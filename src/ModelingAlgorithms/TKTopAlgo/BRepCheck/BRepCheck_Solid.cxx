@@ -301,7 +301,7 @@ void BRepCheck_Solid::Minimum()
       {
         // Too many growths
         BRepCheck::Add(aLST, BRepCheck_EnclosedRegion);
-        break;
+        return; // Later shells have no initialized classifier after this early exit.
       }
     }
   }
