@@ -60,7 +60,7 @@ SplineBasis splineBasisAt(const char *op, const std::vector<double> &knots, int 
     const NCollection_Array1<double> flat(knots.front(), 1, static_cast<int>(knots.size()));
     math_Matrix values(1, splineDerivatives + 1, 1, degree + 1, 0.0);
     SplineBasis basis{};
-    if (BSplCLib::EvalBsplineBasisAt(std::min(splineDerivatives, degree), degree + 1, flat, t, basis.first, values))
+    if (BSplCLib::EvalBsplineBasis(std::min(splineDerivatives, degree), degree + 1, flat, t, basis.first, values))
         fail(op, no_solution, "the patch's knots are degenerate");
     basis.first -= 1;
     for (int d = 0; d <= splineDerivatives; ++d)
