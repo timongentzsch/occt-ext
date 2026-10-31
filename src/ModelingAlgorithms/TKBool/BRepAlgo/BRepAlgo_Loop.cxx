@@ -43,7 +43,10 @@
 #include <NCollection_Map.hxx>
 #include <NCollection_Sequence.hxx>
 
+#include <algorithm>
 #include <cstdio>
+#include <utility>
+#include <vector>
 // #define OCCT_DEBUG_ALGO
 #ifdef OCCT_DEBUG_ALGO
 bool         AffichLoop = true;
@@ -79,44 +82,33 @@ void BRepAlgo_Loop::Init(const TopoDS_Face& F)
 
 static void Bubble(const TopoDS_Edge& E, NCollection_Sequence<TopoDS_Shape>& Seq)
 {
-  // Remove duplicates
-  for (int i = 1; i < Seq.Length(); i++)
+  // Remove duplicates, keeping each vertex's first place: a map, not a pairwise scan, as an
+  // edge can carry thousands of vertices (an offset of many faces).
+  NCollection_Map<TopoDS_Shape>                  aSeen;
+  std::vector<std::pair<double, TopoDS_Shape>> aSorted;
+  aSorted.reserve(Seq.Length());
+  for (NCollection_Sequence<TopoDS_Shape>::Iterator anIt(Seq); anIt.More(); anIt.Next())
   {
-    for (int j = i + 1; j <= Seq.Length(); j++)
+    if (aSeen.Add(anIt.Value()))
     {
-      if (Seq(i) == Seq(j))
-      {
-        Seq.Remove(j);
-        j--;
-      }
+      aSorted.emplace_back(0.0, anIt.Value());
     }
   }
-
-  bool          Invert   = true;
-  int           NbPoints = Seq.Length();
-  double        U1, U2;
-  TopoDS_Vertex V1, V2;
-
-  while (Invert)
+  // Sorted by their parameters on the edge, each read once; stable, as the exchange sort was.
+  if (aSorted.size() > 1)
   {
-    Invert = false;
-    for (int i = 1; i < NbPoints; i++)
+    for (auto& anEntry : aSorted)
     {
-      TopoDS_Shape aLocalV = Seq.Value(i).Oriented(TopAbs_INTERNAL);
-      V1                   = TopoDS::Vertex(aLocalV);
-      aLocalV              = Seq.Value(i + 1).Oriented(TopAbs_INTERNAL);
-      V2                   = TopoDS::Vertex(aLocalV);
-      //      V1 = TopoDS::Vertex(Seq.Value(i)  .Oriented(TopAbs_INTERNAL));
-      //      V2 = TopoDS::Vertex(Seq.Value(i+1).Oriented(TopAbs_INTERNAL));
-
-      U1 = BRep_Tool::Parameter(V1, E);
-      U2 = BRep_Tool::Parameter(V2, E);
-      if (U2 < U1)
-      {
-        Seq.Exchange(i, i + 1);
-        Invert = true;
-      }
+      anEntry.first = BRep_Tool::Parameter(TopoDS::Vertex(anEntry.second.Oriented(TopAbs_INTERNAL)), E);
     }
+    std::stable_sort(aSorted.begin(), aSorted.end(), [](const auto& theA, const auto& theB) {
+      return theA.first < theB.first;
+    });
+  }
+  Seq.Clear();
+  for (const auto& anEntry : aSorted)
+  {
+    Seq.Append(anEntry.second);
   }
 }
 
