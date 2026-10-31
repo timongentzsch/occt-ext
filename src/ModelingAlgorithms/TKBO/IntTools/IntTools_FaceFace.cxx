@@ -54,6 +54,11 @@
 #include <TopoDS_Edge.hxx>
 #include <gp_Elips.hxx>
 #include <ApproxInt_KnotTools.hxx>
+#include <GeomAPI.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <Geom_Plane.hxx>
+#include <Geom_Conic.hxx>
+#include <Geom_SurfaceOfLinearExtrusion.hxx>
 
 static void Parameters(const occ::handle<GeomAdaptor_Surface>&,
                        const occ::handle<GeomAdaptor_Surface>&,
@@ -136,6 +141,15 @@ static double FindMaxDistance(const occ::handle<Geom_Curve>&       theCurve,
                               const occ::handle<IntTools_Context>& theContext);
 
 static void CorrectPlaneBoundaries(double& aUmin, double& aUmax, double& aVmin, double& aVmax);
+
+static bool PerformPlaneAcrossSweep(const TopoDS_Face&                    thePlaneFace,
+                                    const TopoDS_Face&                    theSweptFace,
+                                    const bool                            thePlaneFirst,
+                                    const occ::handle<IntTools_Context>&  theContext,
+                                    const double                          theTol,
+                                    const bool                            theApprox1,
+                                    const bool                            theApprox2,
+                                    NCollection_Sequence<IntTools_Curve>& theSeqOfCurve);
 
 //=================================================================================================
 
@@ -436,6 +450,44 @@ void IntTools_FaceFace::Perform(const TopoDS_Face& aF1,
     }
     return;
   } // if(aType1==GeomAbs_Plane && aType2==GeomAbs_Plane){
+
+  // A plane across a surface swept perpendicularly to it, from a curve that lies across the
+  // sweep (a prism's wall and a plane parallel to its caps): their intersection is that curve
+  // moved along the sweep onto the plane, made exactly.
+  if ((aType1 == GeomAbs_Plane && aType2 == GeomAbs_SurfaceOfExtrusion)
+      || (aType2 == GeomAbs_Plane && aType1 == GeomAbs_SurfaceOfExtrusion))
+  {
+    const bool aPlaneFirst = aType1 == GeomAbs_Plane;
+    if (PerformPlaneAcrossSweep(aPlaneFirst ? myFace1 : myFace2,
+                                aPlaneFirst ? myFace2 : myFace1,
+                                aPlaneFirst,
+                                myContext,
+                                myTol,
+                                myApprox1,
+                                myApprox2,
+                                mySeqOfCurve))
+    {
+      double umin, umax, vmin, vmax;
+      myContext->UVBounds(myFace1, umin, umax, vmin, vmax);
+      myHS1->Load(S1, umin, umax, vmin, vmax);
+      myContext->UVBounds(myFace2, umin, umax, vmin, vmax);
+      myHS2->Load(S2, umin, umax, vmin, vmax);
+      myIsDone       = true;
+      myTangentFaces = false;
+      ComputeTolReached3d(theToRunParallel);
+      if (bReverse)
+      {
+        for (int i = 1; i <= mySeqOfCurve.Length(); ++i)
+        {
+          IntTools_Curve&                 aIC   = mySeqOfCurve(i);
+          const occ::handle<Geom2d_Curve> aC2D1 = aIC.FirstCurve2d();
+          aIC.SetFirstCurve2d(aIC.SecondCurve2d());
+          aIC.SetSecondCurve2d(aC2D1);
+        }
+      }
+      return;
+    }
+  }
 
   if ((aType1 == GeomAbs_Plane) && isFace2Quad)
   {
@@ -3108,4 +3160,127 @@ void CorrectPlaneBoundaries(double& aUmin, double& aUmax, double& aVmin, double&
     aVmin = aVmin - dV;
     aVmax = aVmax + dV;
   }
+}
+
+//=================================================================================================
+// function : PerformPlaneAcrossSweep
+// purpose  : The intersection of a plane and a surface of linear extrusion whose direction is
+//            the plane's normal and whose basis curve lies in a plane across that direction: the
+//            basis curve moved along the direction onto the plane, its parameter that of the
+//            curve; on the swept surface the line of its parameters at that height, on the plane
+//            the curve in the plane's coordinates. Returns false where the faces are not so, or
+//            where the plane passes within the tolerance of an end of the swept face (the general
+//            intersection is made there); true, with no curve, where it passes beyond them.
+//=================================================================================================
+bool PerformPlaneAcrossSweep(const TopoDS_Face&                    thePlaneFace,
+                             const TopoDS_Face&                    theSweptFace,
+                             const bool                            thePlaneFirst,
+                             const occ::handle<IntTools_Context>&  theContext,
+                             const double                          theTol,
+                             const bool                            theApprox1,
+                             const bool                            theApprox2,
+                             NCollection_Sequence<IntTools_Curve>& theSeqOfCurve)
+{
+  occ::handle<Geom_Surface> aPlaneSurf = BRep_Tool::Surface(thePlaneFace);
+  occ::handle<Geom_Surface> aSweptSurf = BRep_Tool::Surface(theSweptFace);
+  for (occ::handle<Geom_Surface>* aSurf : {&aPlaneSurf, &aSweptSurf})
+  {
+    const occ::handle<Geom_RectangularTrimmedSurface> aTrimmed =
+      occ::down_cast<Geom_RectangularTrimmedSurface>(*aSurf);
+    if (!aTrimmed.IsNull())
+    {
+      *aSurf = aTrimmed->BasisSurface();
+    }
+  }
+  const occ::handle<Geom_Plane>                    aPlane = occ::down_cast<Geom_Plane>(aPlaneSurf);
+  const occ::handle<Geom_SurfaceOfLinearExtrusion> aSwept =
+    occ::down_cast<Geom_SurfaceOfLinearExtrusion>(aSweptSurf);
+  if (aPlane.IsNull() || aSwept.IsNull())
+  {
+    return false;
+  }
+  const gp_Pln aPln = aPlane->Pln();
+  const gp_Dir aDir = aSwept->Direction();
+  if (!aDir.IsParallel(aPln.Axis().Direction(), Precision::Angular()))
+  {
+    return false;
+  }
+  occ::handle<Geom_Curve> aBasis = aSwept->BasisCurve();
+  {
+    const occ::handle<Geom_TrimmedCurve> aTrimmed = occ::down_cast<Geom_TrimmedCurve>(aBasis);
+    if (!aTrimmed.IsNull())
+    {
+      aBasis = aTrimmed->BasisCurve();
+    }
+  }
+  // The basis curve across the sweep: a spline's poles all at one height along it, a conic's axis
+  // along it.
+  const gp_XYZ aD    = aDir.XYZ();
+  bool         isAcross = false;
+  if (const occ::handle<Geom_BSplineCurve> aBS = occ::down_cast<Geom_BSplineCurve>(aBasis))
+  {
+    const double aH0 = aBS->Pole(1).XYZ().Dot(aD);
+    isAcross         = true;
+    for (int i = 2; i <= aBS->NbPoles() && isAcross; ++i)
+    {
+      isAcross = std::abs(aBS->Pole(i).XYZ().Dot(aD) - aH0) <= Precision::Confusion();
+    }
+  }
+  else if (const occ::handle<Geom_BezierCurve> aBz = occ::down_cast<Geom_BezierCurve>(aBasis))
+  {
+    const double aH0 = aBz->Pole(1).XYZ().Dot(aD);
+    isAcross         = true;
+    for (int i = 2; i <= aBz->NbPoles() && isAcross; ++i)
+    {
+      isAcross = std::abs(aBz->Pole(i).XYZ().Dot(aD) - aH0) <= Precision::Confusion();
+    }
+  }
+  else if (const occ::handle<Geom_Conic> aConic = occ::down_cast<Geom_Conic>(aBasis))
+  {
+    isAcross = aConic->Axis().Direction().IsParallel(aDir, Precision::Angular());
+  }
+  if (!isAcross)
+  {
+    return false;
+  }
+  double aUmin, aUmax, aVmin, aVmax;
+  theContext->UVBounds(theSweptFace, aUmin, aUmax, aVmin, aVmax);
+  // The height along the sweep at which the plane meets it.
+  const gp_Pnt aOn     = aBasis->Value(aUmin);
+  const double aHeight = gp_Vec(aOn, aPln.Location()).Dot(gp_Vec(aPln.Axis().Direction()))
+                         / aDir.Dot(aPln.Axis().Direction());
+  if (std::abs(aHeight - aVmin) <= theTol || std::abs(aHeight - aVmax) <= theTol)
+  {
+    return false;
+  }
+  if (aHeight < aVmin || aHeight > aVmax)
+  {
+    return true;
+  }
+  occ::handle<Geom_Curve> aMoved =
+    occ::down_cast<Geom_Curve>(aBasis->Translated(gp_Vec(aDir) * aHeight));
+  const bool isWhole = std::abs(aUmin - aMoved->FirstParameter()) <= Precision::PConfusion()
+                       && std::abs(aUmax - aMoved->LastParameter()) <= Precision::PConfusion();
+  // The pave filler bounds a section curve by its ends only where it is a bounded curve (a
+  // conic is not: a whole ellipse passed as it is had no ends and made no section edge).
+  if (!isWhole || !aMoved->IsKind(STANDARD_TYPE(Geom_BoundedCurve)))
+  {
+    aMoved = new Geom_TrimmedCurve(aMoved, aUmin, aUmax);
+  }
+  occ::handle<Geom2d_Curve> aOnSwept =
+    new Geom2d_TrimmedCurve(new Geom2d_Line(gp_Pnt2d(0., aHeight), gp_Dir2d(1., 0.)), aUmin, aUmax);
+  occ::handle<Geom2d_Curve> aOnPlane = GeomAPI::To2d(aMoved, aPln);
+  if (aOnPlane.IsNull())
+  {
+    return false;
+  }
+  IntTools_Curve aCurve;
+  aCurve.SetCurve(aMoved);
+  // Exact, it is as good as the faces are, as between planes.
+  aCurve.SetTolerance(std::max(BRep_Tool::Tolerance(thePlaneFace), BRep_Tool::Tolerance(theSweptFace)));
+  const occ::handle<Geom2d_Curve> aNone;
+  aCurve.SetFirstCurve2d(theApprox1 ? (thePlaneFirst ? aOnPlane : aOnSwept) : aNone);
+  aCurve.SetSecondCurve2d(theApprox2 ? (thePlaneFirst ? aOnSwept : aOnPlane) : aNone);
+  theSeqOfCurve.Append(aCurve);
+  return true;
 }
