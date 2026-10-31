@@ -1365,13 +1365,18 @@ void Approx_BSplComputeLine::Interpol(const MultiLine& Line)
       double                                   U;
       Approx_BSpParLeastSquareOfMyBSplGradient SQ1(Line, Thefirstpt, lastp, Cons, Cons, nnpol);
 
+      // Fit on a local unit interval. The Bezier least-squares system becomes
+      // ill-conditioned when these few endpoint samples occupy only a tiny part
+      // of the complete parameter interval (notably on dense surface grids).
+      const double span1 = TheParam(lastp) - TheParam(Thefirstpt);
       math_Vector P1(Thefirstpt, lastp);
       for (i = Thefirstpt; i <= lastp; i++)
-        P1(i) = TheParam(i);
+        P1(i) = (TheParam(i) - TheParam(Thefirstpt)) / span1;
       SQ1.Perform(P1);
       const AppParCurves_MultiCurve& C1 = SQ1.BezierValue();
       U                                 = 0.0;
       TangencyVector(Line, C1, U, V1);
+      V1 /= span1;
 
       int firstp = std::max(Thefirstpt, Thelastpt - nnp + 1);
 
@@ -1379,18 +1384,21 @@ void Approx_BSplComputeLine::Interpol(const MultiLine& Line)
       {
         U = 1.0;
         TangencyVector(Line, C1, U, V2);
+        V2 /= span1;
       }
       else
       {
         Approx_BSpParLeastSquareOfMyBSplGradient SQ2(Line, firstp, Thelastpt, Cons, Cons, nnpol);
 
+        const double span2 = TheParam(Thelastpt) - TheParam(firstp);
         math_Vector P2(firstp, Thelastpt);
         for (i = firstp; i <= Thelastpt; i++)
-          P2(i) = TheParam(i);
+          P2(i) = (TheParam(i) - TheParam(firstp)) / span2;
         SQ2.Perform(P2);
         const AppParCurves_MultiCurve& C2 = SQ2.BezierValue();
         U                                 = 1.0;
         TangencyVector(Line, C2, U, V2);
+        V2 /= span2;
       }
 
       lambda1 = 1. / deg;
