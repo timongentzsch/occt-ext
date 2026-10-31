@@ -1,5 +1,6 @@
 # Auto-generated list of packages for TKGeomAlgo toolkit
 set(OCCT_TKGeomAlgo_LIST_OF_PACKAGES
+  GeomAlgoExt
   Hatch
   GeomInt
   IntStart
