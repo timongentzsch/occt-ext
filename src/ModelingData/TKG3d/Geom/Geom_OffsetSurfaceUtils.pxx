@@ -27,6 +27,8 @@
 #include <NCollection_Array2.hxx>
 
 #include <cmath>
+#include <Message_ProgressRange.hxx>
+#include <Geom_UndefinedValue.hxx>
 
 //! Internal helper namespace for 3D offset surface calculations.
 //! Provides static inline functions to compute offset surface point and derivatives
@@ -40,6 +42,21 @@
 //! where N = dP/du ^ dP/dv is the surface normal
 namespace Geom_OffsetSurfaceUtils
 {
+//! A borrowed, thread-local range for positional evaluations inside offset tolerance checking.
+//! Nested checks restore the caller's range, including when an evaluation throws.
+inline thread_local const Message_ProgressRange* EvaluationRange = nullptr;
+class EvaluationProgress
+{
+public:
+  explicit EvaluationProgress(const Message_ProgressRange& theRange)
+    : myPrevious(EvaluationRange) { EvaluationRange = &theRange; }
+  ~EvaluationProgress() { EvaluationRange = myPrevious; }
+  EvaluationProgress(const EvaluationProgress&) = delete;
+  EvaluationProgress& operator=(const EvaluationProgress&) = delete;
+private:
+  const Message_ProgressRange* myPrevious;
+};
+
 
 //! Default tolerance for normal magnitude check
 constexpr double THE_D1_MAGNITUDE_TOL = 1.e-9;
@@ -548,6 +565,8 @@ inline bool ShiftPoint(double        theUStart,
   double aDirV =
     (theIsVPeriodic || (isVSingular && !isUSingular) ? 0. : 0.5 * (theVMin + theVMax) - theVStart);
   double aDist = std::sqrt(aDirU * aDirU + aDirV * aDirV);
+  if (!std::isfinite(aDist))
+    throw Geom_UndefinedValue("offset normal retry has a non-finite parameter direction");
 
   // Shift current point from its current position towards center, by value of twice
   // current distance from it to start (but not less than Precision::PConfusion());
@@ -561,8 +580,13 @@ inline bool ShiftPoint(double        theUStart,
   }
 
   aStep /= aDist;
-  theU += aDirU * aStep;
-  theV += aDirV * aStep;
+  const double aNextU = theU + aDirU * aStep;
+  const double aNextV = theV + aDirV * aStep;
+  if (!std::isfinite(aNextU) || !std::isfinite(aNextV)
+      || (aNextU == theU && aNextV == theV))
+    throw Geom_UndefinedValue("offset normal retry cannot advance at floating-point precision");
+  theU = aNextU;
+  theV = aNextV;
 
   return true;
 }
@@ -606,6 +630,8 @@ bool EvaluateD0(double                  theU,
 
   for (;;)
   {
+    if (EvaluationRange != nullptr && EvaluationRange->UserBreak())
+      return false;
     // For subsequent iterations, recompute D1 at shifted point
     if (!isFirstIteration)
     {
@@ -828,6 +854,8 @@ bool EvaluateD1(double                  theU,
 
   for (;;)
   {
+    if (EvaluationRange != nullptr && EvaluationRange->UserBreak())
+      return false;
     // For subsequent iterations, recompute D2 at shifted point
     if (!isFirstIteration)
     {
@@ -1190,6 +1218,8 @@ bool EvaluateD2(double                  theU,
 
   for (;;)
   {
+    if (EvaluationRange != nullptr && EvaluationRange->UserBreak())
+      return false;
     // For subsequent iterations, recompute D3 at shifted point
     if (!isFirstIteration)
     {
@@ -1449,6 +1479,8 @@ bool EvaluateD3(double                  theU,
 
   for (;;)
   {
+    if (EvaluationRange != nullptr && EvaluationRange->UserBreak())
+      return false;
     Geom_Surface::ResD3 aD3Result = theBasisSurf->EvalD3(theU, theV);
     theValue                      = aD3Result.Point;
     theD1U                        = aD3Result.D1U;
@@ -1659,6 +1691,8 @@ bool EvaluateDN(double                  theU,
 
   for (;;)
   {
+    if (EvaluationRange != nullptr && EvaluationRange->UserBreak())
+      return false;
     // For subsequent iterations, recompute D1 at shifted point
     if (!isFirstIteration)
     {
