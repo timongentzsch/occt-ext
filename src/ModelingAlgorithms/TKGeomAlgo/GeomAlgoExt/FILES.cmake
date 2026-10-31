@@ -3,6 +3,8 @@
 set(OCCT_GeomAlgoExt_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
 set(OCCT_GeomAlgoExt_FILES
   GeomAlgoExt_Bernstein.hxx
+  GeomAlgoExt_CubicThrough.hxx
+  GeomAlgoExt_Hermite.hxx
   GeomAlgoExt_Interval.hxx
   GeomAlgoExt_UniformKnots.hxx
 )
