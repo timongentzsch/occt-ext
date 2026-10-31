@@ -6,5 +6,7 @@ set(OCCT_GeomAlgoExt_FILES
   GeomAlgoExt_CubicThrough.hxx
   GeomAlgoExt_Hermite.hxx
   GeomAlgoExt_Interval.hxx
+  GeomAlgoExt_ParameterRectangle.hxx
+  GeomAlgoExt_SurfaceBounds.hxx
   GeomAlgoExt_UniformKnots.hxx
 )
