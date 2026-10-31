@@ -9,6 +9,66 @@ new finite mathematical utilities form package `GeomAlgoExt` in toolkit `TKGeomA
 This is a partial separation of application algorithms, not an assertion that
 all application solvers have become independent OCCT packages.
 
+## Constrained tensor-spline fitting and certified compaction
+
+`GeomAlgoExt_SplineFit`, `GeomAlgoExt_RimFit` and `GeomAlgoExt_CompactSurface`
+extend `TKGeomAlgo`; `GeomAlgoExt_Band` is their banded Cholesky engine.
+They accept OCCT geometry and ordinary C++ containers. Refusals use
+`GeomAlgoExt_Failure` with an unchanged stable reason/message; cancellation uses
+`Message_ProgressRange`. An optional stage observer is a function pointer with
+no clock, global state or application runtime. There is no cancellation added
+inside the original fitting loops that had none.
+
+For a tensor spline S(u,v)=sum P_ij N_i(u) M_j(v), scalar conditions are
+linear forms a_r^T p=b_r in the free pole coordinates. The energy is
+integral [alpha (|S_uu|²+2|S_uv|²+|S_vv|²) +
+beta (|S_uuu|²+3|S_uuv|²+3|S_uvv|²+|S_vvv|²)] du dv.
+The coefficients 1,2,1 and 1,3,3,1 count ordered mixed derivatives, hence
+are derived. Substituting the basis gives a positive semidefinite quadratic
+p^T H p+2g^T p+c. Weighted rows add A^T W A; eliminating fixed poles adds
+their exact contribution to the right hand side. Cholesky solves the resulting
+symmetric positive definite system when it is positive definite. Multipliers
+correct row residuals using products with A M^-1 A^T. Stopped iterations are
+retained exactly; convergence, consistency or global optimality are not promised.
+Gauss quadrature with p+1 points integrates the polynomial basis products on
+each knot span exactly, but arbitrary supplied density functions have no such
+exactness guarantee. Basis locality/derivative identities follow de Boor (1972),
+[On Calculating with B-Splines](https://ftp.cs.wisc.edu/Approx/bsplcalc.pdf),
+DOI [10.1016/0021-9045(72)90080-9](https://doi.org/10.1016/0021-9045(72)90080-9),
+read for this extraction. These algebraic derivations do not certify conditioning.
+
+Rim correction linearizes the nearest-point displacement along a supplied unit
+vector and solves min_x ||A x-r||²+d²||x||². Its normal equations are
+(A^T A+d²I)x=A^T r; unobserved poles stay fixed. The nonlinear projection,
+refinement decisions, summation order and refusal messages are preserved.
+Compaction proposes OCCT knot removals, converts original and candidate to a
+common piecewise Bernstein basis with outward intervals, and bounds displacement
+by max_i ||Delta P_i||_2. Nonnegative basis functions summing to one imply this
+bound over the whole rectangle, provided both conversions are enclosed, degrees
+and full knot sequences agree, weights are nonrational, and the input is finite,
+clamped and nonperiodic. No normal, trim or continuity bound follows from it.
+Cancellation must escape the optional proposal's catch of OCCT builder failures.
+
+All retained non-derived choices are explicit: fit diagonal holds 1e-13, factor
+100 and cap 1e-6; stall count 12, stall share 0.02, maximum passes 400 and energy
+ratio stop 1e-20; basis capacity degree 5 and five terms per condition; rim Newton
+steps 8, determinant cutoff 1e-12, sliver ratio 0.2, three solves, damping 0.03,
+slow-progress ratio 0.5, cosine cutoff 0.17; compaction 512 trials, 16 removals,
+262144 coefficients, 8*1024*1024 visits, proposal multiplier 1024, 33-point
+rejection screen and 1e-10 screen allowance. These are implementation limits or
+heuristics, not theorems, and none was tuned by this move. In particular 1e-20
+is not binary64 epsilon squared. The parent construction's interior acceptance
+heuristic and flat G2 limit remain outside these modules and remain unproven.
+
+The WASM SIMD path is retained. A portable two-lane path rounds each operation
+through volatile binary64 stores to prevent FMA contraction. The finite parity
+harness `adm/scripts/extensions/band-parity.cxx` exercises paired and ordinary
+factors/solves; its digest must agree between native, WASM SIMD and forced scalar
+WASM (`OCCT_GEOMALGOEXT_SCALAR`). This is finite test evidence, not a proof for
+all NaN payloads or non-default native rounding modes. GTests use closed-form
+Bernstein derivatives, tensor polynomials, SPD residuals, plane distances and
+an independently sampled displacement bound; they are registered in the toolkit.
+
 ## Reproducing the native measurements
 
 Use Linux, CMake, Ninja, a C++17 compiler, and static Release libraries.
