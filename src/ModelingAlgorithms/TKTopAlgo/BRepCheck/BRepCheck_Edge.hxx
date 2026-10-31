@@ -20,6 +20,7 @@
 #include <Adaptor3d_Curve.hxx>
 #include <BRepCheck_Result.hxx>
 #include <BRepCheck_Status.hxx>
+#include <Message_ProgressRange.hxx>
 
 class BRep_CurveRepresentation;
 class TopoDS_Edge;
@@ -42,6 +43,9 @@ public:
   Standard_EXPORT void GeometricControls(const bool B);
 
   Standard_EXPORT double Tolerance();
+
+  //! Same positional samples, with cancellation between representations and samples.
+  Standard_EXPORT double Tolerance(const Message_ProgressRange& theRange);
 
   //! Sets status of Edge;
   Standard_EXPORT void SetStatus(const BRepCheck_Status theStatus);

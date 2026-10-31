@@ -25,6 +25,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepCheck.hxx>
 #include <BRepCheck_Edge.hxx>
+#include <Geom_OffsetSurfaceUtils.pxx>
 #include <BRepCheck_Status.hxx>
 #include <NCollection_List.hxx>
 #include <NCollection_Shared.hxx>
@@ -597,6 +598,12 @@ void BRepCheck_Edge::SetStatus(const BRepCheck_Status theStatus)
 
 double BRepCheck_Edge::Tolerance()
 {
+  return Tolerance(Message_ProgressRange());
+}
+
+double BRepCheck_Edge::Tolerance(const Message_ProgressRange& theRange)
+{
+  Geom_OffsetSurfaceUtils::EvaluationProgress aProgress(theRange);
   occ::handle<BRep_TEdge>& TE = *((occ::handle<BRep_TEdge>*)&myShape.TShape());
   int                      it, iRep = 1, nbRep = (TE->Curves()).Extent();
   if (nbRep <= 1)
@@ -618,6 +625,8 @@ double BRepCheck_Edge::Tolerance()
   NCollection_List<occ::handle<BRep_CurveRepresentation>>::Iterator itcr(TE->Curves());
   for (; itcr.More(); itcr.Next())
   {
+    if (theRange.UserBreak())
+      return Precision::Infinite();
     const occ::handle<BRep_CurveRepresentation>& cr = itcr.Value();
     if (cr->IsCurve3D() && !TE->Degenerated())
     {
@@ -647,7 +656,10 @@ double BRepCheck_Edge::Tolerance()
         const occ::handle<Geom2d_Curve>& PCref   = cr->PCurve();
         occ::handle<GeomAdaptor_Surface> GAHSref = new GeomAdaptor_Surface(Sref);
         occ::handle<Geom2dAdaptor_Curve> GHPCref = new Geom2dAdaptor_Curve(PCref, First, Last);
-        Adaptor3d_CurveOnSurface         ACSref(GHPCref, GAHSref);
+        Adaptor3d_CurveOnSurface         ACSref;
+        // D0 uses only myCurve and mySurface. Loading in this order avoids building
+        // endpoint derivative adaptors, unused by every positional sample below.
+        ACSref.Load(GHPCref, GAHSref);
         theRep(iRep) = new Adaptor3d_CurveOnSurface(ACSref);
         iRep++;
       }
@@ -658,7 +670,10 @@ double BRepCheck_Edge::Tolerance()
         const occ::handle<Geom2d_Curve>& PCref   = cr->PCurve2();
         occ::handle<GeomAdaptor_Surface> GAHSref = new GeomAdaptor_Surface(Sref);
         occ::handle<Geom2dAdaptor_Curve> GHPCref = new Geom2dAdaptor_Curve(PCref, First, Last);
-        Adaptor3d_CurveOnSurface         ACSref(GHPCref, GAHSref);
+        Adaptor3d_CurveOnSurface         ACSref;
+        // D0 uses only myCurve and mySurface. Loading in this order avoids building
+        // endpoint derivative adaptors, unused by every positional sample below.
+        ACSref.Load(GHPCref, GAHSref);
         theRep(iRep) = new Adaptor3d_CurveOnSurface(ACSref);
         iRep++;
         nbRep++;
@@ -675,6 +690,8 @@ double BRepCheck_Edge::Tolerance()
   int    i;
   for (i = 0; i < NCONTROL; i++)
   {
+    if (theRange.UserBreak())
+      return Precision::Infinite();
     prm  = ((NCONTROL - 1 - i) * First + i * Last) / (NCONTROL - 1);
     tol2 = dist2 = 0.;
     center       = (*(occ::handle<Adaptor3d_Curve>*)&theRep(1))->Value(prm);
@@ -685,6 +702,8 @@ double BRepCheck_Edge::Tolerance()
     }
     for (iRep = 2; iRep <= nbRep; iRep++)
     {
+      if (theRange.UserBreak())
+        return Precision::Infinite();
       othP = (*(occ::handle<Adaptor3d_Curve>*)&theRep(iRep))->Value(prm);
       if (Precision::IsInfinite(othP.X()) || Precision::IsInfinite(othP.Y())
           || Precision::IsInfinite(othP.Z()))

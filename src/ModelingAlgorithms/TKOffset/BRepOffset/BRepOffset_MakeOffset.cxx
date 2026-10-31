@@ -220,6 +220,7 @@ enum BRepOffset_PIOperation
   PIOperation_MakeMissingWalls,
   PIOperation_MakeShells,
   PIOperation_MakeSolid,
+  PIOperation_UpdateTolerance,
   PIOperation_Sewing,
   PIOperation_Last
 };
@@ -309,10 +310,11 @@ static BRepOffset_Error checkSinglePoint(const double                           
                                          const NCollection_DynamicArray<gp_Pnt>& theBadPoints);
 
 //---------------------------------------------------------------------
-static void UpdateTolerance(
+static bool UpdateTolerance(
   TopoDS_Shape&                                                        theShape,
   const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& theFaces,
-  const TopoDS_Shape&                                                  theInitShape);
+  const TopoDS_Shape&                                                  theInitShape,
+  const Message_ProgressRange&                                         theRange);
 
 static double ComputeMaxDist(const gp_Pln&                  thePlane,
                              const occ::handle<Geom_Curve>& theCrv,
@@ -1038,16 +1040,21 @@ void BRepOffset_MakeOffset::MakeOffsetShape(const Message_ProgressRange& theRang
   // ----------------------------
   if (!myOffsetShape.IsNull())
   {
-    if (myThickening)
+    Message_ProgressScope aTolerancePS(aPS.Next(aSteps(PIOperation_UpdateTolerance)),
+                                      "Updating offset tolerances", 1);
+    aTolerancePS.Show();
+    const TopoDS_Shape anInitShape = myThickening ? myShape : TopoDS_Shape();
+    if (!UpdateTolerance(myOffsetShape, myFaces, anInitShape, aTolerancePS.Next()))
     {
-      UpdateTolerance(myOffsetShape, myFaces, myShape);
-    }
-    else
-    {
-      TopoDS_Shape aDummy;
-      UpdateTolerance(myOffsetShape, myFaces, aDummy);
+      myError = BRepOffset_UserBreak;
+      return;
     }
     BRepLib::UpdateTolerances(myOffsetShape);
+    if (aPS.UserBreak())
+    {
+      myError = BRepOffset_UserBreak;
+      return;
+    }
   }
 
   CorrectConicalFaces();
@@ -4193,9 +4200,10 @@ double ComputeMaxDist(const gp_Pln&                  thePlane,
 
 //=================================================================================================
 
-void UpdateTolerance(TopoDS_Shape&                                                        S,
+bool UpdateTolerance(TopoDS_Shape&                                                        S,
                      const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& Faces,
-                     const TopoDS_Shape& theInitShape)
+                     const TopoDS_Shape& theInitShape,
+                     const Message_ProgressRange& theRange)
 {
   BRep_Builder                                           B;
   NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> View;
@@ -4205,6 +4213,8 @@ void UpdateTolerance(TopoDS_Shape&                                              
   int j;
   for (j = 1; j <= Faces.Extent(); j++)
   {
+    if (theRange.UserBreak())
+      return false;
     const TopoDS_Shape& F = Faces(j);
     TopExp_Explorer     Exp;
     for (Exp.Init(F, TopAbs_EDGE); Exp.More(); Exp.Next())
@@ -4220,6 +4230,8 @@ void UpdateTolerance(TopoDS_Shape&                                              
     TopExp_Explorer anExpF(theInitShape, TopAbs_FACE);
     for (; anExpF.More(); anExpF.Next())
     {
+      if (theRange.UserBreak())
+        return false;
       aMapInitF.Add(anExpF.Current());
       TopExp_Explorer anExpE;
       for (anExpE.Init(anExpF.Current(), TopAbs_EDGE); anExpE.More(); anExpE.Next())
@@ -4238,6 +4250,8 @@ void UpdateTolerance(TopoDS_Shape&                                              
   TopExp_Explorer anExpF(S, TopAbs_FACE);
   for (; anExpF.More(); anExpF.Next())
   {
+    if (theRange.UserBreak())
+      return false;
     const TopoDS_Shape& F = anExpF.Current();
     if (Faces.Contains(F) || aMapInitF.Contains(F))
     {
@@ -4247,6 +4261,8 @@ void UpdateTolerance(TopoDS_Shape&                                              
     TopExp_Explorer     Exp;
     for (Exp.Init(F, TopAbs_EDGE); Exp.More(); Exp.Next())
     {
+      if (theRange.UserBreak())
+        return false;
       TopoDS_Edge E         = TopoDS::Edge(Exp.Current());
       bool        isUpdated = false;
       double      aCurrTol  = BRep_Tool::Tolerance(E);
@@ -4267,7 +4283,18 @@ void UpdateTolerance(TopoDS_Shape&                                              
       {
         E.Locked(false);
         BRepCheck_Edge EdgeCorrector(E);
-        Tol = EdgeCorrector.Tolerance();
+        try
+        {
+          Tol = EdgeCorrector.Tolerance(theRange);
+        }
+        catch (const Standard_Failure&)
+        {
+          if (theRange.UserBreak())
+            return false;
+          throw;
+        }
+        if (theRange.UserBreak())
+          return false;
         if (Tol > aCurrTol)
         {
           B.UpdateEdge(E, Tol);
@@ -4297,6 +4324,7 @@ void UpdateTolerance(TopoDS_Shape&                                              
       }
     }
   }
+  return !theRange.UserBreak();
 }
 
 //=================================================================================================
@@ -5432,6 +5460,7 @@ void BRepOffset_MakeOffset::analyzeProgress(const double                theWhole
   }
   theSteps(PIOperation_MakeShells) = isPlanarIntCase ? 25. : 5.;
   theSteps(PIOperation_MakeSolid)  = 5.;
+  theSteps(PIOperation_UpdateTolerance) = 1.;
   if (myIsPerformSewing && myThickening)
   {
     theSteps(PIOperation_Sewing) = 10.;
