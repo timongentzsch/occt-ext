@@ -63,6 +63,8 @@
 #include <TopoDS_Wire.hxx>
 #include <NCollection_List.hxx>
 
+#include <algorithm>
+
 //=================================================================================================
 
 static void ComputeTrsf(const TopoDS_Wire& W, const gp_Dir& D, Bnd_Box& Box, gp_Trsf& Tf)
@@ -167,7 +169,9 @@ static bool GoodOrientation(const Bnd_Box&                           B,
 
   for (ii = 1; ii <= Nb; ii++)
   {
-    Law->Parameter((ii - 1) * r, Ind, t);
+    // The last sample's abscissa, Nb times l / Nb, can round past l: Parameter then finds no edge,
+    // returns Index 0, and Law(0) reads outside the laws.
+    Law->Parameter(std::min((ii - 1) * r, l), Ind, t);
     AC = Law->Law(Ind)->GetCurve();
     AC->D0(t, Pnts(ii));
     Bary += Pnts(ii).XYZ();
