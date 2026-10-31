@@ -19,6 +19,7 @@
 #include <BRepMesh_DelaunayNodeInsertionMeshAlgo.hxx>
 #include <BRepMesh_GeomTool.hxx>
 #include <GeomLib.hxx>
+#include <NCollection_DataMap.hxx>
 
 //! Extends node insertion Delaunay meshing algo in order to control
 //! deflection of generated triangles. Splits triangles failing the check.
@@ -76,6 +77,7 @@ protected:
       new NCollection_IncAllocator(IMeshData::MEMORY_BLOCK_SIZE_HUGE);
 
     mySqMinSize = this->getParameters().MinSize * this->getParameters().MinSize;
+    myNormals.Clear();
     myCouplesMap =
       new IMeshData::MapOfOrientedEdges(3 * this->getStructure()->ElementsOfDomain().Extent(),
                                         aTmpAlloc);
@@ -113,6 +115,7 @@ protected:
 
     myCouplesMap.Nullify();
     myControlNodes.Nullify();
+    myNormals.Clear();
 
     if (!(myMaxSqDeflection < 0.))
     {
@@ -325,7 +328,10 @@ private:
         {
           if (!rejectSplitLinksForMinSize(theNodesInfo[i], theNodesInfo[j], aMidPnt2d))
           {
-            if (!checkLinkEndsForAngularDeviation(theNodesInfo[i], theNodesInfo[j], aMidPnt2d))
+            if (!checkLinkEndsForAngularDeviation(theNodesIndices[i],
+                                                  theNodesInfo[i],
+                                                  theNodesIndices[j],
+                                                  theNodesInfo[j]))
             {
               myControlNodes->Append(aMidPnt2d);
             }
@@ -348,15 +354,14 @@ private:
 
   //! Checks the given point (located between the given nodes)
   //! for specified angular deviation.
-  bool checkLinkEndsForAngularDeviation(const TriangleNodeInfo& theNodeInfo1,
-                                        const TriangleNodeInfo& theNodeInfo2,
-                                        const gp_XY& /*theMidPoint*/)
+  bool checkLinkEndsForAngularDeviation(const int               theNode1,
+                                        const TriangleNodeInfo& theNodeInfo1,
+                                        const int               theNode2,
+                                        const TriangleNodeInfo& theNodeInfo2)
   {
-    gp_Dir                           aNorm1, aNorm2;
-    const occ::handle<Geom_Surface>& aSurf = this->getDFace()->GetSurface()->GeomSurfaceOriginal();
-
-    if ((GeomLib::NormEstim(aSurf, theNodeInfo1.Point2d, Precision::Confusion(), aNorm1) == 0)
-        && (GeomLib::NormEstim(aSurf, theNodeInfo2.Point2d, Precision::Confusion(), aNorm2) == 0))
+    gp_Dir aNorm1, aNorm2;
+    if (nodeNormal(theNode1, theNodeInfo1.Point2d, aNorm1)
+        && nodeNormal(theNode2, theNodeInfo2.Point2d, aNorm2))
     {
       double anAngle = aNorm1.Angle(aNorm2);
       if (anAngle > this->getParameters().AngleInterior)
@@ -366,6 +371,33 @@ private:
     }
 
     return true;
+  }
+
+  //! Surface normal at the given node, evaluated once per optimization: every link of the
+  //! node that fails the linear deflection asks for it again, on every pass, through the
+  //! uncached surface. A node keeps its place while the mesh is refined. The normal is kept
+  //! with the point it was evaluated at and used only for that point: should an index be given
+  //! to another node (BRepMesh_VertexInspector::Add reuses deleted nodes' indices), the normal
+  //! is evaluated again.
+  //! @return False where the normal is undefined.
+  bool nodeNormal(const int theNode, const gp_XY& thePnt2d, gp_Dir& theNormal)
+  {
+    if (const NodeNormal* aKnown = myNormals.Seek(theNode))
+    {
+      if (aKnown->Point2d.X() == thePnt2d.X() && aKnown->Point2d.Y() == thePnt2d.Y())
+      {
+        theNormal = aKnown->Normal;
+        return aKnown->IsDefined;
+      }
+    }
+    const occ::handle<Geom_Surface>& aSurf = this->getDFace()->GetSurface()->GeomSurfaceOriginal();
+    NodeNormal                       aNormal;
+    aNormal.Point2d = thePnt2d;
+    aNormal.IsDefined =
+      GeomLib::NormEstim(aSurf, thePnt2d, Precision::Confusion(), aNormal.Normal) == 0;
+    myNormals.Bind(theNode, aNormal);
+    theNormal = aNormal.Normal;
+    return aNormal.IsDefined;
   }
 
   //! Returns 3d point corresponding to the given one in 2d space.
@@ -454,12 +486,20 @@ private:
   }
 
 private:
+  struct NodeNormal
+  {
+    gp_XY  Point2d;
+    gp_Dir Normal;
+    bool   IsDefined = false;
+  };
+
   double                                myMaxSqDeflection;
   double                                mySqMinSize;
   bool                                  myIsAllDegenerated;
   Handle(IMeshData::MapOfOrientedEdges) myCouplesMap;
   Handle(IMeshData::ListOfPnt2d)        myControlNodes;
   const BRepMesh_CircleTool*            myCircles;
+  NCollection_DataMap<int, NodeNormal>  myNormals;
 };
 
 #endif
