@@ -1,0 +1,685 @@
+{
+  "_copyright": "Copyright (c) 2026 Timon Gentzsch",
+  "_license": "LGPL-2.1-only WITH OCCT-exception-1.0",
+  "_description": "Ten-sample CPU medians and extrema; all four result values agree with stock at b8f597c6. The fillet analytic volume check was subsequently added outside the measured interval; timed operation bodies are unchanged.",
+  "native-stock-benchmark": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.645,
+      "cpuMinMs": 4.414,
+      "cpuMaxMs": 4.936,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 144.90249999999997,
+      "cpuMinMs": 143.901,
+      "cpuMaxMs": 150.339,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.2375,
+      "cpuMinMs": 11.147,
+      "cpuMaxMs": 11.342,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 34.019999999999996,
+      "cpuMinMs": 33.224,
+      "cpuMaxMs": 34.319,
+      "value": 10176
+    }
+  ],
+  "native-complete-benchmark": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.349,
+      "cpuMinMs": 4.288,
+      "cpuMaxMs": 4.413,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 4.8294999999999995,
+      "cpuMinMs": 4.611,
+      "cpuMaxMs": 4.846,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.1585,
+      "cpuMinMs": 10.876,
+      "cpuMaxMs": 11.334,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 26.987000000000002,
+      "cpuMinMs": 26.672,
+      "cpuMaxMs": 28.363,
+      "value": 10176
+    }
+  ],
+  "native-base-BRepMesh_Delaun-hilbert-insertion": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.2285,
+      "cpuMinMs": 4.203,
+      "cpuMaxMs": 4.256,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 140.642,
+      "cpuMinMs": 139.066,
+      "cpuMaxMs": 147.944,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.428,
+      "cpuMinMs": 11.11,
+      "cpuMaxMs": 11.589,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 26.2805,
+      "cpuMinMs": 26.197,
+      "cpuMaxMs": 26.731,
+      "value": 10176
+    }
+  ],
+  "native-base-BRepTopAdaptor_FClass2d-wire-bounds": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.5329999999999995,
+      "cpuMinMs": 4.488,
+      "cpuMaxMs": 4.815,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 5.0035,
+      "cpuMinMs": 4.967,
+      "cpuMaxMs": 5.041,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.197500000000002,
+      "cpuMinMs": 11.07,
+      "cpuMaxMs": 11.312,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 32.8545,
+      "cpuMinMs": 32.732,
+      "cpuMaxMs": 33.894,
+      "value": 10176
+    }
+  ],
+  "native-base-BRepFill_Draft-orientation-last-sample": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.7355,
+      "cpuMinMs": 4.507,
+      "cpuMaxMs": 5.064,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 143.969,
+      "cpuMinMs": 140.65,
+      "cpuMaxMs": 153.58,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.2935,
+      "cpuMinMs": 11.129,
+      "cpuMaxMs": 11.438,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 32.091,
+      "cpuMinMs": 32.023,
+      "cpuMaxMs": 33.027,
+      "value": 10176
+    }
+  ],
+  "native-base-IntTools_FaceFace-plane-across-sweep": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.532,
+      "cpuMinMs": 4.514,
+      "cpuMaxMs": 4.566,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 151.938,
+      "cpuMinMs": 144.822,
+      "cpuMaxMs": 167.184,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 10.9795,
+      "cpuMinMs": 10.925,
+      "cpuMaxMs": 11.069,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 32.7335,
+      "cpuMinMs": 32.475,
+      "cpuMaxMs": 35.57,
+      "value": 10176
+    }
+  ],
+  "native-base-IntTools_EdgeFace-line-plane-touch": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.218500000000001,
+      "cpuMinMs": 4.185,
+      "cpuMaxMs": 4.258,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 146.0345,
+      "cpuMinMs": 143.079,
+      "cpuMaxMs": 148.525,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.0455,
+      "cpuMinMs": 11.032,
+      "cpuMaxMs": 11.056,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 32.903000000000006,
+      "cpuMinMs": 32.826,
+      "cpuMaxMs": 35.932,
+      "value": 10176
+    }
+  ],
+  "native-base-BRepCheck_Solid-stop-after-enclosed-region": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.422499999999999,
+      "cpuMinMs": 4.407,
+      "cpuMaxMs": 4.527,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 141.9565,
+      "cpuMinMs": 140.183,
+      "cpuMaxMs": 147.706,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.589,
+      "cpuMinMs": 11.092,
+      "cpuMaxMs": 11.783,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 33.757999999999996,
+      "cpuMinMs": 32.897,
+      "cpuMaxMs": 35.233,
+      "value": 10176
+    }
+  ],
+  "native-base-TopOpeBRepBuild_WireEdgeClassifier-box-apart": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.662,
+      "cpuMinMs": 4.644,
+      "cpuMaxMs": 5.768,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 144.457,
+      "cpuMinMs": 142.148,
+      "cpuMaxMs": 151.19,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 10.789,
+      "cpuMinMs": 10.772,
+      "cpuMaxMs": 10.823,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 35.466499999999996,
+      "cpuMinMs": 34.108,
+      "cpuMaxMs": 39.284,
+      "value": 10176
+    }
+  ],
+  "native-base-BRepOffset_MakeOffset-cancellable-tolerances": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.327500000000001,
+      "cpuMinMs": 4.295,
+      "cpuMaxMs": 4.729,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 146.446,
+      "cpuMinMs": 141.269,
+      "cpuMaxMs": 158.604,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 10.975999999999999,
+      "cpuMinMs": 10.969,
+      "cpuMaxMs": 10.997,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 33.2065,
+      "cpuMinMs": 32.433,
+      "cpuMaxMs": 34.858,
+      "value": 10176
+    }
+  ],
+  "native-base-BRepGProp_Gauss-used-errors": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.368,
+      "cpuMinMs": 4.322,
+      "cpuMaxMs": 4.419,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 147.476,
+      "cpuMinMs": 140.672,
+      "cpuMaxMs": 162.103,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.118,
+      "cpuMinMs": 11.028,
+      "cpuMaxMs": 11.251,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 32.6475,
+      "cpuMinMs": 32.394,
+      "cpuMaxMs": 32.739,
+      "value": 10176
+    }
+  ],
+  "native-base-BRepMesh_DelaunayDeflectionControlMeshAlgo-node-normals": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.487500000000001,
+      "cpuMinMs": 4.465,
+      "cpuMaxMs": 4.848,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 140.6535,
+      "cpuMinMs": 138.888,
+      "cpuMaxMs": 157.2,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.019,
+      "cpuMinMs": 10.997,
+      "cpuMaxMs": 11.036,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 33.8985,
+      "cpuMinMs": 32.363,
+      "cpuMaxMs": 37.441,
+      "value": 10176
+    }
+  ],
+  "native-base-BRepOffset_MakeOffset-input-order": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.363,
+      "cpuMinMs": 4.338,
+      "cpuMaxMs": 4.635,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 142.3155,
+      "cpuMinMs": 140.39,
+      "cpuMaxMs": 145.634,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.3855,
+      "cpuMinMs": 10.992,
+      "cpuMaxMs": 11.536,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 32.689499999999995,
+      "cpuMinMs": 32.47,
+      "cpuMaxMs": 33.24,
+      "value": 10176
+    }
+  ],
+  "native-base-BOPAlgo_RemoveFeatures-extend-across-feature": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.468,
+      "cpuMinMs": 4.431,
+      "cpuMaxMs": 4.501,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 143.753,
+      "cpuMinMs": 140.998,
+      "cpuMaxMs": 152.111,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.8585,
+      "cpuMinMs": 11.729,
+      "cpuMaxMs": 12.073,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 33.534499999999994,
+      "cpuMinMs": 32.849,
+      "cpuMaxMs": 34.569,
+      "value": 10176
+    }
+  ],
+  "native-base-IntTools_BeanFaceIntersector-whole-range": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.952999999999999,
+      "cpuMinMs": 4.779,
+      "cpuMaxMs": 5.033,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 143.9035,
+      "cpuMinMs": 141.079,
+      "cpuMaxMs": 157.959,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.1185,
+      "cpuMinMs": 11.041,
+      "cpuMaxMs": 11.248,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 33.3285,
+      "cpuMinMs": 32.62,
+      "cpuMaxMs": 35.92,
+      "value": 10176
+    }
+  ],
+  "native-base-BRepAlgo_Loop-sort-vertices": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.522,
+      "cpuMinMs": 4.46,
+      "cpuMaxMs": 4.713,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 149.1595,
+      "cpuMinMs": 141.361,
+      "cpuMaxMs": 155.684,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.2695,
+      "cpuMinMs": 11.001,
+      "cpuMaxMs": 11.467,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 33.138000000000005,
+      "cpuMinMs": 32.633,
+      "cpuMaxMs": 35.885,
+      "value": 10176
+    }
+  ],
+  "native-base-Geom_OffsetSurfaceUtils-cancellable-progress": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.4475,
+      "cpuMinMs": 4.403,
+      "cpuMaxMs": 4.606,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 144.5075,
+      "cpuMinMs": 141.575,
+      "cpuMaxMs": 147.942,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.3345,
+      "cpuMinMs": 11.202,
+      "cpuMaxMs": 11.501,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 33.918,
+      "cpuMinMs": 32.699,
+      "cpuMaxMs": 34.434,
+      "value": 10176
+    }
+  ],
+  "native-base-Extrema_ExtPExtS-spline-across": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.656499999999999,
+      "cpuMinMs": 4.62,
+      "cpuMaxMs": 4.927,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 145.1305,
+      "cpuMinMs": 139.228,
+      "cpuMaxMs": 150.568,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.1265,
+      "cpuMinMs": 11.038,
+      "cpuMaxMs": 12.036,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 32.544,
+      "cpuMinMs": 32.491,
+      "cpuMaxMs": 32.804,
+      "value": 10176
+    }
+  ],
+  "native-base-Approx_BSplComputeLine-local-endpoint-parameters": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.528499999999999,
+      "cpuMinMs": 4.485,
+      "cpuMaxMs": 4.677,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 144.4375,
+      "cpuMinMs": 141.06,
+      "cpuMaxMs": 146.378,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.102,
+      "cpuMinMs": 11.069,
+      "cpuMaxMs": 11.126,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 33.7275,
+      "cpuMinMs": 32.797,
+      "cpuMaxMs": 34.968,
+      "value": 10176
+    }
+  ],
+  "native-oracle-recheck": [
+    {
+      "case": "plate32-properties",
+      "samples": 10,
+      "cpuMedianMs": 4.572,
+      "cpuMinMs": 4.52,
+      "cpuMaxMs": 4.603,
+      "value": 15798.938070170288
+    },
+    {
+      "case": "plate32-classification",
+      "samples": 10,
+      "cpuMedianMs": 5.571,
+      "cpuMinMs": 5.52,
+      "cpuMaxMs": 5.626,
+      "value": 19760
+    },
+    {
+      "case": "plate32-fillet",
+      "samples": 10,
+      "cpuMedianMs": 11.329,
+      "cpuMinMs": 11.227,
+      "cpuMaxMs": 11.605,
+      "value": 15797.13503629154
+    },
+    {
+      "case": "sphere-mesh",
+      "samples": 10,
+      "cpuMedianMs": 30.805,
+      "cpuMinMs": 30.377,
+      "cpuMaxMs": 30.96,
+      "value": 10176
+    }
+  ]
+}
