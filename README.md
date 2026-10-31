@@ -9,6 +9,60 @@ new finite mathematical utilities form package `GeomAlgoExt` in toolkit `TKGeomA
 This is a partial separation of application algorithms, not an assertion that
 all application solvers have become independent OCCT packages.
 
+## Exact-section blend fitting
+
+`GeomAlgoExt_BlendFit` adds a tensor-surface fit to caller-supplied exact rational
+sections and support contacts. A degree-p B-spline is interpolated along the rail
+at Greville sites, or supplied terminal Hermite jets, for each homogeneous pole
+coordinate and both support parameter curves. For X=wP, differentiation gives
+P'= (X'-Pw')/w and P''=(X''-2P'w'-Pw'')/w. For a support contact (U,V),
+the second fundamental form applied to its velocity is
+n dot (S_uu U'^2+2S_uv U'V'+S_vv V'^2); dividing by squared contact speed
+compares normal curvatures. Basis and derivative identities use de Boor [3].
+
+Assumptions: finite valid clamped bases, consistent section pole count, positive
+weights, callbacks returning the documented row width 4S+4 and valid derivatives,
+unit support normals, and live input/callback lifetimes. Collocation can be
+singular. Sampled inter-site positions and curvature are **not global error or
+G2 certificates**. Stability, the stall/refinement rules and flat-support limits
+are not proved. No section construction law or measured coefficient is supplied
+by this module; values and section/regime/contact callbacks are explicit inputs.
+
+`BlendSectionFitter::Advance` owns one original numerical refinement step.
+A caller may retain its existing outer polling loop, without moving a host callback
+into the numerical code. The convenience `fitBlendSections` accepts OCCT progress
+for native clients. This separation preserves the old app polling path: an opaque
+range check did not meet the zero-increase hot polling gate. It does not claim that
+the rest of the rail marching, section construction, topology or attachment moved.
+
+Retained **unproven choices**: maximum 16 refinements, 4000 longitudinal poles,
+curvature refinement only before round 8, three interior probes at 1/4,1/2,3/4,
+late-break discovery at rounds 2 and 3, 128 regime scan intervals, 60 bisections,
+three-round stall history, factor 1000 and halving criterion. Degree, bend budget,
+merge/degeneracy/length tolerances and law decisions are supplied explicitly.
+The quarter-cylinder GTest checks the defining circle, axial coordinate and
+contact curves at three scales; a separate test checks cancellation before sampling.
+
+`adm/scripts/extensions/module-benchmark.sh blend-fit FORK_BUILD STOCK_BASE_BUILD`
+compares the same quarter-cylinder on the vertical (0,0,z) edge of a 10s by 10s by
+20s box, radius s, s=0.1,1,10. The new method fits the exact rational sections;
+stock `BRepFilletAPI_MakeFillet` builds the entire filleted body. Setup/edge selection
+and a 33x33 defining-circle/axial survey are outside the clock. This is deliberately
+unequal topology work, **not an end-to-end fillet speedup**.
+
+| Scale | Stock whole-body CPU ms | Section-fit CPU ms | Stock circle distance | Fit circle/axial distance |
+| --- | ---: | ---: | ---: | ---: |
+| 0.1 | 0.3025 | 0.0130 | 2.776e-17 | 8.882e-16 |
+| 1 | 0.2950 | 0.0120 | 4.441e-16 | 1.066e-14 |
+| 10 | 0.2955 | 0.0120 | 3.553e-15 | 8.527e-14 |
+
+Ten successes/zero refusals after one warmup per row; process CPU, GCC12.2 -O3,
+TBB off, Ryzen 9 7950X3D shared host. Stock is more accurate on these finite
+fixtures. Min/max values are in [blend-fit-measurements.json](adm/scripts/extensions/blend-fit-measurements.json).
+The timing run predates the split of the numerical step from the convenience loop;
+the independent native tests were repeated after that split. Integrated app CPU
+measurements, rather than this table, gate the behavior-preserving relocation.
+
 ## Constrained tensor-spline fitting and certified compaction
 
 `GeomAlgoExt_SplineFit`, `GeomAlgoExt_RimFit` and `GeomAlgoExt_CompactSurface`
