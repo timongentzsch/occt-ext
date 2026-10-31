@@ -324,28 +324,14 @@ void IntTools_BeanFaceIntersector::Perform()
 
   // Perform intersection
 
-  // try to find localized solution
-  bool bLocalize =
-    (!Precision::IsInfinite(myUMinParameter) && !Precision::IsInfinite(myUMaxParameter)
-     && !Precision::IsInfinite(myVMinParameter) && !Precision::IsInfinite(myVMaxParameter));
-  bLocalize =
-    bLocalize
-    && (mySurface.GetType() == GeomAbs_BezierSurface || mySurface.GetType() == GeomAbs_OtherSurface
-        || (mySurface.GetType() == GeomAbs_BSplineSurface
-            && (mySurface.UDegree() > 2 || mySurface.VDegree() > 2)
-            && (mySurface.NbUKnots() > 2 && mySurface.NbVKnots() > 2)));
+  // Perform real intersection, over the whole range for every surface: the localized search
+  // (ComputeLocalized) that Bezier, B-spline and other surfaces were given misses crossings and
+  // costs many times as much.
+  ComputeAroundExactIntersection();
 
-  bool isLocalized = bLocalize && ComputeLocalized();
+  ComputeUsingExtremum();
 
-  // Perform real intersection
-  if (!isLocalized)
-  {
-    ComputeAroundExactIntersection();
-
-    ComputeUsingExtremum();
-
-    ComputeNearRangeBoundaries();
-  }
+  ComputeNearRangeBoundaries();
 
   myIsDone = true;
 
