@@ -28,6 +28,8 @@
 #include <TopoDS_Shape.hxx>
 #include <TopOpeBRepBuild_CompositeClassifier.hxx>
 #include <TopAbs_State.hxx>
+#include <Bnd_Box2d.hxx>
+#include <NCollection_DataMap.hxx>
 class TopOpeBRepBuild_BlockBuilder;
 class TopOpeBRepBuild_Loop;
 
@@ -73,6 +75,23 @@ public:
   Standard_EXPORT TopAbs_State State() override;
 
 private:
+  //! What is known of a loop for comparing it with others: the box of its edges' curves on the
+  //! face, and, for a wire, the state of every point outside that box.
+  struct LoopBounds
+  {
+    occ::handle<TopOpeBRepBuild_Loop> Loop; //!< held, so that the key stays its loop's
+    Bnd_Box2d                         Box;  //!< void where an edge has no curve on the face
+    TopAbs_State                      Outside = TopAbs_UNKNOWN;
+    bool                              OutsideKnown = false;
+  };
+
+  //! The bounds of <L>, worked out on first asking.
+  LoopBounds& Bounds(const occ::handle<TopOpeBRepBuild_Loop>& L);
+
+  //! The state with respect to the wire <B> of a point outside the box <Box> of its edges.
+  TopAbs_State StateOutside(const TopoDS_Shape& B, const Bnd_Box2d& Box);
+
+  NCollection_DataMap<const TopOpeBRepBuild_Loop*, LoopBounds> myBounds;
   bool                            myFirstCompare;
   gp_Pnt2d                        myPoint2d;
   BRepClass_Edge                  myBCEdge;

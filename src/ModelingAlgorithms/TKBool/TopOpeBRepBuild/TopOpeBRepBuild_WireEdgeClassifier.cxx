@@ -24,6 +24,11 @@
 #include <gp_Vec2d.hxx>
 #include <TopOpeBRepTool_2d.hxx>
 #include <TopExp.hxx>
+#include <BRep_Tool.hxx>
+#include <BndLib_Add2dCurve.hxx>
+#include <Geom2dAdaptor_Curve.hxx>
+#include <TopOpeBRepBuild_Loop.hxx>
+#include <TopOpeBRepBuild_BlockBuilder.hxx>
 
 #include <TopOpeBRepTool_GEOMETRY.hxx>
 
@@ -67,6 +72,30 @@ TopAbs_State TopOpeBRepBuild_WireEdgeClassifier::Compare(
 
   bool isshape1 = L1->IsShape();
   bool isshape2 = L2->IsShape();
+
+  // Loops whose boxes on the face are apart cannot lie one in the other: <L1> is then where
+  // every point outside the box of the wire <L2> is, which is classified once for each wire.
+  // A face of many holes otherwise classifies each hole against every other.
+  if (isshape2)
+  {
+    LoopBounds& B2 = Bounds(L2);
+    if (!B2.Box.IsVoid())
+    {
+      const LoopBounds& B1 = Bounds(L1);
+      if (!B1.Box.IsVoid() && B1.Box.IsOut(B2.Box))
+      {
+        if (!B2.OutsideKnown)
+        {
+          B2.Outside      = StateOutside(L2->Shape(), B2.Box);
+          B2.OutsideKnown = true;
+        }
+        if (B2.Outside == TopAbs_IN || B2.Outside == TopAbs_OUT)
+        {
+          return B2.Outside;
+        }
+      }
+    }
+  }
 
   if (isshape2 && isshape1)
   { // L1 is Shape , L2 is Shape
@@ -516,6 +545,81 @@ bool TopOpeBRepBuild_WireEdgeClassifier::CompareElement(const TopoDS_Shape& EE)
 //  TopAbs_State state = myFPC.State();
 #endif
   return bRet;
+}
+
+//=================================================================================================
+
+TopOpeBRepBuild_WireEdgeClassifier::LoopBounds& TopOpeBRepBuild_WireEdgeClassifier::Bounds(
+  const occ::handle<TopOpeBRepBuild_Loop>& L)
+{
+  if (LoopBounds* aKnown = myBounds.ChangeSeek(L.get()))
+  {
+    return *aKnown;
+  }
+  LoopBounds aBounds;
+  aBounds.Loop = L;
+  // Only curves the face has already: a curve made here would be one that the comparisons
+  // it stands in for may never have made.
+  const TopoDS_Face& F       = myBCEdge.Face();
+  double             aTolMax = Precision::PConfusion();
+  bool               isAll   = true;
+  auto               anAdd   = [&](const TopoDS_Shape& theEdge) {
+    const TopoDS_Edge&        E = TopoDS::Edge(theEdge);
+    double                    f, l;
+    occ::handle<Geom2d_Curve> C2D = BRep_Tool::CurveOnSurface(E, F, f, l);
+    if (C2D.IsNull())
+    {
+      isAll = false;
+      return;
+    }
+    BndLib_Add2dCurve::Add(Geom2dAdaptor_Curve(C2D, f, l), 0., aBounds.Box);
+    aTolMax = std::max(aTolMax, BRep_Tool::Tolerance(E));
+  };
+  if (L->IsShape())
+  {
+    for (TopExp_Explorer anEx(L->Shape(), TopAbs_EDGE); anEx.More() && isAll; anEx.Next())
+    {
+      anAdd(anEx.Current());
+    }
+  }
+  else
+  {
+    TopOpeBRepBuild_BlockIterator aBit = L->BlockIterator();
+    for (aBit.Initialize(); aBit.More() && isAll; aBit.Next())
+    {
+      anAdd(MYBB->Element(aBit));
+    }
+  }
+  if (!isAll)
+  {
+    aBounds.Box.SetVoid();
+  }
+  else if (!aBounds.Box.IsVoid())
+  {
+    // Apart by more than the edges' tolerance, so that loops that touch are never apart.
+    aBounds.Box.Enlarge(aTolMax);
+  }
+  return *myBounds.Bound(L.get(), aBounds);
+}
+
+//=================================================================================================
+
+TopAbs_State TopOpeBRepBuild_WireEdgeClassifier::StateOutside(const TopoDS_Shape& B,
+                                                              const Bnd_Box2d&    Box)
+{
+  // The classification CompareShapes makes for a point of another wire, from a point beyond
+  // the box: a ray from it to the first edge, the state at the nearest crossing.
+  double aXmin, aYmin, aXmax, aYmax;
+  Box.Get(aXmin, aYmin, aXmax, aYmax);
+  myPoint2d      = gp_Pnt2d(aXmax + (aXmax - aXmin) + 1., 0.5 * (aYmin + aYmax));
+  myFirstCompare = true;
+  TopAbs_State aState = TopAbs_UNKNOWN;
+  for (TopExp_Explorer anEx(B, TopAbs_EDGE); anEx.More(); anEx.Next())
+  {
+    CompareElement(anEx.Current());
+    aState = State();
+  }
+  return aState;
 }
 
 //=================================================================================================
