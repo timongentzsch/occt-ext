@@ -16,6 +16,11 @@
 
 #include <BRepMesh_Delaun.hxx>
 
+#include <algorithm>
+#include <cstdint>
+#include <utility>
+#include <vector>
+
 #include <gp_XY.hxx>
 #include <gp_Pnt2d.hxx>
 #include <gp_Vec2d.hxx>
@@ -45,34 +50,51 @@ const double Precision2 = Precision * Precision;
 
 namespace
 {
-//! Sort two points in projection on vector (1,1)
-struct ComparatorOfVertexOfDelaun
+//! The distance along a Hilbert curve over a 2^16 x 2^16 grid of the cell (theX, theY).
+uint64_t HilbertIndex(uint32_t theX, uint32_t theY)
 {
-  bool operator()(const BRepMesh_Vertex& theLeft, const BRepMesh_Vertex& theRight)
+  uint64_t anIndex = 0;
+  for (uint32_t aSide = 1u << 15; aSide > 0; aSide >>= 1)
   {
-    return theLeft.Coord().X() + theLeft.Coord().Y() < theRight.Coord().X() + theRight.Coord().Y();
+    const uint32_t aRx = (theX & aSide) > 0 ? 1 : 0;
+    const uint32_t aRy = (theY & aSide) > 0 ? 1 : 0;
+    anIndex += static_cast<uint64_t>(aSide) * aSide * ((3 * aRx) ^ aRy);
+    if (aRy == 0)
+    {
+      if (aRx == 1)
+      {
+        theX = (1u << 16) - 1 - theX;
+        theY = (1u << 16) - 1 - theY;
+      }
+      std::swap(theX, theY);
+    }
   }
-};
+  return anIndex;
+}
 
-//! Sort two points in projection on vector (1,1)
-struct ComparatorOfIndexedVertexOfDelaun
+//! Keep both initial and refinement insertions local in the triangulation.
+void OrderVertices(const occ::handle<BRepMesh_DataStructureOfDelaun>& theStructure,
+                   IMeshData::VectorOfInteger& theVertexIndices,
+                   const Bnd_Box2d& theBox)
 {
-public:
-  ComparatorOfIndexedVertexOfDelaun(const occ::handle<BRepMesh_DataStructureOfDelaun>& theDS)
-      : myStructure(theDS)
+  double aMinX, aMinY, aMaxX, aMaxY;
+  theBox.Get(aMinX, aMinY, aMaxX, aMaxY);
+  const double aScaleX = aMaxX > aMinX ? 65535. / (aMaxX - aMinX) : 0.;
+  const double aScaleY = aMaxY > aMinY ? 65535. / (aMaxY - aMinY) : 0.;
+  std::vector<std::pair<uint64_t, int>> anOrder;
+  anOrder.reserve(theVertexIndices.Length());
+  for (int anIt = theVertexIndices.Lower(); anIt <= theVertexIndices.Upper(); ++anIt)
   {
+    const gp_XY& aPnt = theStructure->GetNode(theVertexIndices(anIt)).Coord();
+    const uint32_t aX = static_cast<uint32_t>(std::clamp((aPnt.X() - aMinX) * aScaleX, 0., 65535.));
+    const uint32_t aY = static_cast<uint32_t>(std::clamp((aPnt.Y() - aMinY) * aScaleY, 0., 65535.));
+    anOrder.emplace_back(HilbertIndex(aX, aY), theVertexIndices(anIt));
   }
-
-  bool operator()(int theLeft, int theRight)
-  {
-    const BRepMesh_Vertex& aLeft  = myStructure->GetNode(theLeft);
-    const BRepMesh_Vertex& aRight = myStructure->GetNode(theRight);
-    return ComparatorOfVertexOfDelaun()(aLeft, aRight);
-  }
-
-private:
-  occ::handle<BRepMesh_DataStructureOfDelaun> myStructure;
-};
+  std::sort(anOrder.begin(), anOrder.end());
+  int anIt = theVertexIndices.Lower();
+  for (const auto& anEntry : anOrder)
+    theVertexIndices(anIt++) = anEntry.second;
+}
 
 void UpdateBndBox(const gp_XY& thePnt1, const gp_XY& thePnt2, Bnd_B2d& theBox)
 {
@@ -329,9 +351,7 @@ void BRepMesh_Delaun::perform(IMeshData::VectorOfInteger& theVertexIndices,
   initCirclesTool(aBox, theCellsCountU, theCellsCountV);
   superMesh(aBox);
 
-  ComparatorOfIndexedVertexOfDelaun aCmp(myMeshData);
-  std::make_heap(theVertexIndices.begin(), theVertexIndices.end(), aCmp);
-  std::sort_heap(theVertexIndices.begin(), theVertexIndices.end(), aCmp);
+  OrderVertices(myMeshData, theVertexIndices, aBox);
 
   compute(theVertexIndices);
 }
@@ -2412,9 +2432,12 @@ void BRepMesh_Delaun::RemoveVertex(const BRepMesh_Vertex& theVertex)
 void BRepMesh_Delaun::AddVertices(IMeshData::VectorOfInteger&  theVertices,
                                   const Message_ProgressRange& theRange)
 {
-  ComparatorOfIndexedVertexOfDelaun aCmp(myMeshData);
-  std::make_heap(theVertices.begin(), theVertices.end(), aCmp);
-  std::sort_heap(theVertices.begin(), theVertices.end(), aCmp);
+  if (theVertices.IsEmpty()) return;
+  Bnd_Box2d aBox;
+  for (int anIt = theVertices.Lower(); anIt <= theVertices.Upper(); ++anIt)
+    aBox.Add(gp_Pnt2d(GetVertex(theVertices(anIt)).Coord()));
+  aBox.Enlarge(Precision);
+  OrderVertices(myMeshData, theVertices, aBox);
 
   createTrianglesOnNewVertices(theVertices, theRange);
 }
