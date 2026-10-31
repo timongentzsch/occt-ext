@@ -16,6 +16,9 @@
 #include <IntTools_EdgeFace.hxx>
 
 #include <BRep_Tool.hxx>
+#include <Extrema_ExtCS.hxx>
+#include <ElCLib.hxx>
+#include <ElSLib.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <Geom_Curve.hxx>
 #include <Geom_Surface.hxx>
@@ -390,11 +393,40 @@ bool IntTools_EdgeFace::CheckTouch(const IntTools_CommonPrt& aCP, double& aTx)
   GeomAdaptor_Curve   TheCurve(Curve, aTF, aTL);
   GeomAdaptor_Surface TheSurface(Surface, U1f, U1l, V1f, V1l);
 
-  Extrema_ExtCS anExtrema(TheCurve, TheSurface, Tol, Tol);
-
   aDist2 = 1.e100;
 
-  if (anExtrema.IsDone())
+  // A line across a plane: where the one point they meet in lies in the range and in the
+  // bounds of the face, it is the least distance, and it is taken as it is. Extrema_ExtCS
+  // would search the bounded plane for it with Extrema_GenExtCS, a global optimisation, and
+  // find the same point to its tolerance.
+  if (TheCurve.GetType() == GeomAbs_Line && TheSurface.GetType() == GeomAbs_Plane)
+  {
+    const gp_Lin aLin    = TheCurve.Line();
+    const gp_Pln aPln    = TheSurface.Plane();
+    const gp_Dir aNormal = aPln.Axis().Direction();
+    const double aAlong  = aLin.Direction().Dot(aNormal);
+    if (!aLin.Direction().IsNormal(aNormal, Precision::Angular()))
+    {
+      const double aT = gp_Vec(aLin.Location(), aPln.Location()).Dot(aNormal) / aAlong;
+      const gp_Pnt aP = ElCLib::Value(aT, aLin);
+      double       aU, aV;
+      ElSLib::Parameters(aPln, aP, aU, aV);
+      if (aT >= aTF && aT <= aTL && aU >= U1f && aU <= U1l && aV >= V1f && aV <= V1l)
+      {
+        aDist2 = aPln.SquareDistance(aP);
+        aTx    = aT;
+      }
+    }
+  }
+
+  Extrema_ExtCS anExtrema;
+  if (aDist2 == 1.e100)
+  {
+    anExtrema.Initialize(TheSurface, Tol, Tol);
+    anExtrema.Perform(TheCurve, TheCurve.FirstParameter(), TheCurve.LastParameter());
+  }
+
+  if (aDist2 == 1.e100 && anExtrema.IsDone())
   {
     aMinDist2 = aDist2;
 
