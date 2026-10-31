@@ -453,7 +453,25 @@ BRepTopAdaptor_FClass2d::BRepTopAdaptor_FClass2d(const TopoDS_Face& aFace, const
         {
           FlecheV = Toluv;
         }
-        TabClass.Append(CSLib_Class2d(PClass, FlecheU, FlecheV, Umin, Vmin, Umax, Vmax));
+        // The wire's own polygon bounds its quick rejection, not those of every wire explored
+        // so far: a point clear of them is outside it, as the full test finds, and a face of
+        // many holes is not tested against each hole's polygon for every point.
+        double aWUmin = PClass(1).X(), aWUmax = aWUmin, aWVmin = PClass(1).Y(), aWVmax = aWVmin;
+        for (int i = 2; i <= nbpnts; ++i)
+        {
+          aWUmin = std::min(aWUmin, PClass(i).X());
+          aWUmax = std::max(aWUmax, PClass(i).X());
+          aWVmin = std::min(aWVmin, PClass(i).Y());
+          aWVmax = std::max(aWVmax, PClass(i).Y());
+        }
+        if (aWUmax > aWUmin && aWVmax > aWVmin)
+        {
+          TabClass.Append(CSLib_Class2d(PClass, FlecheU, FlecheV, aWUmin, aWVmin, aWUmax, aWVmax));
+        }
+        else
+        {
+          TabClass.Append(CSLib_Class2d(PClass, FlecheU, FlecheV, Umin, Vmin, Umax, Vmax));
+        }
       } // if(nbpoints>3
       else
       {
