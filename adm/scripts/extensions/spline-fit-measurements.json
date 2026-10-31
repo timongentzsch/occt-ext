@@ -1,0 +1,80 @@
+{
+  "base": "b8f597c677811d1f9f4d8a97f5ae2825c0353a42",
+  "candidate": "58430e7900",
+  "machine": "AMD Ryzen 9 7950X3D; GCC 12.2; Release -O3; TBB off; process CPU clock; shared host",
+  "protocol": "one warmup, ten measured; stock upstream files restored from base; candidate additions unused by stock-only compilation; restore candidate after measurement",
+  "measurements": [
+    {
+      "case": "bilinear-boundary",
+      "scale": 0.1,
+      "method": "SplineFit",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.19,
+      "cpuMinMs": 0.186,
+      "cpuMaxMs": 0.194,
+      "maxGridError": 2.1874255878857824e-12,
+      "maxBoundaryError": 1.985286934846897e-12
+    },
+    {
+      "case": "bilinear-boundary",
+      "scale": 1,
+      "method": "SplineFit",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.1885,
+      "cpuMinMs": 0.184,
+      "cpuMaxMs": 0.199,
+      "maxGridError": 2.1874196898257163e-11,
+      "maxBoundaryError": 1.985278608205256e-11
+    },
+    {
+      "case": "bilinear-boundary",
+      "scale": 10,
+      "method": "SplineFit",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.1085,
+      "cpuMinMs": 0.105,
+      "cpuMaxMs": 0.189,
+      "maxGridError": 2.1874679845268474e-10,
+      "maxBoundaryError": 1.9852919308703755e-10
+    },
+    {
+      "case": "bilinear-boundary",
+      "scale": 0.1,
+      "method": "GeomPlate",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.7815000000000001,
+      "cpuMinMs": 0.503,
+      "cpuMaxMs": 0.842,
+      "maxGridError": 2.09578719802802e-16,
+      "maxBoundaryError": 4.163336342344337e-17
+    },
+    {
+      "case": "bilinear-boundary",
+      "scale": 1,
+      "method": "GeomPlate",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.721,
+      "cpuMinMs": 0.52,
+      "cpuMaxMs": 0.887,
+      "maxGridError": 3.1264164235997256e-15,
+      "maxBoundaryError": 8.881784197001252e-16
+    },
+    {
+      "case": "bilinear-boundary",
+      "scale": 10,
+      "method": "GeomPlate",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.687,
+      "cpuMinMs": 0.538,
+      "cpuMaxMs": 0.829,
+      "maxGridError": 4.213000162292041e-14,
+      "maxBoundaryError": 3.580361673049448e-15
+    }
+  ]
+}

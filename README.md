@@ -69,6 +69,36 @@ all NaN payloads or non-default native rounding modes. GTests use closed-form
 Bernstein derivatives, tensor polynomials, SPD residuals, plane distances and
 an independently sampled displacement bound; they are registered in the toolkit.
 
+### Native fitting impact against the pinned stock base
+
+Run `adm/scripts/extensions/spline-fit-benchmark.sh FORK_BUILD STOCK_BASE_BUILD`
+after native static Release builds of this revision and stock `b8f597c6`.
+The stock-only binary excludes every extension header and call. The fixture supplies
+four straight edges of S(u,v)=s(u,v,uv), s=0.1,1,10. The new fit uses 17 sampled
+values per edge and the unchanged energy coefficients 1e-6 and 1e-8; stock
+`GeomPlate_BuildPlateSurface` receives the same four exact boundary curves,
+17 discretization points, G0 and s*1e-7 positional tolerance, with an XY initial
+plane. These are different discretizations of the same boundary problem.
+Construction/setup and the independent 33x33 quality survey are outside the clock.
+Stock measures plate construction, without conversion to a B-spline; the extension
+measures the pole solve, without conversion to a surface. Neither includes topology.
+
+| Scale | Stock plate CPU median ms | Spline fit CPU median ms | Stock max grid distance | Fit max grid distance |
+| --- | ---: | ---: | ---: | ---: |
+| 0.1 | 0.7815 | 0.1900 | 2.096e-16 | 2.187e-12 |
+| 1 | 0.7210 | 0.1885 | 3.126e-15 | 2.187e-11 |
+| 10 | 0.6870 | 0.1085 | 4.213e-14 | 2.187e-10 |
+
+Each row has ten successes and zero refusals after one warmup. GCC 12.2, -O3,
+AMD Ryzen 9 7950X3D, TBB off, shared machine, process CPU time. The extension
+was faster on these inputs and less accurate than stock; both meet the supplied
+tolerance on this finite survey. This is not a global error certificate or a
+claim about general patches. Minima/maxima and boundary distances are in
+[spline-fit-measurements.json](adm/scripts/extensions/spline-fit-measurements.json).
+Native spline GTests pass 6/6. The band harness gives `27232afcfea55306` for all
+48 finite matrix configurations in native scalar, WASM SIMD and forced scalar
+WASM. That digest establishes these finite factor/solve comparisons only.
+
 ## Reproducing the native measurements
 
 Use Linux, CMake, Ninja, a C++17 compiler, and static Release libraries.
