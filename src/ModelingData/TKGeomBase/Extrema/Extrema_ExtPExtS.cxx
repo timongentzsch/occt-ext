@@ -16,7 +16,12 @@
 
 #include <Standard_NotImplemented.hxx>
 #include <ElCLib.hxx>
+#include <Extrema_ExtPC.hxx>
+#include <algorithm>
+#include <vector>
 #include <Extrema_ExtPElC.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom_BezierCurve.hxx>
 #include <Extrema_ExtPExtS.hxx>
 #include <Extrema_POnCurv.hxx>
 #include <Extrema_POnSurf.hxx>
@@ -246,6 +251,7 @@ void Extrema_ExtPExtS::Initialize(const occ::handle<GeomAdaptor_SurfaceOfLinearE
   myIsAnalyticallyComputable = false;
   myDone                     = false;
   myNbExt                    = 0;
+  myAcross                   = false;
 
   occ::handle<Adaptor3d_Curve> anACurve = theS->BasisCurve();
 
@@ -265,6 +271,113 @@ void Extrema_ExtPExtS::Initialize(const occ::handle<GeomAdaptor_SurfaceOfLinearE
 
 //=================================================================================================
 
+//=================================================================================================
+// function : PerformAcross
+// purpose  : Where the basis curve is a B-spline or Bezier curve all of whose poles lie at one
+//            height along the direction (a prism's wall), the point's least distances to the
+//            surface are those of its projection along the direction onto the curve's plane to the
+//            curve, at the height of the point: found on the curve (Extrema_ExtPC), not on a grid
+//            over the surface. The curve's extrema are taken as the analytic branch takes a
+//            conic's, the four nearest. False, and the grid search is made as before, where the
+//            curve is not so, where none is found, or where the nearest lies within the tolerance
+//            of the bounds of the parameters or beyond them (the boundary keeps its answers).
+//=================================================================================================
+static bool PerformAcross(const gp_Pnt&                       P,
+                          const occ::handle<Adaptor3d_Curve>& C,
+                          const gp_Vec&                       D,
+                          const double                        theUinf,
+                          const double                        theUsup,
+                          const double                        theVinf,
+                          const double                        theVsup,
+                          const double                        theTolU,
+                          const double                        theTolV,
+                          Extrema_POnSurf*                    thePoints,
+                          double*                             theSqDist,
+                          int&                                theNbExt,
+                          const int                           theNbExtMax)
+{
+  const gp_XYZ aD = D.XYZ();
+  gp_Pnt       aFirstPole;
+  if (C->GetType() == GeomAbs_BSplineCurve)
+  {
+    const occ::handle<Geom_BSplineCurve> aBS = C->BSpline();
+    aFirstPole                               = aBS->Pole(1);
+    for (int i = 2; i <= aBS->NbPoles(); ++i)
+    {
+      if (std::abs((aBS->Pole(i).XYZ() - aFirstPole.XYZ()).Dot(aD)) > Precision::Confusion())
+      {
+        return false;
+      }
+    }
+  }
+  else if (C->GetType() == GeomAbs_BezierCurve)
+  {
+    const occ::handle<Geom_BezierCurve> aBz = C->Bezier();
+    aFirstPole                              = aBz->Pole(1);
+    for (int i = 2; i <= aBz->NbPoles(); ++i)
+    {
+      if (std::abs((aBz->Pole(i).XYZ() - aFirstPole.XYZ()).Dot(aD)) > Precision::Confusion())
+      {
+        return false;
+      }
+    }
+  }
+  else
+  {
+    return false;
+  }
+  // The point taken along the direction onto the curve's plane.
+  const double aHeight = (P.XYZ() - aFirstPole.XYZ()).Dot(aD);
+  const gp_Pnt aPp(P.XYZ() - aD * aHeight);
+  Extrema_ExtPC anExt(aPp, *C, theUinf, theUsup, theTolU);
+  if (!anExt.IsDone())
+  {
+    return false;
+  }
+  // The extrema along the curve, as the analytic branch takes a conic's, nearest first; the
+  // nearest of them a least.
+  std::vector<std::pair<double, int>> aLeast;
+  for (int i = 1; i <= anExt.NbExt(); ++i)
+  {
+    aLeast.emplace_back(anExt.SquareDistance(i), i);
+  }
+  if (aLeast.empty())
+  {
+    return false;
+  }
+  std::sort(aLeast.begin(), aLeast.end());
+  const int aBest = aLeast.front().second;
+  if (!anExt.IsMin(aBest))
+  {
+    return false;
+  }
+  {
+    const Extrema_POnCurv& aPOC = anExt.Point(aBest);
+    const double           aU   = aPOC.Parameter();
+    const double           aV   = (P.XYZ() - aPOC.Value().XYZ()).Dot(aD);
+    const bool             isUInside =
+      C->IsPeriodic() || (aU > theUinf + theTolU && aU < theUsup - theTolU);
+    if (!isUInside || !(aV > theVinf + theTolV && aV < theVsup - theTolV))
+    {
+      return false;
+    }
+  }
+  theNbExt = 0;
+  for (const auto& [aSqDist, i] : aLeast)
+  {
+    if (theNbExt == theNbExtMax)
+    {
+      break;
+    }
+    const Extrema_POnCurv& aPOC = anExt.Point(i);
+    const double           aV   = (P.XYZ() - aPOC.Value().XYZ()).Dot(aD);
+    thePoints[theNbExt]         = Extrema_POnSurf(aPOC.Parameter(), aV, aPOC.Value().Translated(D * aV));
+    theSqDist[theNbExt]         = aSqDist;
+    ++theNbExt;
+  }
+  return true;
+}
+
 void Extrema_ExtPExtS::Perform(const gp_Pnt& P)
 {
   const int NbExtMax = 4; // dimension of arrays
@@ -275,6 +388,13 @@ void Extrema_ExtPExtS::Perform(const gp_Pnt& P)
 
   if (!myIsAnalyticallyComputable)
   {
+    if (PerformAcross(P, myC, myDirection, myuinf, myusup, myvinf, myvsup, mytolu, mytolv, myPoint, mySqDist, myNbExt, NbExtMax))
+    {
+      myAcross = true;
+      myDone   = true;
+      return;
+    }
+    myAcross = false;
     myExtPS.Perform(P);
     myDone = myExtPS.IsDone();
     //  modified by NIZHNY-EAP Wed Nov 17 12:59:08 1999 ___BEGIN___
@@ -452,7 +572,7 @@ int Extrema_ExtPExtS::NbExt() const
   {
     throw StdFail_NotDone();
   }
-  if (myIsAnalyticallyComputable)
+  if (myIsAnalyticallyComputable || myAcross)
   {
     return myNbExt;
   }
@@ -470,7 +590,7 @@ double Extrema_ExtPExtS::SquareDistance(const int N) const
   {
     throw Standard_OutOfRange();
   }
-  if (myIsAnalyticallyComputable)
+  if (myIsAnalyticallyComputable || myAcross)
   {
     // modified by NIZHNY-MKK  Thu Sep 18 14:48:39 2003.BEGIN
     //     return myValue[N];
@@ -491,7 +611,7 @@ const Extrema_POnSurf& Extrema_ExtPExtS::Point(const int N) const
   {
     throw Standard_OutOfRange();
   }
-  if (myIsAnalyticallyComputable)
+  if (myIsAnalyticallyComputable || myAcross)
   {
     // modified by NIZHNY-MKK  Thu Sep 18 14:47:40 2003.BEGIN
     //     return myPoint[N];

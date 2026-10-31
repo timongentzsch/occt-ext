@@ -95,6 +95,8 @@ private:
   gp_Ax2                                            myPosition;
   Extrema_GenExtPS                                  myExtPS;
   bool                                              myIsAnalyticallyComputable;
+  //! The last Perform found the extrema along a spline basis curve across the direction.
+  bool                                              myAcross = false;
   bool                                              myDone;
   int                                               myNbExt;
   double                                            mySqDist[4];
