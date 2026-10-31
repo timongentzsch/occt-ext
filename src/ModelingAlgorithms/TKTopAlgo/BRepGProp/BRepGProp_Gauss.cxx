@@ -32,6 +32,29 @@ static const int GPM        = math::GaussPointsMax();
 static const int SUBS_POWER = 32;
 static const int SM         = SUBS_POWER * GPM + 1;
 
+// What theVector.Max() gives of an error vector whose values past theUsed have been zero since
+// it was made: the scan stops there, as the vector is SM long and only the first few subintervals
+// are used. A greatest value that is negative gives the first zero after the scan, as Max() does.
+static int maxIndex(const math_Vector& theVector, const int theUsed)
+{
+  const int aLast   = std::min(theVector.Upper(), std::max(theUsed, theVector.Lower()));
+  int       anIndex = 0;
+  double    aMax    = RealFirst();
+  for (int i = theVector.Lower(); i <= aLast; ++i)
+  {
+    if (theVector(i) > aMax)
+    {
+      aMax    = theVector(i);
+      anIndex = i;
+    }
+  }
+  if (aMax < 0.0 && aLast < theVector.Upper())
+  {
+    return aLast + 1;
+  }
+  return anIndex;
+}
+
 // Auxiliary inner functions to perform arithmetic operations.
 static double Add(const double theA, const double theB)
 {
@@ -575,6 +598,8 @@ double BRepGProp_Gauss::Compute(BRepGProp_Face&   theSurface,
   NCollection_Handle<math_Vector> ErrL  = new math_Vector(1, SM, 0.0);
   NCollection_Handle<math_Vector> ErrU  = new math_Vector(1, SM, 0.0);
   NCollection_Handle<math_Vector> ErrUL = new math_Vector(1, SM, 0.0);
+  // The highest place of ErrL and ErrU given a value other than zero (maxIndex).
+  int anErrLUsed = 0, anErrUUsed = 0;
 
   // Face parametrization in U and V direction
   double BV1, BV2, BU1, BU2;
@@ -677,7 +702,7 @@ double BRepGProp_Gauss::Compute(BRepGProp_Face&   theSurface,
       {
         if (++JL > iLSubEnd)
         {
-          LRange[0] = IL = ErrL->Max();
+          LRange[0] = IL = maxIndex(*ErrL, anErrLUsed);
           LRange[1]      = JL;
           L1->Value(JL)  = (L1->Value(IL) + L2->Value(IL)) * 0.5;
           L2->Value(JL)  = L2->Value(IL);
@@ -786,7 +811,7 @@ double BRepGProp_Gauss::Compute(BRepGProp_Face&   theSurface,
                 { // while: U
                   if (++JU > iUSubEnd)
                   {
-                    URange[0] = IU = ErrU->Max();
+                    URange[0] = IU = maxIndex(*ErrU, anErrUUsed);
                     URange[1]      = JU;
 
                     U1->Value(JU) = (U1->Value(IU) + U2->Value(IU)) * 0.5;
@@ -903,6 +928,7 @@ double BRepGProp_Gauss::Compute(BRepGProp_Face&   theSurface,
 #endif
 
                         ErrU->Value(iUS) = mult(aDMass, ur);
+                        anErrUUsed       = std::max(anErrUUsed, iUS);
                       }
                       else
                       {
@@ -917,6 +943,7 @@ double BRepGProp_Gauss::Compute(BRepGProp_Face&   theSurface,
                         anUI.Iyz = mult(aLocal[0].Iyz, ur);
 
                         ErrU->Value(iUS) = mult(aDMass, ur);
+                        anErrUUsed       = std::max(anErrUUsed, iUS);
                       }
                     }
                   }
@@ -924,7 +951,7 @@ double BRepGProp_Gauss::Compute(BRepGProp_Face&   theSurface,
                   if (JU == iUSubEnd)
                   {
                     kUEnd  = 2;
-                    ErrorU = ErrU->Value(ErrU->Max());
+                    ErrorU = ErrU->Value(maxIndex(*ErrU, anErrUUsed));
                   }
                 } while ((ErrorU - EpsU > 0.0 && EpsU != 0.0) || kUEnd == 1);
 
@@ -984,10 +1011,12 @@ double BRepGProp_Gauss::Compute(BRepGProp_Face&   theSurface,
 #endif
 
                 ErrL->Value(iLS) = add(mult(aSubDim, lr), ErrorU);
+                anErrLUsed       = std::max(anErrLUsed, iLS);
               }
               else
               {
                 ErrL->Value(iLS) = add(mult(aSubDim, lr), ErrUL->Value(iLS));
+                anErrLUsed       = std::max(anErrLUsed, iLS);
               }
             }
 
@@ -1042,7 +1071,7 @@ double BRepGProp_Gauss::Compute(BRepGProp_Face&   theSurface,
         }
         if (kLEnd == 2)
         {
-          ErrorL = ErrL->Value(ErrL->Max());
+          ErrorL = ErrL->Value(maxIndex(*ErrL, anErrLUsed));
         }
       } while ((ErrorL - EpsL > 0.0 && isVerifyComputation) || kLEnd == 1);
 
