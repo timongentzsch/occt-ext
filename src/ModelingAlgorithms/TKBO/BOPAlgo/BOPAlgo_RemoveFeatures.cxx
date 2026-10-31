@@ -33,6 +33,11 @@
 #include <BRepBndLib.hxx>
 
 #include <BRepLib.hxx>
+#include <BRep_Tool.hxx>
+#include <Geom2d_Curve.hxx>
+#include <gp_Pnt2d.hxx>
+#include <gp_Vec2d.hxx>
+#include <Precision.hxx>
 
 #include <NCollection_DynamicArray.hxx>
 
@@ -586,14 +591,55 @@ private: //! @name Private methods performing the operation
 
     const double anExtLength = sqrt(aFeatureBox.SquareExtent());
 
+    // The feature's edges: an adjacent face is extended only across these.
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> aFeatureEdges;
+    TopExp::MapShapes(myFeature, TopAbs_EDGE, aFeatureEdges);
+
     const int             aNbFA = theMFAdjacent.Extent();
     Message_ProgressScope aPS(theRange, "Extending adjacent faces", aNbFA);
     for (int i = 1; i <= aNbFA && aPS.More(); ++i, aPS.Next())
     {
       const TopoDS_Face& aF = TopoDS::Face(theMFAdjacent(i));
+      // Extend the face only along those of its parameters that lead out of it across its
+      // edges with the feature, where the gap is (both ways along each, as what it is trimmed
+      // against there may lie past either end of those edges). Along a parameter whose lines
+      // run beside those edges (round a cylinder whose end the feature takes) its other edges
+      // stay with the faces beyond them, and extending past them makes a surface that closes
+      // round on itself meet the other extended faces a second time.
+      bool anExtU = false, anExtV = false;
+      const TopoDS_Face aFF = TopoDS::Face(aF.Oriented(TopAbs_FORWARD));
+      for (TopExp_Explorer anExpE(aFF, TopAbs_EDGE); anExpE.More(); anExpE.Next())
+      {
+        const TopoDS_Edge& aE = TopoDS::Edge(anExpE.Current());
+        if (!aFeatureEdges.Contains(aE) || BRep_Tool::Degenerated(aE))
+          continue;
+        double aT1, aT2;
+        const occ::handle<Geom2d_Curve> aC2D = BRep_Tool::CurveOnSurface(aE, aFF, aT1, aT2);
+        if (aC2D.IsNull())
+        {
+          anExtU = anExtV = true;
+          continue;
+        }
+        // The face lies to the left of its edges as it uses them; out of it is to the right.
+        const int aNbS = 4;
+        for (int k = 0; k <= aNbS; ++k)
+        {
+          gp_Pnt2d aP;
+          gp_Vec2d aD;
+          aC2D->D1(aT1 + (aT2 - aT1) * k / aNbS, aP, aD);
+          if (aE.Orientation() == TopAbs_REVERSED)
+            aD.Reverse();
+          const double aLen = aD.Magnitude();
+          if (aLen <= gp::Resolution())
+            continue;
+          const gp_Vec2d anOut(aD.Y() / aLen, -aD.X() / aLen);
+          anExtU = anExtU || std::abs(anOut.X()) > Precision::Angular();
+          anExtV = anExtV || std::abs(anOut.Y()) > Precision::Angular();
+        }
+      }
       // Extend the face
       TopoDS_Face aFExt;
-      BRepLib::ExtendFace(aF, anExtLength, true, true, true, true, aFExt);
+      BRepLib::ExtendFace(aF, anExtLength, anExtU, anExtU, anExtV, anExtV, aFExt);
       theFaceExtFaceMap.Add(aF, aFExt);
       myHistory->AddModified(aF, aFExt);
     }
