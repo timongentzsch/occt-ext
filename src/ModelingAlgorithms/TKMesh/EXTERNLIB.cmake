@@ -6,6 +6,7 @@ set(OCCT_TKMesh_EXTERNAL_LIBS
   TKTopAlgo
   TKShHealing
   TKGeomBase
+  TKGeomAlgo
   TKG3d
   TKG2d
 )
