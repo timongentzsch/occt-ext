@@ -151,6 +151,10 @@ their exact contribution to the right hand side. Cholesky solves the resulting
 symmetric positive definite system when it is positive definite. Multipliers
 correct row residuals using products with A M^-1 A^T. Stopped iterations are
 retained exactly; convergence, consistency or global optimality are not promised.
+The semidefinite claim assumes nonnegative energy coefficients, row weights and
+density, finite regular knot spans and consistent constraint dimensions. Solvability
+requires positive definiteness after fixed-pole elimination; these are caller
+preconditions, not a proof that arbitrary inputs produce a usable surface.
 Gauss quadrature with p+1 points integrates the polynomial basis products on
 each knot span exactly, but arbitrary supplied density functions have no such
 exactness guarantee. Basis locality/derivative identities follow de Boor (1972),
