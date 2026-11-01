@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <ctime>
 #include <vector>
+#include <exception>
 
 static gp_Pnt exact(double u,double v,double scale) { return gp_Pnt(scale*u,scale*v,scale*u*v); }
 int main() {
@@ -74,6 +75,7 @@ int main() {
      if(i==0||j==0||i==32||j==32)boundary=std::max(boundary,error);
     }
    }catch(const Standard_Failure&){if(sample>=0)++refused;}
+   catch(const std::exception&){if(sample>=0)++refused;}
   }
   std::sort(times.begin(),times.end());
   const double median=times.empty()?0:(times[(times.size()-1)/2]+times[times.size()/2])/2;

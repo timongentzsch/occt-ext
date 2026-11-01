@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <ctime>
 #include <vector>
+#include <exception>
 static Handle(Geom_BSplineSurface) plane(double scale) {
  NCollection_Array2<gp_Pnt> poles(1,4,1,4);NCollection_Array1<double> knots(1,2);NCollection_Array1<int> mults(1,2);
  knots(1)=0;knots(2)=1;mults.Init(4);
@@ -64,6 +65,7 @@ int main() {
      error=std::max(error,p.Distance(gp_Pnt(scale*u,scale*v,compact?0:scale*.125)));
     }
    }catch(const Standard_Failure&){if(sample>=0)++refused;}
+   catch(const std::exception&){if(sample>=0)++refused;}
   }
   std::sort(times.begin(),times.end());
   std::printf("{\"case\":\"%s\",\"scale\":%.17g,\"method\":\"%s\",\"samples\":%zu,\"refused\":%d,\"cpuMedianMs\":%.17g,\"cpuMinMs\":%.17g,\"cpuMaxMs\":%.17g,\"maxGridDistance\":%.17g}\n",compact?"affine-knot-compaction":"parallel-plane-rim",scale,stock?(compact?"RemoveUKnot-RemoveVKnot":"GeomPlate-points"):(compact?"CertifiedCompaction":"RimFit"),times.size(),refused,times.empty()?0:(times[(times.size()-1)/2]+times[times.size()/2])/2,times.empty()?0:times.front(),times.empty()?0:times.back(),error);

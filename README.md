@@ -11,20 +11,21 @@ all application solvers have become independent OCCT packages.
 
 ## Application integration limit
 
-The native solver APIs below build and pass their independent tests. The app
-consumer retains its original tensor fitting, section refinement, patch charts,
-interior surveys, rim fitting and compaction implementations: their relocation
-boundaries did not establish nonincreasing CPU cost, including when implementation
-and adapter were compiled together with the original flags. The separately
-compiled extraction passed numerical/refusal comparisons; paired compilation
-was a CPU-only diagnostic. These APIs are prepared native modules,
-not a claim that those production algorithms have been fully transferred.
-The portable band header is consumed through a thin app alias: migrated and
-original consumers produce identical WASM and JS in the same build. Removing
-the six new solver implementation objects also leaves that release unchanged.
-This proves no added runtime code for the band move. The four function bodies
-differing from an older cached release persist in that control; their rebuild
-drift is unresolved and is not attributed to this header.
+The patch fit/rim/compaction pilot now contains the original production
+translation units (`GeomAlgoExt_PatchFit`, `PatchRim`, `PatchCompact`). The
+application compiles those exact files directly, at their original object/link
+positions and with its original optimization flags. Native CMake compiles them
+into TKGeomAlgo. This avoids introducing a new optimization or callable boundary.
+The old prepared fit/rim/compaction implementations were deleted, and their
+independent polynomial/plane/certificate tests were ported. Namespace and symbol
+names are intentionally preserved during this source relocation.
+
+Production consumption still requires the pilot release-identity gate. Later
+section-fitting, chart and interior APIs remain prepared implementations until
+their own production sources replace them. The portable band header was already
+consumed with identical release WASM and JS in the preceding same-build control.
+The full patch/fillet operations have not moved; the component benchmarks below
+are not whole-operation impact measurements or evidence of completed extraction.
 
 ## Exact-section blend fitting
 
@@ -149,13 +150,25 @@ relative edge distortions and curvature errors are in
 
 ## Constrained tensor-spline fitting and certified compaction
 
-`GeomAlgoExt_SplineFit`, `GeomAlgoExt_RimFit` and `GeomAlgoExt_CompactSurface`
+`GeomAlgoExt_PatchFit`, `GeomAlgoExt_PatchRim` and `GeomAlgoExt_PatchCompact`
 extend `TKGeomAlgo`; `GeomAlgoExt_Band` is their banded Cholesky engine.
-They accept OCCT geometry and ordinary C++ containers. Refusals use
-`GeomAlgoExt_Failure` with an unchanged stable reason/message; cancellation uses
-`Message_ProgressRange`. An optional stage observer is a function pointer with
-no clock, global state or application runtime. There is no cancellation added
-inside the original fitting loops that had none.
+They accept OCCT geometry and ordinary C++ containers. `loft::Failure`,
+`fail`, `FailureKind` and stable reason constants live in `GeomAlgoExt_Failure`;
+fields, strings and the std::runtime_error base are retained. Substituting
+Standard_Failure would change which existing OCCT catch blocks intercept a
+refusal, so adapting that exception taxonomy is a later upstreaming task.
+The integer diagnostic ranking is inherited categorical policy, not geometry;
+its scores 100/90/80/70/60/40/30/10/0 encode the retained priority order.
+The hash modulus 2147483647 is the signed 31-bit interface ceiling.
+
+Cancellation remains a direct `sessionCancelled()` call at every original
+polling site. A native caller constructs `loft::ProgressScope(range)` from
+`GeomAlgoExt_Progress.hxx` around the entry call; its thread-local scoped range
+backs the native default hook. Nested calls restore their previous range. The
+application defines the same link symbol with its existing host implementation.
+`loft_patch_phase` is a separate direct phase-observer hook (native default:
+no-op). No new polling or erased callback is inserted in a hot loop. The native
+default hooks are an independent archive member, unused by the application link.
 
 For a tensor spline S(u,v)=sum P_ij N_i(u) M_j(v), scalar conditions are
 linear forms a_r^T p=b_r in the free pole coordinates. The energy is
@@ -177,7 +190,8 @@ each knot span exactly, but arbitrary supplied density functions have no such
 exactness guarantee. Basis locality/derivative identities follow de Boor (1972),
 [On Calculating with B-Splines](https://ftp.cs.wisc.edu/Approx/bsplcalc.pdf),
 DOI [10.1016/0021-9045(72)90080-9](https://doi.org/10.1016/0021-9045(72)90080-9),
-read for this extraction. These algebraic derivations do not certify conditioning.
+sections 1–2 (recurrences and differentiation) reopened for this mechanical move.
+These algebraic derivations do not certify conditioning.
 
 Rim correction linearizes the nearest-point displacement along a supplied unit
 vector and solves min_x ||A x-r||²+d²||x||². Its normal equations are
@@ -190,6 +204,12 @@ bound over the whole rectangle, provided both conversions are enclosed, degrees
 and full knot sequences agree, weights are nonrational, and the input is finite,
 clamped and nonperiodic. No normal, trim or continuity bound follows from it.
 Cancellation must escape the optional proposal's catch of OCCT builder failures.
+The outward interval enclosure uses the inclusion principle in Siegfried M. Rump
+(2010), section 5.5, [Verification methods: Rigorous results using floating-point
+arithmetic](https://www.tuhh.de/ti3/rump/intlab/ActaNumerica2010.pdf),
+DOI 10.1017/S096249291000005X. Sections 5.5–7.1 were reopened for this move;
+this reference does not certify the implementation without its stated rounding
+and finite-input assumptions.
 
 All retained non-derived choices are explicit: fit diagonal holds 1e-13, factor
 100 and cap 1e-6; stall count 12, stall share 0.02, maximum passes 400 and energy
@@ -265,12 +285,11 @@ plain knot removal does not provide its interval certificate. Rim accuracy is
 worse than stock here. All three scales and extrema are in
 [fit-aux-measurements.json](adm/scripts/extensions/fit-aux-measurements.json).
 
-The native rim/compaction implementations are prepared for review but the app
-retains its original implementations: replacing its hot cancellation polling by
-an opaque OCCT progress check failed the zero-increase CPU gate. A frozen paired
-slope experiment measured +0.665 ns/check (one-sided 95% upper bound +0.806).
-This is a boundary performance limitation, not a numerical disagreement. Native
-clients may use these APIs; no claim is made that the app consumes them yet.
+The table above is the historical measurement of the prepared implementations,
+not a new measurement of the mechanically relocated implementation. Rerun the
+ported harness before attributing these timings to this revision. Whole Patch and
+whole fillet CPU/quality comparisons remain outstanding because their operation
+bodies are still outside the fork. No component timing substitutes for them.
 
 ## Applying modules separately
 
@@ -280,6 +299,7 @@ remain unchanged. On this pinned base, apply the following commits in order:
 | Module | Commits | Dependencies |
 | --- | --- | --- |
 | Spline fit, portable band, prepared rim/compaction | `bb5616bf41`, `58430e7900`, `dd709ae866` | accepted interval/Bernstein/bounds helpers; existing TKGeomAlgo→TKBRep dependency |
+| Original fit/rim/compaction source replacement | `72b7c5f0a0` | replaces the prepared fit family above; preserves production symbols and polling; native progress/default hook member |
 | Exact-section fitting | `a28ec1fd41` | spline-fit batch and accepted Hermite helper |
 | Patch chart/interior | `3d1022a70e`, `4273531a63` | spline execution header; accepted Bernstein/interval helpers; existing TKMesh |
 | Benchmark documentation | `01bba3caa2`, `f757b82e4c` | corresponding module headers for candidate binaries only |
