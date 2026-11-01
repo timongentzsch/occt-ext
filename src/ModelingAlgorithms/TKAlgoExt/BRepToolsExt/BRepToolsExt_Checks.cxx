@@ -5,16 +5,20 @@
 
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepCheck_Result.hxx>
+#include <BRepCheck_Shell.hxx>
+#include <BRepCheck_Solid.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Iterator.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
 
 #include <stdexcept>
 #include <unordered_set>
 
-namespace BRepExt {
-
-} // namespace BRepExt
 namespace BRepExt {
 
 std::vector<TopoDS_Shape> subShapes(const OcctKernel& kernel, const char* operation,
@@ -44,9 +48,8 @@ std::vector<TopoDS_Shape> subShapes(const OcctKernel& kernel, const char* operat
     return found;
 }
 
-std::string invalidity(const TopoDS_Shape& shape) {
-    const BRepCheck_Analyzer check(shape);
-    if (check.IsValid()) return {};
+// The statuses that an analyzer of `shape` holds, as "kind:status" words.
+static std::string describe(const BRepCheck_Analyzer& check, const TopoDS_Shape& shape) {
     std::string what;
     for (const auto kind : {TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_SHELL, TopAbs_SOLID}) {
         NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> all;
@@ -64,7 +67,51 @@ std::string invalidity(const TopoDS_Shape& shape) {
                                 std::to_string(int(status));
         }
     }
+    return what;
+}
+
+std::string invalidity(const TopoDS_Shape& shape) {
+    const BRepCheck_Analyzer check(shape);
+    if (check.IsValid()) return {};
+    const std::string what = describe(check, shape);
     return what.empty() ? " unknown" : what;
+}
+
+std::string invalidity(const TopoDS_Shape& shape, const TopoDS_Shape& earlier) {
+    if (TopExp_Explorer(shape, TopAbs_SOLID).More() == false) return invalidity(shape);
+    // A face that the operation did not touch is the earlier body's own face, with its wires, edges and
+    // vertices as they were: it keeps the verdict it had, and is not checked again. The faces that are
+    // new are checked with everything under them, then each solid and shell as a whole (connected,
+    // closed, consistently oriented), which is what remains of the full check.
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> known, faces;
+    TopExp::MapShapes(earlier, TopAbs_FACE, known);
+    TopExp::MapShapes(shape, TopAbs_FACE, faces);
+    std::string what;
+    for (int i = 1; i <= faces.Extent(); ++i) {
+        if (known.Contains(faces(i))) continue;
+        const BRepCheck_Analyzer check(faces(i));
+        if (check.IsValid()) continue;
+        const std::string found = describe(check, faces(i));
+        what += found.empty() ? " unknown" : found;
+    }
+    for (TopExp_Explorer solids(shape, TopAbs_SOLID); solids.More(); solids.Next()) {
+        const TopoDS_Solid solid = TopoDS::Solid(solids.Current());
+        BRepCheck_Solid whole(solid);
+        whole.Minimum();
+        for (const auto status : whole.Status())
+            if (status != BRepCheck_NoError) what += " " + std::to_string(int(TopAbs_SOLID)) + ":" + std::to_string(int(status));
+        for (TopoDS_Iterator shells(solid); shells.More(); shells.Next()) {
+            if (shells.Value().ShapeType() != TopAbs_SHELL) continue;
+            BRepCheck_Shell shell(TopoDS::Shell(shells.Value()));
+            shell.Minimum();
+            shell.InContext(solid);
+            for (const auto status : shell.Status())
+                if (status != BRepCheck_NoError) what += " " + std::to_string(int(TopAbs_SHELL)) + ":" + std::to_string(int(status));
+            for (const auto status : shell.StatusOnShape(solid))
+                if (status != BRepCheck_NoError) what += " " + std::to_string(int(TopAbs_SHELL)) + "in" + std::to_string(int(TopAbs_SOLID)) + ":" + std::to_string(int(status));
+        }
+    }
+    return what;
 }
 
 } // namespace BRepExt

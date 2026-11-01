@@ -63,7 +63,7 @@ Blended blendStored(const OcctKernel& kernel, const char* op, uint32_t shape, co
 }
 
 void accepted(const char* op, const TopoDS_Shape& input, const TopoDS_Shape& result, double size, const Blended* made) {
-    if (const auto what = invalidity(result); !what.empty())
+    if (const auto what = invalidity(result, input); !what.empty())
         fail(op, no_solution, "the blended body is not valid (shape kind and OpenCascade status:" + what + ")");
     // OpenCascade's check passes a shell with an edge on one face: none that the input did not have.
     if (freeEdges(result) > freeEdges(input))

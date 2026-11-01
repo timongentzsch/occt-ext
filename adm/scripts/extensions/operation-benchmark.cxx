@@ -505,16 +505,19 @@ double steiner(double r) {
 } // namespace
 
 int main(int argc, char** argv) {
-  // With an argument, only the rows whose name contains it are run (for debugging one case).
+  // With an argument, only that group is run (for debugging one group: fillet, patch, rounds, junction, hollow or offset).
   const std::string only = argc > 1 ? argv[1] : "";
+  const auto want = [&](const char* group) { return only.empty() || only == group; };
   std::printf("operation | input | who | ok/runs | CPU median [min, max] ms | quality\n");
-  for (double r : {0.2, 0.5}) fillet(r);
-  for (double a : {0.5, 2.0}) patch(a);
-  rounds("box, all 12 edges r=6", {{everyEdge, 6}}, steiner(6));
-  rounds("box, all 12 edges r=9 (2r near height)", {{everyEdge, 9}}, steiner(9));
-  rounds("box, three edges at a corner r=7", {{cornerEdges, 7}}, 0);
-  rounds("box, top r=8 then uprights r=3", {{topEdges, 8}, {uprights, 3}}, 0);
-  {
+  if (want("fillet")) for (double r : {0.2, 0.5}) fillet(r);
+  if (want("patch")) for (double a : {0.5, 2.0}) patch(a);
+  if (want("rounds")) {
+    rounds("box, all 12 edges r=6", {{everyEdge, 6}}, steiner(6));
+    rounds("box, all 12 edges r=9 (2r near height)", {{everyEdge, 9}}, steiner(9));
+    rounds("box, three edges at a corner r=7", {{cornerEdges, 7}}, 0);
+    rounds("box, top r=8 then uprights r=3", {{topEdges, 8}, {uprights, 3}}, 0);
+  }
+  if (want("junction")) {
     const TopoDS_Shape along = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -20), gp_Dir(0, 0, 1)), 10, 40).Shape();
     const TopoDS_Shape across = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(-20, 0, 0), gp_Dir(1, 0, 0)), 6, 40).Shape();
     const TopoDS_Shape crossed = BRepAlgoAPI_Fuse(along, across).Shape();
@@ -533,8 +536,10 @@ int main(int argc, char** argv) {
       junction(label, standing, ring, r);
     }
   }
-  hollow(3, 2);
-  hollow(3, 4);
-  for (double d : {2.0, 10.0}) offset(d);
+  if (want("hollow")) {
+    hollow(3, 2);
+    hollow(3, 4);
+  }
+  if (want("offset")) for (double d : {2.0, 10.0}) offset(d);
   return 0;
 }
