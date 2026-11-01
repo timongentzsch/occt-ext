@@ -168,7 +168,9 @@ backs the native default hook. Nested calls restore their previous range. The
 application defines the same link symbol with its existing host implementation.
 `loft_patch_phase` is a separate direct phase-observer hook (native default:
 no-op). No new polling or erased callback is inserted in a hot loop. The native
-default hooks are an independent archive member, unused by the application link.
+default hook implementation is compiled only for native builds. It is omitted
+from WebAssembly archives: a native definition there would satisfy the linker
+before a host import and silently replace cancellation/observation.
 
 For a tensor spline S(u,v)=sum P_ij N_i(u) M_j(v), scalar conditions are
 linear forms a_r^T p=b_r in the free pole coordinates. The energy is
