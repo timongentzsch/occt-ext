@@ -7,7 +7,7 @@
 #include <gp_XYZ.hxx>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 // Fixed parameters are the input's correspondence to the result, not nearest rendered triangles.
 struct FitTarget {
     gp_Pnt position;
@@ -34,4 +34,4 @@ struct FitDiagnostics {
 FitDiagnostics measureSurfaceFit(const char *operation, const occ::handle<Geom_Surface> &surface,
                                  const std::vector<FitTarget> &targets, double modelScale,
                                  gp_XYZ referenceArea);
-} // namespace loft
+} // namespace BRepExt

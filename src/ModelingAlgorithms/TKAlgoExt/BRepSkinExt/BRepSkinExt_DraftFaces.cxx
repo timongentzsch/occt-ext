@@ -10,7 +10,7 @@
 // conical faces about their intersection with a neutral plane and re-intersects the neighbours.
 // One maker takes any number of faces, each validated on its own by AddDone.
 
-#include <BRepLoftExt_DraftIsocline.hxx>
+#include <BRepSkinExt_DraftIsocline.hxx>
 #include <BRepToolsExt_History.hxx>
 #include <BRepOffsetExt_Solid.hxx>
 #include <BRepFilletExt_Untouched.hxx>
@@ -33,7 +33,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 
 namespace {
 
@@ -41,7 +41,7 @@ const char* const op = "draftFaces";
 
 /// The tolerance that the draft of curved walls works to: the operation is given none, and
 /// this is the one that documents are made with.
-constexpr double draftTolerance = loft::tolerance::sewing;
+constexpr double draftTolerance = BRepExt::tolerance::sewing;
 
 gp_Dir direction(Vec3 v, const char* name) {
     if (!finite(v)) {
@@ -178,19 +178,19 @@ EvolutionData draftFaces(OcctKernel& kernel, uint32_t shapeId, const std::vector
         const auto wall = TopoDS::Face(faces[0]);
         BRepAdaptor_Surface s(wall);
         if (s.GetType() == GeomAbs_Cylinder && wall.Orientation() == TopAbs_REVERSED &&
-            std::abs(s.LastUParameter() - s.FirstUParameter() - 2 * M_PI) < loft::tolerance::angularResolution) {
+            std::abs(s.LastUParameter() - s.FirstUParameter() - 2 * M_PI) < BRepExt::tolerance::angularResolution) {
             const auto cylinder = s.Cylinder();
             const auto axis = cylinder.Axis().Direction();
             const double alignment = axis.Dot(pull);
-            bool eligible = std::abs(alignment) > 1 - loft::tolerance::angle &&
-                            std::abs(axis.Dot(neutral.Axis().Direction())) > 1 - loft::tolerance::angle;
+            bool eligible = std::abs(alignment) > 1 - BRepExt::tolerance::angle &&
+                            std::abs(axis.Dot(neutral.Axis().Direction())) > 1 - BRepExt::tolerance::angle;
             NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> adj;
             TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, adj);
             for (TopExp_Explorer e(wall, TopAbs_EDGE); e.More(); e.Next())
                 for (const auto &f : adj.FindFromKey(e.Current())) if (!f.IsSame(wall)) {
                     BRepAdaptor_Surface other(TopoDS::Face(f));
                     if (other.GetType() != GeomAbs_Plane ||
-                        std::abs(other.Plane().Axis().Direction().Dot(axis)) < 1 - loft::tolerance::angle) eligible = false;
+                        std::abs(other.Plane().Axis().Direction().Dot(axis)) < 1 - BRepExt::tolerance::angle) eligible = false;
                 }
             const auto start = cylinder.Location().Translated(gp_Vec(axis) * s.FirstVParameter());
             const double height = s.LastVParameter() - s.FirstVParameter();
@@ -236,4 +236,4 @@ EvolutionData draftFaces(OcctKernel& kernel, uint32_t shapeId, const std::vector
     return history.finish(store(kernel, result));
 }
 
-} // namespace loft
+} // namespace BRepExt

@@ -11,7 +11,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 
-namespace loft {
+namespace BRepExt {
 
 // Roles come from construction/history, never from the angle of the delivered seam.
 struct BlendBoundaryRoles {
@@ -36,4 +36,4 @@ using BlendModified = std::function<const NCollection_List<TopoDS_Shape>&(const 
 /// Fails if a face the blend made runs into a face of the body that is not beside it.
 void checkBlendClear(const TopoDS_Shape& before, const TopoDS_Shape& after,
                      const std::vector<TopoDS_Shape>& selected, const BlendModified& modified);
-} // namespace loft
+} // namespace BRepExt

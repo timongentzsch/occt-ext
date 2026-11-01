@@ -9,7 +9,7 @@
 // rectangle.
 
 #include <GeomAlgoExt_Band.hxx>
-namespace loft { using GeomAlgoExt::Band; }
+namespace BRepExt { using GeomAlgoExt::Band; }
 
 #include <Geom_BSplineSurface.hxx>
 #include <gp_XYZ.hxx>
@@ -18,7 +18,7 @@ namespace loft { using GeomAlgoExt::Band; }
 #include <optional>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 /// Degrees up to 5; flat knots; the pole (i, j) at `poles[i * countV() + j]`.
 struct SplineNet {
@@ -106,4 +106,4 @@ std::vector<int> fitNet(const char *operation, SplineNet &net, const std::vector
 
 occ::handle<Geom_BSplineSurface> surfaceOf(const SplineNet &net);
 
-} // namespace loft
+} // namespace BRepExt

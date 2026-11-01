@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 FitDiagnostics measureSurfaceFit(const char *op, const occ::handle<Geom_Surface> &surface,
                                  const std::vector<FitTarget> &targets, double scale,
                                  gp_XYZ referenceArea) {
@@ -49,4 +49,4 @@ FitDiagnostics measureSurfaceFit(const char *op, const occ::handle<Geom_Surface>
         }
     return out;
 }
-} // namespace loft
+} // namespace BRepExt

@@ -35,7 +35,7 @@
 
 class IntTools_Context;
 
-namespace loft {
+namespace BRepExt {
 
 /// Distinct shapes in the order they were added, each found again by its index.
 using ShapeSet = NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>;
@@ -145,4 +145,4 @@ bool solveForThree(Rows& rows, int n) {
     return true;
 }
 
-} // namespace loft
+} // namespace BRepExt

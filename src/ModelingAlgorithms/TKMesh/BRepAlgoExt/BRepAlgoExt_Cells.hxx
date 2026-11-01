@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 /// Which cells make the result. `sources` are what is worked on, `tools` what it is worked with.
 enum class Select {
@@ -112,4 +112,4 @@ void simplifyBooleanResult(BooleanResult& result, const BooleanRequest& request,
 /// Paired rungs (reference, optimized) retain every verdict and diagnostic.
 std::vector<Rung> compareBooleanChecks(const BooleanRequest& request);
 
-} // namespace loft
+} // namespace BRepExt

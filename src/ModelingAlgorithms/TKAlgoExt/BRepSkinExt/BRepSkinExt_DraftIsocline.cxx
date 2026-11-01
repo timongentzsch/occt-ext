@@ -22,7 +22,7 @@
 //
 // For walls along the pull direction between two levels: the side faces of an extrusion.
 
-#include <BRepLoftExt_DraftIsocline.hxx>
+#include <BRepSkinExt_DraftIsocline.hxx>
 #include <BRepOffsetExt_Solid.hxx>
 
 #include <BRepAdaptor_Curve.hxx>
@@ -57,7 +57,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 
 namespace {
 
@@ -65,9 +65,9 @@ const char *const op = "draftFaces";
 
 /// The curves of the drafted wall and of the walls beside it are fitted to this: the
 /// distance at which OpenCascade takes two points for one.
-constexpr double isoclineFit = loft::tolerance::length;
+constexpr double isoclineFit = BRepExt::tolerance::length;
 /// The faces of a solid that is taken or joined are sewn at ten times that fit.
-constexpr double isoclineSew = loft::tolerance::sewing;
+constexpr double isoclineSew = BRepExt::tolerance::sewing;
 /// How far what is taken stands out of the body and what is joined into it, in units of the
 /// caller's tolerance: far above the Boolean's fuzz (1e-7), small against any wall.
 constexpr double isoclineOverlap = 1e3;
@@ -471,4 +471,4 @@ TopoDS_Shape draftWalls(const TopoDS_Shape &solid, const std::vector<TopoDS_Shap
     return result;
 }
 
-} // namespace loft
+} // namespace BRepExt

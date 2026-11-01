@@ -12,11 +12,10 @@
 #include <stdexcept>
 #include <unordered_set>
 
-namespace loft {
+namespace BRepExt {
 
-} // namespace loft
-#include <GeomAlgoExt_Failure.cxx>
-namespace loft {
+} // namespace BRepExt
+namespace BRepExt {
 
 std::vector<TopoDS_Shape> subShapes(const OcctKernel& kernel, const char* operation,
                                     const TopoDS_Shape& owner, const std::vector<uint32_t>& ids,
@@ -68,4 +67,4 @@ std::string invalidity(const TopoDS_Shape& shape) {
     return what.empty() ? " unknown" : what;
 }
 
-} // namespace loft
+} // namespace BRepExt

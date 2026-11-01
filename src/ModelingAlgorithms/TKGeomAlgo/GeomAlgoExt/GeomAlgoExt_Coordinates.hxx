@@ -3,7 +3,7 @@
 
 #pragma once
 #include <cmath>
-namespace loft {
+namespace BRepExt {
 /// Whether every coordinate of a point or vector is a number.
 template <typename Coordinates>
 bool finite(const Coordinates& p) {

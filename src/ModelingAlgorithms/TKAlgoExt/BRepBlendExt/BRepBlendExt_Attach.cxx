@@ -15,7 +15,7 @@
 #include <ShapeAnalysis_Edge.hxx>
 #include <numeric>
 
-namespace loft::blend2::detail {
+namespace BRepExt::blend2::detail {
 
 /// The blends of chains of edges attached to the body (design §6): each support cut back to its
 /// contacts, each stopping face to the blend's end section, the other edges at a chain's inner
@@ -941,7 +941,7 @@ void Attach::capNotch(int k, int side, int end, const TopoDS_Vertex& vertex, con
         const gp_Pnt p0 = BRep_Tool::Pnt(from), p1 = BRep_Tool::Pnt(to);
         const double length = p0.Distance(p1);
         if (!(length > limit::degenerate * rail.scale)) fail(op, no_solution, "the cap of a blend at a notch collapses", {rail.edge});
-        const Handle(Geom_Curve) line = GC_MakeSegment(p0, p1).Value();
+        const Handle(Geom_Curve) line(GC_MakeSegment(p0, p1).Value());
         const auto other = BRep_Tool::Surface(face);
         for (const auto& surface : {placed, other}) {
             GeomAPI_ProjectPointOnSurf mid(line->Value(length / 2), surface);
@@ -1368,7 +1368,7 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex) {
                 fail(op, no_solution, "the blend's contact misses where the face that stops it crosses the cliff's edge", {rail.edge});
             u[k][side][end] = (on.LowerDistanceParameter() - sheet.alpha) / sheet.beta;
             // The cap's edge: the segment from there to the vertex, on both faces' surfaces.
-            const Handle(Geom_Curve) line = GC_MakeSegment(*F, V).Value();
+            const Handle(Geom_Curve) line(GC_MakeSegment(*F, V).Value());
             const double length = F->Distance(V);
             const auto narrowPlaced = BRep_Tool::Surface(narrow.face);
             for (const auto& surface : {placed, narrowPlaced}) {
@@ -2697,8 +2697,8 @@ TopoDS_Face Attach::lawCorner(const Corner& at, size_t c) {
                     piece.rail.resolved(limit::together))
                     fail(op, unsupported_geometry, "a corner of three chamfers whose ends do not lie flat, which v2 does not make yet", {piece.rail.edge});
         edges[i] = edgeBetween(sides[i].curve, *sides[i].start, 0, *sides[i].stop, 1,
-                               {{segment2d(sides[i].from, sides[i].to), patchSurface, {}},
-                                {aligned(onSheet, 0, startOnSheet, piece.sheet.surface), piece.sheet.surface, {}}},
+                               {OnSurface{Handle(Geom2d_Curve)(segment2d(sides[i].from, sides[i].to)), Handle(Geom_Surface)(patchSurface), {}},
+                                OnSurface{Handle(Geom2d_Curve)(aligned(onSheet, 0, startOnSheet, piece.sheet.surface)), Handle(Geom_Surface)(piece.sheet.surface), {}}},
                                tolerance);
         section[k][end] = edges[i];
     }
@@ -3413,5 +3413,5 @@ TopoDS_Shape attach(TopoDS_Shape body, const std::vector<Piece>& pieces, const s
     return a.assemble();
 }
 
-} // namespace loft::blend2::detail
+} // namespace BRepExt::blend2::detail
 

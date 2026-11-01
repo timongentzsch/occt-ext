@@ -7,8 +7,8 @@
 #include <TopoDS_Face.hxx>
 #include <gp_Pln.hxx>
 
-namespace loft {
-// Loft's normalized UVN contract, shared by carried curves and B-rep deformation.
+namespace BRepExt {
+// The normalized UVN contract, shared by carried curves and B-rep deformation.
 // Swap, then mirror, then scale/offset; N uses oriented face normals.
 class DeformUVN {
     const char *op;
@@ -33,4 +33,4 @@ struct DeformResult {
 };
 DeformResult deformBody(OcctKernel &, uint32_t, uint32_t, uint32_t, Vec3, Vec3, bool, bool, bool,
                          bool, double, const std::vector<int> &, int);
-} // namespace loft
+} // namespace BRepExt

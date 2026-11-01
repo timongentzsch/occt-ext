@@ -58,7 +58,7 @@
 
 #include <BRepAlgoExt_Properties.hxx>
 
-namespace loft {
+namespace BRepExt {
 
 namespace {
 
@@ -756,7 +756,7 @@ ShapeList sweptCrossings(const std::vector<Operand>& operands, double crossingTo
         for (size_t b = a + 1; b < operands.size(); ++b)
             for (const auto& one : walls[a])
                 for (const auto& other : walls[b]) {
-                    if (one.box.IsOut(other.box) || !one.along.IsParallel(other.along, loft::tolerance::angle)) continue;
+                    if (one.box.IsOut(other.box) || !one.along.IsParallel(other.along, BRepExt::tolerance::angle)) continue;
                     GeomAPI_ProjectPointOnSurf onOne, onOther;
                     footOn(one, onOne);
                     footOn(other, onOther);
@@ -776,7 +776,7 @@ ShapeList sweptCrossings(const std::vector<Operand>& operands, double crossingTo
                             if (gp_Vec(low, points[j]).Dot(along) < 0) low = points[j];
                             if (gp_Vec(high, points[j]).Dot(along) > 0) high = points[j];
                         }
-                        if (low.Distance(high) <= loft::tolerance::sewing) continue;
+                        if (low.Distance(high) <= BRepExt::tolerance::sewing) continue;
                         const TopoDS_Edge line = BRepBuilderAPI_MakeEdge(low, high).Edge();
                         curveOn(line, low, high, one, onOne);
                         curveOn(line, low, high, other, onOther);
@@ -900,7 +900,7 @@ void fuse(Partition& partition, const BooleanRequest& request, const Step& step,
 void verify(Partition& partition, const BooleanRequest& request, Rung& rung) {
     auto& operands = partition.operands;
     const double reach = kOnFactor * partition.tolerance;
-    const std::string inconsistent = loft::inconsistent(request);
+    const std::string inconsistent = BRepExt::inconsistent(request);
 
     BooleanPhase check("verify");
     // 1.
@@ -1932,7 +1932,7 @@ BooleanResult booleanCells(const BooleanRequest& request, std::vector<Rung>* rep
         face.Next();
         if (face.More()) torusPair = false;
     }
-    if (torusPair && !torusAxes[0].IsParallel(torusAxes[1], loft::tolerance::angularResolution)) divideSeams(operands);
+    if (torusPair && !torusAxes[0].IsParallel(torusAxes[1], BRepExt::tolerance::angularResolution)) divideSeams(operands);
     // Check 4 does not yet bound lower-dimensional contacts against faces. Do not let
     // a caller's fuzzy value (including a command retry) erase contacts above the ceiling.
     const double ceiling = tolerance::booleanCeiling;
@@ -2054,4 +2054,4 @@ std::vector<Rung> compareBooleanChecks(const BooleanRequest& given) {
     return compared;
 }
 
-} // namespace loft
+} // namespace BRepExt

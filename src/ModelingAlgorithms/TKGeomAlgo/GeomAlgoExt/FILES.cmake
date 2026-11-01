@@ -19,10 +19,7 @@ set(OCCT_GeomAlgoExt_FILES
   GeomAlgoExt_Resolution.hxx
   GeomAlgoExt_Coordinates.hxx
   GeomAlgoExt_Progress.hxx
-  GeomAlgoExt_BlendFit.hxx
-  GeomAlgoExt_BlendFit.cxx
   GeomAlgoExt_Band.hxx
-  GeomAlgoExt_Execution.hxx
   GeomAlgoExt_Pair.hxx
   GeomAlgoExt_Bernstein.hxx
   GeomAlgoExt_CubicThrough.hxx
@@ -39,4 +36,5 @@ set(OCCT_GeomAlgoExt_FILES
 # WebAssembly applications supply their own direct cancellation/observer hooks.
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
   list(APPEND OCCT_GeomAlgoExt_FILES GeomAlgoExt_Progress.cxx)
-endif()
+endif(  GeomAlgoExt_Progress.cxx
+)

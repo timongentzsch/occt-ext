@@ -38,7 +38,7 @@
 #include <functional>
 #include <tuple>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 /// An edge's curve as a spline from 0 to 1, run the other way where `reversed`.
 Handle(Geom_BSplineCurve) unitCurve(const TopoDS_Edge &edge, bool reversed) {
@@ -54,7 +54,7 @@ Handle(Geom_BSplineCurve) unitCurve(const TopoDS_Edge &edge, bool reversed) {
     return spline;
 }
 
-/// A guided loft between two profiles with G2 asked at an end: the sum of the surface straight
+/// A guided skin between two profiles with G2 asked at an end: the sum of the surface straight
 /// across between the guides, and the quintic in the guides' direction that has each profile, the
 /// support's plane and bend along it, less the same between the guides' ends. Along a guide the
 /// last two cancel, so each guide is kept; along a profile the first and last cancel. The two supports
@@ -250,7 +250,7 @@ TopoDS_Face guidedSum(OcctKernel &kernel, const char *op, const std::vector<uint
 }
 } // namespace
 
-EvolutionData loftGuides(OcctKernel &kernel, const std::vector<uint32_t> &edges, uint32_t firstFace,
+EvolutionData skinGuides(OcctKernel &kernel, const std::vector<uint32_t> &edges, uint32_t firstFace,
                          uint32_t lastFace, int firstOrder, int lastOrder, double tolerance) {
     const char *op = "loftGuides";
     if (edges.size() < 4 || firstOrder < 0 || firstOrder > 2 || lastOrder < 0 || lastOrder > 2 ||
@@ -297,13 +297,13 @@ EvolutionData loftGuides(OcctKernel &kernel, const std::vector<uint32_t> &edges,
         fail(op, no_solution, "guided loft did not meet G2: " + std::to_string(fill.G2Error()));
     return stored(kernel, fill.Shape());
 }
-} // namespace loft
+} // namespace BRepExt
 
 #include <GeomAPI_PointsToBSplineSurface.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <NCollection_Array2.hxx>
-namespace loft {
-EvolutionData loftPeriodic(OcctKernel &kernel,const std::vector<uint32_t> &ids,double tolerance) {
+namespace BRepExt {
+EvolutionData skinPeriodic(OcctKernel &kernel,const std::vector<uint32_t> &ids,double tolerance) {
     const char *op="loftPeriodic";
     if(ids.size()<3 || !std::isfinite(tolerance) || tolerance<=0)
         fail(op,invalid_input,"at least three sections and positive tolerance required");

@@ -5,10 +5,10 @@
 #include <GeomAlgoExt_Failure.hxx>
 #include <Message_ProgressIndicator.hxx>
 #include <Message_ProgressScope.hxx>
-namespace loft {
+namespace BRepExt {
 extern "C" int sessionCancelled();
 /// Host hook receiving the name of each progress scope OCCT opens (diagnostics only).
-extern "C" void loft_report_progress(const char* name);
+extern "C" void BRepExt_ReportProgress(const char* name);
 inline void checkCancelled(const char* operation, bool enabled = true) {
     if (enabled && sessionCancelled()) fail(operation, "cancelled", "Operation cancelled");
 }
@@ -17,7 +17,7 @@ inline void checkCancelled(const char* operation, bool enabled = true) {
 class CancelProgress : public Message_ProgressIndicator {
   protected:
     bool UserBreak() override { return sessionCancelled(); }
-    void Show(const Message_ProgressScope& scope, const bool) override { loft_report_progress(scope.Name()); }
+    void Show(const Message_ProgressScope& scope, const bool) override { BRepExt_ReportProgress(scope.Name()); }
 };
 inline Handle(Message_ProgressIndicator) progress(bool enabled) {
     if (!enabled) return {};

@@ -50,7 +50,7 @@
 #include <TopTools_ShapeMapHasher.hxx>
 #include <cmath>
 #include <algorithm>
-namespace loft {
+namespace BRepExt {
 namespace {
 TopoDS_Face rectangular(OcctKernel &k,uint32_t id,double tolerance) {
     if(get(k,id).ShapeType()!=TopAbs_FACE || !std::isfinite(tolerance) || tolerance<=0)
@@ -96,7 +96,7 @@ Fit fitSupport(const char* op,const TopoDS_Face& face,int uDegree,int vDegree,in
         std::vector<std::pair<double,int>> values{{0,degree+1},{1,degree+1}};
         if(count<=spans) for(int i=2;i<=count;++i) {
             const double t=(intervals(i)-low)/(high-low);
-            if(t<=loft::tolerance::parameter || t>=1-loft::tolerance::parameter) continue;
+            if(t<=BRepExt::tolerance::parameter || t>=1-BRepExt::tolerance::parameter) continue;
             int continuity=2;
             if(source.GetType()==GeomAbs_BSplineSurface) {
                 const auto bs=source.BSpline();
@@ -185,7 +185,7 @@ EvolutionData rebuildFace(OcctKernel &k,uint32_t id,int uDegree,int vDegree,int 
     // Transfer the original trim domain, including inner wires, by its exact
     // affine UV map. Reprojecting 3D edges would change the requested boundary.
     BRep_Builder builder;TopoDS_Face rebuilt;
-    builder.MakeFace(rebuilt,fitted,loft::tolerance::length);
+    builder.MakeFace(rebuilt,fitted,BRepExt::tolerance::length);
     builder.NaturalRestriction(rebuilt,false);
     NCollection_DataMap<TopoDS_Shape,TopoDS_Shape,TopTools_ShapeMapHasher> vertices;
     const auto forward=TopoDS::Face(face.Oriented(TopAbs_FORWARD));
@@ -215,7 +215,7 @@ EvolutionData rebuildFace(OcctKernel &k,uint32_t id,int uDegree,int vDegree,int 
             TopExp::Vertices(TopoDS::Edge(edge.Oriented(TopAbs_FORWARD)),v0,v1);
             auto vertex=[&](const TopoDS_Vertex& original,double t) {
                 const auto uv=curve->Value(t);const auto point=fitted->Value(uv.X(),uv.Y());
-                const double inherited=std::max(loft::tolerance::length,BRep_Tool::Tolerance(original));
+                const double inherited=std::max(BRepExt::tolerance::length,BRep_Tool::Tolerance(original));
                 if(!vertices.IsBound(original)) {
                     auto made=BRepBuilderAPI_MakeVertex(point).Vertex();
                     builder.UpdateVertex(made,inherited);vertices.Bind(original,made);
@@ -224,7 +224,7 @@ EvolutionData rebuildFace(OcctKernel &k,uint32_t id,int uDegree,int vDegree,int 
                 const double gap=BRep_Tool::Pnt(made).Distance(point);
                 if(gap>tolerance+inherited)
                     fail("rebuildFace",no_solution,"trim endpoints exceed the fit tolerance");
-                builder.UpdateVertex(made,std::max(inherited,gap+loft::tolerance::length));
+                builder.UpdateVertex(made,std::max(inherited,gap+BRepExt::tolerance::length));
                 return made;
             };
             const auto firstVertex=vertex(v0,curve->FirstParameter());
@@ -236,7 +236,7 @@ EvolutionData rebuildFace(OcctKernel &k,uint32_t id,int uDegree,int vDegree,int 
         if(!wire.IsDone()) fail("rebuildFace",no_solution,"could not rebuild trim wire");
         builder.Add(rebuilt,wire.Wire());
     }
-    if(!BRepLib::BuildCurves3d(rebuilt,loft::tolerance::length))
+    if(!BRepLib::BuildCurves3d(rebuilt,BRepExt::tolerance::length))
         fail("rebuildFace",no_solution,"could not construct trim curves");
     rebuilt.Orientation(face.Orientation());
     return result(k,rebuilt);
@@ -300,7 +300,7 @@ EvolutionData rebuildBodyFace(OcctKernel &k,uint32_t bodyId,uint32_t faceId,int 
         }
         const double edgeTolerance=BRep_Tool::Tolerance(curve.edge);
         if(gap>tolerance+edgeTolerance) fail(op,no_solution,"trim boundary fit did not meet tolerance");
-        if(gap>edgeTolerance) builder.UpdateEdge(curve.edge,gap+loft::tolerance::length);
+        if(gap>edgeTolerance) builder.UpdateEdge(curve.edge,gap+BRepExt::tolerance::length);
     }
     // A vertex covers its edges' ends, which may now sit up to their new tolerance away.
     for(TopExp_Explorer it(forward,TopAbs_VERTEX);it.More();it.Next()) {
@@ -374,7 +374,7 @@ occ::handle<Geom_BSplineSurface> splineFromData(const char* op,const std::vector
     } catch(const Standard_Failure&) { fail(op,invalid_input,"inconsistent knots, multiplicities and poles"); }
 }
 EvolutionData splineFace(OcctKernel& k,const std::vector<double>& data) {
-    BRepBuilderAPI_MakeFace make(splineFromData("splineFace",data),loft::tolerance::length);
+    BRepBuilderAPI_MakeFace make(splineFromData("splineFace",data),BRepExt::tolerance::length);
     if(!make.IsDone()) fail("splineFace",no_solution,"could not make a face on the spline");
     return stored(k, make.Face());
 }
@@ -409,7 +409,7 @@ EvolutionData unwrapFace(OcctKernel &k,uint32_t id,double tolerance) {
         const double angle=(surface.LastUParameter()-surface.FirstUParameter())*std::abs(sine);
         const double r0=cone.RefRadius()+surface.FirstVParameter()*sine;
         const double r1=cone.RefRadius()+surface.LastVParameter()*sine;
-        if(r0<-tolerance || r1<-tolerance || angle<=loft::tolerance::angle)
+        if(r0<-tolerance || r1<-tolerance || angle<=BRepExt::tolerance::angle)
             fail("unwrapFace",unsupported_geometry,"cone development cannot cross the apex");
         const double inner=std::max(0.0,std::min(r0,r1))/std::abs(sine);
         const double outer=std::max(r0,r1)/std::abs(sine);

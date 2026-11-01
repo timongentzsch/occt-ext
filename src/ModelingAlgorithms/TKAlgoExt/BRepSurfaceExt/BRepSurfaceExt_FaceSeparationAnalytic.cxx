@@ -37,7 +37,7 @@
 #include <optional>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 
 /// sin 15 degrees: two surfaces crossing at less than this come within a gap of each other
@@ -190,4 +190,4 @@ bool analyticWorth(const TopoDS_Shape& shape) {
     return false;
 }
 
-} // namespace loft
+} // namespace BRepExt

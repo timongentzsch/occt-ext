@@ -60,7 +60,7 @@
 #include <cmath>
 #include <limits>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 
 using ShapeMap = NCollection_DataMap<TopoDS_Shape, TopoDS_Shape, TopTools_ShapeMapHasher>;
@@ -180,7 +180,7 @@ occ::handle<Geom_Curve> meetingCurve(const char* op, const occ::handle<Geom_Curv
             }
         }
         if (!closed) refined.push_back(sites.back());
-        if (good) return curve;
+        if (good) return Handle(Geom_Curve)(curve);
         if (refined.size() > 4096) fail(op, no_solution, "the curve where the surfaces meet is too fine to follow", at);
         sites = std::move(refined);
     }
@@ -453,7 +453,7 @@ EvolutionData replaceFaceSupport(OcctKernel& k, uint32_t bodyId, uint32_t faceId
             Geom2dAPI_Interpolate interpolate(points, parameters, false, Precision::PConfusion());
             interpolate.Perform();
             if (!interpolate.IsDone()) fail(op, no_solution, "could not lay an edge on its face", at(edge.original));
-            const occ::handle<Geom2d_Curve> curve2d = interpolate.Curve();
+            const occ::handle<Geom2d_Curve> curve2d(interpolate.Curve());
             double worst = 0;
             for (int i = 0; i < count; ++i) {
                 const double t = edge.first + (edge.last - edge.first) * (i + 0.5) / count;
@@ -523,4 +523,4 @@ EvolutionData replaceFaceSupport(OcctKernel& k, uint32_t bodyId, uint32_t faceId
     return history.finish(store(k, result));
 }
 
-} // namespace loft
+} // namespace BRepExt

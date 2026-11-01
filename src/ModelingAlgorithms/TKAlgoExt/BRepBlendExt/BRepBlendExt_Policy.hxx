@@ -7,7 +7,7 @@
 #include <cmath>
 #include <GeomAlgoExt_Failure.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
-namespace loft::blend2 {
+namespace BRepExt::blend2 {
 struct NativePolicy {
     inline static constexpr double lawShare = 0;
     static bool tangentFor(double angle, double size) { return angle <= tolerance::coarseAngle || angle * size <= tolerance::length; }

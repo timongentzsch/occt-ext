@@ -11,7 +11,7 @@
 #include <Geom2dAdaptor_Curve.hxx>
 #include <GeomLib_IsPlanarSurface.hxx>
 
-namespace loft::blend2::detail {
+namespace BRepExt::blend2::detail {
 
 std::vector<double> flatten(const std::map<double, int>& knots) {
     std::vector<double> flat;
@@ -742,5 +742,5 @@ std::vector<Fold> capFolds(Dips& dips, std::vector<Fold>* open) {
     return {};
 }
 
-} // namespace loft::blend2::detail
+} // namespace BRepExt::blend2::detail
 

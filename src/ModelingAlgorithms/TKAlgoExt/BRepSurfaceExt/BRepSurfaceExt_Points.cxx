@@ -8,7 +8,7 @@
 #include <cmath>
 #include <math_Matrix.hxx>
 
-namespace loft {
+namespace BRepExt {
 std::vector<double> surfacePoles(OcctKernel &k, uint32_t id) {
     const char *op = "surfacePoles";
     auto face = surfacing::faceOf(k, op, id);
@@ -197,4 +197,4 @@ EvolutionData moveSurfacePoles(OcctKernel &k, uint32_t faceId, const std::vector
     surfacing::measure(op, made, targets, tolerance);
     return stored(k, made);
 }
-} // namespace loft
+} // namespace BRepExt

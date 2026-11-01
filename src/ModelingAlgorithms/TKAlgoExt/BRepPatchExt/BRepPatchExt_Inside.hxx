@@ -8,7 +8,7 @@
 #include <optional>
 #include <string>
 
-namespace loft {
+namespace BRepExt {
 /// What is wrong with the inside of a face, if anything is: that it folds over, or that it
 /// bends many times more tightly than anything on its rim does (`rimBend`, a curvature; zero
 /// or less leaves that unjudged).
@@ -25,4 +25,4 @@ double insideStep(const TopoDS_Face &face);
 
 /// The largest principal curvature of a face at the places it is looked at inside its loop.
 double tightestInside(const TopoDS_Face &face);
-} // namespace loft
+} // namespace BRepExt

@@ -23,7 +23,7 @@
 #include <gp_Pnt2d.hxx>
 #include <gp_Pln.hxx>
 
-namespace loft {
+namespace BRepExt {
 EvolutionData filletRange(OcctKernel &kernel, uint32_t shapeId, uint32_t edgeId, double radius, double start,
                           double end, bool propagate, const std::vector<int> &hashes, int bound, const std::vector<double> &law) {
     const char *op = "filletRange";
@@ -37,7 +37,7 @@ EvolutionData filletRange(OcctKernel &kernel, uint32_t shapeId, uint32_t edgeId,
     const double rangeLength=GCPnts_AbscissaPoint::Length(rangeCurve,
         rangeCurve.FirstParameter()+(rangeCurve.LastParameter()-rangeCurve.FirstParameter())*start,
         rangeCurve.FirstParameter()+(rangeCurve.LastParameter()-rangeCurve.FirstParameter())*end);
-    if(rangeLength<=loft::tolerance::length) fail(op,invalid_input,"empty range: limits are within kernel resolution");
+    if(rangeLength<=BRepExt::tolerance::length) fail(op,invalid_input,"empty range: limits are within kernel resolution");
     BRepFilletAPI_MakeFillet maker(shape);
     maker.Add(radius, edge);
     const int contour = maker.Contour(edge);
@@ -90,15 +90,15 @@ EvolutionData filletRange(OcctKernel &kernel, uint32_t shapeId, uint32_t edgeId,
         const double f=double(i)/256;
         const auto p=curve.Value(a+(b-a)*f);
         if (f > start+1e-8 && f < end-1e-8) {
-            if (!inside(p,-loft::tolerance::length)) fail(op, unsupported_geometry, "range crosses its normal stopping planes");
-        } else if ((f < start-1e-8 || f > end+1e-8) && inside(p,loft::tolerance::length))
+            if (!inside(p,-BRepExt::tolerance::length)) fail(op, unsupported_geometry, "range crosses its normal stopping planes");
+        } else if ((f < start-1e-8 || f > end+1e-8) && inside(p,BRepExt::tolerance::length))
             fail(op, unsupported_geometry, "range returns inside its normal stopping planes");
     }
     for (int e=1; e<=maker.NbEdges(contour); ++e) {
         if (maker.Edge(contour,e).IsSame(edge)) continue;
         BRepAdaptor_Curve other(maker.Edge(contour,e));
         for (int i=1; i<64; ++i)
-            if (inside(other.Value(other.FirstParameter()+(other.LastParameter()-other.FirstParameter())*i/64),loft::tolerance::length))
+            if (inside(other.Value(other.FirstParameter()+(other.LastParameter()-other.FirstParameter())*i/64),BRepExt::tolerance::length))
                 fail(op, unsupported_geometry, "tangent continuation re-enters the limited interval");
     }
     auto clip = [&](TopoDS_Shape tool) {
@@ -122,4 +122,4 @@ EvolutionData filletRange(OcctKernel &kernel, uint32_t shapeId, uint32_t edgeId,
     history.collectComposed(cut, fuse, shape);
     return history.finish(store(kernel,fuse.Shape()));
 }
-} // namespace loft
+} // namespace BRepExt

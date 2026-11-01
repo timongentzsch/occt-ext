@@ -10,7 +10,7 @@
 
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 /// `shape` with every edge of one flat face blended by `distance`: a round (the ball's arc) or,
 /// with `bevel`, a chamfer of that setback on both sides. `edges` must be all the edges of one
@@ -29,4 +29,4 @@ namespace loft {
 BooleanResult faceBlend(const char* operation, const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& edges,
                         double distance, bool bevel);
 
-} // namespace loft
+} // namespace BRepExt

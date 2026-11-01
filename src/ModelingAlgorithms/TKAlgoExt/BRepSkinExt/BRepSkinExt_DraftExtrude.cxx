@@ -27,7 +27,7 @@
 #include <gp_Lin.hxx>
 #include <gp_Pnt2d.hxx>
 
-namespace loft {
+namespace BRepExt {
 TopoDS_Shape draftExtrude(const TopoDS_Shape& profile, const gp_Vec& vector, double angle,
                           Handle(BRepTools_History) & history) {
     constexpr const char* op = "extrude";
@@ -183,4 +183,4 @@ TopoDS_Shape draftExtrude(const TopoDS_Shape& profile, const gp_Vec& vector, dou
             fail(op, invalid_result, "The profile draft has ambiguous generated-wall history");
     return result;
 }
-} // namespace loft
+} // namespace BRepExt

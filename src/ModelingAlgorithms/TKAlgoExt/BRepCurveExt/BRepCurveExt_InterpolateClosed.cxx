@@ -12,7 +12,7 @@
 #include <math_Vector.hxx>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 EvolutionData interpolateClosed(OcctKernel& kernel, const std::vector<double>& coordinates) {
     const char* op = "interpolateClosed";
     if (coordinates.size() < 9 || coordinates.size() % 3 != 0)

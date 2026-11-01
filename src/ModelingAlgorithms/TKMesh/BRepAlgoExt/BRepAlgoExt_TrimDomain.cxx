@@ -20,7 +20,7 @@
 #include <array>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 void unique(std::vector<double>& x) {
     std::sort(x.begin(),x.end());

@@ -26,7 +26,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 // Stations are spatial points. OCCT's radius laws use contour abscissae, which we derive
 // by projecting onto the named edge and measuring the curve, never from its tessellation.
 EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
@@ -49,8 +49,8 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
     for(double value:stations) if(!std::isfinite(value)) fail(op,invalid_input,"nonfinite station");
     for(double value:limits) if(!std::isfinite(value)) fail(op,invalid_input,"nonfinite limit");
     const auto configure=[](BRepFilletAPI_MakeFillet& maker) {
-        maker.SetParams(1e-2, loft::tolerance::length, loft::tolerance::uv,
-                        loft::tolerance::length, loft::tolerance::uv, 1e-3);
+        maker.SetParams(1e-2, BRepExt::tolerance::length, BRepExt::tolerance::uv,
+                        BRepExt::tolerance::length, BRepExt::tolerance::uv, 1e-3);
     };
     BRepFilletAPI_MakeFillet all(shape);configure(all);
     for(const auto &edge:edges) if(!all.Contour(TopoDS::Edge(edge))) all.Add(radius,TopoDS::Edge(edge));
@@ -74,7 +74,7 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
             const double length=GCPnts_AbscissaPoint::Length(curve);
             pieces.push_back({edge,total,length}); total+=length;
         }
-        if(total<=loft::tolerance::length) fail(op,invalid_input,"empty chain");
+        if(total<=BRepExt::tolerance::length) fail(op,invalid_input,"empty chain");
         std::vector<std::pair<double,double>> law;
         for(size_t i=0;i<pointEdges.size();++i) {
             const auto piece=std::find_if(pieces.begin(),pieces.end(),[&](const Piece &p){return p.edge.IsSame(pointEdges[i]);});
@@ -85,12 +85,12 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
             double length=GCPnts_AbscissaPoint::Length(curve,curve.FirstParameter(),t);
             if(piece->edge.Orientation()==TopAbs_REVERSED) length=piece->length-length;
             double at=piece->from+length;
-            if(maker.Closed(contour) && total-at<loft::tolerance::length) at=0;
+            if(maker.Closed(contour) && total-at<BRepExt::tolerance::length) at=0;
             law.emplace_back(at,stations[4*i+3]);
         }
         if(law.empty()) return;
         const auto range=std::minmax_element(law.begin(),law.end(),[](const auto& a,const auto& b){return a.second<b.second;});
-        if(range.second->second-range.first->second>loft::tolerance::length &&
+        if(range.second->second-range.first->second>BRepExt::tolerance::length &&
            std::any_of(pieces.begin(),pieces.end(),[](const Piece& p){
                const auto type=BRepAdaptor_Curve(p.edge).GetType();
                return type==GeomAbs_BSplineCurve || type==GeomAbs_BezierCurve;
@@ -98,8 +98,8 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
             fail(op,unsupported_geometry,"variable radii on spline chains do not satisfy the rolling-ball envelope; construction is unavailable");
 
         std::sort(law.begin(),law.end());
-        for(size_t i=1;i<law.size();++i) if(law[i].first-law[i-1].first<loft::tolerance::length) {
-            if(std::abs(law[i].second-law[i-1].second)>loft::tolerance::length) fail(op,invalid_input,"conflicting radii at one station");
+        for(size_t i=1;i<law.size();++i) if(law[i].first-law[i-1].first<BRepExt::tolerance::length) {
+            if(std::abs(law[i].second-law[i-1].second)>BRepExt::tolerance::length) fail(op,invalid_input,"conflicting radii at one station");
             law.erase(law.begin()+i); --i;
         }
         const bool closed=maker.Closed(contour);
@@ -108,8 +108,8 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
             law.insert(law.begin(),{last.first-total,last.second});
             law.emplace_back(first.first+total,first.second);
         } else {
-            if(law.front().first>loft::tolerance::length) law.insert(law.begin(),{0,law.front().second});
-            if(law.back().first<total-loft::tolerance::length) law.emplace_back(total,law.back().second);
+            if(law.front().first>BRepExt::tolerance::length) law.insert(law.begin(),{0,law.front().second});
+            if(law.back().first<total-BRepExt::tolerance::length) law.emplace_back(total,law.back().second);
         }
         auto radiusAt=[&](double at) {
             for(size_t i=1;i<law.size();++i) if(at<=law[i].first+1e-8) {
@@ -121,7 +121,7 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
         for(size_t i=0;i<pieces.size();++i) {
             const auto &p=pieces[i];
             std::vector<gp_Pnt2d> points{{0,radiusAt(p.from)}};
-            for(const auto &s:law) if(s.first>p.from+loft::tolerance::length && s.first<p.from+p.length-loft::tolerance::length)
+            for(const auto &s:law) if(s.first>p.from+BRepExt::tolerance::length && s.first<p.from+p.length-BRepExt::tolerance::length)
                 points.emplace_back((s.first-p.from)/p.length,s.second);
             points.emplace_back(1,radiusAt(p.from+p.length));
             NCollection_Array1<gp_Pnt2d> values(1,int(points.size()));
@@ -167,7 +167,7 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
                     curve.LastParameter()-(curve.LastParameter()-curve.FirstParameter())*f :
                     curve.FirstParameter()+(curve.LastParameter()-curve.FirstParameter())*f;
                 const auto p=curve.Value(t);bool inside=true;
-                for(const auto& stop:stops) inside &= gp_Vec(stop.point,p).Dot(stop.direction)>-loft::tolerance::length;
+                for(const auto& stop:stops) inside &= gp_Vec(stop.point,p).Dot(stop.direction)>-BRepExt::tolerance::length;
                 kept.push_back(inside);
             }
         }
@@ -206,4 +206,4 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
     history.collectComposed(cut,fuse,shape);
     return history.finish(store(kernel,fuse.Shape()));
 }
-} // namespace loft
+} // namespace BRepExt

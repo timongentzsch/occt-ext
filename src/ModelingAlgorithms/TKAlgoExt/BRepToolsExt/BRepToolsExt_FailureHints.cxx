@@ -35,7 +35,7 @@
 // Neither comes out of the failed solve, which reports nothing of where: both are built apart from
 // it and say what the operation could not have had, not what it tripped on.
 
-namespace loft {
+namespace BRepExt {
 
 // The curves where two bodies meet that do not close: a sheet that stops short of crossing a solid
 // meets it in an open section, which cuts nothing. By the Jordan curve theorem on the surface a
@@ -162,4 +162,4 @@ EvolutionData thickenFailure(OcctKernel &kernel, uint32_t sheet, double thicknes
     fail(op, no_solution, "the sheet could not be thickened by this much: these edges shrink to nothing", edges);
 }
 
-} // namespace loft
+} // namespace BRepExt

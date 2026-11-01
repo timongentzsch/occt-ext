@@ -10,7 +10,7 @@
 
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 
 std::vector<double> curvature(OcctKernel& kernel, uint32_t edgeId, const std::vector<double>& parameters) {
     const char* const op = "curvature";
@@ -43,4 +43,4 @@ std::vector<double> curvature(OcctKernel& kernel, uint32_t edgeId, const std::ve
     return result;
 }
 
-} // namespace loft
+} // namespace BRepExt

@@ -17,7 +17,7 @@
 #include <cmath>
 #include <cstdio>
 
-namespace loft::surfacing {
+namespace BRepExt::surfacing {
 TopoDS_Face faceOf(OcctKernel &k, const char *op, uint32_t id) {
     if (get(k, id).ShapeType() != TopAbs_FACE)
         fail(op, invalid_input, "a face is required");
@@ -57,7 +57,7 @@ int boundarySide(const char *op, const TopoDS_Face &face, const TopoDS_Edge &edg
     if (pc.IsNull())
         fail(op, invalid_input, "the edge must belong to the face");
     int side = -1;
-    const double slack = loft::tolerance::parameterMerge * std::max(u1 - u0, v1 - v0);
+    const double slack = BRepExt::tolerance::parameterMerge * std::max(u1 - u0, v1 - v0);
     for (int s = 0; s < 4; ++s) {
         bool matches = true;
         for (int i = 0; i <= 16; ++i) {
@@ -88,7 +88,7 @@ occ::handle<Geom_BSplineSurface> editable(const char *op, const TopoDS_Face &fac
     double u0, u1, v0, v1, a, b, c, d;
     BRepTools::UVBounds(face, u0, u1, v0, v1);
     s->Bounds(a, b, c, d);
-    const double slack = loft::tolerance::parameterMerge * std::max(b - a, d - c);
+    const double slack = BRepExt::tolerance::parameterMerge * std::max(b - a, d - c);
     if (std::abs(a - u0) + std::abs(b - u1) + std::abs(c - v0) + std::abs(d - v1) > slack)
         fail(op, unsupported_geometry, "requires an untrimmed rectangular B-spline face");
     int count = 0, mask = 0;
@@ -296,4 +296,4 @@ void measure(const char *op, const TopoDS_Face &face, const std::vector<Constrai
         }
     }
 }
-} // namespace loft::surfacing
+} // namespace BRepExt::surfacing

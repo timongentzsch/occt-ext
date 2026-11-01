@@ -13,7 +13,7 @@
 #include <gp_Pln.hxx>
 #include <gp_Trsf.hxx>
 
-namespace loft {
+namespace BRepExt {
 // Bound the actual trimmed curve in plane coordinates. Fixed sample counts miss
 // excursions of high-degree splines between samples; OCCT's optimal curve
 // bounds include those extrema.
@@ -32,4 +32,4 @@ inline void requirePlanarCurve(const char *op, const Handle(Geom_Curve) & curve,
     if (std::max(std::abs(zmin), std::abs(zmax)) > tolerance)
         fail(op, invalid_input, "curve does not lie in the supplied plane");
 }
-} // namespace loft
+} // namespace BRepExt

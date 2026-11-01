@@ -34,7 +34,7 @@
 #include <cmath>
 #include <gp_Pln.hxx>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 TopoDS_Face faceInput(OcctKernel &kernel, const char *op, uint32_t id, double tolerance) {
     const auto &shape = get(kernel, id);
@@ -176,8 +176,8 @@ EvolutionData offsetSheetEdge(OcctKernel &kernel, uint32_t faceId, const std::ve
         if(high-low+selected.size()*distance<=tolerance) fail(op,no_solution,"offset collapses the cylindrical band");
         for(const auto &shape:selected) {
             const auto edge=TopoDS::Edge(shape);BRepAdaptor_Curve c(edge);
-            if(c.GetType()!=GeomAbs_Circle || std::abs(c.LastParameter()-c.FirstParameter()-2*M_PI)>loft::tolerance::angularResolution ||
-               std::abs(c.Circle().Axis().Direction().Dot(cylinder.Axis().Direction()))<1-loft::tolerance::angle)
+            if(c.GetType()!=GeomAbs_Circle || std::abs(c.LastParameter()-c.FirstParameter()-2*M_PI)>BRepExt::tolerance::angularResolution ||
+               std::abs(c.Circle().Axis().Direction().Dot(cylinder.Axis().Direction()))<1-BRepExt::tolerance::angle)
                 fail(op,unsupported_geometry,"cylindrical geodesic offset supports complete circular boundary loops only");
             const double v=gp_Vec(cylinder.Location(),c.Circle().Location()).Dot(gp_Vec(cylinder.Axis().Direction()));
             double sign;
@@ -204,4 +204,4 @@ EvolutionData offsetSheetEdge(OcctKernel &kernel, uint32_t faceId, const std::ve
         fail(op, no_solution, "edge offset failed");
     return checked(kernel, op, offset.Shape());
 }
-} // namespace loft
+} // namespace BRepExt

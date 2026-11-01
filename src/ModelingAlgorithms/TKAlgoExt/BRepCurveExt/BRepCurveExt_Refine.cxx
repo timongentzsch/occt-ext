@@ -18,7 +18,7 @@
 
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 
 EvolutionData refineCurve(OcctKernel& kernel, uint32_t wireId, int mode, int amount, double tolerance) {
     const char* const op = "refineCurve";
@@ -76,4 +76,4 @@ EvolutionData refineCurve(OcctKernel& kernel, uint32_t wireId, int mode, int amo
     return stored(kernel, wire.Wire());
 }
 
-} // namespace loft
+} // namespace BRepExt

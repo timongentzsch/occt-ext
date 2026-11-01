@@ -15,7 +15,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 std::vector<double> minimumDistance(OcctKernel &kernel, uint32_t first, uint32_t second) {
     BRepExtrema_DistShapeShape distance(get(kernel, first), get(kernel, second));
     if (!distance.IsDone() || distance.NbSolution() < 1)
@@ -81,4 +81,4 @@ std::vector<double> faceContinuity(OcctKernel &kernel, uint32_t first, uint32_t 
     }
     return out;
 }
-} // namespace loft
+} // namespace BRepExt

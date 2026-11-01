@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 #ifndef OCCT_EXTENSION_STOCK_ONLY
 #include <BRepAlgoExt_PatchFlow.hxx>
-#include <BRepAlgoExt_Interior.hxx>
 #endif
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -22,7 +21,7 @@
 #include <vector>
 struct Chart {std::vector<gp_Pnt> point;std::vector<gp_XY> flat;std::vector<std::array<int,3>> triangles;};
 int main() {
- for(bool cylinder:{false,true})for(double scale:{.1,1.,10.})for(bool survey:{false,true}) {
+ for(bool cylinder:{false,true})for(double scale:{.1,1.,10.})for(bool survey:{false}) {
 #ifdef OCCT_EXTENSION_STOCK_ONLY
   const bool stock=true;
 #else
@@ -43,8 +42,7 @@ int main() {
      }
     }else { BRepMesh_IncrementalMesh mesh(face,.01*scale,false,.5,false); }
 #else
-    if(survey)bend=BRepAlgoExt::maximumInteriorCurvature(face,Precision::PConfusion());
-    else {auto c=loft::conformalChart(face,.2*scale,.01*scale);out.point=std::move(c.point);out.flat=std::move(c.flat);out.triangles=std::move(c.triangles);}
+    {auto c=BRepExt::conformalChart(face,.2*scale,.01*scale);out.point=std::move(c.point);out.flat=std::move(c.flat);out.triangles=std::move(c.triangles);}
 #endif
     const double cpu=1000.*(std::clock()-start)/CLOCKS_PER_SEC;
     if(sample<0)continue;times.push_back(cpu);

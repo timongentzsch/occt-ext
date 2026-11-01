@@ -48,7 +48,7 @@
 #include <gp_Trsf.hxx>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 gp_Dir direction(const char *op, Vec3 v) {
     if (!finite(v) || gp_Vec(v.x, v.y, v.z).Magnitude() < 1e-15)
@@ -101,7 +101,7 @@ EvolutionData projectCurve(OcctKernel &kernel, uint32_t wire, uint32_t body, Vec
     };
     auto result = sectionOf(source);
     IntCurvesFace_ShapeIntersector rays;
-    rays.Load(target, loft::tolerance::length);
+    rays.Load(target, BRepExt::tolerance::length);
     auto complete = [&](const TopoDS_Shape &candidate) {
         DistanceTo toCandidate(candidate);
         for (TopExp_Explorer it(source, TopAbs_EDGE); it.More(); it.Next()) {
@@ -166,7 +166,7 @@ EvolutionData projectPlane(OcctKernel &kernel, uint32_t shapeId, Vec3 origin, Ve
         auto out = make.Edge();
         GProp_GProps props;
         BRepGProp::LinearProperties(out, props);
-        if (props.Mass() <= loft::tolerance::length)
+        if (props.Mass() <= BRepExt::tolerance::length)
             continue;
         // Coincident 3D silhouette edges can have different depths but the same
         // image.
@@ -180,13 +180,13 @@ EvolutionData projectPlane(OcctKernel &kernel, uint32_t shapeId, Vec3 origin, Ve
                 continue;
             GProp_GProps q;
             BRepGProp::LinearProperties(other, q);
-            if (std::abs(q.Mass() - props.Mass()) > loft::tolerance::length)
+            if (std::abs(q.Mass() - props.Mass()) > BRepExt::tolerance::length)
                 continue;
             bool same = true;
             for (int i = 0; i <= 4 && same; ++i) {
                 auto p = c.Value(c.FirstParameter() + (c.LastParameter() - c.FirstParameter()) * i / 4);
                 BRepExtrema_DistShapeShape d(BRepBuilderAPI_MakeVertex(p).Vertex(), other);
-                same = d.IsDone() && d.Value() <= loft::tolerance::length;
+                same = d.IsDone() && d.Value() <= BRepExt::tolerance::length;
             }
             if (same) {
                 duplicate = true;
@@ -214,7 +214,7 @@ EvolutionData slot(OcctKernel &kernel, uint32_t wireId, double width, Vec3 norma
     for (TopExp_Explorer it(shape, TopAbs_EDGE); it.More(); it.Next()) {
         double a, b;
         const auto curve = BRep_Tool::Curve(TopoDS::Edge(it.Current()), a, b);
-        requirePlanarCurve("slot", curve, a, b, plane, loft::tolerance::sewing);
+        requirePlanarCurve("slot", curve, a, b, plane, BRepExt::tolerance::sewing);
     }
     BRepBuilderAPI_MakeFace support(plane, TopoDS::Wire(shape), true);
     BRepOffsetAPI_MakeOffset offset(support.Face(), GeomAbs_Arc, false);
@@ -225,4 +225,4 @@ EvolutionData slot(OcctKernel &kernel, uint32_t wireId, double width, Vec3 norma
     unify.Build();
     return curves(kernel, "slot", unify.Shape());
 }
-} // namespace loft
+} // namespace BRepExt

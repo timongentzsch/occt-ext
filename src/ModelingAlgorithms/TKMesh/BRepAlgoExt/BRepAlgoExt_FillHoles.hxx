@@ -13,7 +13,7 @@
 
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 /// Whether `wire` of `owner` (forward) is a hole of it: it winds against the outer bound in the
 /// face's parameters, as ShapeAnalysis::OuterWire tells them apart.
@@ -50,4 +50,4 @@ Filled fillHoles(const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& fac
 /// no such feature takes in what it is joined to, up to the whole body.
 std::vector<TopoDS_Shape> featuresOf(const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& faces);
 
-} // namespace loft
+} // namespace BRepExt

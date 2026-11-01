@@ -8,7 +8,7 @@
 #include <BRepBooleanExt_Accept.hxx>
 #include <BRepOffsetExt_Parts.hxx>
 
-namespace loft {
+namespace BRepExt {
 
 /// `solid` without the faces that an offset by `distance` shrinks to nothing, their neighbours
 /// extended over them; `solid` itself when there are none. `faces` is carried through. Fails,
@@ -21,4 +21,4 @@ TopoDS_Shape withoutVanishing(const char *op, const TopoDS_Shape &solid, double 
 TopoDS_Shape offsetBody(const TopoDS_Shape &work, double distance, double tolerance, int join,
                         const std::vector<TopoDS_Shape> &pushed, double pushedBy, Lineage &faces);
 
-} // namespace loft
+} // namespace BRepExt

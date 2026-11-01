@@ -43,7 +43,7 @@
 #include <cmath>
 #include <optional>
 
-namespace loft {
+namespace BRepExt {
 
 namespace {
 
@@ -284,4 +284,4 @@ EvolutionData shell(OcctKernel &kernel, uint32_t id, const std::vector<uint32_t>
     return history.finish(store(kernel, result));
 }
 
-} // namespace loft
+} // namespace BRepExt

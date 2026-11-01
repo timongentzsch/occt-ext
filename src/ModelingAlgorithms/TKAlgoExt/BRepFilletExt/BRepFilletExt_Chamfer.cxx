@@ -35,7 +35,7 @@
 #include <limits>
 #include <gp_Pln.hxx>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 std::pair<gp_Vec, gp_Vec> chamferDirections(const TopoDS_Face& a, const TopoDS_Face& b) {
     const gp_Vec na(orientedPlaneAxis(a)), nb(orientedPlaneAxis(b));
@@ -66,8 +66,8 @@ bool chamferHasSetbacks(const TopoDS_Shape& shape, BRepFilletAPI_MakeChamfer& ma
             BRepAdaptor_Surface flat(cap), side(wall);
             if (flat.GetType() != GeomAbs_Plane) continue;
             const auto normal = flat.Plane().Axis().Direction();
-            bool vertical = side.GetType() == GeomAbs_SurfaceOfExtrusion && normal.IsParallel(side.Direction(), loft::tolerance::angle);
-            if (side.GetType() == GeomAbs_Cylinder) vertical = normal.IsParallel(side.Cylinder().Axis().Direction(), loft::tolerance::angle);
+            bool vertical = side.GetType() == GeomAbs_SurfaceOfExtrusion && normal.IsParallel(side.Direction(), BRepExt::tolerance::angle);
+            if (side.GetType() == GeomAbs_Cylinder) vertical = normal.IsParallel(side.Cylinder().Axis().Direction(), BRepExt::tolerance::angle);
             if (!vertical) continue;
             caps.Add(cap); walls.Add(wall); outline.Add(edge);
         }
@@ -196,7 +196,7 @@ EvolutionData chamfer(OcctKernel &kernel, uint32_t shapeId, const std::vector<ui
         const auto [da, db] = chamferDirections(a, b);
         const auto first = curve.Value(curve.FirstParameter()), last = curve.Value(curve.LastParameter());
         const auto middle = curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2);
-        if (BRepClass3d_SolidClassifier(shape, middle.Translated((da + db) * (1e-3 * std::min(distance1, distance2))), loft::tolerance::length).State() != TopAbs_IN)
+        if (BRepClass3d_SolidClassifier(shape, middle.Translated((da + db) * (1e-3 * std::min(distance1, distance2))), BRepExt::tolerance::length).State() != TopAbs_IN)
             fail(op, unsupported_geometry, "isolated concave chamfer is not built");
         BRepBuilderAPI_MakePolygon triangle(first, first.Translated(da * distance1), first.Translated(db * distance2), true);
         const auto section = BRepBuilderAPI_MakeFace(triangle.Wire()).Face();
@@ -282,7 +282,7 @@ EvolutionData chamfer(OcctKernel &kernel, uint32_t shapeId, const std::vector<ui
         const auto plane = s.Plane();
         const gp_Vec n(orientedPlaneAxis(face));
         for (TopExp_Explorer v(shape, TopAbs_VERTEX); v.More(); v.Next())
-            if (gp_Vec(plane.Location(), BRep_Tool::Pnt(TopoDS::Vertex(v.Current()))).Dot(n) > loft::tolerance::length)
+            if (gp_Vec(plane.Location(), BRep_Tool::Pnt(TopoDS::Vertex(v.Current()))).Dot(n) > BRepExt::tolerance::length)
                 fail(op, no_solution,
                      "builder failed; plane-cut fallback cannot change concave "
                      "topology");
@@ -315,9 +315,9 @@ EvolutionData chamfer(OcctKernel &kernel, uint32_t shapeId, const std::vector<ui
     history.collect(cut, shape);
     return history.finish(store(kernel, solidIfSingle(cut.Shape())));
 }
-} // namespace loft
+} // namespace BRepExt
 
-namespace loft {
+namespace BRepExt {
 EvolutionData clipPlane(OcctKernel &kernel, uint32_t shapeId, Vec3 origin, Vec3 normal, bool positive,
                         const std::vector<int> &hashes, int bound) {
     const auto &shape = get(kernel, shapeId);
@@ -336,4 +336,4 @@ EvolutionData clipPlane(OcctKernel &kernel, uint32_t shapeId, Vec3 origin, Vec3 
     history.collect(clip, shape);
     return history.finish(store(kernel, clip.Shape()));
 }
-} // namespace loft
+} // namespace BRepExt

@@ -5,7 +5,7 @@
 #include <BRep_Builder.hxx>
 #include <TopoDS_Shape.hxx>
 
-namespace loft {
+namespace BRepExt {
 /// Gathering a caller-owned shape in a temporary container must not change its
 /// administrative Free flag, including when OCCT rejects the insertion.
 inline void addPreservingFree(const BRep_Builder& builder, TopoDS_Shape& container,
@@ -17,4 +17,4 @@ inline void addPreservingFree(const BRep_Builder& builder, TopoDS_Shape& contain
     } restore{child, child.Free()};
     builder.Add(container, child);
 }
-} // namespace loft
+} // namespace BRepExt

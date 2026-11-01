@@ -19,7 +19,7 @@
 
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 
 EvolutionData surfaceThroughGrid(OcctKernel &kernel, const std::vector<double> &coordinates, int rows,
                                  int columns, double tolerance) {
@@ -75,4 +75,4 @@ EvolutionData fillBoundary(OcctKernel &kernel, uint32_t wireId, double tolerance
     return stored(kernel, fill.Shape());
 }
 
-} // namespace loft
+} // namespace BRepExt

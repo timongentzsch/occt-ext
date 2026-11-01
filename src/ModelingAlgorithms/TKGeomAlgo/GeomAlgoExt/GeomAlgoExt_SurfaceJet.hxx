@@ -21,7 +21,7 @@
 #include <cmath>
 #include <utility>
 
-namespace loft {
+namespace BRepExt {
 
 struct SurfaceJet {
     const char *operation;
@@ -119,4 +119,4 @@ inline std::pair<double, double> bendDifference(const SurfaceJet &a, const Surfa
     return {deviation, scale > 1e-15 ? std::min(1.0, deviation / scale) : 0};
 }
 
-} // namespace loft
+} // namespace BRepExt

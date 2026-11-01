@@ -4,7 +4,7 @@
 #pragma once
 #include <BRepToolsExt_Operations.hxx>
 
-namespace loft {
+namespace BRepExt {
 // A projected curve retains its source body and line category. Coordinates are in the view's
 // plane; only their approximation to a polyline depends on the drawing tolerance.
 struct DrawingCurve {

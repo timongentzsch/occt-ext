@@ -13,7 +13,7 @@
 
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 
 // How fair a face is, from the face alone: its principal curvatures are taken at the middles of
 // a grid of its parameter rectangle, where they are inside the face, and summed over its area.
@@ -25,7 +25,7 @@ std::vector<double> faceFairness(OcctKernel &kernel, uint32_t faceId, int sample
     double u0, u1, v0, v1;
     BRepTools::UVBounds(face, u0, u1, v0, v1);
     BRepAdaptor_Surface surface(face);
-    BRepTopAdaptor_FClass2d classifier(face, loft::tolerance::uv);
+    BRepTopAdaptor_FClass2d classifier(face, BRepExt::tolerance::uv);
     struct Place {
         bool in = false;
         gp_Pnt point;
@@ -77,4 +77,4 @@ std::vector<double> faceFairness(OcctKernel &kernel, uint32_t faceId, int sample
     return {area, bending, variation * area, sharpest};
 }
 
-} // namespace loft
+} // namespace BRepExt

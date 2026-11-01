@@ -25,7 +25,7 @@
 #include <gp_Pln.hxx>
 #include <gp_Sphere.hxx>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 struct Primitive {
     int kind = 0;
@@ -161,7 +161,7 @@ std::vector<double> primitiveDimensions(OcctKernel &kernel, uint32_t shape, doub
     if (input.ShapeType() == TopAbs_FACE) {
         BRepAdaptor_Surface surface(TopoDS::Face(input));
         if (surface.GetType() != GeomAbs_Cylinder ||
-            std::abs(surface.LastUParameter() - surface.FirstUParameter() - 2 * M_PI) > loft::tolerance::angle)
+            std::abs(surface.LastUParameter() - surface.FirstUParameter() - 2 * M_PI) > BRepExt::tolerance::angle)
             return {};
         const auto c = surface.Cylinder();
         const auto origin = c.Location().Translated(gp_Vec(c.Axis().Direction()) * surface.FirstVParameter());
@@ -212,4 +212,4 @@ EvolutionData setPrimitiveDimensions(OcctKernel &kernel, uint32_t shape, int kin
     }
     return stored(kernel, result);
 }
-} // namespace loft
+} // namespace BRepExt

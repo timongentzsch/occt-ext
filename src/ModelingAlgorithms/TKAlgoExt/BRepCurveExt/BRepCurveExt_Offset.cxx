@@ -55,7 +55,7 @@
 #include <optional>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 // How the gap at a corner of an offset is closed: 0 by an arc about the corner (Round), 1 by
 // the chord of that arc (Linear), 2 by carrying the two neighbours on to where they cross
@@ -79,7 +79,7 @@ constexpr double joinGap = 100 * same;
 constexpr double nearShare = 1e-3;
 // Two directions this near (radians) are one: the arcs OpenCascade joins pieces by are tangent
 // to them to about 1e-9.
-constexpr double tangent = loft::tolerance::coarseAngle;
+constexpr double tangent = BRepExt::tolerance::coarseAngle;
 
 // A stretch of a curve as the offset runs along it, from `from` to `to` (from > to: backwards).
 struct Run {
@@ -695,7 +695,7 @@ TopoDS_Wire redrawn(const char *op, const TopoDS_Wire &wire, double factor) {
         for (int i = knots.Lower(); i <= knots.Upper(); ++i)
             knots(i) *= factor;
         scaled->SetKnots(knots);
-        run = {scaled, run.from * factor, run.to * factor, false};
+        run = {Handle(Geom_Curve)(scaled), run.from * factor, run.to * factor, false};
     }
     return wireOf(op, runs, BRep_Tool::IsClosed(wire), "the pieces of the curve do not join up");
 }
@@ -1042,4 +1042,4 @@ EvolutionData offsetVertex(OcctKernel &kernel, uint32_t wireId, uint32_t vertexI
         fail(op, no_solution, "split wire is invalid");
     return stored(kernel, output.Wire());
 }
-} // namespace loft
+} // namespace BRepExt

@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 /// What OpenCascade's checker finds wrong with `shape`, by kind of sub-shape and its own status,
 /// each also as found within each shape that holds it ("4:27 5in4:28"); empty when valid.
@@ -27,4 +27,4 @@ std::vector<TopoDS_Shape> subShapes(const OcctKernel& kernel, const char* operat
                                     const TopoDS_Shape& owner, const std::vector<uint32_t>& ids,
                                     TopAbs_ShapeEnum type);
 
-} // namespace loft
+} // namespace BRepExt

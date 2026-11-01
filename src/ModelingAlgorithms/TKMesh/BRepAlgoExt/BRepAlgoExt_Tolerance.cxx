@@ -13,7 +13,7 @@
 #include <cmath>
 #include <limits>
 
-namespace loft::tolerance {
+namespace BRepExt::tolerance {
 
 double own(const TopoDS_Shape& shape) {
     switch (shape.ShapeType()) {
@@ -36,4 +36,4 @@ double largest(const TopoDS_Shape& shape) {
     return value;
 }
 
-} // namespace loft::tolerance
+} // namespace BRepExt::tolerance

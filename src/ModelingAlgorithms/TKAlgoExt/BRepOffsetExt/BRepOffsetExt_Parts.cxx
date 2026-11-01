@@ -21,7 +21,7 @@
 #include <cmath>
 #include <limits>
 
-namespace loft {
+namespace BRepExt {
 
 namespace {
 
@@ -231,4 +231,4 @@ void Lineage::generated(FaceHistory &history) const {
             history.generated(input_.FindKey(i), listOf(now_[i - 1]));
 }
 
-} // namespace loft
+} // namespace BRepExt

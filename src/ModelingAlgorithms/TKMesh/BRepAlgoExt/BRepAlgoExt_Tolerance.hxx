@@ -3,7 +3,7 @@
 
 #pragma once
 #include <TopoDS_Shape.hxx>
-namespace loft::tolerance {
+namespace BRepExt::tolerance {
 // Stored values, without a global application floor.
 double own(const TopoDS_Shape& shape);
 double largest(const TopoDS_Shape& shape);

@@ -37,8 +37,8 @@ int main() {
    GeomPlate_BuildPlateSurface plate(new Geom_Plane(gp_Pln(gp::XOY())),3,17,3,Precision::PConfusion(),tolerance,.01,.1,false);
    for(int i=0;i<=8;++i)for(int j=0;j<=8;++j)plate.Add(new GeomPlate_PointConstraint(gp_Pnt(scale*i/8.,scale*j/8.,scale*.125),0,tolerance));
 #ifndef OCCT_EXTENSION_STOCK_ONLY
-   auto net=loft::netOf(input);
-   const auto places=[=](double) {std::vector<loft::RimPlace> out;
+   auto net=BRepExt::netOf(input);
+   const auto places=[=](double) {std::vector<BRepExt::RimPlace> out;
     for(int i=0;i<=8;++i)for(int j=0;j<=8;++j)out.push_back({gp_Pnt(scale*i/8.,scale*j/8.,scale*.125),gp_XY(i/8.,j/8.),gp_XY(0,0),false});return out;};
 #endif
    try {
@@ -49,8 +49,8 @@ int main() {
      for(int i=input->NbVKnots()-1;i>1;--i)if(!input->RemoveVKnot(i,0,tolerance))++refused;
     }else plate.Perform();
 #else
-    if(compact){const auto reduced=loft::compactPatchSurface("compact",input,tolerance);if(reduced)input=reduced->surface;else if(sample>=0)++refused;}
-    else loft::correctRim("benchmark",net,places,gp_XYZ(0,0,1),tolerance,0,16);
+    if(compact){const auto reduced=BRepExt::compactPatchSurface("compact",input,tolerance);if(reduced)input=reduced->surface;else if(sample>=0)++refused;}
+    else BRepExt::correctRim("benchmark",net,places,gp_XYZ(0,0,1),tolerance,0,16);
 #endif
     const double cpu=1000.*(std::clock()-begin)/CLOCKS_PER_SEC;
     if(sample<0)continue;times.push_back(cpu);
@@ -58,7 +58,7 @@ int main() {
 #ifdef OCCT_EXTENSION_STOCK_ONLY
     else {if(!plate.IsDone()){++refused;continue;}surface=plate.Surface();}
 #else
-    else surface=loft::surfaceOf(net);
+    else surface=BRepExt::surfaceOf(net);
 #endif
     for(int i=0;i<=32;++i)for(int j=0;j<=32;++j) {
      const double u=i/32.,v=j/32.;const auto p=surface->Value(stock&&!compact?scale*u:u,stock&&!compact?scale*v:v);

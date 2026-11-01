@@ -10,7 +10,7 @@
 #include <Geom_SurfaceOfRevolution.hxx>
 #include <gp_Lin.hxx>
 
-namespace loft::blend2::detail {
+namespace BRepExt::blend2::detail {
 
 namespace {
 /// A cliff's frame across its edge at `w`: the unit tangent, and two unit normals to it, with
@@ -399,8 +399,8 @@ static bool setbackAt(const Rail& rail, double t, Station& s, double d0, double 
             onto.LowerDistanceParameters(u, v);
             // In the same period as the edge's own parameters on the face.
             const auto& surface = rail.s[i].surface;
-            s.uv[i][0] = surface->IsUPeriodic() ? loft::nearPeriod(u, s.uv[i][0], surface->UPeriod()) : u;
-            s.uv[i][1] = surface->IsVPeriodic() ? loft::nearPeriod(v, s.uv[i][1], surface->VPeriod()) : v;
+            s.uv[i][0] = surface->IsUPeriodic() ? BRepExt::nearPeriod(u, s.uv[i][0], surface->UPeriod()) : u;
+            s.uv[i][1] = surface->IsVPeriodic() ? BRepExt::nearPeriod(v, s.uv[i][1], surface->VPeriod()) : v;
             if (!jetAt(rail.s[i], s.uv[i][0], s.uv[i][1], j)) return false;
         }
         std::array<double, 2> x = {s.uv[i][0], s.uv[i][1]};
@@ -441,7 +441,7 @@ bool contactAt(const Rail& rail, double t, Station& s, double scale) {
                 s.uv[i][0] += M_PI;
                 s.uv[i][1] = 2 * *point - s.uv[i][1];
             }
-            if (surface->IsUPeriodic()) s.uv[i][0] = loft::nearPeriod(s.uv[i][0], seed.uv[i][0], surface->UPeriod());
+            if (surface->IsUPeriodic()) s.uv[i][0] = BRepExt::nearPeriod(s.uv[i][0], seed.uv[i][0], surface->UPeriod());
         }
     return true;
 }
@@ -677,4 +677,4 @@ std::optional<Ball> restingBall(const std::vector<Side>& faces, const gp_Pnt& se
     return {};
 }
 
-} // namespace loft::blend2::detail
+} // namespace BRepExt::blend2::detail

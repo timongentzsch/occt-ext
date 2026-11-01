@@ -23,7 +23,7 @@
 #include <GeomAlgoExt_Failure.hxx>
 #ifndef BREPBLENDEXT_POLICY
 #include <BRepBlendExt_Policy.hxx>
-#define BREPBLENDEXT_POLICY loft::blend2::NativePolicy
+#define BREPBLENDEXT_POLICY BRepExt::blend2::NativePolicy
 #endif
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <deque>
@@ -111,11 +111,11 @@
 #include <type_traits>
 #include <optional>
 
-namespace loft::blend2::detail {
+namespace BRepExt::blend2::detail {
 using SectionPolicy = BREPBLENDEXT_POLICY;
 using rho = SectionPolicy;
 
-namespace tol = loft::tolerance;
+namespace tol = BRepExt::tolerance;
 
 /// v2's own thresholds, each named for what it bounds (the kernel's shared ones are in
 /// tolerance.h). Those marked "x size" are shares of the blend's size (Rail::scale), so that a
@@ -556,7 +556,7 @@ class Stations {
                 // In the turn of the station before: a prediction near a pole can be half a turn off.
                 for (int i = 0; i < 2; ++i)
                     if (!rail_.s[i].cliffCurve && rail_.s[i].surface->IsUPeriodic())
-                        next.uv[i][0] = loft::nearPeriod(next.uv[i][0], current.uv[i][0], rail_.s[i].surface->UPeriod());
+                        next.uv[i][0] = BRepExt::nearPeriod(next.uv[i][0], current.uv[i][0], rail_.s[i].surface->UPeriod());
                 if (carried && next.centre.Distance(rail_.curve.Value(t)) > limit::strayed * rail_.scale) {
                     reached_[towards] = current.t;
                     return;
@@ -1046,4 +1046,4 @@ struct ContinuationRequired : Failure {
 TopoDS_Shape attach(TopoDS_Shape body, const std::vector<Piece>& pieces, const std::vector<Corner>& cornersAt,
                     const Handle(BRepTools_History)& history);
 
-} // namespace loft::blend2::detail
+} // namespace BRepExt::blend2::detail

@@ -18,7 +18,7 @@
 
 #include <vector>
 
-namespace loft::patch_host {
+namespace BRepExt::patch_host {
 
 /// An edge of the loop or a curve inside it, run from `from` to `to`.
 struct Side {
@@ -70,4 +70,4 @@ void chain(std::vector<Side>& sides, double tolerance);
 /// their rims.
 void closeGaps(const std::vector<Side>& sides, std::vector<Rim>& rims);
 
-} // namespace loft::patch_host
+} // namespace BRepExt::patch_host

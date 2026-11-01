@@ -50,7 +50,7 @@
 #include <set>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 
 // Work allowed to one pre-pass, in box tests and Bernstein coefficients: past it, what is not
@@ -1358,4 +1358,4 @@ std::vector<double> faceSeparation(OcctKernel& kernel, uint32_t id) {
             double(parts.size())};
 }
 
-} // namespace loft
+} // namespace BRepExt

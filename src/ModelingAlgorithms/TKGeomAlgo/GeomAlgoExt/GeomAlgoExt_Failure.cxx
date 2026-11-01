@@ -4,7 +4,7 @@
 #include <GeomAlgoExt_Failure.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 
-namespace loft {
+namespace BRepExt {
 const char* failureKindName(FailureKind kind) {
     switch (kind) {
     case FailureKind::Construction: return "construction";
@@ -56,4 +56,4 @@ void fail(const char* operation, const char* reason, const std::string& message,
     throw failure;
 }
 
-} // namespace loft
+} // namespace BRepExt

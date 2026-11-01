@@ -18,7 +18,7 @@
 
 #include <functional>
 
-namespace loft {
+namespace BRepExt {
 
 /// A place that the surface is to pass through. `uv` is where to look for the surface's point
 /// nearest to it, and is where that was found afterwards. With `across`, a direction of the
@@ -50,4 +50,4 @@ double correctRim(const char *operation, SplineNet &net,
                   const std::function<std::vector<RimPlace>(double span)> &placesFor, const gp_XYZ &up,
                   double within, double enough, int mostSpans);
 
-} // namespace loft
+} // namespace BRepExt

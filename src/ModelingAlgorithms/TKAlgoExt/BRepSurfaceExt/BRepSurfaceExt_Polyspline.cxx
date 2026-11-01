@@ -36,7 +36,7 @@
 #include <set>
 #include <sstream>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 constexpr const char *op = "polySpline";
 using Quad = std::array<int, 4>;
@@ -117,10 +117,10 @@ struct Topology {
 };
 
 void validateCage(const Mesh &m) {
-  BRepBuilderAPI_Sewing sew(loft::tolerance::length);
+  BRepBuilderAPI_Sewing sew(BRepExt::tolerance::length);
   for (const auto &q : m.q) {
     for (int side = 0; side < 4; ++side)
-      if ((m.p[q[side]] - m.p[q[(side + 1) % 4]]).Modulus() < loft::tolerance::length)
+      if ((m.p[q[side]] - m.p[q[(side + 1) % 4]]).Modulus() < BRepExt::tolerance::length)
         fail(op, invalid_input,
              "degenerate cage edge (coincident or too close vertices)");
     for (const auto &tri : std::array<std::array<int, 3>, 2>{
@@ -589,7 +589,7 @@ PolySplineResult polySpline(OcctKernel &kernel, const std::vector<double> &xyz,
     fail(
         op, invalid_input,
         "cages need XYZ vertices and quads, at most 1024 vertices / 256 faces");
-  if (!std::isfinite(tolerance) || tolerance < loft::tolerance::length || tolerance > 1 ||
+  if (!std::isfinite(tolerance) || tolerance < BRepExt::tolerance::length || tolerance > 1 ||
       refinement < 0 || refinement > 3 || !std::isfinite(angularTolerance) ||
       angularTolerance < 0 || angularTolerance > 90)
     fail(op, invalid_input,
@@ -758,7 +758,7 @@ PolySplineResult polySpline(OcctKernel &kernel, const std::vector<double> &xyz,
         << " degrees; G1 was refused";
     fail(op, no_solution, msg.str());
   }
-  BRepBuilderAPI_Sewing sew(loft::tolerance::length);
+  BRepBuilderAPI_Sewing sew(BRepExt::tolerance::length);
   std::vector<TopoDS_Face> faces;
   if (merge && report.regular) {
     auto s = mergeGrid(nets, cage, grid);
@@ -792,7 +792,7 @@ PolySplineResult polySpline(OcctKernel &kernel, const std::vector<double> &xyz,
               fail(op, no_solution,
                    "merged patch representation changed the limit surface");
           }
-    BRepBuilderAPI_MakeFace make(s, loft::tolerance::length);
+    BRepBuilderAPI_MakeFace make(s, BRepExt::tolerance::length);
     if (!make.IsDone())
       fail(op, no_solution, "merged face construction failed");
     faces.push_back(make.Face());
@@ -804,7 +804,7 @@ PolySplineResult polySpline(OcctKernel &kernel, const std::vector<double> &xyz,
     report.normalAngle = 0;
   } else {
     for (size_t f = 0; f < surfaces.size(); ++f) {
-      BRepBuilderAPI_MakeFace make(surfaces[f], loft::tolerance::length);
+      BRepBuilderAPI_MakeFace make(surfaces[f], BRepExt::tolerance::length);
       if (!make.IsDone())
         fail(op, no_solution, "patch face construction failed");
       faces.push_back(make.Face());
@@ -867,4 +867,4 @@ PolySplineResult polySpline(OcctKernel &kernel, const std::vector<double> &xyz,
   report.resultId = store(kernel, result);
   return report;
 }
-} // namespace loft
+} // namespace BRepExt

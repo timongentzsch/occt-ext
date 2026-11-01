@@ -8,7 +8,7 @@
 #include <NCollection_List.hxx>
 #include <TopoDS_Shape.hxx>
 
-namespace loft {
+namespace BRepExt {
 template <class Operation> struct Untouched : Operation {
     Untouched(const TopoDS_Shape& object, const TopoDS_Shape& tool) {
         NCollection_List<TopoDS_Shape> objects, tools;
@@ -20,4 +20,4 @@ template <class Operation> struct Untouched : Operation {
         this->Build();
     }
 };
-} // namespace loft
+} // namespace BRepExt

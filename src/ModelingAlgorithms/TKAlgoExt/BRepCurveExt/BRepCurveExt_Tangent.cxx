@@ -41,7 +41,7 @@
 #include <limits>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 // Everything here is worked out in a frame of the curves' own (`Flat`): the plane as z = 0 and
 // the middle of the curves at the origin, so that the answer does not depend on where the
@@ -423,7 +423,7 @@ EvolutionData tangentArcToCurve(OcctKernel &kernel, Vec3 start, Vec3 tangent, ui
     const char *op = "tangentArcToCurve";
     const gp_Pnt p(start.x, start.y, start.z);
     const gp_Vec t(tangent.x, tangent.y, tangent.z), n(normal.x, normal.y, normal.z);
-    if (t.Magnitude() < 1e-15 || n.Magnitude() < 1e-15 || std::abs(t.Normalized().Dot(n.Normalized())) > loft::tolerance::angle)
+    if (t.Magnitude() < 1e-15 || n.Magnitude() < 1e-15 || std::abs(t.Normalized().Dot(n.Normalized())) > BRepExt::tolerance::angle)
         fail(op, invalid_input, "arc tangent must lie in the chosen plane");
     const gp_Ax2 axes(p, gp_Dir(n), gp_Dir(t));
     const gp_Pln plane(axes);
@@ -576,4 +576,4 @@ EvolutionData tangentArcToCurve(OcctKernel &kernel, Vec3 start, Vec3 tangent, ui
     return stored(kernel,
                   BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(gp_Circ(placement, radius), 0, angle).Edge()).Wire());
 }
-} // namespace loft
+} // namespace BRepExt

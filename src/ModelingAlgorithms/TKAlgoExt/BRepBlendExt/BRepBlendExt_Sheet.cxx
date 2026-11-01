@@ -5,7 +5,7 @@
 
 #include <BRepBlendExt_Internal.hxx>
 
-namespace loft::blend2::detail {
+namespace BRepExt::blend2::detail {
 
 Handle(Geom_BSplineCurve) sectionCurve(const Section& section) {
     const int count = int(section.poles.size());
@@ -316,8 +316,8 @@ std::optional<Fitted> exactContacts(const Rail& rail, Stations& stations, const 
                 // Round a closed edge, on from the last place in its own period; the angle likewise.
                 if (i > 0) {
                     const gp_Pnt2d last = values(i);
-                    if (edge->IsPeriodic()) w = loft::nearPeriod(w, last.X(), edge->Period());
-                    angle = loft::nearPeriod(angle, last.Y(), 2 * M_PI);
+                    if (edge->IsPeriodic()) w = BRepExt::nearPeriod(w, last.X(), edge->Period());
+                    angle = BRepExt::nearPeriod(angle, last.Y(), 2 * M_PI);
                 }
                 values(i + 1) = gp_Pnt2d(w, angle);
                 at(i + 1) = i / double(count - 1);
@@ -389,4 +389,4 @@ std::optional<Fitted> exactContacts(const Rail& rail, Stations& stations, const 
     return out;
 }
 
-} // namespace loft::blend2::detail
+} // namespace BRepExt::blend2::detail

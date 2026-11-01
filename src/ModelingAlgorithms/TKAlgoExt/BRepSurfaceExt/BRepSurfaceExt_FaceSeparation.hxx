@@ -7,7 +7,7 @@
 #include <array>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 // What a self-interference check of a shape (BOPAlgo_ArgumentAnalyzer's SelfInterMode, OCCT's
 // CheckerSI) can leave out: a conservative pre-pass over the shape's faces, which proves pairs
@@ -40,4 +40,4 @@ struct SeparationCount {
 // meet with itself, which costs it little.
 std::vector<TopoDS_Shape> unprovenParts(const TopoDS_Shape& shape, SeparationCount* count = nullptr);
 
-} // namespace loft
+} // namespace BRepExt

@@ -5,7 +5,7 @@
 #include <BRepToolsExt_Session.hxx>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 struct PolySplineResult {
   uint32_t resultId = 0;
   int patches = 0, extraordinary = 0, refinement = 0, freeEdges = 0;
@@ -21,4 +21,4 @@ PolySplineResult polySpline(OcctKernel &, const std::vector<double> &,
                             int refinement, bool merge, bool rounded,
                             bool boundaryExactly, bool requireG1,
                             double angularTolerance);
-} // namespace loft
+} // namespace BRepExt

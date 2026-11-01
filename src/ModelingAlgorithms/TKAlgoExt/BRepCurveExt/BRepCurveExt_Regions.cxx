@@ -25,7 +25,7 @@
 
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 
 EvolutionData regions(OcctKernel& kernel, const std::vector<uint32_t>& curveIds,
                       Vec3 origin, Vec3 normal, double tolerance) {
@@ -48,7 +48,7 @@ EvolutionData regions(OcctKernel& kernel, const std::vector<uint32_t>& curveIds,
     const TopoDS_Shape copy = BRepBuilderAPI_Copy(input, true, false).Shape();
     BRepBuilderAPI_FindPlane found(copy, tolerance);
     const gp_Pln plane(gp_Pnt(origin.x, origin.y, origin.z), gp_Dir(normal.x, normal.y, normal.z));
-    if (!found.Found() || !found.Plane()->Pln().Axis().Direction().IsParallel(plane.Axis().Direction(), loft::tolerance::angle) ||
+    if (!found.Found() || !found.Plane()->Pln().Axis().Direction().IsParallel(plane.Axis().Direction(), BRepExt::tolerance::angle) ||
         plane.Distance(found.Plane()->Location()) > tolerance) {
         fail(op, invalid_input, "the curves must lie in the specified plane");
     }
@@ -92,4 +92,4 @@ EvolutionData regions(OcctKernel& kernel, const std::vector<uint32_t>& curveIds,
     return stored(kernel, result);
 }
 
-} // namespace loft
+} // namespace BRepExt

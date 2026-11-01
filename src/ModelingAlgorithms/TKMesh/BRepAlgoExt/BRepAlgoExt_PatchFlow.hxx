@@ -11,7 +11,7 @@
 #include <array>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 /// A face's triangulation laid flat by Boundary First Flattening with the boundary's lengths
 /// kept (Sawhney and Crane 2017, scale zero along the boundary): angles are kept everywhere,
@@ -41,4 +41,4 @@ struct ConformalChart {
 /// flattening folds a triangle over.
 ConformalChart conformalChart(const TopoDS_Face &face, double spacing, double deflection);
 
-} // namespace loft
+} // namespace BRepExt

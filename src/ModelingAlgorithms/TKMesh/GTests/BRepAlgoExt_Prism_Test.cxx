@@ -24,8 +24,8 @@ TEST(BRepAlgoExtPrism, CircularCapInradius) {
     const auto edge = BRepBuilderAPI_MakeEdge(spline).Edge();
     const auto cap = BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakeWire(edge).Wire(),true).Face();
     const auto body = BRepPrimAPI_MakePrism(cap,gp_Vec(frame.Direction())*(4*radius)).Shape();
-    EXPECT_FALSE(loft::blendConsumesPrismCap(body,{edge},.5*radius));
-    EXPECT_TRUE(loft::blendConsumesPrismCap(body,{edge},1.5*radius));
+    EXPECT_FALSE(BRepExt::blendConsumesPrismCap(body,{edge},.5*radius));
+    EXPECT_TRUE(BRepExt::blendConsumesPrismCap(body,{edge},1.5*radius));
   }
 }
 // The inward vector of every rectangle edge points toward the centre, even if
@@ -41,7 +41,7 @@ TEST(BRepAlgoExtPrism, InwardIsIndependentOfFaceOrientation) {
         const double t=(curve.FirstParameter()+curve.LastParameter())/2;
         gp_Pnt p; gp_Vec tangent,inward;
         curve.D1(t,p,tangent);
-        ASSERT_TRUE(loft::supportInward(support,edge,t,tangent,inward));
+        ASSERT_TRUE(BRepExt::supportInward(support,edge,t,tangent,inward));
         EXPECT_GT(inward.Dot(gp_Vec(p,gp_Pnt(scale,.5*scale,0))),0);
       }
     }

@@ -16,7 +16,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace loft {
+namespace BRepExt {
 bool blendConsumesPrismCap(const TopoDS_Shape& shape,
                            const std::vector<TopoDS_Shape>& edges, double radius) {
     // Limit this diagnostic to spline prisms. Polyhedral chamfers deliberately
@@ -41,14 +41,14 @@ bool blendConsumesPrismCap(const TopoDS_Shape& shape,
             switch (wall.GetType()) {
             case GeomAbs_Plane: {
                 const double dot = std::abs(normal.Dot(wall.Plane().Axis().Direction()));
-                if (dot > 1-loft::tolerance::fineAngle) ++caps;
-                else if (dot > loft::tolerance::fineAngle) prism = false;
+                if (dot > 1-BRepExt::tolerance::fineAngle) ++caps;
+                else if (dot > BRepExt::tolerance::fineAngle) prism = false;
                 break;
             }
             case GeomAbs_SurfaceOfExtrusion:
-                prism &= normal.IsParallel(wall.Direction(), loft::tolerance::fineAngle); break;
+                prism &= normal.IsParallel(wall.Direction(), BRepExt::tolerance::fineAngle); break;
             case GeomAbs_Cylinder:
-                prism &= normal.IsParallel(wall.Cylinder().Axis().Direction(), loft::tolerance::fineAngle); break;
+                prism &= normal.IsParallel(wall.Cylinder().Axis().Direction(), BRepExt::tolerance::fineAngle); break;
             default: prism = false;
             }
         }
@@ -76,7 +76,7 @@ bool blendConsumesPrismCap(const TopoDS_Shape& shape,
 #include <GeomLib_IsPlanarSurface.hxx>
 #include <TopExp.hxx>
 #include <NCollection_IndexedDataMap.hxx>
-namespace loft {
+namespace BRepExt {
 // Resolve the direction into a trimmed support in UV. This is independent of
 // topological orientation, including a reflection and spline-converted planes.
 bool supportInward(const TopoDS_Face& face,const TopoDS_Edge& edge,double t,

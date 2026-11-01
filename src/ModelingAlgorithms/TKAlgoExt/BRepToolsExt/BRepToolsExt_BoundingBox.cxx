@@ -34,7 +34,7 @@
 #include <limits>
 #include <queue>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 std::vector<double> extremaAngles(double first,double last,double phase) {
     std::vector<double> out{first,last};

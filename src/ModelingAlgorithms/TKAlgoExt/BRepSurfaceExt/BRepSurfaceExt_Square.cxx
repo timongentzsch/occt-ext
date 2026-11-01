@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 double greville(const std::vector<double> &k, int p, int i) {
     double sum = 0;
@@ -36,7 +36,7 @@ EvolutionData squareSurface(OcctKernel &k, const std::vector<uint32_t> &inputEdg
     // Generated boundaries are local arena entries, released on every exit.
     struct Release {
         OcctKernel &k; std::vector<uint32_t> &ids;
-        ~Release() { for (auto id : ids) loft::release(k, id); }
+        ~Release() { for (auto id : ids) BRepExt::release(k, id); }
     } release{k, generated};
     const auto curve = [&](uint32_t id) {
         if (get(k, id).ShapeType() != TopAbs_EDGE)
@@ -92,7 +92,7 @@ EvolutionData squareSurface(OcctKernel &k, const std::vector<uint32_t> &inputEdg
     const auto seed =
         patch(k, edges, std::vector<uint32_t>(4, 0), std::vector<int>(4, 0), {}, {}, tolerance, 0.1, 0.05, 1);
     const auto seedFace = surfacing::faceOf(k, op, seed.evolution.resultId);
-    loft::release(k, seed.evolution.resultId);
+    BRepExt::release(k, seed.evolution.resultId);
     if (seed.values[0] != 1)
         fail(op, unsupported_geometry, "the loop does not admit Patch's untrimmed four-sided construction");
     const auto original = surfacing::editable(op, seedFace, false);
@@ -176,4 +176,4 @@ EvolutionData squareSurface(OcctKernel &k, const std::vector<uint32_t> &inputEdg
     surfacing::measure(op, made, held, tolerance, normalFlow);
     return stored(k, made);
 }
-} // namespace loft
+} // namespace BRepExt

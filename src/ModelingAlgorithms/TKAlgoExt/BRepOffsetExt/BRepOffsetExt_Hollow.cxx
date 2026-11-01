@@ -14,7 +14,7 @@
 
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 
 EvolutionData hollow(OcctKernel &kernel, uint32_t shapeId, double thickness, double tolerance,
                      const std::vector<int> &inputFaceHashes, int hashUpperBound) {
@@ -54,4 +54,4 @@ EvolutionData hollow(OcctKernel &kernel, uint32_t shapeId, double thickness, dou
     return history.finish(store(kernel, cut.Shape()));
 }
 
-} // namespace loft
+} // namespace BRepExt

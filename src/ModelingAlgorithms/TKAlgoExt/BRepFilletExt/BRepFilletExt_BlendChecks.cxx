@@ -25,7 +25,7 @@
 #include <array>
 #include <optional>
 
-namespace loft {
+namespace BRepExt {
 
 bool sameBlendSurface(const TopoDS_Face& a, const TopoDS_Face& b) {
     if (a.IsSame(b)) return true;
@@ -228,7 +228,7 @@ void checkBlendClear(const TopoDS_Shape& before,const TopoDS_Shape& after,const 
         for(TopExp_Explorer v(old.Current(),TopAbs_VERTEX);v.More();v.Next()) {
             const auto p=BRep_Tool::Pnt(TopoDS::Vertex(v.Current()));item.corners.push_back(p);
             for(const auto& edge:selected) for(TopExp_Explorer ev(edge,TopAbs_VERTEX);ev.More();ev.Next())
-                incident |= p.Distance(BRep_Tool::Pnt(TopoDS::Vertex(ev.Current())))<loft::tolerance::length;
+                incident |= p.Distance(BRep_Tool::Pnt(TopoDS::Vertex(ev.Current())))<BRepExt::tolerance::length;
         }
         if(incident) continue;
         BRepBndLib::Add(item.face,item.box,false);faces.push_back(std::move(item));
@@ -237,7 +237,7 @@ void checkBlendClear(const TopoDS_Shape& before,const TopoDS_Shape& after,const 
         auto& a=faces[i];auto& b=faces[j];
         if((!a.made && !b.made) || a.box.IsOut(b.box)) continue;
         bool adjacent=false;
-        for(const auto& p:a.corners) for(const auto& q:b.corners) adjacent |= p.Distance(q)<loft::tolerance::length;
+        for(const auto& p:a.corners) for(const auto& q:b.corners) adjacent |= p.Distance(q)<BRepExt::tolerance::length;
         if(adjacent) continue;
         // The exact box of a face of an elementary kind is dear (some milliseconds for the
         // torus of every rounded rim), and is worked out only for a pair that the loose
@@ -265,10 +265,10 @@ void checkBlendClear(const TopoDS_Shape& before,const TopoDS_Shape& after,const 
                     for(int i=0;i<4;++i) for(int j=0;j<4;++j) {
                         auto piece=Handle(Geom_BezierSurface)::DownCast(patch->Copy());
                         piece->Segment(i*.25,(i+1)*.25,j*.25,(j+1)*.25);
-                        auto box=GeomAlgoExt::bezierBounds(piece);box.Enlarge(loft::tolerance::length);item.patches.push_back(box);
+                        auto box=GeomAlgoExt::bezierBounds(piece);box.Enlarge(BRepExt::tolerance::length);item.patches.push_back(box);
                     }
             } else for(int k=0;k<32;++k) {
-                Bnd_Box box;BndLib_AddSurface::Add(surface,u0+(u1-u0)*k/32,u0+(u1-u0)*(k+1)/32,v0,v1,loft::tolerance::length,box);
+                Bnd_Box box;BndLib_AddSurface::Add(surface,u0+(u1-u0)*k/32,u0+(u1-u0)*(k+1)/32,v0,v1,BRepExt::tolerance::length,box);
                 item.patches.push_back(box);
             }
         };
@@ -277,8 +277,8 @@ void checkBlendClear(const TopoDS_Shape& before,const TopoDS_Shape& after,const 
         for(const auto& x:a.patches) for(const auto& y:b.patches) overlap |= !x.IsOut(y);
         if(!overlap) continue;
         BRepExtrema_DistShapeShape distance(a.face,b.face);
-        if(distance.IsDone() && distance.Value()<=loft::tolerance::length)
+        if(distance.IsDone() && distance.Value()<=BRepExt::tolerance::length)
             fail("fillet",no_solution,"new blend face runs into a nonadjacent face behind its supports");
     }
 }
-} // namespace loft
+} // namespace BRepExt

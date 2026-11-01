@@ -17,7 +17,7 @@
 #include <cmath>
 #include <type_traits>
 
-namespace loft {
+namespace BRepExt {
 
 /// A curve or surface without the trimming OpenCascade wraps it in.
 Handle(Geom_Curve) basisOf(Handle(Geom_Curve) curve);
@@ -74,4 +74,4 @@ void settle(const Handle(Geom2d_Curve)& stored);
 /// the curves of its edges. Geometry the input holds is left as it is, so the input is untouched.
 void settleNew(const TopoDS_Shape& input, const TopoDS_Shape& result);
 
-} // namespace loft
+} // namespace BRepExt

@@ -32,7 +32,7 @@
 #include <cmath>
 #include <gp_Ax2.hxx>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 // A copy in walking direction, bounded to the edge rather than its underlying
 // spline.
@@ -252,4 +252,4 @@ EvolutionData extendCurve(OcctKernel &kernel, uint32_t wireId, bool atStart, int
         }
     }
 }
-} // namespace loft
+} // namespace BRepExt

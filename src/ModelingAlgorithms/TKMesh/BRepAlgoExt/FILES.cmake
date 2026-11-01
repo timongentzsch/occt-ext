@@ -15,8 +15,6 @@ set(OCCT_BRepAlgoExt_FILES
   BRepAlgoExt_Prism.cxx
   BRepAlgoExt_PatchFlow.hxx
   BRepAlgoExt_PatchFlow.cxx
-  BRepAlgoExt_Interior.hxx
-  BRepAlgoExt_Interior.cxx
   BRepAlgoExt_Geometry.hxx
   BRepAlgoExt_Geometry.cxx
   BRepAlgoExt_Cells.hxx

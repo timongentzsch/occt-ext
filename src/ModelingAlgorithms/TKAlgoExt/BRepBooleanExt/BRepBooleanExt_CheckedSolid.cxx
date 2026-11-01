@@ -23,7 +23,7 @@
 // The kernel's Booleans, as the commands call them. All of them are selections of the cells of
 // one General Fuse, verified against the operands as they were given: see boolean_cells.h.
 
-namespace loft {
+namespace BRepExt {
 namespace {
 
 // Preserve exact surface sharing while constructing the copied topology. The
@@ -175,4 +175,4 @@ std::vector<Rung> booleanReport(OcctKernel& k, int select, const std::vector<uin
     return rungs;
 }
 
-} // namespace loft
+} // namespace BRepExt

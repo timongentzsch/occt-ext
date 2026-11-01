@@ -8,7 +8,7 @@
 
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 /// One edge of a loop that Patch is to fill for another operation: the face it is to be smooth
 /// with to `order` (0, 1 or 2 for G0 to G2; a null face for G0).
@@ -23,4 +23,4 @@ struct PatchSide {
 /// it makes none to keep.
 TopoDS_Face patchLoop(const std::vector<PatchSide>& sides, double tolerance, double g1Degrees);
 
-} // namespace loft
+} // namespace BRepExt

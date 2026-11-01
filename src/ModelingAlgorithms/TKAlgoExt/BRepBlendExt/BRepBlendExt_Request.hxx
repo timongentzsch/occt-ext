@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace loft::blend2 {
+namespace BRepExt::blend2 {
 
 /// Section law: rational conic, curvature-continuous spline, bevel, chord-controlled or three-support round.
 enum class Law { Conic = 0, G2 = 1, Chamfer = 2, Chordal = 3, Full = 4 };
@@ -66,4 +66,4 @@ void accepted(const char* operation, const TopoDS_Shape& input, const TopoDS_Sha
 
 
 
-} // namespace loft::blend2
+} // namespace BRepExt::blend2

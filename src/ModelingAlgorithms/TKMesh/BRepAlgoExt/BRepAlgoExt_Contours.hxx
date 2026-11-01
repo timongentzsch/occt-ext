@@ -12,7 +12,7 @@
 #include <TopoDS.hxx>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 // Read an already seeded maker's own tangent contours without building a body.
 // Keep the explicit selection first, including any edge the maker did not adopt.
@@ -72,4 +72,4 @@ std::vector<TopoDS_Shape> blendContours(const TopoDS_Shape& shape,
     return seeds;
 }
 
-} // namespace loft
+} // namespace BRepExt

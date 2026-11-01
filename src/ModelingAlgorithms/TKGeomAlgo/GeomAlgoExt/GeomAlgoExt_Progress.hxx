@@ -3,7 +3,7 @@
 
 #pragma once
 #include <Message_ProgressRange.hxx>
-namespace loft {
+namespace BRepExt {
 // Scope a native entry call; existing algorithms poll the direct link-time hook.
 class ProgressScope {
     Message_ProgressRange previous;

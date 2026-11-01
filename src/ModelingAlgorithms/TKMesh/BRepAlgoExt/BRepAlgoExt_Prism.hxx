@@ -7,7 +7,7 @@
 #include <TopoDS_Shape.hxx>
 #include <gp_Vec.hxx>
 #include <vector>
-namespace loft {
+namespace BRepExt {
 // A sufficient, conservative cap-collapse test for a right prism. Only used
 // after native construction failed; it cannot change a successful native blend.
 bool blendConsumesPrismCap(const TopoDS_Shape&, const std::vector<TopoDS_Shape>&, double);

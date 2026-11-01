@@ -10,7 +10,7 @@
 #include <TopoDS_Wire.hxx>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 std::vector<double> curveLocations(OcctKernel &kernel, uint32_t wireId, const std::vector<double> &fractions,
                                    bool transport) {
     const auto &shape = get(kernel, wireId);
@@ -89,4 +89,4 @@ std::vector<double> curveLocations(OcctKernel &kernel, uint32_t wireId, const st
     }
     return values;
 }
-} // namespace loft
+} // namespace BRepExt

@@ -7,7 +7,7 @@
 
 #include <gp_Pln.hxx>
 
-namespace loft {
+namespace BRepExt {
 
 /// `faces` of `solid`, walls along `pull`, each replaced by the ruled surface that makes
 /// `angle` with `pull` and passes through the wall where the neutral plane crosses it
@@ -16,4 +16,4 @@ namespace loft {
 TopoDS_Shape draftWalls(const TopoDS_Shape &solid, const std::vector<TopoDS_Shape> &faces, double angle,
                         const gp_Dir &pull, const gp_Pln &neutral, double tolerance, Lineage &lineage);
 
-} // namespace loft
+} // namespace BRepExt

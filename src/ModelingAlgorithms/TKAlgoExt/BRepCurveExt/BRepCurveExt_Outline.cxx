@@ -70,7 +70,7 @@
 // Lengths are measured against the size of the body, and the work is done with the body moved
 // to the origin, so that neither its size nor its place changes the answer.
 
-namespace loft {
+namespace BRepExt {
 namespace {
 
 // A point of the image: what is seen of a point in space.
@@ -124,7 +124,7 @@ constexpr double sameWay = 1e-4;
 // A face beside an edge is seen edge-on where the sine of its angle to the view is under this
 // (the faces' normals are exact to about 1e-12; this is far above that and far below any angle
 // a face is modelled at).
-constexpr double edgeOn = loft::tolerance::angularResolution;
+constexpr double edgeOn = BRepExt::tolerance::angularResolution;
 
 // Looking along a straight prism, its two caps have the same shadow and its walls
 // are edge-on. Recognise that exactly for line and full-circle boundaries; no rays
@@ -137,7 +137,7 @@ TopoDS_Shape axialPrism(const TopoDS_Shape &shape, const View &view, const Lengt
         if (surface.GetType() == GeomAbs_Plane) {
             const double facing = std::abs(gp_Vec(surface.Plane().Axis().Direction()).Dot(view.n));
             if (facing >= 1 - 1e-14) caps.push_back(face);
-            else if (facing > loft::tolerance::fineAngle) return {};
+            else if (facing > BRepExt::tolerance::fineAngle) return {};
         } else if (surface.GetType() != GeomAbs_Cylinder ||
                    std::abs(gp_Vec(surface.Cylinder().Axis().Direction()).Dot(view.n)) < 1 - 1e-14) {
             return {};
@@ -155,8 +155,8 @@ TopoDS_Shape axialPrism(const TopoDS_Shape &shape, const View &view, const Lengt
         const BRepAdaptor_Curve first(one), second(two);
         if (first.GetType() != second.GetType()) return false;
         if (first.GetType() == GeomAbs_Circle) {
-            if (std::abs(first.LastParameter() - first.FirstParameter() - 2 * M_PI) > loft::tolerance::fineAngle ||
-                std::abs(second.LastParameter() - second.FirstParameter() - 2 * M_PI) > loft::tolerance::fineAngle) return false;
+            if (std::abs(first.LastParameter() - first.FirstParameter() - 2 * M_PI) > BRepExt::tolerance::fineAngle ||
+                std::abs(second.LastParameter() - second.FirstParameter() - 2 * M_PI) > BRepExt::tolerance::fineAngle) return false;
             return std::abs(first.Circle().Radius() - second.Circle().Radius()) <= len.point &&
                    gap(view.of(first.Circle().Location()), view.of(second.Circle().Location())) <= len.point;
         }
@@ -293,7 +293,7 @@ bool prepare(Candidate &c, const View &view, const Lengths &len, std::vector<dou
     // A circle projects to an ellipse unless its plane is exactly edge-on. An
     // ellipse never stops or turns back, so it needs no search for turning points.
     const auto circle = Handle(Geom_Circle)::DownCast(c.curve);
-    const bool canFold = !straight && (circle.IsNull() || std::abs(gp_Vec(circle->Axis().Direction()).Dot(view.n)) < loft::tolerance::fineAngle);
+    const bool canFold = !straight && (circle.IsNull() || std::abs(gp_Vec(circle->Axis().Direction()).Dot(view.n)) < BRepExt::tolerance::fineAngle);
     // Folds: a curve seen edge-on in part (a circle from its side) runs out and back along the
     // same image, and turns where its image stands still; a silhouette's image has cusps.
     if (canFold) {
@@ -396,7 +396,7 @@ std::vector<double> nearest(const Candidate &c, const View &view, Image q, doubl
             continue;
         bool known = false;
         for (const double other : found)
-            known |= std::abs(other - s) <= loft::tolerance::parameterMerge * (c.b - c.a);
+            known |= std::abs(other - s) <= BRepExt::tolerance::parameterMerge * (c.b - c.a);
         if (!known)
             found.push_back(s);
     }
@@ -907,9 +907,9 @@ Handle(Geom_Curve) fitted(const char *op, std::vector<OnSurface> points, bool cl
     for (int round = 0; round < 32; ++round) {
         std::vector<OnSurface> distinct;
         for (const auto &p : points)
-            if (distinct.empty() || distinct.back().p.Distance(p.p) > loft::tolerance::exactLength * len.span)
+            if (distinct.empty() || distinct.back().p.Distance(p.p) > BRepExt::tolerance::exactLength * len.span)
                 distinct.push_back(p);
-        if (closed && distinct.size() > 1 && distinct.front().p.Distance(distinct.back().p) <= loft::tolerance::exactLength * len.span)
+        if (closed && distinct.size() > 1 && distinct.front().p.Distance(distinct.back().p) <= BRepExt::tolerance::exactLength * len.span)
             distinct.pop_back();
         if (distinct.size() < (closed ? 3u : 2u))
             return nullptr;
@@ -944,7 +944,7 @@ Handle(Geom_Curve) fitted(const char *op, std::vector<OnSurface> points, bool cl
         interpolate.Perform();
         if (!interpolate.IsDone())
             fail(op, no_solution, "the outline could not be drawn through its points on a face");
-        Handle(Geom_Curve) curve = interpolate.Curve();
+        Handle(Geom_Curve) curve(interpolate.Curve());
         std::vector<OnSurface> finer;
         bool added = false;
         const int spans = closed ? count : count - 1;
@@ -962,8 +962,8 @@ Handle(Geom_Curve) fitted(const char *op, std::vector<OnSurface> points, bool cl
             if (away <= len.traced)
                 continue;
             OnSurface middle;
-            if (!between(from, to, p, middle) || middle.p.Distance(from.p) <= loft::tolerance::exactLength * len.span ||
-                middle.p.Distance(to.p) <= loft::tolerance::exactLength * len.span) {
+            if (!between(from, to, p, middle) || middle.p.Distance(from.p) <= BRepExt::tolerance::exactLength * len.span ||
+                middle.p.Distance(to.p) <= BRepExt::tolerance::exactLength * len.span) {
                 fail(op, no_solution,
                      "the adaptive surface silhouette could not be resolved to tolerance");
             }
@@ -1230,7 +1230,7 @@ void silhouettes(const char *op, const TopoDS_Face &face, const OnFace &onFace, 
     }
     case GeomAbs_SurfaceOfRevolution: {
         const auto revolution = Handle(Geom_SurfaceOfRevolution)::DownCast(surface);
-        if (!revolution.IsNull() && view.Crossed(gp_Vec(revolution->Axis().Direction())).Magnitude() < loft::tolerance::angle) {
+        if (!revolution.IsNull() && view.Crossed(gp_Vec(revolution->Axis().Direction())).Magnitude() < BRepExt::tolerance::angle) {
             auto f = [&](double v) { return facing.raw((u1 + u2) / 2, v); };
             std::vector<double> found;
             const int count = std::max(16, 4 * adaptor.NbVIntervals(GeomAbs_C2));
@@ -1255,12 +1255,12 @@ void silhouettes(const char *op, const TopoDS_Face &face, const OnFace &onFace, 
         const gp_Torus torus = adaptor.Torus();
         const gp_Vec axis(torus.Axis().Direction());
         const double along = view.Dot(axis), across = (view - axis * along).Magnitude();
-        if (across < loft::tolerance::fineAngle) { // from above: the outer and the inner circle
+        if (across < BRepExt::tolerance::fineAngle) { // from above: the outer and the inner circle
             add(surface->VIso(0), u1, u2);
             add(surface->VIso(M_PI), u1, u2);
             return;
         }
-        if (std::abs(along) < loft::tolerance::fineAngle) { // side-on: the top and bottom circles and two of the tube
+        if (std::abs(along) < BRepExt::tolerance::fineAngle) { // side-on: the top and bottom circles and two of the tube
             add(surface->VIso(M_PI / 2), u1, u2);
             add(surface->VIso(3 * M_PI / 2), u1, u2);
             isoU(0);
@@ -1633,4 +1633,4 @@ EvolutionData outline(OcctKernel &kernel, uint32_t shapeId, Vec3 origin, Vec3 no
     }
     return finish(result);
 }
-} // namespace loft
+} // namespace BRepExt

@@ -9,7 +9,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 
-namespace loft {
+namespace BRepExt {
 namespace surfacing {
 struct Boundary {
     TopoDS_Edge edge;
@@ -68,4 +68,4 @@ EvolutionData moveSurfacePoles(OcctKernel &, uint32_t, const std::vector<int> &,
 EvolutionData raiseSurfaceDegree(OcctKernel &, uint32_t, int, int, double);
 /// The B-spline that `faceSpline` data describes; fails naming `op` on malformed data.
 occ::handle<Geom_BSplineSurface> splineFromData(const char *op, const std::vector<double> &);
-} // namespace loft
+} // namespace BRepExt

@@ -20,7 +20,7 @@
 #include <cmath>
 #include <limits>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 struct Side { TopoDS_Edge edge; int neighbour; int axis; double at; bool tangent; bool g2; };
 struct Face { int kind = 0; std::vector<Side> sides; std::vector<int> springs; };

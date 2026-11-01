@@ -44,7 +44,7 @@
 #include <cmath>
 #include <deque>
 
-namespace loft {
+namespace BRepExt {
 
 namespace {
 
@@ -284,4 +284,4 @@ TopoDS_Shape sweepFaces(const TopoDS_Shape &solid, const std::vector<TopoDS_Shap
     return result;
 }
 
-} // namespace loft
+} // namespace BRepExt

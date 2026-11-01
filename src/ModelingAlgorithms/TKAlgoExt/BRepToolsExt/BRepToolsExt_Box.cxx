@@ -8,7 +8,7 @@
 #include <Precision.hxx>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 EvolutionData makeBox(OcctKernel& k,double x,double y,double z) {
     if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)||
        x<=Precision::Confusion()||y<=Precision::Confusion()||z<=Precision::Confusion())
@@ -17,4 +17,4 @@ EvolutionData makeBox(OcctKernel& k,double x,double y,double z) {
     if(!maker.IsDone()) fail("makeBox",no_solution,"box dimensions cannot be represented by the kernel");
     return stored(k, maker.Shape());
 }
-} // namespace loft
+} // namespace BRepExt

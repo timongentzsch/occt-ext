@@ -12,7 +12,7 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 
-namespace loft {
+namespace BRepExt {
 
 /// Whether two faces that have `shared` in common (edges and vertices) meet only there and
 /// come within their tolerances of each other only beside it. False where this cannot tell.
@@ -22,4 +22,4 @@ bool analyticBeside(const TopoDS_Face& a, const TopoDS_Face& b,
 /// Whether `shape` has two faces beside each other that analyticBeside is for.
 bool analyticWorth(const TopoDS_Shape& shape);
 
-} // namespace loft
+} // namespace BRepExt

@@ -28,7 +28,7 @@
 #include <cstdio>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 /// The places a face is looked at, each way across its parameters.
 constexpr int grid = 40;
@@ -93,7 +93,7 @@ class FinalTrim {
             if (bound <= goal || depth == 12) {
                 // Positive rational Bezier weights keep the entire boundary within
                 // this control-hull tube, including excursions past either endpoint.
-                segments.push_back({a, b, bound + loft::tolerance::uv + 1e-10 * std::max(u1-u0, v1-v0)});
+                segments.push_back({a, b, bound + BRepExt::tolerance::uv + 1e-10 * std::max(u1-u0, v1-v0)});
                 return true;
             }
             auto left = occ::down_cast<Geom2d_BezierCurve>(curve->Copy());
@@ -116,7 +116,7 @@ class FinalTrim {
         } catch (const Standard_Failure &) { segments.clear(); }
     }
 public:
-    explicit FinalTrim(const TopoDS_Face &face) : exact(face, loft::tolerance::uv) {
+    explicit FinalTrim(const TopoDS_Face &face) : exact(face, BRepExt::tolerance::uv) {
         approximate(face);
         int wires = 0;
         for (TopExp_Explorer it(face, TopAbs_WIRE); it.More(); it.Next()) {
@@ -299,4 +299,4 @@ std::optional<std::string> insideFault(const TopoDS_Face &face, double rimBend) 
     }
     return std::nullopt;
 }
-} // namespace loft
+} // namespace BRepExt

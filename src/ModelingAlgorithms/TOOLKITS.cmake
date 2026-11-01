@@ -14,4 +14,5 @@ set(OCCT_ModelingAlgorithms_LIST_OF_TOOLKITS
   TKXMesh
   TKShHealing
   TKExpress
+  TKAlgoExt
 )

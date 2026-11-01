@@ -15,7 +15,7 @@
 
 class OcctKernel;
 
-namespace loft {
+namespace BRepExt {
 
 /// A result and what became of the tracked input faces: [inputFaceHash, count, resultFaceHash...]
 /// records in `modified` and `generated`, and the hashes of input faces in `deleted`.
@@ -42,4 +42,4 @@ inline EvolutionData stored(OcctKernel& kernel, const TopoDS_Shape& shape) {
     return out;
 }
 
-} // namespace loft
+} // namespace BRepExt

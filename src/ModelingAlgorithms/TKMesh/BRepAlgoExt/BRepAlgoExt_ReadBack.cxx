@@ -22,7 +22,7 @@
 #include <gp_Ax22d.hxx>
 #include <gp_Lin.hxx>
 
-namespace loft {
+namespace BRepExt {
 
 Handle(Geom_Curve) basisOf(Handle(Geom_Curve) curve) {
     while (const auto trimmed = Handle(Geom_TrimmedCurve)::DownCast(curve)) curve = trimmed->BasisCurve();
@@ -127,4 +127,4 @@ void settleNew(const TopoDS_Shape& input, const TopoDS_Shape& result) {
         });
 }
 
-} // namespace loft
+} // namespace BRepExt

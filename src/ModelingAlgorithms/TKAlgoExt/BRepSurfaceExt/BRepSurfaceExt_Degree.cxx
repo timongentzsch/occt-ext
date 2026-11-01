@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 EvolutionData raiseSurfaceDegree(OcctKernel &k, uint32_t id, int deltaU, int deltaV, double tolerance) {
     const char *op = "raiseSurfaceDegree";
     if (deltaU < 0 || deltaV < 0 || deltaU > 25 || deltaV > 25 || !std::isfinite(tolerance) || tolerance <= 0)
@@ -28,4 +28,4 @@ EvolutionData raiseSurfaceDegree(OcctKernel &k, uint32_t id, int deltaU, int del
         }
     return stored(k, surfacing::makeFace(op, surface, tolerance, face.Orientation()));
 }
-} // namespace loft
+} // namespace BRepExt

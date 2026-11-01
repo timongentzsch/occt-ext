@@ -32,7 +32,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 constexpr const char *op = "hiddenLine";
 
@@ -147,7 +147,7 @@ std::vector<DrawingCurve> hiddenLine(OcctKernel &kernel, const std::vector<uint3
                 const auto plane = surface.Plane();
                 const gp_Pnt origin(p[18], p[19], p[20]);
                 const gp_Dir n(p[21], p[22], p[23]);
-                if (plane.Distance(origin) < loft::tolerance::sewing && plane.Axis().Direction().IsParallel(n, 1e-8))
+                if (plane.Distance(origin) < BRepExt::tolerance::sewing && plane.Axis().Direction().IsParallel(n, 1e-8))
                     hatchPlane(face, gp_Dir(p[8], p[9], p[10]), p[7], builder, hatch);
             }
         }

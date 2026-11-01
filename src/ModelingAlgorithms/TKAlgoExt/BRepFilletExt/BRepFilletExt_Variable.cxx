@@ -38,7 +38,7 @@
 
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 // OCCT's variable fillet uses circular sections in the guide plane. Its
 // approximated guide need not be the source edge's exact normal plane: cutting
@@ -250,4 +250,4 @@ EvolutionData filletVariable(OcctKernel& kernel, uint32_t shapeId,
     return history.finish(store(kernel, result));
 }
 
-} // namespace loft
+} // namespace BRepExt

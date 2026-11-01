@@ -29,7 +29,7 @@
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 gp_Pln outwardPlane(const TopoDS_Face &f) {
     BRepAdaptor_Surface surface(f);
@@ -66,7 +66,7 @@ TopoDS_Shape reconstructOffset(const TopoDS_Shape &solid, const std::vector<Topo
     // A full cylindrical cavity bounded only by perpendicular planes may break
     // through surrounding walls. Recut its exact finite analytic cylinder.
     if (surface.GetType() == GeomAbs_Cylinder && moved.Orientation() == TopAbs_REVERSED && distance < 0 &&
-        std::abs(surface.LastUParameter() - surface.FirstUParameter() - 2 * M_PI) < loft::tolerance::angularResolution) {
+        std::abs(surface.LastUParameter() - surface.FirstUParameter() - 2 * M_PI) < BRepExt::tolerance::angularResolution) {
         const auto c = surface.Cylinder();
         bool perpendicular = true;
         for (TopExp_Explorer e(moved, TopAbs_EDGE); e.More(); e.Next())
@@ -74,7 +74,7 @@ TopoDS_Shape reconstructOffset(const TopoDS_Shape &solid, const std::vector<Topo
                 if (!f.IsSame(moved)) {
                     BRepAdaptor_Surface s(TopoDS::Face(f));
                     if (s.GetType() != GeomAbs_Plane ||
-                        std::abs(s.Plane().Axis().Direction().Dot(c.Axis().Direction())) < 1 - loft::tolerance::angle)
+                        std::abs(s.Plane().Axis().Direction().Dot(c.Axis().Direction())) < 1 - BRepExt::tolerance::angle)
                         perpendicular = false;
                 }
         if (perpendicular) {
@@ -138,7 +138,7 @@ TopoDS_Shape reconstructOffset(const TopoDS_Shape &solid, const std::vector<Topo
                     if (!f.IsSame(moved)) {
                         BRepAdaptor_Surface s(TopoDS::Face(f));
                         if (s.GetType() != GeomAbs_Plane ||
-                            std::abs(s.Plane().Axis().Direction().Dot(plane.Axis().Direction())) > loft::tolerance::angle)
+                            std::abs(s.Plane().Axis().Direction().Dot(plane.Axis().Direction())) > BRepExt::tolerance::angle)
                             perpendicular = false;
                     }
             if (perpendicular) {
@@ -167,11 +167,11 @@ TopoDS_Shape reconstructOffset(const TopoDS_Shape &solid, const std::vector<Topo
                 if (old.IsSame(moved))
                     p.Translate(gp_Vec(p.Axis().Direction()) * distance);
                 same = p.Distance(q.Location()) <= tolerance &&
-                       p.Axis().Direction().Dot(q.Axis().Direction()) > 1 - loft::tolerance::angle;
+                       p.Axis().Direction().Dot(q.Axis().Direction()) > 1 - BRepExt::tolerance::angle;
             } else if (a.GetType() == GeomAbs_Cylinder && b.GetType() == GeomAbs_Cylinder) {
                 auto p = a.Cylinder(), q = b.Cylinder();
                 same = std::abs(p.Radius() - (old.IsSame(moved) ? distance : 0) - q.Radius()) <= tolerance &&
-                       std::abs(p.Axis().Direction().Dot(q.Axis().Direction())) > 1 - loft::tolerance::angle &&
+                       std::abs(p.Axis().Direction().Dot(q.Axis().Direction())) > 1 - BRepExt::tolerance::angle &&
                        gp_Lin(p.Axis()).Distance(q.Location()) <= tolerance;
             }
             if (same)
@@ -181,4 +181,4 @@ TopoDS_Shape reconstructOffset(const TopoDS_Shape &solid, const std::vector<Topo
     }
     return solidIfSingle(result);
 }
-} // namespace loft
+} // namespace BRepExt

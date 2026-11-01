@@ -54,7 +54,7 @@
 #include <string>
 #include <vector>
 
-// A loft through profiles along any number of guides (two or more), as a Gordon surface: the
+// A skin through profiles along any number of guides (two or more), as a Gordon surface: the
 // surface through a network of curves that is the skin of the profiles plus the skin of the
 // guides minus the surface through their crossings. OpenCascade 8 has it as GeomFill_Gordon
 // (after TiGL's method), which is used here; nothing was ported.
@@ -73,7 +73,7 @@
 // four to each span; and at every crossing it has to be on the same side of the two curves
 // there. Profiles that are closed and flat are capped, and the whole made a solid.
 
-namespace loft {
+namespace BRepExt {
 namespace {
 const char *op = "loftGordon";
 
@@ -394,7 +394,7 @@ bool runAlike(const Handle(Geom_BSplineCurve) &a, const Handle(Geom_BSplineCurve
 /// parameters `given` among the grid's. Each is within 1e-8 of its length of its curve; the grid
 /// is refined for all together. Curves that are not made periodic keep their directions at their
 /// ends. Empty where 4096 points do not bring one there (a corner along it). The accuracy is set by
-/// the closed forms of rings on a cone or a cylinder, not by comparison with another product. Open speed finding: loft.net-seams-apart is 4.3 times its time, in these spans.
+/// the closed forms of rings on a cone or a cylinder, not by comparison with another product. Open speed finding: skin.net-seams-apart is 4.3 times its time, in these spans.
 std::vector<Handle(Geom_BSplineCurve)> onOneGrid(const std::vector<Handle(Geom_BSplineCurve)> &curves,
                                                  const std::vector<Monotone> &shares,
                                                  const std::vector<double> &given, bool periodic) {
@@ -664,7 +664,7 @@ Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)> &rin
 
 } // namespace
 
-EvolutionData loftGordon(OcctKernel &kernel, const std::vector<uint32_t> &profileIds,
+EvolutionData skinGordon(OcctKernel &kernel, const std::vector<uint32_t> &profileIds,
                          const std::vector<uint32_t> &guideIds, bool solid, double tolerance) {
     if (profileIds.size() < 2 || guideIds.size() < 2 || !std::isfinite(tolerance) || tolerance <= 0)
         fail(op, invalid_input, "two or more profiles and two or more guides are required");
@@ -752,7 +752,7 @@ EvolutionData loftGordon(OcctKernel &kernel, const std::vector<uint32_t> &profil
                                profiles[i]->Value(b).Distance(seam) > tolerance;
             if (!holds) {
                 double middle = b > a ? (a + b) / 2 : (a + b + (last - first)) / 2;
-                if (b <= a && a - b < loft::tolerance::parameterMerge * (last - first))
+                if (b <= a && a - b < BRepExt::tolerance::parameterMerge * (last - first))
                     middle = a + (last - first) / 2; // one guide given twice, or both at the seam
                 if (middle > last)
                     middle -= last - first;
@@ -784,7 +784,7 @@ EvolutionData loftGordon(OcctKernel &kernel, const std::vector<uint32_t> &profil
             }
             const auto &c = profiles[i];
             if (c->Value(low).Distance(c->StartPoint()) > tolerance || c->Value(high).Distance(c->EndPoint()) > tolerance) {
-                if (high - low <= loft::tolerance::parameter * (c->LastParameter() - c->FirstParameter()))
+                if (high - low <= BRepExt::tolerance::parameter * (c->LastParameter() - c->FirstParameter()))
                     fail(op, no_solution, "the guides all meet a profile in one point");
                 profiles[i]->Segment(low, high);
                 meet(i);
@@ -802,7 +802,7 @@ EvolutionData loftGordon(OcctKernel &kernel, const std::vector<uint32_t> &profil
         }
         const auto &c = guides[j];
         if (c->Value(low).Distance(c->StartPoint()) > tolerance || c->Value(high).Distance(c->EndPoint()) > tolerance) {
-            if (high - low <= loft::tolerance::parameter * (c->LastParameter() - c->FirstParameter()))
+            if (high - low <= BRepExt::tolerance::parameter * (c->LastParameter() - c->FirstParameter()))
                 fail(op, no_solution, "the profiles all meet a guide in one point");
             guides[j]->Segment(low, high);
             for (size_t i = 0; i < np; ++i)
@@ -870,13 +870,13 @@ EvolutionData loftGordon(OcctKernel &kernel, const std::vector<uint32_t> &profil
         fail(op, no_solution, "the loft through the net is not a valid body");
     return stored(kernel, result);
 }
-// A loft through open profiles along guides that cross them anywhere. Each guide is put at one parameter across the
+// A skin through open profiles along guides that cross them anywhere. Each guide is put at one parameter across the
 // profiles, the mean of the shares of their lengths at which it crosses them; the profiles are
 // made again with that parameter (a monotone smooth map from their length to it), and skinned.
 // Each guide then moves the skin by how far it is off it, blended across to the next guide or
 // to the profiles' ends by the cubic that is one at the guide and nothing at the next, with no
 // slope at either (a convention of this code, not derived).
-EvolutionData loftGuided(OcctKernel &kernel, const std::vector<uint32_t> &profileIds,
+EvolutionData skinGuided(OcctKernel &kernel, const std::vector<uint32_t> &profileIds,
                          const std::vector<uint32_t> &guideIds, double tolerance) {
     if (profileIds.size() < 2 || guideIds.empty() || !std::isfinite(tolerance) || tolerance <= 0)
         fail(op, invalid_input, "two or more profiles and one or more guides are required");
@@ -966,7 +966,7 @@ EvolutionData loftGuided(OcctKernel &kernel, const std::vector<uint32_t> &profil
         if (on[i].size() < nodes.size())
             on[i].push_back(1.0);
         for (size_t k = 1; k < on[i].size(); ++k)
-            if (on[i][k] - on[i][k - 1] <= loft::tolerance::parameter)
+            if (on[i][k] - on[i][k - 1] <= BRepExt::tolerance::parameter)
                 fail(op, no_solution,
                      "no surface through the profiles and guides: the guides meet a profile at one point, or in "
                      "another order than they meet the first");
@@ -1045,7 +1045,7 @@ EvolutionData loftGuided(OcctKernel &kernel, const std::vector<uint32_t> &profil
         for (size_t i = 0; i < np; ++i)
             from.push_back((at[i][j].onSecond - first) / (last - first));
         for (size_t i = 1; i < np; ++i)
-            if (from[i] - from[i - 1] <= loft::tolerance::parameter)
+            if (from[i] - from[i - 1] <= BRepExt::tolerance::parameter)
                 fail(op, no_solution, "a guide does not run from profile to profile in their order");
         std::vector<double> crossings;
         for (size_t i = 0; i < np; ++i)
@@ -1139,7 +1139,7 @@ bool withoutUnlikeWeights(std::vector<Handle(Geom_BSplineCurve)> &curves, bool p
 /// Closed rings of one edge each, made fit to be joined point to point. Their seams go in one line,
 /// as a convention of this code: the first keeps its seam, each next has its seam at its point
 /// nearest to the seam before, carried over by the difference of the centres of the two rings'
-/// world boxes. This convention was chosen by comparison with another system (its Curve Loft of spline, ellipse and circle
+/// world boxes. This convention was chosen by comparison with another system (a skin of a spline, an ellipse and a circle
 /// rings, shifted and turned, to 2e-4 mm in place and 0.03 mm in a general pose), not a theorem: it
 /// is pose dependent and greedy from the first ring. The alternative with a proof is cyclic
 /// alignment, minimising the squared mismatch over shifts as a cyclic cross-correlation (Dogan,
@@ -1166,7 +1166,7 @@ std::vector<TopoDS_Wire> ringsInLine(std::vector<TopoDS_Wire> wires) {
         return gp_XYZ((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     };
     const auto startOf = [](const TopoDS_Wire &wire) { return curveOf(wire, Precision::Confusion())->StartPoint(); };
-    // A loft that comes back to its first ring ends on that ring as it is.
+    // A skin that comes back to its first ring ends on that ring as it is.
     const bool loops = wires.size() > 2 && wires.front().IsSame(wires.back());
     const size_t rings = wires.size() - (loops ? 1 : 0);
     gp_Pnt seam = startOf(wires[0]);
@@ -1216,12 +1216,12 @@ std::vector<TopoDS_Wire> ringsInLine(std::vector<TopoDS_Wire> wires) {
 } // namespace
 
 namespace {
-/// A smooth loft through sections: a tensor product whose every line
+/// A smooth skin through sections: a tensor product whose every line
 /// across the sections is the natural C2 cubic through them, with knots at chord-length places. The
-/// law is measured (the poles of its Curve Loft fit it to four decimals over 2 to 5 rings), not a
-/// theorem of the loft's; the natural spline has its own variational theorem. Sections are matched
+/// law is measured (its poles fit it to four decimals over 2 to 5 rings), not a
+/// theorem of the skin's; the natural spline has its own variational theorem. Sections are matched
 /// by OpenCascade's compatible wires, a face to each edge; rational sections that do not run alike
-/// are made again by length. A section may be a point, which is a row of equal poles. A loft that
+/// are made again by length. A section may be a point, which is a row of equal poles. A skin that
 /// comes back to its first section closes its line across: `Closed` (periodic form). How far apart two sections are is empirical: for sections
 /// of several edges the mean of the distance at the edges' middles (fits squares to 4e-4 of a share),
 /// for one edge the mean over it at 64 even shares, an estimate of an integral, not tuned. How the points of rational
@@ -1384,8 +1384,8 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire> &given, const gp_Pnt *start, co
 }
 } // namespace
 
-// A loft through sections: smooth by `skin`; ruled, or of two sections, by OpenCascade's.
-EvolutionData loftThrough(OcctKernel &kernel, const std::vector<uint32_t> &ids, uint32_t startVertex,
+// A skin through sections: smooth by `skin`; ruled, or of two sections, by OpenCascade's.
+EvolutionData skinThrough(OcctKernel &kernel, const std::vector<uint32_t> &ids, uint32_t startVertex,
                           uint32_t endVertex, bool solid, bool ruled) {
     std::vector<TopoDS_Wire> wires;
     for (const uint32_t id : ids)
@@ -1412,4 +1412,4 @@ EvolutionData loftThrough(OcctKernel &kernel, const std::vector<uint32_t> &ids, 
         fail("loft", no_solution, "operation failed");
     return stored(kernel, maker.Shape());
 }
-} // namespace loft
+} // namespace BRepExt

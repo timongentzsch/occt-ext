@@ -12,7 +12,7 @@
 
 #include <functional>
 
-namespace loft::blend2::detail {
+namespace BRepExt::blend2::detail {
 
 TopoDS_Edge trimmed(const TopoDS_Edge& edge, const TopoDS_Vertex& from, const TopoDS_Vertex& to, double at) {
     const TopoDS_Edge forward = TopoDS::Edge(edge.Oriented(TopAbs_FORWARD));
@@ -284,8 +284,8 @@ std::pair<Handle(Geom_Surface), TopLoc_Location> surfaceOf(const TopoDS_Face& fa
 }
 
 gp_Pnt2d nearPeriod(gp_Pnt2d p, const gp_Pnt2d& target, const Handle(Geom_Surface)& surface) {
-    if (surface->IsUPeriodic()) p.SetX(loft::nearPeriod(p.X(), target.X(), surface->UPeriod()));
-    if (surface->IsVPeriodic()) p.SetY(loft::nearPeriod(p.Y(), target.Y(), surface->VPeriod()));
+    if (surface->IsUPeriodic()) p.SetX(BRepExt::nearPeriod(p.X(), target.X(), surface->UPeriod()));
+    if (surface->IsVPeriodic()) p.SetY(BRepExt::nearPeriod(p.Y(), target.Y(), surface->VPeriod()));
     return p;
 }
 
@@ -664,7 +664,7 @@ static std::optional<TopoDS_Edge> joinedMeeting(const SurfaceMeeting& meet, cons
                 const auto curve = endToEnd(curves, together);
                 const auto curveOne = endToEnd(onSurface[0], tol::parameterMerge), curveTwo = endToEnd(onSurface[1], tol::parameterMerge);
                 if (curve.IsNull() || curveOne.IsNull() || curveTwo.IsNull()) return {};
-                return edgeBetween(curve, first, 0, second, 1, {{curveOne, one.basis, one.location}, {curveTwo, two.basis, two.location}},
+                return edgeBetween(curve, first, 0, second, 1, {OnSurface{Handle(Geom2d_Curve)(curveOne), Handle(Geom_Surface)(one.basis), one.location}, OnSurface{Handle(Geom2d_Curve)(curveTwo), Handle(Geom_Surface)(two.basis), two.location}},
                                    std::max(tol::length, error));
             }
             return {};
@@ -1127,5 +1127,5 @@ bool smoothAt(const TopoDS_Face& a, const TopoDS_Face& b, const TopoDS_Edge& edg
            na.Crossed(nb).Magnitude() <= tol::coarseAngle;
 }
 
-} // namespace loft::blend2::detail
+} // namespace BRepExt::blend2::detail
 

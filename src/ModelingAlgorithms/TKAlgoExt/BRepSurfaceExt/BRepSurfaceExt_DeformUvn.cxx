@@ -25,7 +25,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 DeformUVN::DeformUVN(const char *operation, const TopoDS_Face &reference, const TopoDS_Face &target,
                      Vec3 s, Vec3 o, bool sw, bool mi, bool normal)
     : op(operation), surface(BRep_Tool::Surface(target)), scale(s), offset(o), swap(sw), mirror(mi) {
@@ -91,9 +91,9 @@ void DeformUVN::checkChart(double umin, double umax, double vmin, double vmax) c
     if (surface->Continuity() < GeomAbs_C2)
         fail(op, unsupported_geometry, "target continuity breaks require separate charts");
 }
-} // namespace loft
+} // namespace BRepExt
 
-namespace loft {
+namespace BRepExt {
 // The faces that carry a deformation from one curve to another, for curves taken as the
 // reference and the target: a flat strip along a
 // straight reference, wide enough for what moves, and the same strip laid along the target by
@@ -235,4 +235,4 @@ EvolutionData deformSupports(OcctKernel &kernel, uint32_t referenceId, uint32_t 
         return stored(kernel, both);
     }
 }
-} // namespace loft
+} // namespace BRepExt

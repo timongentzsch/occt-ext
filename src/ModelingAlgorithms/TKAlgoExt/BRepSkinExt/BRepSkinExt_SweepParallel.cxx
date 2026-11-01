@@ -21,7 +21,7 @@
 #include <cmath>
 #include <gp_Pln.hxx>
 
-namespace loft {
+namespace BRepExt {
 EvolutionData sweepSection(OcctKernel &kernel, uint32_t profileId, uint32_t pathId, double scale, int corner,
                            bool parallel, bool solid, double tolerance) {
     const char *op = parallel ? "sweepParallel" : "sweepSection";
@@ -52,7 +52,7 @@ EvolutionData sweepSection(OcctKernel &kernel, uint32_t profileId, uint32_t path
             gp_Pnt at;
             gp_Vec tangent;
             spine.D1(spine.FirstParameter(), at, tangent);
-            if (tangent.Magnitude() <= loft::tolerance::exactLength)
+            if (tangent.Magnitude() <= BRepExt::tolerance::exactLength)
                 fail(op, no_solution, "path has no initial tangent");
             frame = gp_Ax2(at, gp_Dir(tangent));
         }
@@ -83,7 +83,7 @@ EvolutionData sweepSection(OcctKernel &kernel, uint32_t profileId, uint32_t path
         maker.SetMode(frame);
     }
     maker.SetTransitionMode(static_cast<BRepBuilderAPI_TransitionMode>(corner));
-    maker.SetTolerance(tolerance, tolerance, loft::tolerance::coarseAngle);
+    maker.SetTolerance(tolerance, tolerance, BRepExt::tolerance::coarseAngle);
     if (scale == 1)
         maker.Add(profile, false, !parallel && corner != 1);
     else {
@@ -109,4 +109,4 @@ EvolutionData sweepSection(OcctKernel &kernel, uint32_t profileId, uint32_t path
     }
     return stored(kernel, maker.Shape());
 }
-} // namespace loft
+} // namespace BRepExt

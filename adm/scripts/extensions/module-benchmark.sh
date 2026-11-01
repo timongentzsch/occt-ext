@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 set -euo pipefail
 family="${1:?Usage: module-benchmark.sh FAMILY FORK_BUILD STOCK_BASE_BUILD}"
-case "$family" in spline-fit|blend-fit|patch-chart|fit-aux) ;; *) echo 'Unknown benchmark family' >&2;exit 1;;esac
+case "$family" in spline-fit|patch-chart|fit-aux) ;; *) echo 'Unknown benchmark family' >&2;exit 1;;esac
 candidate="$(cd "${2:?Supply native static Release fork build}" && pwd)"
 stock="$(cd "${3:?Supply separate stock b8f597c6 Release build}" && pwd)"
 here="$(cd "$(dirname "$0")" && pwd)"

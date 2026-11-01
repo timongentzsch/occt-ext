@@ -23,7 +23,7 @@ TEST(BRepAlgoExtShared, EccentricHoleMoments) {
     const auto hole=BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(gp_Pnt(s,s,2*s),gp::DZ()),.4*s)).Edge()).Wire();
     maker.Add(TopoDS::Wire(hole.Reversed()));
     const gp_Pnt origin(0,0,0);
-    const auto result=loft::trimmedProperties(maker.Face(),&origin);
+    const auto result=BRepExt::trimmedProperties(maker.Face(),&origin);
     const double disk=M_PI*.16*s*s,area=12*s*s-disk;
     ASSERT_TRUE(result.converged);
     EXPECT_NEAR(result.area,area,1e-9*s*s);
@@ -41,17 +41,17 @@ TEST(BRepAlgoExtShared, NestedToleranceMaximum) {
     TopoDS_Vertex v;b.MakeVertex(v,gp_Pnt(t,0,0),t);b.Add(inner,v);
   }
   b.Add(outer,inner);
-  EXPECT_DOUBLE_EQ(loft::tolerance::own(outer),0);
-  EXPECT_DOUBLE_EQ(loft::tolerance::largest(outer),3e-4);
+  EXPECT_DOUBLE_EQ(BRepExt::tolerance::own(outer),0);
+  EXPECT_DOUBLE_EQ(BRepExt::tolerance::largest(outer),3e-4);
 }
 // The reader normalizes coordinates again. These non-axis-aligned direction
 // families catch returning an unstable input or perturbing the direction grossly.
 TEST(BRepAlgoExtShared, DirectionReaderFixedPoints) {
   for(int i=1;i<=128;++i) {
     const gp_Dir input(std::sin(i*.37),std::cos(i*.19),std::sin(i*.11)+.4);
-    const auto settled=loft::readBack(input);gp_Dir read;
+    const auto settled=BRepExt::readBack(input);gp_Dir read;
     read.SetCoord(settled.X(),settled.Y(),settled.Z());
-    EXPECT_TRUE(loft::same(settled,read));
+    EXPECT_TRUE(BRepExt::same(settled,read));
     EXPECT_LT(gp_Vec(input).Crossed(gp_Vec(settled)).Magnitude(),1e-12);
   }
 }
@@ -64,9 +64,9 @@ TEST(BRepAlgoExtShared, SphereRectangleArea) {
   for(double r : {.1,1.,10.}) {
     const auto face=BRepBuilderAPI_MakeFace(gp_Sphere(gp_Ax3(),r),.2,1.3,-.4,.7).Face();
     const double expected=r*r*1.1*(std::sin(.7)-std::sin(-.4));
-    EXPECT_NEAR(loft::faceArea(face),expected,1e-10*r*r);
+    EXPECT_NEAR(BRepExt::faceArea(face),expected,1e-10*r*r);
     bool converged=true;
-    EXPECT_NEAR(loft::faceMeasure(face,true,gp_Pnt(),&converged),expected,1e-8*r*r);
+    EXPECT_NEAR(BRepExt::faceMeasure(face,true,gp_Pnt(),&converged),expected,1e-8*r*r);
     EXPECT_TRUE(converged);
   }
 }

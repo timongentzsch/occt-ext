@@ -19,8 +19,8 @@ TEST(GeomAlgoExtSurfaceJet, IndependentOneSidedPolynomialDerivatives) {
       poles(i,j)=gp_Pnt(scale*coordinate[i-1],scale*coordinate[j-1],scale*(f[i-1]+h[j-1]));
     const Handle(Geom_BSplineSurface) surface=new Geom_BSplineSurface(poles,knots,knots,mult,mult,2,2);
     for(int left : {1,2}) {
-      loft::SurfaceJet jet{"test",{},{},{},{},{},{},{}};
-      loft::surfaceD2OnUSpan(surface,.5,.75,left,left+1,jet);
+      BRepExt::SurfaceJet jet{"test",{},{},{},{},{},{},{}};
+      BRepExt::surfaceD2OnUSpan(surface,.5,.75,left,left+1,jet);
       jet.orient(false);
       EXPECT_NEAR(jet.u.X(),scale,1e-12*scale);
       EXPECT_NEAR(jet.u.Z(),scale,1e-12*scale);
@@ -48,7 +48,7 @@ TEST(GeomAlgoExtSurfaceJet, TrimmedPolynomialPlaneSlab) {
   for(int i=1;i<=9;++i)poles(i)=gp_Pnt((i-1)/8.,0,i==5?1:0);
   const Handle(Geom_BezierCurve) curve=new Geom_BezierCurve(poles);
   const gp_Pln plane(gp::XOY());
-  EXPECT_NO_THROW(loft::requirePlanarCurve("test",curve,0,1,plane,.3));
-  EXPECT_THROW(loft::requirePlanarCurve("test",curve,0,1,plane,.2),loft::Failure);
-  EXPECT_NO_THROW(loft::requirePlanarCurve("test",curve,0,.1,plane,.2));
+  EXPECT_NO_THROW(BRepExt::requirePlanarCurve("test",curve,0,1,plane,.3));
+  EXPECT_THROW(BRepExt::requirePlanarCurve("test",curve,0,1,plane,.2),BRepExt::Failure);
+  EXPECT_NO_THROW(BRepExt::requirePlanarCurve("test",curve,0,.1,plane,.2));
 }

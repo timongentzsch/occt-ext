@@ -6,11 +6,11 @@
 
 // The operations this package adds to the kernel. Each takes and returns arena
 // handles, reports face history like upstream's *WithHistory methods (see
-// history.h) and fails through loft::fail (see input.h). bindings.cpp exposes
+// history.h) and fails through BRepExt::fail (see input.h). bindings.cpp exposes
 // them to JavaScript.
 
 
-namespace loft {
+namespace BRepExt {
 struct Failure;
 void clearTriangulation(OcctKernel&, uint32_t);
 EvolutionData makeBox(OcctKernel&,double,double,double);
@@ -26,7 +26,7 @@ EvolutionData shell(OcctKernel&,uint32_t,const std::vector<uint32_t>&,double,dou
 std::vector<int> surfaceSplineInfo(OcctKernel &, uint32_t);
 struct Vec3;
 EvolutionData interpolateClosed(OcctKernel&, const std::vector<double>&);
-EvolutionData loftPeriodic(OcctKernel &, const std::vector<uint32_t> &, double);
+EvolutionData skinPeriodic(OcctKernel &, const std::vector<uint32_t> &, double);
 EvolutionData importIges(OcctKernel &, const std::string &);
 std::string exportIges(OcctKernel &, uint32_t);
 EvolutionData rebuildFace(OcctKernel &, uint32_t, int, int, int, double);
@@ -46,7 +46,7 @@ EvolutionData replaceFaceSupport(OcctKernel &, uint32_t body, uint32_t face, con
                                  double tolerance, const std::vector<int> &hashes, int bound);
 EvolutionData unwrapFace(OcctKernel &, uint32_t, double);
 EvolutionData trimPath(OcctKernel &, uint32_t, double, double);
-EvolutionData loftGuides(OcctKernel &, const std::vector<uint32_t> &edges, uint32_t firstFace,
+EvolutionData skinGuides(OcctKernel &, const std::vector<uint32_t> &edges, uint32_t firstFace,
                          uint32_t lastFace, int firstOrder, int lastOrder, double tolerance);
 EvolutionData convertCurveVertex(OcctKernel &, uint32_t wire, Vec3 point, bool smooth, double tolerance);
 EvolutionData openSections(OcctKernel &, uint32_t a, uint32_t b, double tolerance);
@@ -215,7 +215,7 @@ struct PatchResult {
     std::vector<double> values;
 };
 
-/// Controls on Loft's own fill; -1 keeps Patch's established automatic construction.
+/// Controls on this fill; -1 keeps Patch's established automatic construction.
 struct PatchControls {
     int quad = -1;
     int flow = 0; // Natural, Normal, Next, Adjacent
@@ -284,16 +284,16 @@ EvolutionData projectCurveVisible(OcctKernel &kernel, uint32_t wire, uint32_t bo
 EvolutionData sweepFramed(OcctKernel &kernel, uint32_t profile, uint32_t path, double twist, double scale,
                           const std::vector<uint32_t> &guides, int guideMethod, double tolerance, bool solid);
 
-/// A loft through two or more profiles along two or more guides, each an edge or a wire, as a
-/// Gordon surface; with `solid`, closed flat end profiles are capped. See loft_gordon.cpp.
-EvolutionData loftThrough(OcctKernel &kernel, const std::vector<uint32_t> &sections, uint32_t startVertex,
+/// A skin through two or more profiles along two or more guides, each an edge or a wire, as a
+/// Gordon surface; with `solid`, closed flat end profiles are capped. See skin_gordon.cpp.
+EvolutionData skinThrough(OcctKernel &kernel, const std::vector<uint32_t> &sections, uint32_t startVertex,
                           uint32_t endVertex, bool solid, bool ruled);
-EvolutionData loftGordon(OcctKernel &kernel, const std::vector<uint32_t> &profiles,
+EvolutionData skinGordon(OcctKernel &kernel, const std::vector<uint32_t> &profiles,
                          const std::vector<uint32_t> &guides, bool solid, double tolerance);
 
-/// A loft through open profiles along guides that cross them anywhere, each guide's move off the
-/// profiles' skin blended to the next by a cubic without slope at either. See loft_gordon.cpp.
-EvolutionData loftGuided(OcctKernel &kernel, const std::vector<uint32_t> &profiles,
+/// A skin through open profiles along guides that cross them anywhere, each guide's move off the
+/// profiles' skin blended to the next by a cubic without slope at either. See skin_gordon.cpp.
+EvolutionData skinGuided(OcctKernel &kernel, const std::vector<uint32_t> &profiles,
                          const std::vector<uint32_t> &guides, double tolerance);
 
 /// Edges on a face of a body along lines of constant u or v: see imprint_more.cpp.
@@ -343,4 +343,4 @@ EvolutionData splitFaceEdges(OcctKernel &, uint32_t shape, uint32_t face,
                              const std::vector<uint32_t> &curves, double tolerance,
                              const std::vector<int> &hashes, int bound);
 
-} // namespace loft
+} // namespace BRepExt

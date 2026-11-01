@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 // Limits affect only this optional optimization; the accepted original is retained.
 constexpr int mostTrials = 512, mostRemovals = 16;

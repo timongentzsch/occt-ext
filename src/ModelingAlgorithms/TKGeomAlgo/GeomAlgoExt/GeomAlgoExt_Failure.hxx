@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 // Stable reasons and codes are fields, never tags in diagnostic text.
 inline constexpr const char* invalid_input = "invalid_input";             // caller error: wrong shape type, zero vector, ...
 inline constexpr const char* unsupported_geometry = "unsupported_geometry"; // valid request the algorithm cannot handle
@@ -54,4 +54,4 @@ int failureHash(const TopoDS_Shape& shape);
     fail(operation, reason, message, at, "CONSTRUCTION_FAILED", kind);
 }
 
-} // namespace loft
+} // namespace BRepExt

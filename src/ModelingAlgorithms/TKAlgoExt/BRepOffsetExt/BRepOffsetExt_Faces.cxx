@@ -57,7 +57,7 @@
 #include <cmath>
 #include <optional>
 
-namespace loft {
+namespace BRepExt {
 
 namespace {
 
@@ -401,4 +401,4 @@ EvolutionData offsetFaces(OcctKernel &kernel, uint32_t solidId, const std::vecto
     return history.finish(store(kernel, done->shape));
 }
 
-} // namespace loft
+} // namespace BRepExt

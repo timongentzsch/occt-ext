@@ -19,14 +19,14 @@
 #include <algorithm>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 Handle(Geom_BSplineCurve) fixedFit(const Handle(Adaptor3d_Curve) & source, int count, int degree) {
     // Clamped uniform spline interpolating at Greville abscissae. Collocation is
     // a square system, solved for all three coordinates with pivoting; no
     // normal-equation squaring.
     const bool periodic =
-        source->Value(source->FirstParameter()).Distance(source->Value(source->LastParameter())) <= loft::tolerance::exactLength;
+        source->Value(source->FirstParameter()).Distance(source->Value(source->LastParameter())) <= BRepExt::tolerance::exactLength;
     const double shift = degree % 2 == 0 ? 0.5 : 0.0;
     const int spans = periodic ? count : count - degree;
     std::vector<double> knots;
@@ -142,4 +142,4 @@ EvolutionData rebuildCurve(OcctKernel &kernel, uint32_t wireId, int mode, double
         fail(op, no_solution, "rebuild produced an invalid wire");
     return stored(kernel, output.Wire());
 }
-} // namespace loft
+} // namespace BRepExt

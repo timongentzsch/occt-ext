@@ -12,7 +12,7 @@
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 
-namespace loft {
+namespace BRepExt {
 // Sheet/curve components are allowed in mixed-dimensional Booleans. Every solid component
 // must have closed shells and no free, non-degenerate edges. Empty Boolean results are valid.
 inline bool accepts(const TopoDS_Shape& shape, bool solidExpected = false) {
@@ -39,4 +39,4 @@ inline bool accepts(const TopoDS_Shape& shape, bool solidExpected = false) {
     return !solidExpected || solid;
 }
 
-} // namespace loft
+} // namespace BRepExt

@@ -5,7 +5,7 @@
 #include <Geom_BSplineSurface.hxx>
 #include <optional>
 
-namespace loft {
+namespace BRepExt {
 struct CompactPatchSurface {
     occ::handle<Geom_BSplineSurface> surface;
     double displacement;

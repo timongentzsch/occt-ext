@@ -10,7 +10,7 @@
 #include <functional>
 #include <initializer_list>
 
-namespace loft {
+namespace BRepExt {
 
 /// What `sewing` made of `added`, a shape given to it or a sub-shape of one: itself where kept.
 TopoDS_Shape sewn(const BRepBuilderAPI_Sewing& sewing, const TopoDS_Shape& added);

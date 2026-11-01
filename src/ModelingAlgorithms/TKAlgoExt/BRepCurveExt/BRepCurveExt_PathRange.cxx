@@ -14,7 +14,7 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Wire.hxx>
 #include <cmath>
-namespace loft {
+namespace BRepExt {
 EvolutionData trimPath(OcctKernel &kernel,uint32_t id,double start,double end) {
     const char *op="trimPath";
     const auto shape=get(kernel,id);
@@ -24,7 +24,7 @@ EvolutionData trimPath(OcctKernel &kernel,uint32_t id,double start,double end) {
     for(BRepTools_WireExplorer it(TopoDS::Wire(shape));it.More();it.Next()) {
         BRepAdaptor_Curve c(it.Current()); total+=GCPnts_AbscissaPoint::Length(c);
     }
-    if(total<=loft::tolerance::exactLength) fail(op,invalid_input,"path has no length");
+    if(total<=BRepExt::tolerance::exactLength) fail(op,invalid_input,"path has no length");
     BRepBuilderAPI_MakeWire wire;
     double distance=0;
     for(BRepTools_WireExplorer it(TopoDS::Wire(shape));it.More();it.Next()) {
@@ -32,13 +32,13 @@ EvolutionData trimPath(OcctKernel &kernel,uint32_t id,double start,double end) {
         const double len=GCPnts_AbscissaPoint::Length(c);
         const double a=std::max(0.0,start*total-distance),b=std::min(len,end*total-distance);
         distance+=len;
-        if(b-a<=loft::tolerance::exactLength) continue;
-        if(a<=loft::tolerance::exactLength && len-b<=loft::tolerance::exactLength) {wire.Add(edge);continue;}
+        if(b-a<=BRepExt::tolerance::exactLength) continue;
+        if(a<=BRepExt::tolerance::exactLength && len-b<=BRepExt::tolerance::exactLength) {wire.Add(edge);continue;}
         const bool reverse=edge.Orientation()==TopAbs_REVERSED;
         const double begin=reverse ? c.LastParameter():c.FirstParameter();
         auto parameter=[&](double length) {
-            if(length<=loft::tolerance::exactLength) return begin;
-            if(len-length<=loft::tolerance::exactLength) return reverse ? c.FirstParameter():c.LastParameter();
+            if(length<=BRepExt::tolerance::exactLength) return begin;
+            if(len-length<=BRepExt::tolerance::exactLength) return reverse ? c.FirstParameter():c.LastParameter();
             GCPnts_AbscissaPoint solve(1e-9,c,reverse ? -length:length,begin);
             if(!solve.IsDone()) fail(op,no_solution,"arc length inversion failed");
             return solve.Parameter();

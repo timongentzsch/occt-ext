@@ -24,7 +24,7 @@
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <gp_Pln.hxx>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 bool sameSupport(const TopoDS_Face& a, const TopoDS_Face& b, double tolerance) {
     BRepAdaptor_Surface surface(a);
@@ -42,8 +42,8 @@ bool sameSupport(const TopoDS_Face& a, const TopoDS_Face& b, double tolerance) {
                    surface.FirstVParameter() + g * (surface.LastVParameter() - surface.FirstVParameter()),at,a0,a1);
         other->D1(u,v,at,b0,b1);
         auto na=a0.Crossed(a1),nb=b0.Crossed(b1);
-        if (na.Magnitude()<loft::tolerance::length || nb.Magnitude()<loft::tolerance::length ||
-            std::abs(na.Normalized().Dot(nb.Normalized()))<1-loft::tolerance::angle) return false;
+        if (na.Magnitude()<BRepExt::tolerance::length || nb.Magnitude()<BRepExt::tolerance::length ||
+            std::abs(na.Normalized().Dot(nb.Normalized()))<1-BRepExt::tolerance::angle) return false;
     }
     return true;
 }
@@ -53,7 +53,7 @@ RoundFace recognizeRound(const TopoDS_Shape &shape, const TopoDS_Face &face, dou
     BRepAdaptor_Surface s(face);
     if (s.GetType() != GeomAbs_Cylinder && s.GetType() != GeomAbs_Torus)
         return b;
-    if (s.GetType() == GeomAbs_Cylinder && s.LastUParameter() - s.FirstUParameter() >= 2 * M_PI - loft::tolerance::angle) return b;
+    if (s.GetType() == GeomAbs_Cylinder && s.LastUParameter() - s.FirstUParameter() >= 2 * M_PI - BRepExt::tolerance::angle) return b;
     b.toroidal = s.GetType() == GeomAbs_Torus;
     if (b.toroidal) b.torus = s.Torus();
     else b.cylinder = s.Cylinder();
@@ -78,7 +78,7 @@ RoundFace recognizeRound(const TopoDS_Shape &shape, const TopoDS_Face &face, dou
                 const double t = curve.FirstParameter() + (curve.LastParameter() - curve.FirstParameter()) * (i + .5) / 17;
                 const auto a = surfaceJet("filletDimension", edge, face, t);
                 const auto c = surfaceJet("filletDimension", edge, TopoDS::Face(neighbour), t);
-                smooth &= a.p.Distance(c.p) <= tolerance && a.n.Dot(c.n) > 1 - loft::tolerance::angle;
+                smooth &= a.p.Distance(c.p) <= tolerance && a.n.Dot(c.n) > 1 - BRepExt::tolerance::angle;
             }
             tangent |= smooth;
             bad |= !smooth;
@@ -164,4 +164,4 @@ EvolutionData refillet(OcctKernel &kernel, uint32_t shapeId, uint32_t faceId, do
     });
     return history.finish(store(kernel, maker.Shape()));
 }
-} // namespace loft
+} // namespace BRepExt

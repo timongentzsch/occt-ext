@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <limits>
 
-namespace loft::tolerance {
+namespace BRepExt::tolerance {
 
 // Lengths in model units. Preserve the existing thresholds; callers' document tolerances
 // still govern requested fits. Do not substitute these for solver steps or relative errors.
@@ -50,4 +50,4 @@ inline constexpr double booleanSurfaceParameter = 1e-10;
 inline constexpr double booleanQuadrature = 5e-8;
 inline constexpr double booleanFuzzyRelative = 1e-5;
 
-} // namespace loft::tolerance
+} // namespace BRepExt::tolerance

@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 // Endpoints and stationary parameters of one rational Bezier coordinate, using the same
 // Bernstein root isolation as the trim's monotone pcurve pieces.
 std::vector<double> coordinateExtrema(const Handle(Geom_BezierCurve)&, int axis);

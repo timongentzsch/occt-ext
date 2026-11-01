@@ -10,7 +10,7 @@
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 
-namespace loft {
+namespace BRepExt {
 // Keep every unselected dividing edge. Face dissolution permits only edges incident to
 // a selected face; sharp edges still cannot be merged by same-domain unification.
 EvolutionData cleanTopology(OcctKernel& k, uint32_t id, const std::vector<uint32_t>& selected,

@@ -27,7 +27,7 @@
 
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 
 TopoDS_Shape dividedAtC0(const TopoDS_Shape &body, Lineage &faces) {
     bool any = false;
@@ -155,4 +155,4 @@ EvolutionData offsetSolid(OcctKernel &kernel, uint32_t shapeId, double distance,
     return history.finish(store(kernel, result));
 }
 
-} // namespace loft
+} // namespace BRepExt

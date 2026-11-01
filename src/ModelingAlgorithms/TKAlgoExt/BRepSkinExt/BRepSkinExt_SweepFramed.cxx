@@ -80,7 +80,7 @@
 // stretches between the places where its curvature has a kink (the knots of a cubic spline):
 // the slopes at the stations are taken from one stretch only.
 
-namespace loft {
+namespace BRepExt {
 namespace {
 const char *op = "sweepFramed";
 
@@ -406,7 +406,7 @@ EvolutionData sweepFramed(OcctKernel &kernel, uint32_t profileId, uint32_t pathI
         gp_Pnt g;
         gp_Vec dg;
         guides.back()->D1(crossings.back(), g, dg);
-        if (std::abs(dg.Dot(heading)) <= loft::tolerance::angle * dg.Magnitude())
+        if (std::abs(dg.Dot(heading)) <= BRepExt::tolerance::angle * dg.Magnitude())
             fail(op, invalid_input, "a guide runs across the path where the profile is, not beside it");
     }
 
@@ -876,4 +876,4 @@ EvolutionData sweepFramed(OcctKernel &kernel, uint32_t profileId, uint32_t pathI
         fail(op, no_solution, "the sweep's faces do not make a valid body");
     return stored(kernel, result);
 }
-} // namespace loft
+} // namespace BRepExt

@@ -4,6 +4,6 @@
 #pragma once
 #include <BRepToolsExt_Operations.hxx>
 #include <BRepAlgoExt_Geometry.hxx>
-namespace loft {
+namespace BRepExt {
 inline bool finite(const Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 }

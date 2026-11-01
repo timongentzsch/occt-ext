@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-// What the skins of lofts are made of.
+// What the skins of skins are made of.
 
 namespace GeomAlgoExt {
 

@@ -23,7 +23,7 @@
 
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 
 // The spiral as a function of turns t. Every derivative is exact, so the approximation is held
@@ -73,7 +73,7 @@ EvolutionData spiral(OcctKernel &kernel, Vec3 origin, Vec3 axis, Vec3 start, dou
     const gp_XYZ z(axis.x, axis.y, axis.z), along(start.x, start.y, start.z);
     if (z.Modulus() == 0) fail(op, invalid_input, "the axis must have a direction");
     const gp_XYZ unitZ = z / z.Modulus(), radial = along - unitZ * along.Dot(unitZ);
-    if (radial.Modulus() <= loft::tolerance::angle * along.Modulus())
+    if (radial.Modulus() <= BRepExt::tolerance::angle * along.Modulus())
         fail(op, invalid_input, "the start direction must not lie along the axis");
     SpiralLaw law;
     law.origin = gp_XYZ(origin.x, origin.y, origin.z);
@@ -106,4 +106,4 @@ EvolutionData spiral(OcctKernel &kernel, Vec3 origin, Vec3 axis, Vec3 start, dou
     }
 }
 
-} // namespace loft
+} // namespace BRepExt

@@ -20,7 +20,7 @@
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <ElCLib.hxx>
 
-namespace loft::blend2 {
+namespace BRepExt::blend2 {
 
 using namespace detail;
 
@@ -2524,4 +2524,4 @@ static Blended blendCopy(const Request& request, BRepBuilderAPI_Copy& copy, cons
     return b.result();
 }
 
-} // namespace loft::blend2
+} // namespace BRepExt::blend2

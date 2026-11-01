@@ -19,7 +19,7 @@
 
 #include <unordered_set>
 
-namespace loft {
+namespace BRepExt {
 
 class FaceHistory {
   public:
@@ -113,4 +113,4 @@ class FaceHistory {
     EvolutionData evolution_;
 };
 
-} // namespace loft
+} // namespace BRepExt

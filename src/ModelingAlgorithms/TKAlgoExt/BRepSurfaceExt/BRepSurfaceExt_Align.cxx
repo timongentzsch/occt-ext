@@ -6,7 +6,7 @@
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
 
-namespace loft {
+namespace BRepExt {
 EvolutionData alignSurface(OcctKernel &k, uint32_t faceId, uint32_t edgeId, uint32_t referenceId,
                            uint32_t supportId, int order, double tolerance, int extraRows, int pu, int pv, int su, int sv, bool normalFlow,
                            double partialStart, double partialEnd, bool skewed, double skewStart, double skewEnd) {
@@ -246,4 +246,4 @@ EvolutionData alignCollinear(OcctKernel &k, uint32_t faceId, uint32_t edgeId, ui
     builder.Add(both, surfacing::makeFace(op, fixed.surface, tolerance, ref.face.Orientation()));
     return stored(k, both);
 }
-} // namespace loft
+} // namespace BRepExt

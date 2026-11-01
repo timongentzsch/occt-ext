@@ -91,7 +91,7 @@
 // no surface that misses its constraints or is not one to keep is returned. Sewn readings
 // include the input edges' existing tangential parameter uncertainty, and are reported as delivered.
 
-namespace loft {
+namespace BRepExt {
 namespace {
 
 const char *const op = "patch";
@@ -259,7 +259,7 @@ constexpr double roundLoop = 1e-3;
 
 /// Two corners are as far from the middle when they differ by less than this share: the
 /// rounding of the sums they are measured from, with room.
-constexpr double sameCorner = loft::tolerance::exactLength;
+constexpr double sameCorner = BRepExt::tolerance::exactLength;
 
 Frame meanPlane(const std::vector<gp_Pnt> &points, double perimeter) {
     gp_XYZ centre(0, 0, 0), area(0, 0, 0);
@@ -746,9 +746,9 @@ Miss measure(const occ::handle<Geom_Surface> &surface, const Side &side, const K
             const auto local = start || i > 0 ? nearestWithin(surface, start ? start->uv : uv.XY(), point)
                                               : std::nullopt;
             uv = local     ? gp_Pnt2d(*local)
-                 : start   ? project.NextValueOfUV(gp_Pnt2d(start->uv), point, loft::tolerance::exactLength)
-                 : i == 0  ? project.ValueOfUV(point, loft::tolerance::exactLength)
-                           : project.NextValueOfUV(uv, point, loft::tolerance::exactLength);
+                 : start   ? project.NextValueOfUV(gp_Pnt2d(start->uv), point, BRepExt::tolerance::exactLength)
+                 : i == 0  ? project.ValueOfUV(point, BRepExt::tolerance::exactLength)
+                           : project.NextValueOfUV(uv, point, BRepExt::tolerance::exactLength);
             if (start && surface->Value(start->uv.X(), start->uv.Y()).Distance(point) <
                              surface->Value(uv.X(), uv.Y()).Distance(point))
                 uv = gp_Pnt2d(start->uv);
@@ -1141,7 +1141,7 @@ Measured measureAll(const occ::handle<Geom_Surface> &surface, const Asked &asked
     at += asked.guides.size();
     ShapeAnalysis_Surface project(surface);
     for (size_t i = 0; i < asked.points.size(); ++i) {
-        const gp_Pnt2d uv = project.ValueOfUV(asked.points[i], loft::tolerance::exactLength);
+        const gp_Pnt2d uv = project.ValueOfUV(asked.points[i], BRepExt::tolerance::exactLength);
         const double miss = surface->Value(uv.X(), uv.Y()).Distance(asked.points[i]);
         out.values[at + i] = miss;
         note(miss <= limits.g0, miss / limits.g0, "point " + std::to_string(i + 1) + " is missed by " + number(miss) +
@@ -1742,7 +1742,7 @@ std::optional<Built> foursided(const Asked &asked, const Frame &frame) {
         for (size_t k = 0; k < junctions.size(); ++k) {
             runs[i].starts[k + 1] = (junctions[k] - first) / span;
             for (int knot = 2; knot < curves[i]->NbKnots(); ++knot)
-                if (std::abs(curves[i]->Knot(knot) - junctions[k]) <= loft::tolerance::parameterMerge * span) {
+                if (std::abs(curves[i]->Knot(knot) - junctions[k]) <= BRepExt::tolerance::parameterMerge * span) {
                     // Kept as it is where the edges do not go on from each other closely enough.
                     curves[i]->RemoveKnot(knot, curves[i]->Degree() - 1, asked.limits.g0 * plainShare);
                     break;
@@ -1770,7 +1770,7 @@ std::optional<Built> foursided(const Asked &asked, const Frame &frame) {
             return {};
         a->IncreaseDegree(degree);
         b->IncreaseDegree(degree);
-        const double same = loft::tolerance::parameterMerge * (i ? lv : lu);
+        const double same = BRepExt::tolerance::parameterMerge * (i ? lv : lu);
         a->InsertKnots(b->Knots(), b->Multiplicities(), same, false);
         b->InsertKnots(a->Knots(), a->Multiplicities(), same, false);
         if (a->NbPoles() != b->NbPoles())
@@ -1820,7 +1820,7 @@ std::optional<Built> foursided(const Asked &asked, const Frame &frame) {
             const gp_Vec n = part->jet(g).n;
             way -= n * way.Dot(n);
         }
-        if (way.Magnitude() <= loft::tolerance::exactLength * asked.size ||
+        if (way.Magnitude() <= BRepExt::tolerance::exactLength * asked.size ||
             std::abs(way.Normalized().Dot(tangent)) > sharpestCorner)
             fail(op, unsupported_geometry,
                  "the UV flow asked for runs along boundary edge " + std::to_string(part->input + 1));
@@ -1857,7 +1857,7 @@ std::optional<Built> foursided(const Asked &asked, const Frame &frame) {
             }
             ShapeAnalysis_Surface projection(surface);
             const auto guideTarget = [&](const gp_Pnt &point, double share) {
-                gp_XY uv = projection.ValueOfUV(point, loft::tolerance::exactLength).XY();
+                gp_XY uv = projection.ValueOfUV(point, BRepExt::tolerance::exactLength).XY();
                 // A guide that ends on a side comes out on it to within the tolerance, either way:
                 // the parameters here are lengths.
                 const double slack = asked.limits.g0;
@@ -1880,8 +1880,8 @@ std::optional<Built> foursided(const Asked &asked, const Frame &frame) {
                        std::abs(uv.Y()) <= slack || std::abs(uv.Y() - lv) <= slack;
             };
             for (size_t g = 0; g < asked.guides.size(); ++g) {
-                const gp_XY a = projection.ValueOfUV(asked.guides[g].at(0), loft::tolerance::exactLength).XY(),
-                            b = projection.ValueOfUV(asked.guides[g].at(1), loft::tolerance::exactLength).XY();
+                const gp_XY a = projection.ValueOfUV(asked.guides[g].at(0), BRepExt::tolerance::exactLength).XY(),
+                            b = projection.ValueOfUV(asked.guides[g].at(1), BRepExt::tolerance::exactLength).XY();
                 if (onSide(a) && onSide(b)) across[g] = {true, {{0.0, a}, {1.0, b}}};
             }
             constexpr int crossingPlaces = 129;
@@ -1916,7 +1916,7 @@ std::optional<Built> foursided(const Asked &asked, const Frame &frame) {
                     const gp_XY a = across[g].stops[0].second, b = across[g].stops.back().second,
                                 c = across[h].stops[0].second, d = across[h].stops.back().second;
                     const double det = (b - a).Crossed(d - c);
-                    if (std::abs(det) <= loft::tolerance::parameterMerge * (b - a).Modulus() * (d - c).Modulus()) continue;
+                    if (std::abs(det) <= BRepExt::tolerance::parameterMerge * (b - a).Modulus() * (d - c).Modulus()) continue;
                     const gp_XY cross = a + (b - a) * ((c - a).Crossed(d - c) / det);
                     across[g].stops.push_back({fg, cross});
                     across[h].stops.push_back({fh, cross});
@@ -1934,7 +1934,7 @@ std::optional<Built> foursided(const Asked &asked, const Frame &frame) {
                 if (across[g].laid) continue;
                 const auto end = [&](double f) -> std::optional<gp_XY> {
                     const gp_Pnt at = asked.guides[g].at(f);
-                    const gp_XY uv = projection.ValueOfUV(at, loft::tolerance::exactLength).XY();
+                    const gp_XY uv = projection.ValueOfUV(at, BRepExt::tolerance::exactLength).XY();
                     if (onSide(uv)) return uv;
                     for (size_t h = 0; h < laidFirst; ++h) {
                         if (h == g || !across[h].laid || across[h].stops.size() < 2) continue;
@@ -1980,7 +1980,7 @@ std::optional<Built> foursided(const Asked &asked, const Frame &frame) {
                 const auto held = fit(first, fixed, targets, asked.size, asked.limits, surface, {}, nullptr, {}, &frame, asked.flatness);
                 ShapeAnalysis_Surface nearestOn(held);
                 for (const gp_Pnt &point : asked.points) {
-                    const gp_XY uv = nearestOn.ValueOfUV(point, loft::tolerance::exactLength).XY();
+                    const gp_XY uv = nearestOn.ValueOfUV(point, BRepExt::tolerance::exactLength).XY();
                     targets.push_back({point, gp_XY(std::clamp(uv.X(), 0.0, lu), std::clamp(uv.Y(), 0.0, lv)), 0, {}, {}, 1});
                 }
             } else
@@ -2071,10 +2071,10 @@ Rim preimage(const occ::handle<Geom_BSplineSurface> &surface, const Side &side, 
         if (curve->IsPeriodic())
             curve->SetNotPeriodic();
         bool same = std::abs(curve->FirstParameter() - first) + std::abs(curve->LastParameter() - last) <
-                    loft::tolerance::parameter * std::max(1.0, std::abs(first) + std::abs(last));
+                    BRepExt::tolerance::parameter * std::max(1.0, std::abs(first) + std::abs(last));
         for (int k = 0; same && k <= 4; ++k) {
             const double t = first + (last - first) * k / 4;
-            same = curve->Value(t).Distance(side.curve->Value(t)) < loft::tolerance::exactLength * size;
+            same = curve->Value(t).Distance(side.curve->Value(t)) < BRepExt::tolerance::exactLength * size;
         }
         // One with weights goes the way of an arc: its poles are not found as a plain
         // curve's are.
@@ -2429,7 +2429,7 @@ std::optional<Built> chainedQuad(const Asked &asked, const Frame &frame) {
         auto &a = curves[i], &b = curves[i + 2];
         const int degree = std::max(a->Degree(), b->Degree());
         a->IncreaseDegree(degree); b->IncreaseDegree(degree);
-        const double same = loft::tolerance::parameterMerge * (i ? v : u);
+        const double same = BRepExt::tolerance::parameterMerge * (i ? v : u);
         a->InsertKnots(b->Knots(), b->Multiplicities(), same, false);
         b->InsertKnots(a->Knots(), a->Multiplicities(), same, false);
         if (a->NbPoles() > mostCoonsPoles || b->NbPoles() > mostCoonsPoles) return std::nullopt;
@@ -2509,7 +2509,7 @@ std::optional<Built> toroidal(const Asked &asked, const Frame &frame) {
         if (here.Location().Distance(torus.Location()) > 1e-12 * asked.size ||
             std::abs(here.MajorRadius() - torus.MajorRadius()) > 1e-12 * asked.size ||
             std::abs(here.MinorRadius() - torus.MinorRadius()) > 1e-12 * asked.size ||
-            !here.Axis().IsParallel(torus.Axis(), loft::tolerance::fineAngle)) return std::nullopt;
+            !here.Axis().IsParallel(torus.Axis(), BRepExt::tolerance::fineAngle)) return std::nullopt;
     }
     ShapeAnalysis_Surface angular(first.held);
     const gp_XY anchor = angular.ValueOfUV(first.meet(.5), 1e-10).XY();
@@ -2642,12 +2642,12 @@ std::optional<Built> ruledRound(const Asked &asked, const Frame &frame) {
         if (!cylinder.IsNull()) {
             const gp_Cylinder here = cylinder->Cylinder();
             if (round && (std::abs(here.Radius() - round->Radius()) > 1e-12 * asked.size ||
-                !here.Axis().IsCoaxial(round->Axis(), loft::tolerance::fineAngle, 1e-12 * asked.size))) return std::nullopt;
+                !here.Axis().IsCoaxial(round->Axis(), BRepExt::tolerance::fineAngle, 1e-12 * asked.size))) return std::nullopt;
             round = here;
         } else if (!plane.IsNull()) {
             const gp_Pln here = plane->Pln();
             if (std::none_of(planes.begin(), planes.end(), [&](const gp_Pln &p) {
-                return p.Axis().IsParallel(here.Axis(), loft::tolerance::fineAngle) && p.Distance(here.Location()) < 1e-12 * asked.size;
+                return p.Axis().IsParallel(here.Axis(), BRepExt::tolerance::fineAngle) && p.Distance(here.Location()) < 1e-12 * asked.size;
             })) planes.push_back(here);
         } else return std::nullopt;
     }
@@ -2659,7 +2659,7 @@ std::optional<Built> ruledRound(const Asked &asked, const Frame &frame) {
     for (int i = 0; i < 2; ++i) {
         const gp_Vec n(planes[i].Axis().Direction());
         const double distance = gp_Vec(centre, planes[i].Location()).Dot(n);
-        if (std::abs(n.Dot(axis)) > loft::tolerance::fineAngle || std::abs(std::abs(distance) - radius) > 1e-12 * asked.size) return std::nullopt;
+        if (std::abs(n.Dot(axis)) > BRepExt::tolerance::fineAngle || std::abs(std::abs(distance) - radius) > 1e-12 * asked.size) return std::nullopt;
         radial[i] = n * distance;
     }
     const double cosine = radial[0].Dot(radial[1]) / (radius * radius);
@@ -3094,7 +3094,7 @@ Built overPlane(const Asked &asked, const Frame &flat, int direction = 0) {
                 place(1, least, true);
                 for (size_t i = 0; i + 1 < cuts.size(); ++i) {
                     const double from = cuts[i], to = cuts[i + 1];
-                    if (to - from < loft::tolerance::parameterMerge)
+                    if (to - from < BRepExt::tolerance::parameterMerge)
                         continue;
                     for (int k = 0; k < placesPerSpan; ++k) {
                         place(from + (to - from) * (k + 0.5) / placesPerSpan,
@@ -3449,7 +3449,7 @@ Built adjacentOver(const Asked &asked, const Frame &frame, const Built &natural,
     // allow a constraint to slide away from the chart that defines the flow.
     ShapeAnalysis_Surface sourceProject(source);
     const auto interiorPlace = [&](const gp_Pnt &point) {
-        return chart.map(sourceProject.ValueOfUV(point, loft::tolerance::exactLength).XY());
+        return chart.map(sourceProject.ValueOfUV(point, BRepExt::tolerance::exactLength).XY());
     };
     // Where the result is read inside the loop: every node and the middle of every triangle,
     // each with the Natural fill's normal there, which a fill that does not fold keeps to.
@@ -4023,7 +4023,7 @@ Built patchFace(Asked asked, int method, double flatness, PatchControls controls
                 bool finite = true;
                 const Measured refined = measureAll(surface, delivered,
                     [&](const Side &, double, const gp_Pnt &point) -> std::optional<Place> {
-                        const gp_XY seed = project.ValueOfUV(point, loft::tolerance::exactLength).XY();
+                        const gp_XY seed = project.ValueOfUV(point, BRepExt::tolerance::exactLength).XY();
                         const gp_XY uv = nearest(surface, seed, point);
                         if (!std::isfinite(uv.X()) || !std::isfinite(uv.Y()) ||
                             !std::isfinite(surface->Value(uv.X(), uv.Y()).Distance(point))) {
@@ -4087,7 +4087,7 @@ PatchResult patchAsAsked(OcctKernel &kernel, const std::vector<uint32_t> &edges,
     if (controls.quad < -1 || controls.quad > 1 || controls.flow < 0 || controls.flow > 3 || controls.quality < 0 || controls.quality > 2)
         fail(op, invalid_input, "invalid parameterization, flow or quality control");
     if (method == 2 && (controls.quad != -1 || controls.flow || controls.quality || !controls.trim))
-        fail(op, invalid_input, "parameterization, flow, quality and untrim controls use Loft's solver");
+        fail(op, invalid_input, "parameterization, flow, quality and untrim controls use this solver");
     Asked asked{{}, {}, {}, {tolerance, g1Degrees, g2Share}, 0, flatness, controls};
     for (size_t i = 0; i < edges.size(); ++i)
         asked.sides.push_back(sideOf(kernel, edges[i], supports[i], orders[i], static_cast<int>(i)));
@@ -4157,4 +4157,4 @@ TopoDS_Face patchLoop(const std::vector<PatchSide> &sides, double tolerance, dou
     return patchFace(asked, 0, -1, PatchControls{}).face;
 }
 
-} // namespace loft
+} // namespace BRepExt

@@ -14,13 +14,13 @@
 #include <cmath>
 #include <cstdio>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 std::vector<gp_Pnt> section(const char *op, const surfacing::Boundary &a, const surfacing::Boundary &b,
                             double f, int orderA, int orderB, double tensionA, double tensionB, int degree) {
     const auto p = a.point(f), q = b.point(f);
     const gp_Vec chord(p, q);
-    if (chord.Magnitude() < loft::tolerance::length)
+    if (chord.Magnitude() < BRepExt::tolerance::length)
         fail(op, unsupported_geometry,
              "the boundaries touch or intersect; bridge requires a separated strip");
     const auto end = [&](const surfacing::Boundary &side, int order, double tension, bool last) {
@@ -70,8 +70,8 @@ EvolutionData bridgeSurface(OcctKernel &k, uint32_t firstEdge, uint32_t firstFac
     if (shape == 1) { orderA = 0; orderB = 0; }
     auto a = surfacing::boundaryOf(k, op, firstEdge, firstFace),
          b = surfacing::boundaryOf(k, op, secondEdge, secondFace);
-    if (a.edge.IsSame(b.edge) || a.point(0).Distance(a.point(1)) < loft::tolerance::length ||
-        b.point(0).Distance(b.point(1)) < loft::tolerance::length)
+    if (a.edge.IsSame(b.edge) || a.point(0).Distance(a.point(1)) < BRepExt::tolerance::length ||
+        b.point(0).Distance(b.point(1)) < BRepExt::tolerance::length)
         fail(op, unsupported_geometry, "two distinct open boundary edges are required");
     if (a.point(0).Distance(b.point(1)) + a.point(1).Distance(b.point(0)) <
         a.point(0).Distance(b.point(0)) + a.point(1).Distance(b.point(1)))
@@ -138,4 +138,4 @@ EvolutionData bridgeSurface(OcctKernel &k, uint32_t firstEdge, uint32_t firstFac
     }
     fail(op, no_solution, "Hermite refinement exhausted");
 }
-} // namespace loft
+} // namespace BRepExt

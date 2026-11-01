@@ -11,7 +11,7 @@
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 EvolutionData thicken(OcctKernel& kernel, uint32_t id, double thickness, double tolerance,
                       const std::vector<int>& hashes, int bound) {
     const char* op = "thicken";
@@ -55,4 +55,4 @@ EvolutionData thicken(OcctKernel& kernel, uint32_t id, double thickness, double 
     divided.modified(history);
     return history.finish(store(kernel, maker.Shape()));
 }
-} // namespace loft
+} // namespace BRepExt

@@ -7,7 +7,7 @@
 #include <GeomAlgoExt_Hermite.hxx>
 #include <set>
 
-namespace loft::blend2::detail {
+namespace BRepExt::blend2::detail {
 // Express the sections in a common basis before comparing or joining their poles.
 static bool commonSections(const std::vector<Handle(Geom_BSplineSurface)>& surfaces) {
     if (surfaces.empty())
@@ -741,7 +741,7 @@ static void sheetJoins(const char* op, const std::vector<Piece>& pieces, const s
 }
 
 void joinSplitPieces(const char* op, std::vector<Piece>& pieces, const std::vector<std::optional<Station>>& seeds) {
-    // Keep Loft's single-face representation of one edge split by support crossings.
+    // Keep the single-face representation of one edge split by support crossings.
     // Framed inherited curvature breaks retain G2 contacts and a common join normal.
     // Other groups retain their established section law and join construction.
 
@@ -988,4 +988,4 @@ void joinSplitPieces(const char* op, std::vector<Piece>& pieces, const std::vect
     sheetJoins(op, pieces, seeds);
 }
 
-} // namespace loft::blend2::detail
+} // namespace BRepExt::blend2::detail

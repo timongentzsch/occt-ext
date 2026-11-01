@@ -11,7 +11,7 @@
 #include <IntTools_Context.hxx>
 #include <Standard_Failure.hxx>
 
-namespace loft {
+namespace BRepExt {
 
 std::vector<gp_Pnt2d> parametersAcross(const TopoDS_Face& face, int lines, const Handle(IntTools_Context)& context) {
     std::vector<gp_Pnt2d> out;
@@ -49,4 +49,4 @@ std::vector<gp_Pnt2d> parametersAcross(const TopoDS_Face& face, int lines, const
     return out;
 }
 
-} // namespace loft
+} // namespace BRepExt

@@ -91,7 +91,7 @@
 
 #include <BRepAlgoExt_Properties.hxx>
 
-namespace loft {
+namespace BRepExt {
 
 namespace {
 
@@ -309,7 +309,7 @@ struct Blend {
             step *= 2;
         }
         if (!std::isfinite(value) || value == HUGE_VAL) return false;
-        if (own == other && (x - least < loft::tolerance::parameterMerge * span || most - x < loft::tolerance::parameterMerge * span)) return false;
+        if (own == other && (x - least < BRepExt::tolerance::parameterMerge * span || most - x < BRepExt::tolerance::parameterMerge * span)) return false;
         if (f.p.Distance(o.curve.Value(x)) < 2 * kNear * o.spacing) return false;
         tp = x;
         d = value;
@@ -346,7 +346,7 @@ struct Blend {
         // tightly there than this one: its bend stops the place as well.
         for (const bool last : {false, true}) {
             const int next = last ? e.after : e.before;
-            if (next < 0 || next == own || (last ? e.sharpB : e.sharpA) || std::abs(t - (last ? e.b : e.a)) > loft::tolerance::parameter * (e.b - e.a)) continue;
+            if (next < 0 || next == own || (last ? e.sharpB : e.sharpA) || std::abs(t - (last ? e.b : e.a)) > BRepExt::tolerance::parameter * (e.b - e.a)) continue;
             const double at = last ? e.afterAt : e.beforeAt;
             const double bend = elements[next].frame(at).bend;
             if (bend > 1e-14 && 1 / bend < best.d) best = {1 / bend, next, at};
@@ -402,7 +402,7 @@ struct Corners {
         TopoDS_Vertex v;
     };
     std::vector<Corner> all;
-    double near = loft::tolerance::sewing;
+    double near = BRepExt::tolerance::sewing;
     int add(const gp_Pnt& p) {
         for (size_t i = 0; i < all.size(); ++i)
             if (all[i].p.Distance(p) < near) return int(i);
@@ -489,9 +489,9 @@ struct Maker : Blend {
                 const double leave = e.s > 0 ? e.b : e.a, arrive = n.s > 0 ? n.a : n.b;
                 const gp_Vec2d out = e.frame(leave).along * e.s, in = n.frame(arrive).along * n.s;
                 const double turn = out.X() * in.Y() - out.Y() * in.X();
-                if (turn < -loft::tolerance::coarseAngle)
+                if (turn < -BRepExt::tolerance::coarseAngle)
                     refuse("the outline has a corner that turns away from the face: a blend around such a corner is not built", e.edge);
-                const bool sharp = turn > loft::tolerance::coarseAngle;
+                const bool sharp = turn > BRepExt::tolerance::coarseAngle;
                 (e.s > 0 ? e.after : e.before) = j;
                 (e.s > 0 ? e.afterAt : e.beforeAt) = arrive;
                 (e.s > 0 ? e.sharpB : e.sharpA) = sharp;
@@ -632,7 +632,7 @@ struct Maker : Blend {
         {
             std::vector<Event> merged;
             for (const auto& event : events) {
-                if (!merged.empty() && event.t - merged.back().t < loft::tolerance::parameterMerge * (e.b - e.a) && !event.leaf && !merged.back().leaf) {
+                if (!merged.empty() && event.t - merged.back().t < BRepExt::tolerance::parameterMerge * (e.b - e.a) && !event.leaf && !merged.back().leaf) {
                     merged.back().right = event.right;
                     continue;
                 }
@@ -707,7 +707,7 @@ struct Maker : Blend {
             Piece piece;
             piece.from = breaks[k];
             piece.to = breaks[k + 1];
-            if (piece.to - piece.from < loft::tolerance::parameter * (e.b - e.a)) continue;
+            if (piece.to - piece.from < BRepExt::tolerance::parameter * (e.b - e.a)) continue;
             double middle = (piece.from + piece.to) / 2;
             Hit hit = reach(own, middle);
             // A curve that is not an arc is stopped by its own bend at single places only; the
@@ -861,7 +861,7 @@ struct Maker : Blend {
             spans.push_back(poles);
         };
         for (size_t k = 0; k + 1 < breaks.size(); ++k)
-            if (breaks[k + 1] - breaks[k] > loft::tolerance::parameter * (e.b - e.a)) span(breaks[k], breaks[k + 1], 0);
+            if (breaks[k + 1] - breaks[k] > BRepExt::tolerance::parameter * (e.b - e.a)) span(breaks[k], breaks[k + 1], 0);
         knots.push_back(e.b);
         const int count = int(spans.size()), poles = count * kDegree + 1, rows = bevel ? 2 : 3;
         NCollection_Array1<double> uKnots(1, count + 1), vKnots(1, 2);
@@ -903,7 +903,7 @@ struct Maker : Blend {
         const double gapA = curve->Value(a).Distance(BRep_Tool::Pnt(from)), gapB = curve->Value(b).Distance(BRep_Tool::Pnt(to));
         if (std::max(gapA, gapB) > 1e-4 * scale) refuse(what);
         TopoDS_Edge edge;
-        builder.MakeEdge(edge, curve, loft::tolerance::length);
+        builder.MakeEdge(edge, curve, BRepExt::tolerance::length);
         builder.Add(edge, from.Oriented(TopAbs_FORWARD));
         builder.Add(edge, to.Oriented(TopAbs_REVERSED));
         builder.Range(edge, a, b);
@@ -924,7 +924,7 @@ struct Maker : Blend {
             const gp_Pnt2d uv = onFace->Value(t);
             worst = std::max(worst, curve->Value(t).Distance(surface->Value(uv.X(), uv.Y())));
         }
-        builder.UpdateEdge(edge, std::max(loft::tolerance::length, 2 * worst));
+        builder.UpdateEdge(edge, std::max(BRepExt::tolerance::length, 2 * worst));
     }
     void fitVertices(const TopoDS_Edge& edge) {
         const double tolerance = BRep_Tool::Tolerance(edge);
@@ -963,7 +963,7 @@ struct Maker : Blend {
             if (cuspLast) pole.SetY(std::max(pole.Y(), points.back().Y()));
             curve->SetPole(k, pole);
         }
-        return curve;
+        return Handle(Geom2d_Curve)(curve);
     }
 
     /// The section at an end of an edge, from the foot up to where the edge's face ends
@@ -1184,7 +1184,7 @@ struct Maker : Blend {
                 cut.slantIn = new Geom2d_Line(from, gp_Dir2d(along));
                 // Its curve in space from its curve in the face, to a tolerance.
                 BRepBuilderAPI_MakeEdge slant(cut.slantIn, spline, first, corner, 0, along.Magnitude());
-                if (!slant.IsDone() || !BRepLib::BuildCurve3d(slant.Edge(), loft::tolerance::exactLength, GeomAbs_C1, 14, 256))
+                if (!slant.IsDone() || !BRepLib::BuildCurve3d(slant.Edge(), BRepExt::tolerance::exactLength, GeomAbs_C1, 14, 256))
                     refuse("a face of the blend could not be divided", e.edge);
                 cut.slant = slant.Edge();
                 cut.rise = joined(spline->UIso(t), corner, corners.all[after.cornerFrom].v, low, high, "a face of the blend could not be divided");
@@ -1198,11 +1198,11 @@ struct Maker : Blend {
             // its curve in each.
             const Handle(Geom_Surface) surface = count == 1 ? e.surface : Handle(Geom_Surface)::DownCast(e.surface->Copy());
             TopoDS_Face face;
-            builder.MakeFace(face, surface, loft::tolerance::length);
+            builder.MakeFace(face, surface, BRepExt::tolerance::length);
             TopoDS_Wire wire;
             builder.MakeWire(wire);
             const auto put = [&](const TopoDS_Edge& edge, const Handle(Geom2d_Curve) & onFace, bool forward) {
-                builder.UpdateEdge(edge, onFace, face, loft::tolerance::length);
+                builder.UpdateEdge(edge, onFace, face, BRepExt::tolerance::length);
                 fitTolerance(edge, onFace, surface);
                 builder.Add(wire, edge.Oriented(forward ? TopAbs_FORWARD : TopAbs_REVERSED));
             };
@@ -1216,7 +1216,7 @@ struct Maker : Blend {
                 if (seam) {
                     // One edge closed on itself: the section at its one corner is the face's seam.
                     const auto atB = riseIn(e, e.b, rises[riseA]), atA = riseIn(e, e.a, rises[riseA]);
-                    builder.UpdateEdge(rises[riseA].edge, atB, atA, face, loft::tolerance::length);
+                    builder.UpdateEdge(rises[riseA].edge, atB, atA, face, BRepExt::tolerance::length);
                     fitTolerance(rises[riseA].edge, atB, surface);
                     fitTolerance(rises[riseA].edge, atA, surface);
                     builder.Add(wire, rises[riseA].edge.Oriented(TopAbs_FORWARD));
@@ -1250,7 +1250,7 @@ struct Maker : Blend {
                     // All the sections of an arc end in one point.
                     const TopoDS_Edge point = degenerateEdge(new Geom2d_Line(gp_Pnt2d(0, across(piece->dFrom)), gp_Dir2d(1, 0)), surface,
                                                              TopLoc_Location(), corners.all[piece->cornerFrom].v, piece->from, piece->to,
-                                                             loft::tolerance::length);
+                                                             BRepExt::tolerance::length);
                     builder.Add(wire, point.Oriented(TopAbs_REVERSED));
                 } else {
                     Shared& shared = creaseOf(own, *piece);
@@ -1276,7 +1276,7 @@ struct Maker : Blend {
             // them the other way about, and is to the right unless its angle runs backwards.
             if (e.straight && !bevel && !e.flipped) {
                 TopoDS_Face other;
-                builder.MakeFace(other, surface, loft::tolerance::length);
+                builder.MakeFace(other, surface, BRepExt::tolerance::length);
                 builder.Add(other, wire.Reversed());
                 face = other;
             }
@@ -1341,10 +1341,10 @@ struct Maker : Blend {
         for (const auto& outer : loops) {
             if (outer.area <= 0) continue;
             TopoDS_Face face;
-            builder.MakeFace(face, plane, loft::tolerance::length);
+            builder.MakeFace(face, plane, BRepExt::tolerance::length);
             const auto take = [&](const Loop& loop) {
                 for (int k : loop.edges) {
-                    builder.UpdateEdge(capEdges[k].edge, capEdges[k].inPlane, face, loft::tolerance::length);
+                    builder.UpdateEdge(capEdges[k].edge, capEdges[k].inPlane, face, BRepExt::tolerance::length);
                     fitTolerance(capEdges[k].edge, capEdges[k].inPlane, plane);
                 }
                 builder.Add(face, loop.wire);
@@ -1442,8 +1442,8 @@ BooleanResult closingBall(Maker& maker, const TopoDS_Shape& shape, const TopoDS_
     for (const auto& wall : walls) {
         BRepAdaptor_Surface surface(TopoDS::Face(wall));
         const bool vertical = surface.GetType() == GeomAbs_Plane
-            ? std::abs(planeNormal(surface.Plane()).Dot(up)) < loft::tolerance::angle
-            : surface.GetType() == GeomAbs_Cylinder && surface.Cylinder().Axis().Direction().IsParallel(gp_Dir(up), loft::tolerance::angle);
+            ? std::abs(planeNormal(surface.Plane()).Dot(up)) < BRepExt::tolerance::angle
+            : surface.GetType() == GeomAbs_Cylinder && surface.Cylinder().Axis().Direction().IsParallel(gp_Dir(up), BRepExt::tolerance::angle);
         if (!vertical)
             fail(op, unsupported_geometry, "closing concave round requires planar or cylindrical vertical prism walls: refused");
         double high = 0;
@@ -1461,7 +1461,7 @@ BooleanResult closingBall(Maker& maker, const TopoDS_Shape& shape, const TopoDS_
                                (std::abs(ha - depth) < tol && std::abs(hb - depth) < tol);
             if (level) {
                 if (curve.GetType() != GeomAbs_Line &&
-                    !(curve.GetType() == GeomAbs_Circle && curve.Circle().Axis().Direction().IsParallel(gp_Dir(up), loft::tolerance::angle)))
+                    !(curve.GetType() == GeomAbs_Circle && curve.Circle().Axis().Direction().IsParallel(gp_Dir(up), BRepExt::tolerance::angle)))
                     fail(op, unsupported_geometry, "closing concave round requires straight or circular prism-level wall boundaries: refused");
                 if (std::abs(ha - depth) < tol) {
                     bool mouth = false;
@@ -1471,7 +1471,7 @@ BooleanResult closingBall(Maker& maker, const TopoDS_Shape& shape, const TopoDS_
                         if (cap.GetType() != GeomAbs_Plane) continue;
                         gp_Vec normal = planeNormal(cap.Plane());
                         if (neighbour.Orientation() == TopAbs_REVERSED) normal.Reverse();
-                        mouth |= normal.Dot(up) > 0 && normal.Crossed(up).Magnitude() < loft::tolerance::angle;
+                        mouth |= normal.Dot(up) > 0 && normal.Crossed(up).Magnitude() < BRepExt::tolerance::angle;
                     }
                     if (!mouth)
                         fail(op, unsupported_geometry, "closing concave round requires an open planar mouth; a ceiling or overhang is not built: refused");
@@ -1540,7 +1540,7 @@ BooleanResult closingBall(Maker& maker, const TopoDS_Shape& shape, const TopoDS_
             for (const auto& vertex : polygon) onPath |= centre.Distance(vertex.Translated(up * r)) < tol;
         } else {
             const gp_Lin axis(surface.Cylinder().Axis());
-            if (axis.Direction().IsParallel(gp_Dir(up), loft::tolerance::angle)) {
+            if (axis.Direction().IsParallel(gp_Dir(up), BRepExt::tolerance::angle)) {
                 for (const auto& vertex : polygon) onPath |= axis.Distance(vertex) < tol;
             } else if (std::abs(height(axis.Location()) - r) < tol) {
                 for (size_t i = 0; i < polygon.size(); ++i)
@@ -1634,7 +1634,7 @@ BooleanResult faceBlend(const char* op, const TopoDS_Shape& shape, const std::ve
             gp_Pnt p;
             gp_Vec tangent, into;
             curve.D1(t, p, tangent);
-            if (!supportInward(wall, edge, t, tangent, into) || into.Crossed(outward).Magnitude() > loft::tolerance::angle * into.Magnitude())
+            if (!supportInward(wall, edge, t, tangent, into) || into.Crossed(outward).Magnitude() > BRepExt::tolerance::angle * into.Magnitude())
                 fail(op, unsupported_geometry, "a wall does not stand square on the face", {edge});
             const double way = into.Dot(outward) > 0 ? 1 : -1;
             if (side != 0 && way != side)
@@ -1652,7 +1652,7 @@ BooleanResult faceBlend(const char* op, const TopoDS_Shape& shape, const std::ve
     const double diagonal = std::sqrt(box.SquareExtent());
     maker.scale = std::max(1.0, distance);
     // Two corners of the blend nearer than this (a share of the blend's size) are one.
-    maker.corners.near = loft::tolerance::sewing * std::max(1.0, distance);
+    maker.corners.near = BRepExt::tolerance::sewing * std::max(1.0, distance);
 
     // Step 1: the body cut off or filled up at the distance.
     const double area = faceMeasure(top, true, gp_Pnt(), nullptr), before = held(shape);
@@ -1682,7 +1682,7 @@ BooleanResult faceBlend(const char* op, const TopoDS_Shape& shape, const std::ve
         BRepAdaptor_Surface surface(face);
         if (surface.GetType() != GeomAbs_Plane) continue;
         const gp_Pln own = surface.Plane();
-        if (own.Distance(footAt) > loft::tolerance::length || !own.Axis().Direction().IsParallel(gp_Dir(outward), loft::tolerance::angle)) continue;
+        if (own.Distance(footAt) > BRepExt::tolerance::length || !own.Axis().Direction().IsParallel(gp_Dir(outward), BRepExt::tolerance::angle)) continue;
         gp_Vec normal = planeNormal(own);
         if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
         if (normal.Dot(outward) < 0) continue;
@@ -1746,7 +1746,7 @@ BooleanResult faceBlend(const char* op, const TopoDS_Shape& shape, const std::ve
     }
     const auto caps = maker.caps(outward);
     if (caps.empty()) fail(op, no_solution, "requested distance consumes the planar cap: top face vanishes", {}, FailureKind::CapConsumed);
-    for (const auto& corner : maker.corners.all) maker.builder.UpdateVertex(corner.v, loft::tolerance::length);
+    for (const auto& corner : maker.corners.all) maker.builder.UpdateVertex(corner.v, BRepExt::tolerance::length);
     for (const auto& face : lid)
         for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next()) maker.fitVertices(TopoDS::Edge(it.Current()));
 
@@ -1784,4 +1784,4 @@ BooleanResult faceBlend(const char* op, const TopoDS_Shape& shape, const std::ve
     return result;
 }
 
-} // namespace loft
+} // namespace BRepExt

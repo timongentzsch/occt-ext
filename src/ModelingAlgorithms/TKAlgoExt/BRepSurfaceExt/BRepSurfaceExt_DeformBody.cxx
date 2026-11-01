@@ -37,7 +37,7 @@
 #include <cstdio>
 #include <limits>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 /// How many poles a target may have along each direction: what a cubic needs for its bends at the
 /// tolerance, or the 21 any target may have. A C2 cubic through points of spacing h is off by
@@ -469,4 +469,4 @@ DeformResult deformBody(OcctKernel &kernel, uint32_t bodyId, uint32_t referenceI
     result.evolution = history.finish(store(kernel, output));
     return result;
 }
-} // namespace loft
+} // namespace BRepExt

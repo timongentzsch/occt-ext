@@ -13,7 +13,7 @@
 #include <TopoDS.hxx>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 TopoDS_Shape sewn(const BRepBuilderAPI_Sewing& sewing, const TopoDS_Shape& added) {
     if (sewing.IsModified(added)) return sewing.Modified(added);
     if (sewing.IsModifiedSubShape(added)) return sewing.ModifiedSubShape(added);

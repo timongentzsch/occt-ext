@@ -12,7 +12,7 @@
 
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 
 EvolutionData scaleAxes(OcctKernel& kernel, uint32_t shapeId, Vec3 factors, Vec3 center,
                         const std::vector<int>& inputFaceHashes, int hashUpperBound) {
@@ -41,4 +41,4 @@ EvolutionData scaleAxes(OcctKernel& kernel, uint32_t shapeId, Vec3 factors, Vec3
     return history.finish(store(kernel, maker.Shape()));
 }
 
-} // namespace loft
+} // namespace BRepExt

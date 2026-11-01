@@ -4,7 +4,7 @@
 #include <GeomAlgoExt_Phase.hxx>
 #include <GeomAlgoExt_PatchRim.hxx>
 #include <GeomAlgoExt_Band.hxx>
-namespace loft { using GeomAlgoExt::Band; }
+namespace BRepExt { using GeomAlgoExt::Band; }
 #include <GeomAlgoExt_Cancel.hxx>
 
 #include <NCollection_Array1.hxx>
@@ -14,7 +14,7 @@ namespace loft { using GeomAlgoExt::Band; }
 #include <functional>
 #include <cstdio>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 
 /// A span shorter than this share of the mean one is beside a knot of lower continuity, and
@@ -259,4 +259,4 @@ double correctRim(const char *op, SplineNet &net, const std::function<std::vecto
     return worst;
 }
 
-} // namespace loft
+} // namespace BRepExt

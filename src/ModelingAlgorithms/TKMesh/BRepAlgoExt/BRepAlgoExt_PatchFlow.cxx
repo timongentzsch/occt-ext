@@ -26,7 +26,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace loft {
+namespace BRepExt {
 namespace {
 constexpr const char *op = "patch";
 
@@ -172,7 +172,7 @@ ConformalChart conformalChart(const TopoDS_Face &face, double spacing, double de
         for (double u = low.X(); u <= high.X(); u += spacing)
             for (double v = low.Y(); v <= high.Y(); v += spacing) {
                 if (!inside(gp_XY(u, v), 0)) continue;
-                GeomLProp_SLProps props(surface, u, v, 2, loft::tolerance::parameterMerge);
+                GeomLProp_SLProps props(surface, u, v, 2, BRepExt::tolerance::parameterMerge);
                 if (props.IsCurvatureDefined())
                     bend = std::max({bend, std::abs(props.MaxCurvature()), std::abs(props.MinCurvature())});
             }
@@ -417,4 +417,4 @@ gp_XY ConformalChart::map(const gp_XY &uv) const {
            flat[t[2]] * (signedArea(source[t[0]], source[t[1]], uv) / whole);
 }
 
-} // namespace loft
+} // namespace BRepExt

@@ -15,7 +15,7 @@
 
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 // --- Tolerances of this subject, each with where its value is from -------------------------
 
@@ -142,4 +142,4 @@ class Lineage {
 /// geometry is the same; `body` itself where it has no such face.
 TopoDS_Shape dividedAtC0(const TopoDS_Shape &body, Lineage &faces);
 
-} // namespace loft
+} // namespace BRepExt

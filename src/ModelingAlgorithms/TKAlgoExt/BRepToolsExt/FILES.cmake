@@ -15,4 +15,5 @@ set(OCCT_BRepToolsExt_FILES
   BRepToolsExt_Operations.hxx
   BRepToolsExt_Properties.cxx
   BRepToolsExt_ShapeContainer.hxx
+  BRepToolsExt_Session.hxx
 )

@@ -50,7 +50,7 @@
 // with a weight, splines cut to the part an edge uses, and a projection with what is hidden
 // left out.
 
-namespace loft {
+namespace BRepExt {
 
 // Deform Curve in UVN: a curve that lies on or above a flat reference face is
 // carried to a target face. A point at (x, y) of the reference and h above it goes to the
@@ -98,7 +98,7 @@ EvolutionData deformCurveUVN(OcctKernel &kernel, uint32_t wireId, uint32_t refer
             std::vector<std::pair<double, int>> inner;
             double finest = to - from, last = from;
             for (int k = spans.Lower(); k <= spans.Upper(); ++k)
-                if (spans(k) > from + loft::tolerance::parameter * (to - from) && spans(k) < to - loft::tolerance::parameter * (to - from)) {
+                if (spans(k) > from + BRepExt::tolerance::parameter * (to - from) && spans(k) < to - BRepExt::tolerance::parameter * (to - from)) {
                     inner.push_back({spans(k), degree - 2});
                     finest = std::min(finest, spans(k) - last);
                     last = spans(k);
@@ -199,7 +199,7 @@ EvolutionData rebuildCurveWeighted(OcctKernel &kernel, uint32_t wireId, int degr
              "rebuild requires a wire, degree 1-9, degree+1 to 256 points and a weight above 0, at most 1");
     BRepAdaptor_CompCurve source(TopoDS::Wire(shape), true);
     const double first = source.FirstParameter(), last = source.LastParameter();
-    if (source.Value(first).Distance(source.Value(last)) <= loft::tolerance::exactLength)
+    if (source.Value(first).Distance(source.Value(last)) <= BRepExt::tolerance::exactLength)
         fail(op, unsupported_geometry,
              "weighted Explicit Control supports open curves only; use Refit or Points for a closed curve");
     const int spans = count - degree;
@@ -290,7 +290,7 @@ EvolutionData untrimCurve(OcctKernel &kernel, uint32_t wireId) {
             curve = Handle(Geom_TrimmedCurve)::DownCast(curve)->BasisCurve();
         const auto spline = Handle(Geom_BSplineCurve)::DownCast(curve);
         if (!spline.IsNull() && !spline->IsPeriodic() &&
-            (a > spline->FirstParameter() + loft::tolerance::parameter || b < spline->LastParameter() - loft::tolerance::parameter)) {
+            (a > spline->FirstParameter() + BRepExt::tolerance::parameter || b < spline->LastParameter() - BRepExt::tolerance::parameter)) {
             auto part = Handle(Geom_BSplineCurve)::DownCast(spline->Copy());
             part->Segment(a, b);
             TopoDS_Edge cut = BRepBuilderAPI_MakeEdge(part).Edge();
@@ -456,7 +456,7 @@ EvolutionData projectCurveVisible(OcctKernel &kernel, uint32_t wire, uint32_t bo
         const auto &curve = piece.curve;
         const double a = piece.a, b = piece.b;
         auto emit = [&](double from, double to) {
-            if (to - from <= loft::tolerance::parameterMerge * (b - a) || curve->Value(from).Distance(curve->Value((from + to) / 2)) <=
+            if (to - from <= BRepExt::tolerance::parameterMerge * (b - a) || curve->Value(from).Distance(curve->Value((from + to) / 2)) <=
                                                   Precision::Confusion())
                 return;
             BRepBuilderAPI_MakeEdge edge(curve, from, to);
@@ -466,7 +466,7 @@ EvolutionData projectCurveVisible(OcctKernel &kernel, uint32_t wire, uint32_t bo
         std::vector<double> stops = {a};
         std::sort(piece.cuts.begin(), piece.cuts.end());
         for (const double cut : piece.cuts)
-            if (cut - stops.back() > loft::tolerance::parameterMerge * (b - a) && b - cut > loft::tolerance::parameterMerge * (b - a))
+            if (cut - stops.back() > BRepExt::tolerance::parameterMerge * (b - a) && b - cut > BRepExt::tolerance::parameterMerge * (b - a))
                 stops.push_back(cut);
         stops.push_back(b);
         double from = a;
@@ -486,4 +486,4 @@ EvolutionData projectCurveVisible(OcctKernel &kernel, uint32_t wire, uint32_t bo
         fail(op, no_solution, "nothing of the projection is in sight of the curve");
     return stored(kernel, result);
 }
-} // namespace loft
+} // namespace BRepExt

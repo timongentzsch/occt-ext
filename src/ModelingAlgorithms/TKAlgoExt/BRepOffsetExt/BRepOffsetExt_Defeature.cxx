@@ -53,7 +53,7 @@
 
 #include <numeric>
 
-namespace loft {
+namespace BRepExt {
 
 namespace {
 
@@ -277,9 +277,9 @@ EvolutionData defeature(OcctKernel &kernel, uint32_t shapeId, const std::vector<
     // General nonplanar openings cannot be closed by this bounded path.
     TopoDS_Shape input = staged ? filled.shape : shape;
     std::vector<TopoDS_Shape> caps;
-    BRepBuilderAPI_Sewing sewing(loft::tolerance::sewing);
+    BRepBuilderAPI_Sewing sewing(BRepExt::tolerance::sewing);
     if (sheet) {
-        ShapeAnalysis_FreeBounds free(shape, loft::tolerance::sewing, false, true);
+        ShapeAnalysis_FreeBounds free(shape, BRepExt::tolerance::sewing, false, true);
         if (TopExp_Explorer(free.GetOpenWires(), TopAbs_EDGE).More())
             fail(op, unsupported_geometry, "shell has open boundary chains");
         sewing.Add(shape);
@@ -338,7 +338,7 @@ EvolutionData defeature(OcctKernel &kernel, uint32_t shapeId, const std::vector<
         for (const auto &f : maker.Modified(original))
             capFaces.Append(f);
     }
-    BRepBuilderAPI_Sewing open(loft::tolerance::sewing);
+    BRepBuilderAPI_Sewing open(BRepExt::tolerance::sewing);
     for (TopExp_Explorer it(maker.Shape(), TopAbs_FACE); it.More(); it.Next()) {
         bool temporary = false;
         for (const auto &cap : capFaces)
@@ -368,4 +368,4 @@ EvolutionData defeature(OcctKernel &kernel, uint32_t shapeId, const std::vector<
     return history.finish(store(kernel, open.SewedShape()));
 }
 
-} // namespace loft
+} // namespace BRepExt

@@ -4,7 +4,7 @@
 #include <GeomAlgoExt_Phase.hxx>
 #include <GeomAlgoExt_PatchFit.hxx>
 #include <GeomAlgoExt_Band.hxx>
-namespace loft { using GeomAlgoExt::Band; }
+namespace BRepExt { using GeomAlgoExt::Band; }
 #include <GeomAlgoExt_Failure.hxx>
 
 #include <BSplCLib.hxx>
@@ -19,7 +19,7 @@ namespace loft { using GeomAlgoExt::Band; }
 #include <map>
 
 #if !defined(__wasm_simd128__) || defined(OCCT_GEOMALGOEXT_SCALAR)
-namespace loft {
+namespace BRepExt {
 using GeomAlgoExt::v128_t;
 using GeomAlgoExt::wasm_f64x2_splat;
 using GeomAlgoExt::wasm_v128_load;
@@ -29,7 +29,7 @@ using GeomAlgoExt::wasm_f64x2_mul;
 }
 #endif
 
-namespace loft {
+namespace BRepExt {
 namespace {
 
 /// What is added to the diagonal of the scaled matrix, whose entries are one, when it does not
@@ -549,4 +549,4 @@ occ::handle<Geom_BSplineSurface> surfaceOf(const SplineNet &net) {
                                    net.degreeU, net.degreeV);
 }
 
-} // namespace loft
+} // namespace BRepExt

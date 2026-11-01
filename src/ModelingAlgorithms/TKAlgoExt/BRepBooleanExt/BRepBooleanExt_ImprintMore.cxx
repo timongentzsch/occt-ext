@@ -54,7 +54,7 @@
 // Isoparam (edges on a face of a solid or sheet along the U or V direction), and Imprint with its Normal method, with what is hidden left out,
 // and with its edges carried on to the edges of the face (Completion: Edge).
 
-namespace loft {
+namespace BRepExt {
 namespace {
 EvolutionData splitBy(const char *op, OcctKernel &kernel, const TopoDS_Shape &shape,
                       const NCollection_List<TopoDS_Shape> &tools, const std::vector<int> &hashes, int bound,
@@ -660,4 +660,4 @@ EvolutionData completeEdges(OcctKernel &kernel, uint32_t shapeId, const std::vec
     // ends of the edges as that was found.
     return splitBy(op, kernel, shape, tools, hashes, bound, fuzzy);
 }
-} // namespace loft
+} // namespace BRepExt

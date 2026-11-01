@@ -13,7 +13,7 @@
 
 #include <vector>
 
-namespace loft {
+namespace BRepExt {
 
 struct RoundFace {
     bool valid = false;
@@ -29,4 +29,4 @@ struct RoundFace {
 /// is tangent, to `tolerance`, along every edge it shares with exactly two neighbours, its supports.
 RoundFace recognizeRound(const TopoDS_Shape& shape, const TopoDS_Face& face, double tolerance);
 
-} // namespace loft
+} // namespace BRepExt

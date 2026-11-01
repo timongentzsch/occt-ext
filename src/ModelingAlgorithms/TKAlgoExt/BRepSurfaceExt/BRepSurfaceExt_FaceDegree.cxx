@@ -19,7 +19,7 @@
 #include <TopoDS.hxx>
 #include <cmath>
 
-namespace loft {
+namespace BRepExt {
 EvolutionData raiseFaceDegrees(OcctKernel& k,uint32_t id,const std::vector<uint32_t>& selected,
                                int du,int dv,double tolerance,const std::vector<int>& hashes,int bound) {
     const char* op="raiseFaceDegrees";
