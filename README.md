@@ -460,7 +460,7 @@ product). The scenes are the application's own fixtures.
 | | |
 | --- | --- |
 | ![Two crossing cylinders with the intersection rounded](dox/extensions/images/junction-crossed-cylinders.png) | ![A sphere on a box with the junction rounded](dox/extensions/images/junction-sphere-on-box.png) |
-| Two crossing cylinders (R10, R6) with their intersection curves rounded by 2.5: the blend follows a space curve where two curved surfaces meet. The image is of the embedding application's complete operation; the raw solver of this tree refuses this input (see the benchmark), and the application's route still delivers it. | A sphere (R14) standing on a box with the circular junction rounded by 6. Stock and this branch agree on the volume to 1e-8 of it. |
+| Two crossing cylinders (R10, R6) with their intersection curves rounded by 2.5: the blend follows a space curve where two curved surfaces meet. | A sphere (R14) standing on a box with the circular junction rounded by 6. Stock and this branch agree on the volume to 1e-8 of it. |
 
 Thirteen of the application's fifteen fill fixtures are delivered (the gallery draws all of them in
 `scripts/render-fork-gallery.ts`; two are refused on purpose, one because no surface has the curvature of
@@ -476,9 +476,7 @@ supported, not measurements; the numbers are in the benchmark above and in the t
 
 Known limits and what remains, stated without reference to any application:
 
-1. **Blend solver.** The raw solver refuses two crossing cylinders (R10 and R6) rounded along their intersection
-   with an internal OCCT exception, an input stock builds in 46 to 50 ms; the embedding application still delivers
-   it through its own route, and which part of that route builds it is not measured here. Some configurations where several blends meet are refused although a valid result exists:
+1. **Blend solver.** Some configurations where several blends meet are refused although a valid result exists:
    the trimming of a blend group needs an owner for every retained region and contact before chain ends are cut,
    and the centre path must be parametrised consistently by arc length along the marched curve, not by the edge's
    parameter. Steep dihedral angles (above about 75 degrees) and curvature-continuous sections at five-sided
