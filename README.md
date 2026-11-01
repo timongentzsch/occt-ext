@@ -714,3 +714,27 @@ These depend on TKMesh/TKGeomAlgo and the inherited Resolution header; they can
 be applied independently of the patch solver. There is no whole-fillet impact
 measurement here: construction remains in the application, and this source move
 is validated by identical linked production bytes rather than a new speed claim.
+
+### Surface differential jets
+
+`GeomAlgoExt_SurfaceJet` retains the production first and second derivatives,
+normal orientation, one-sided spline evaluation and curvature comparison. For
+J=[Su Sv], I=J^T J and IIij=n dot Sij, coefficients of an ambient tangent t
+are I^-1 J^T t. Thus II(a,b) is evaluated in parameter coordinates without
+assuming an orthonormal parametrization. The maximum absolute directional
+curvature difference of symmetric 2x2 D is |tr(D)/2|+hypot((D11-D22)/2,D12).
+One-sided U derivatives use adjacent distinct knots; V uses its containing span.
+Assumptions: regular differentials and compatible tangent planes for comparison.
+Inherited **unproven** cutoffs: det(I)<=1e-24, normal magnitude<1e-15 and
+curvature scale>1e-15. They are not a scale-invariant singularity theorem.
+The polynomial GTest has independent piecewise graph derivatives at C1 joins,
+including the V-span choice and reversed normals. This header needs TKGeomAlgo
+and Failure only, and can be applied independently. Production byte identity
+proves relocation adds no cost; whole surface-operation impact remains unmeasured.
+
+`GeomAlgoExt_FitDiagnostics` uses those jets to report fixed-parameter residuals
+and normal angles, signed projected Jacobian, and composite-trapezoid bending
+energy (||Suu||²+2||Suv||²+||Svv||² in normalized parameters, scaled by length²).
+The inherited 32x32 cell grid (1089 vertices), reference-area squared cutoff
+1e-24 and minimum initialization 1e100 are **unproven operational choices**.
+Sampling is not a global regularity or residual certificate. No fit policy changes.

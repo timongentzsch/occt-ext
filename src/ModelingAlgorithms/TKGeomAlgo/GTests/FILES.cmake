@@ -3,6 +3,7 @@ set(OCCT_TKGeomAlgo_GTests_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
 
 set(OCCT_TKGeomAlgo_GTests_FILES
   GeomAlgoExt_BlendFit_Test.cxx
+  GeomAlgoExt_SurfaceJet_Test.cxx
   GeomAlgoExt_SplineFit_Test.cxx
   Geom2dAPI_InterCurveCurve_Test.cxx
   Geom2dAPI_Interpolate_Test.cxx

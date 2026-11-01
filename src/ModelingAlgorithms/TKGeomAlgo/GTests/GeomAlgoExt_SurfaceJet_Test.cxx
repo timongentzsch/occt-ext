@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Timon Gentzsch
+// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+#include <GeomAlgoExt_SurfaceJet.hxx>
+#include <NCollection_Array1.hxx>
+#include <NCollection_Array2.hxx>
+#include <gtest/gtest.h>
+#include <cmath>
+
+// Piecewise quadratic graph with C1 joins: f''=2 on the left, 4 on the
+// right, h''=0 below and 2 above. A broad V span would extrapolate h''=0.
+TEST(GeomAlgoExtSurfaceJet, IndependentOneSidedPolynomialDerivatives) {
+  for(double scale : {.1,1.,10.}) {
+    NCollection_Array1<double> knots(1,3);knots(1)=0;knots(2)=.5;knots(3)=1;
+    NCollection_Array1<int> mult(1,3);mult(1)=3;mult(2)=1;mult(3)=3;
+    NCollection_Array2<gp_Pnt> poles(1,4,1,4);
+    const double coordinate[]={0,.25,.75,1};
+    const double f[]={0,0,.5,1.25},h[]={0,0,0,.25};
+    for(int i=1;i<=4;++i)for(int j=1;j<=4;++j)
+      poles(i,j)=gp_Pnt(scale*coordinate[i-1],scale*coordinate[j-1],scale*(f[i-1]+h[j-1]));
+    const Handle(Geom_BSplineSurface) surface=new Geom_BSplineSurface(poles,knots,knots,mult,mult,2,2);
+    for(int left : {1,2}) {
+      loft::SurfaceJet jet{"test",{},{},{},{},{},{},{}};
+      loft::surfaceD2OnUSpan(surface,.5,.75,left,left+1,jet);
+      jet.orient(false);
+      EXPECT_NEAR(jet.u.X(),scale,1e-12*scale);
+      EXPECT_NEAR(jet.u.Z(),scale,1e-12*scale);
+      EXPECT_NEAR(jet.v.Y(),scale,1e-12*scale);
+      EXPECT_NEAR(jet.v.Z(),.5*scale,1e-12*scale);
+      EXPECT_NEAR(jet.uu.Z(),(left==1?2:4)*scale,1e-12*scale);
+      EXPECT_NEAR(jet.vv.Z(),2*scale,1e-12*scale);
+      EXPECT_NEAR(jet.uv.Magnitude(),0,1e-12*scale);
+      // II(Su,Su) = n dot Suu for the independent graph normal (-1,-.5,1)/1.5.
+      EXPECT_NEAR(jet.curvature(jet.u,jet.u),(left==1?2:4)*scale/1.5,1e-11*scale);
+      jet.orient(true);
+      EXPECT_NEAR(jet.curvature(jet.v,jet.v),-2*scale/1.5,1e-11*scale);
+    }
+  }
+}

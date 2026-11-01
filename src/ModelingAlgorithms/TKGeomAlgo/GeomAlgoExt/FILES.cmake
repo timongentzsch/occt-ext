@@ -12,6 +12,9 @@ set(OCCT_GeomAlgoExt_FILES
   GeomAlgoExt_Failure.cxx
   GeomAlgoExt_Cancel.hxx
   GeomAlgoExt_Phase.hxx
+  GeomAlgoExt_FitDiagnostics.hxx
+  GeomAlgoExt_FitDiagnostics.cxx
+  GeomAlgoExt_SurfaceJet.hxx
   GeomAlgoExt_Resolution.hxx
   GeomAlgoExt_Coordinates.hxx
   GeomAlgoExt_Progress.hxx
