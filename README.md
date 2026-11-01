@@ -15,8 +15,9 @@ The native solver APIs below build and pass their independent tests. The app
 consumer retains its original tensor fitting, section refinement, patch charts,
 interior surveys, rim fitting and compaction implementations: their relocation
 boundaries did not establish nonincreasing CPU cost, including when implementation
-and adapter were compiled together with the original flags. Numerical/refusal
-comparisons passed before restoration. These APIs are prepared native modules,
+and adapter were compiled together with the original flags. The separately
+compiled extraction passed numerical/refusal comparisons; paired compilation
+was a CPU-only diagnostic. These APIs are prepared native modules,
 not a claim that those production algorithms have been fully transferred.
 The portable band header is evaluated separately from those solver boundaries.
 
