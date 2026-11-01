@@ -1,4 +1,6 @@
 {
+  "copyright": "Copyright (c) 2026 Timon Gentzsch",
+  "license": "LGPL-2.1-only WITH OCCT-exception-1.0",
   "base": "b8f597c677811d1f9f4d8a97f5ae2825c0353a42",
   "candidate": "58430e7900",
   "machine": "AMD Ryzen 9 7950X3D; GCC 12.2; Release -O3; TBB off; process CPU clock; shared host",
