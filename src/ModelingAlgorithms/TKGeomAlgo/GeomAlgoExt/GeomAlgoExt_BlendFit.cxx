@@ -113,11 +113,9 @@ bool BlendSectionFitter::Advance(int refinement) {
         }
       return r;
     };
-    // A G2 blend's normal curvature along each contact, against its support's
-    // along the feet: the fit is G2 to its supports only so far as its contact
-    // rows are, which the positions alone do not bound (beside a C1 knot where
-    // an edge's parameter kinks, they bend apart by 3e-4 / r within the length
-    // tolerance).
+    // Contact positions alone do not bound derivative or normal-curvature error,
+    // particularly across a support parameterization with limited continuity.
+    // Compare normal curvatures along the fitted contact and support explicitly.
     const auto alongBend = [&](double u, int side) {
       math_Matrix values(1, 3, 1, kDegree + 1);
       int firstIndex = 0;

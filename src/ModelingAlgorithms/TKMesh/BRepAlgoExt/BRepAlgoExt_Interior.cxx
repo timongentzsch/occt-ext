@@ -36,12 +36,8 @@ namespace BRepAlgoExt {
 namespace {
 /// The places a face is looked at, each way across its parameters.
 constexpr int grid = 40;
-/// How many times more tightly than its rim a patch may bend inside. A patch that fills a
-/// hole fairly bends about as its rim does (a cap of a ball exactly so; the corner between
-/// three rounds was measured at up to two and a half times, a hole whose rim is a little off
-/// its face at three and a half); the spikes and bulges that this is to catch bend seven to
-/// a hundred times more. Between the two, four is a judgement.
-// The bend ratio is supplied explicitly by the caller; no native default.
+// The maximum interior-to-rim bend ratio is caller-owned acceptance policy.
+// Finite curvature samples do not establish a supremum; there is no native default.
 // An inexpensive trim for choosing a second fitted net. The final acceptance still uses
 // the actual trim in interiorFault. Patch has one wire, but parity also handles inner wires.
 class SurveyTrim {
