@@ -14,6 +14,9 @@
 // rectangle.
 
 #include <GeomAlgoExt_Band.hxx>
+#include <BSplCLib.hxx>
+#include <NCollection_Array1.hxx>
+#include <math_Matrix.hxx>
 
 #include <Geom_BSplineSurface.hxx>
 #include <GeomAlgoExt_Execution.hxx>
@@ -41,6 +44,20 @@ struct SplineBasis {
     int first;
     double value[splineDerivatives + 1][splineOrder];
 };
+//! Status boundary for hot app adapters: no exception translation in the valid path.
+//! Preconditions and arithmetic are those of splineBasisAt; false means degenerate knots.
+inline bool splineBasisValues(const std::vector<double>& knots, int degree, double t, SplineBasis& basis) {
+    const NCollection_Array1<double> flat(knots.front(), 1, static_cast<int>(knots.size()));
+    math_Matrix values(1, splineDerivatives + 1, 1, degree + 1, 0.0);
+    basis = {};
+    if (BSplCLib::EvalBsplineBasis(std::min(splineDerivatives, degree), degree + 1, flat, t, basis.first, values))
+        return false;
+    basis.first -= 1;
+    for (int d = 0; d <= splineDerivatives; ++d)
+        for (int k = 0; k <= degree; ++k)
+            basis.value[d][k] = values(d + 1, k + 1);
+    return true;
+}
 Standard_EXPORT SplineBasis splineBasisAt(const char *operation, const std::vector<double> &knots, int degree, double t);
 
 /// One scalar condition at (u, v): the sum over `count` terms of

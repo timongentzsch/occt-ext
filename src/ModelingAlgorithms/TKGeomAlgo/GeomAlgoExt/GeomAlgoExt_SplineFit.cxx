@@ -57,15 +57,9 @@ struct Row {
 } // namespace
 
 SplineBasis splineBasisAt(const char *op, const std::vector<double> &knots, int degree, double t) {
-    const NCollection_Array1<double> flat(knots.front(), 1, static_cast<int>(knots.size()));
-    math_Matrix values(1, splineDerivatives + 1, 1, degree + 1, 0.0);
-    SplineBasis basis{};
-    if (BSplCLib::EvalBsplineBasis(std::min(splineDerivatives, degree), degree + 1, flat, t, basis.first, values))
+    SplineBasis basis;
+    if (!splineBasisValues(knots, degree, t, basis))
         fail(op, no_solution, "the patch's knots are degenerate");
-    basis.first -= 1;
-    for (int d = 0; d <= splineDerivatives; ++d)
-        for (int k = 0; k <= degree; ++k)
-            basis.value[d][k] = values(d + 1, k + 1);
     return basis;
 }
 
