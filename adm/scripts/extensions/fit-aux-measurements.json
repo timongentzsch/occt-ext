@@ -1,0 +1,139 @@
+{
+  "base": "b8f597c6",
+  "clock": "std::clock process CPU",
+  "warmups": 1,
+  "measurements": [
+    {
+      "case": "parallel-plane-rim",
+      "scale": 0.1,
+      "method": "GeomPlate-points",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.2105,
+      "cpuMinMs": 0.206,
+      "cpuMaxMs": 0.24,
+      "maxGridDistance": 8.500145032286355e-17
+    },
+    {
+      "case": "parallel-plane-rim",
+      "scale": 1,
+      "method": "GeomPlate-points",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.204,
+      "cpuMinMs": 0.202,
+      "cpuMaxMs": 0.326,
+      "maxGridDistance": 3.802513859341161e-15
+    },
+    {
+      "case": "parallel-plane-rim",
+      "scale": 10,
+      "method": "GeomPlate-points",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.3115,
+      "cpuMinMs": 0.217,
+      "cpuMaxMs": 0.321,
+      "maxGridDistance": 3.1086244689504383e-15
+    },
+    {
+      "case": "affine-knot-compaction",
+      "scale": 0.1,
+      "method": "RemoveUKnot-RemoveVKnot",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.0025,
+      "cpuMinMs": 0.002,
+      "cpuMaxMs": 0.003,
+      "maxGridDistance": 3.1031676915590914e-17
+    },
+    {
+      "case": "affine-knot-compaction",
+      "scale": 1,
+      "method": "RemoveUKnot-RemoveVKnot",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.0025,
+      "cpuMinMs": 0.002,
+      "cpuMaxMs": 0.003,
+      "maxGridDistance": 2.482534153247273e-16
+    },
+    {
+      "case": "affine-knot-compaction",
+      "scale": 10,
+      "method": "RemoveUKnot-RemoveVKnot",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.002,
+      "cpuMinMs": 0.002,
+      "cpuMaxMs": 0.003,
+      "maxGridDistance": 2.5121479338940403e-15
+    },
+    {
+      "case": "parallel-plane-rim",
+      "scale": 0.1,
+      "method": "RimFit",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.222,
+      "cpuMinMs": 0.217,
+      "cpuMaxMs": 0.229,
+      "maxGridDistance": 1.8884871322982777e-09
+    },
+    {
+      "case": "parallel-plane-rim",
+      "scale": 1,
+      "method": "RimFit",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.2175,
+      "cpuMinMs": 0.216,
+      "cpuMaxMs": 0.309,
+      "maxGridDistance": 1.8884871305635542e-08
+    },
+    {
+      "case": "parallel-plane-rim",
+      "scale": 10,
+      "method": "RimFit",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.215,
+      "cpuMinMs": 0.213,
+      "cpuMaxMs": 0.319,
+      "maxGridDistance": 1.8884871333391118e-07
+    },
+    {
+      "case": "affine-knot-compaction",
+      "scale": 0.1,
+      "method": "CertifiedCompaction",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 1.294,
+      "cpuMinMs": 1.283,
+      "cpuMaxMs": 1.313,
+      "maxGridDistance": 3.1031676915590914e-17
+    },
+    {
+      "case": "affine-knot-compaction",
+      "scale": 1,
+      "method": "CertifiedCompaction",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 1.289,
+      "cpuMinMs": 1.28,
+      "cpuMaxMs": 1.299,
+      "maxGridDistance": 3.1401849173675503e-16
+    },
+    {
+      "case": "affine-knot-compaction",
+      "scale": 10,
+      "method": "CertifiedCompaction",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 1.29,
+      "cpuMinMs": 1.272,
+      "cpuMaxMs": 2.335,
+      "maxGridDistance": 2.5121479338940403e-15
+    }
+  ]
+}

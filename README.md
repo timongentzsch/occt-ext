@@ -52,16 +52,16 @@ unequal topology work, **not an end-to-end fillet speedup**.
 
 | Scale | Stock whole-body CPU ms | Section-fit CPU ms | Stock circle distance | Fit circle/axial distance |
 | --- | ---: | ---: | ---: | ---: |
-| 0.1 | 0.3025 | 0.0130 | 2.776e-17 | 8.882e-16 |
-| 1 | 0.2950 | 0.0120 | 4.441e-16 | 1.066e-14 |
-| 10 | 0.2955 | 0.0120 | 3.553e-15 | 8.527e-14 |
+| 0.1 | 0.3025 | 0.0120 | 2.776e-17 | 8.882e-16 |
+| 1 | 0.2950 | 0.0110 | 4.441e-16 | 1.066e-14 |
+| 10 | 0.2955 | 0.0110 | 3.553e-15 | 8.527e-14 |
 
 Ten successes/zero refusals after one warmup per row; process CPU, GCC12.2 -O3,
 TBB off, Ryzen 9 7950X3D shared host. Stock is more accurate on these finite
 fixtures. Min/max values are in [blend-fit-measurements.json](adm/scripts/extensions/blend-fit-measurements.json).
-The timing run predates the split of the numerical step from the convenience loop;
-the independent native tests were repeated after that split. Integrated app CPU
-measurements, rather than this table, gate the behavior-preserving relocation.
+The independent native tests and timings were repeated after separating the numerical
+step from the convenience loop. Integrated app CPU measurements separately gate
+the behavior-preserving relocation.
 
 ## Boundary-first patch chart and interior survey
 
@@ -219,6 +219,34 @@ claim about general patches. Minima/maxima and boundary distances are in
 Native spline GTests pass 6/6. The band harness gives `27232afcfea55306` for all
 48 finite matrix configurations in native scalar, WASM SIMD and forced scalar
 WASM. That digest establishes these finite factor/solve comparisons only.
+
+### Rim and compaction reference work
+
+Run `adm/scripts/extensions/module-benchmark.sh fit-aux FORK_BUILD STOCK_BASE_BUILD`.
+The rim fixture fits a plane displaced by 0.125s using 81 points; stock GeomPlate
+receives the same points as G0 constraints. The quality oracle is distance to that
+plane on a separate 33x33 grid. The compaction fixture is an affine plane with
+inserted quarter knots; stock removes those knots directly, whereas the new
+operation additionally certifies a global displacement enclosure. These workloads
+are related, not identical. Setup and geometric surveys are outside the clock.
+
+| Scale 1 fixture | Stock CPU ms | New CPU ms | Stock/new max grid distance |
+| --- | ---: | ---: | --- |
+| parallel-plane rim | 0.2040 | 0.2175 | 3.80e-15 / 1.89e-8 |
+| affine knot compaction | 0.0025 | 1.2890 | 2.48e-16 / 3.14e-16 |
+
+Ten successes/zero refusals per row after one warmup, same CPU/compiler settings
+as above. The certified compactor is over 500 times slower on this small case;
+plain knot removal does not provide its interval certificate. Rim accuracy is
+worse than stock here. All three scales and extrema are in
+[fit-aux-measurements.json](adm/scripts/extensions/fit-aux-measurements.json).
+
+The native rim/compaction implementations are prepared for review but the app
+retains its original implementations: replacing its hot cancellation polling by
+an opaque OCCT progress check failed the zero-increase CPU gate. A frozen paired
+slope experiment measured +0.665 ns/check (one-sided 95% upper bound +0.806).
+This is a boundary performance limitation, not a numerical disagreement. Native
+clients may use these APIs; no claim is made that the app consumes them yet.
 
 ## Reproducing the native measurements
 

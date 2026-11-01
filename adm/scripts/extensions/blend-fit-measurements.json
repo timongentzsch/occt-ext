@@ -1,41 +1,8 @@
 {
   "base": "b8f597c6",
-  "candidate": "BlendFit initial extraction, retained arithmetic; native tests repeated after numerical-step separation",
+  "candidate": "a28ec1fd41 numerical-step API",
   "machine": "AMD Ryzen 9 7950X3D, GCC12.2 -O3, TBB off; CPU clock; one warmup ten samples",
   "measurements": [
-    {
-      "case": "quarter-cylinder-box-edge",
-      "scale": 0.1,
-      "method": "BlendSectionFit",
-      "samples": 10,
-      "refused": 0,
-      "cpuMedianMs": 0.013,
-      "cpuMinMs": 0.012,
-      "cpuMaxMs": 0.02,
-      "maxDefiningDistance": 8.881784197001252e-16
-    },
-    {
-      "case": "quarter-cylinder-box-edge",
-      "scale": 1,
-      "method": "BlendSectionFit",
-      "samples": 10,
-      "refused": 0,
-      "cpuMedianMs": 0.012,
-      "cpuMinMs": 0.011,
-      "cpuMaxMs": 0.022,
-      "maxDefiningDistance": 1.0658141036401503e-14
-    },
-    {
-      "case": "quarter-cylinder-box-edge",
-      "scale": 10,
-      "method": "BlendSectionFit",
-      "samples": 10,
-      "refused": 0,
-      "cpuMedianMs": 0.012,
-      "cpuMinMs": 0.011,
-      "cpuMaxMs": 0.013,
-      "maxDefiningDistance": 8.526512829121202e-14
-    },
     {
       "case": "quarter-cylinder-box-edge",
       "scale": 0.1,
@@ -68,6 +35,39 @@
       "cpuMinMs": 0.29,
       "cpuMaxMs": 0.3,
       "maxDefiningDistance": 3.552713678800501e-15
+    },
+    {
+      "case": "quarter-cylinder-box-edge",
+      "scale": 0.1,
+      "method": "BlendSectionFit",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.012,
+      "cpuMinMs": 0.011,
+      "cpuMaxMs": 0.023,
+      "maxDefiningDistance": 8.881784197001252e-16
+    },
+    {
+      "case": "quarter-cylinder-box-edge",
+      "scale": 1,
+      "method": "BlendSectionFit",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.011,
+      "cpuMinMs": 0.011,
+      "cpuMaxMs": 0.015,
+      "maxDefiningDistance": 1.0658141036401503e-14
+    },
+    {
+      "case": "quarter-cylinder-box-edge",
+      "scale": 10,
+      "method": "BlendSectionFit",
+      "samples": 10,
+      "refused": 0,
+      "cpuMedianMs": 0.011,
+      "cpuMinMs": 0.011,
+      "cpuMaxMs": 0.011,
+      "maxDefiningDistance": 8.526512829121202e-14
     }
   ]
 }
