@@ -785,3 +785,21 @@ existing topology dependencies. Their native tests use exact eccentric-hole
 moments, nested stored maxima and independent repeated reader normalization.
 These source moves add no operation or new numeric policy; stock whole-operation
 CPU/quality comparisons remain future work, not an inferred speedup.
+
+`BRepAlgoExt_Properties` owns the original adaptive boundary property core and
+analytic rectangular-face areas. The application includes this source inside its
+original translation unit, retaining visibility of its local helpers for host
+wrappers. Native CMake compiles the same file independently. The app's IDs and
+publication logic stay outside it. Areas integrate ||Su cross Sv||; signed
+volume integrates (p-origin) dot (Su cross Sv)/3. Rectangles of elementary
+surfaces use their analytic Jacobian integrals, excluding cone-apex crossings
+and spindle tori. Other paths retain their quadrature/fallback policy.
+The boundary quadrature is a numerical estimate, not a rigorous certificate.
+
+Property-core **unproven choices retained:** Gauss order 8; adaptive interval
+cutoff 1e-14; noise floors 1e-12 and 1e-14; area relative budget 1e-8;
+volume relative budget 1e-11 and floor 1e-24; relative volume noise 1e-13 and
+noise share 1e-3; inner/outer divisors 10 and 100; derivative cutoff 1e-18;
+stock area fallback tolerance 1e-9; adaptive depth 18 and two-million evaluations.
+Gauss nodes and weights derive from Legendre polynomial exactness, not empirical
+geometry data. The new sphere-rectangle oracle uses r² du (sin(v1)-sin(v0)).

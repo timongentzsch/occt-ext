@@ -3,6 +3,8 @@
 set(OCCT_BRepAlgoExt_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
 set(OCCT_BRepAlgoExt_FILES
   BRepAlgoExt_ReadBack.hxx
+  BRepAlgoExt_Properties.hxx
+  BRepAlgoExt_Properties.cxx
   BRepAlgoExt_ReadBack.cxx
   BRepAlgoExt_TrimDomain.hxx
   BRepAlgoExt_TrimDomain.cxx

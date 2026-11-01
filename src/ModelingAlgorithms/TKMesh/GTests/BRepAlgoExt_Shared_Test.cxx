@@ -55,3 +55,18 @@ TEST(BRepAlgoExtShared, DirectionReaderFixedPoints) {
     EXPECT_LT(gp_Vec(input).Crossed(gp_Vec(settled)).Magnitude(),1e-12);
   }
 }
+
+#include <BRepAlgoExt_Properties.hxx>
+#include <gp_Sphere.hxx>
+// Integral r^2 cos(v) du dv on a sphere rectangle; probes both closed-form
+// and adaptive paths without deriving expected values from another OCCT measure.
+TEST(BRepAlgoExtShared, SphereRectangleArea) {
+  for(double r : {.1,1.,10.}) {
+    const auto face=BRepBuilderAPI_MakeFace(gp_Sphere(gp_Ax3(),r),.2,1.3,-.4,.7).Face();
+    const double expected=r*r*1.1*(std::sin(.7)-std::sin(-.4));
+    EXPECT_NEAR(loft::faceArea(face),expected,1e-10*r*r);
+    bool converged=true;
+    EXPECT_NEAR(loft::faceMeasure(face,true,gp_Pnt(),&converged),expected,1e-8*r*r);
+    EXPECT_TRUE(converged);
+  }
+}

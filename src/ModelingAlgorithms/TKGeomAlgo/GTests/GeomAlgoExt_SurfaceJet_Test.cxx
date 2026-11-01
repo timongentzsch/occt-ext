@@ -36,3 +36,19 @@ TEST(GeomAlgoExtSurfaceJet, IndependentOneSidedPolynomialDerivatives) {
     }
   }
 }
+
+#include <GeomAlgoExt_PlanarCurve.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <gp_Pln.hxx>
+// z(t)=70 t^4(1-t)^4 has maximum 70/256. Its initial tenth is below .2.
+// This catches checking only endpoints, using control poles as exact extrema,
+// or bounding the untrimmed curve when a trimmed interval was requested.
+TEST(GeomAlgoExtSurfaceJet, TrimmedPolynomialPlaneSlab) {
+  NCollection_Array1<gp_Pnt> poles(1,9);
+  for(int i=1;i<=9;++i)poles(i)=gp_Pnt((i-1)/8.,0,i==5?1:0);
+  const Handle(Geom_BezierCurve) curve=new Geom_BezierCurve(poles);
+  const gp_Pln plane(gp::XOY());
+  EXPECT_NO_THROW(loft::requirePlanarCurve("test",curve,0,1,plane,.3));
+  EXPECT_THROW(loft::requirePlanarCurve("test",curve,0,1,plane,.2),loft::Failure);
+  EXPECT_NO_THROW(loft::requirePlanarCurve("test",curve,0,.1,plane,.2));
+}
