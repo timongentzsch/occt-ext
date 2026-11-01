@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Timon Gentzsch
 // SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
-#include <BRepAlgoExt_Chart.hxx>
+#include <BRepAlgoExt_PatchFlow.hxx>
 #include <BRepAlgoExt_Interior.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <gp_Pln.hxx>
@@ -13,7 +13,7 @@
 TEST(BRepAlgoExtPatch, PlanarChartIsometry) {
  for(double scale:{.1,1.,10.}) {
   const auto face=BRepBuilderAPI_MakeFace(gp_Pln(gp::XOY()),0,2*scale,0,scale).Face();
-  const auto chart=BRepAlgoExt::makeConformalChart(face,.2*scale,.01*scale,Precision::PConfusion(),nullptr);
+  const auto chart=loft::conformalChart(face,.2*scale,.01*scale);
   ASSERT_FALSE(chart.triangles.empty());
   for(int i=0;i<=8;++i)for(int j=0;j<=8;++j) {
    const gp_XY a(2*scale*i/8.,scale*j/8.);

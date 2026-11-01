@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Timon Gentzsch
 // SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 #ifndef OCCT_EXTENSION_STOCK_ONLY
-#include <BRepAlgoExt_Chart.hxx>
+#include <BRepAlgoExt_PatchFlow.hxx>
 #include <BRepAlgoExt_Interior.hxx>
 #endif
 #include <BRepBuilderAPI_MakeFace.hxx>
@@ -44,7 +44,7 @@ int main() {
     }else { BRepMesh_IncrementalMesh mesh(face,.01*scale,false,.5,false); }
 #else
     if(survey)bend=BRepAlgoExt::maximumInteriorCurvature(face,Precision::PConfusion());
-    else {auto c=BRepAlgoExt::makeConformalChart(face,.2*scale,.01*scale,Precision::PConfusion(),nullptr);out.point=std::move(c.point);out.flat=std::move(c.flat);out.triangles=std::move(c.triangles);}
+    else {auto c=loft::conformalChart(face,.2*scale,.01*scale);out.point=std::move(c.point);out.flat=std::move(c.flat);out.triangles=std::move(c.triangles);}
 #endif
     const double cpu=1000.*(std::clock()-start)/CLOCKS_PER_SEC;
     if(sample<0)continue;times.push_back(cpu);

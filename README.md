@@ -85,7 +85,7 @@ the behavior-preserving relocation.
 
 Package `BRepAlgoExt` uses existing toolkit `TKMesh`, because chart construction
 requires its Delaunay mesher; it also uses existing lower topology/geometry tools.
-`BRepAlgoExt_Chart` forms cotangent stiffness L, solves the interior equation
+`BRepAlgoExt_PatchFlow` forms cotangent stiffness L, solves the interior equation
 L_II u=K_I with zero boundary log scale, and obtains boundary turns from
 pi-angleSum-(Lu)_boundary. For directions t_i and original lengths l_i,
 minimize sum (delta l_i)^2/l_i subject to sum (l_i+delta l_i)t_i=0.

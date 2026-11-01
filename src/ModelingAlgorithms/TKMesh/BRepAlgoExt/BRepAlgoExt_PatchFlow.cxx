@@ -1,15 +1,10 @@
 // Copyright (c) 2026 Timon Gentzsch
-//
-// This file is part of Open CASCADE Technology software library.
-// This library is free software; you can redistribute it and/or modify it under
-// the terms of the GNU Lesser General Public License version 2.1 as published
-// by the Free Software Foundation, with special exception defined in the file
-// OCCT_LGPL_EXCEPTION.txt. Consult LICENSE_LGPL_21.txt for the complete license.
+// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
-#include <BRepAlgoExt_Chart.hxx>
-
-
-
+#include <BRepAlgoExt_PatchFlow.hxx>
+#include <GeomAlgoExt_Phase.hxx>
+#include <GeomAlgoExt_Failure.hxx>
+#include <GeomAlgoExt_Resolution.hxx>
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepMesh_DataStructureOfDelaun.hxx>
@@ -31,7 +26,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace BRepAlgoExt {
+namespace loft {
 namespace {
 constexpr const char *op = "patch";
 
@@ -96,7 +91,7 @@ void solve(const Laplacian &a, const std::vector<char> &fixed, const std::vector
                 for (size_t k = begin[i]; k < begin[i + 1]; ++k) q[i] -= free[k].second * p[free[k].first];
                 pq += p[i] * q[i];
             }
-        if (!(pq > 0)) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the conformal chart's equations are not positive definite");
+        if (!(pq > 0)) fail(op, no_solution, "the conformal chart's equations are not positive definite");
         const double step = rz / pq;
         double left = 0, next = 0;
         for (size_t i = 0; i < n; ++i)
@@ -112,15 +107,15 @@ void solve(const Laplacian &a, const std::vector<char> &fixed, const std::vector
             if (!fixed[i]) p[i] = z[i] + next / rz * p[i];
         rz = next;
     }
-    GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the conformal chart's equations do not converge");
+    fail(op, no_solution, "the conformal chart's equations do not converge");
 }
 
 double signedArea(const gp_XY &a, const gp_XY &b, const gp_XY &c) { return (b - a).Crossed(c - a) / 2; }
 
 } // namespace
 
-ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, double deflection, double parameterResolution, GeomAlgoExt::StageObserver observer) {
-    GeomAlgoExt::FitPhase phase(observer, "conformal-chart");
+ConformalChart conformalChart(const TopoDS_Face &face, double spacing, double deflection) {
+    PatchPhase phase("conformal-chart");
     ConformalChart chart;
     const occ::handle<Geom_Surface> surface = BRep_Tool::Surface(face);
     // The boundary in the face's parameters: each edge at even steps of its length in space.
@@ -131,13 +126,13 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
             const TopoDS_Edge &edge = it.Current();
             double first, last;
             const auto curve = BRep_Tool::CurveOnSurface(edge, face, first, last);
-            if (curve.IsNull()) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face to be flattened has an edge without a curve on it");
+            if (curve.IsNull()) fail(op, no_solution, "the face to be flattened has an edge without a curve on it");
             BRepAdaptor_Curve inSpace(edge);
             const double length = GCPnts_AbscissaPoint::Length(inSpace, first, last);
             const int steps = std::max(2, static_cast<int>(std::ceil(length / step)));
             GCPnts_UniformAbscissa even(inSpace, steps + 1, first, last);
             if (!even.IsDone() || even.NbPoints() != steps + 1)
-                GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face to be flattened has an edge that cannot be divided");
+                fail(op, no_solution, "the face to be flattened has an edge that cannot be divided");
             const bool reversed = edge.Orientation() == TopAbs_REVERSED;
             for (int k = 0; k < steps; ++k)
                 rim.push_back(curve->Value(even.Parameter(reversed ? steps + 1 - k : 1 + k)).XY());
@@ -177,7 +172,7 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
         for (double u = low.X(); u <= high.X(); u += spacing)
             for (double v = low.Y(); v <= high.Y(); v += spacing) {
                 if (!inside(gp_XY(u, v), 0)) continue;
-                GeomLProp_SLProps props(surface, u, v, 2, parameterResolution);
+                GeomLProp_SLProps props(surface, u, v, 2, loft::tolerance::parameterMerge);
                 if (props.IsCurvatureDefined())
                     bend = std::max({bend, std::abs(props.MaxCurvature()), std::abs(props.MinCurvature())});
             }
@@ -193,7 +188,7 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
         for (double u = from.X() + (row % 2) * spacing / 2; u < to.X(); u += spacing)
             if (const gp_XY p(u, from.Y() + row * rowStep); inside(p, spacing / 2)) nodes.push_back(p);
     if (static_cast<int>(nodes.size()) > mostNodes)
-        GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face to be flattened needs more nodes than the chart is given");
+        fail(op, no_solution, "the face to be flattened needs more nodes than the chart is given");
     // Constrained Delaunay in the face's parameters, with the boundary as its frontier.
     occ::handle<NCollection_IncAllocator> allocator = new NCollection_IncAllocator(IMeshData::MEMORY_BLOCK_SIZE_HUGE);
     occ::handle<BRepMesh_DataStructureOfDelaun> structure = new BRepMesh_DataStructureOfDelaun(allocator, static_cast<int>(nodes.size()));
@@ -213,7 +208,7 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
         std::array<int, 3> t{};
         for (int k = 0; k < 3; ++k) {
             const auto found = node.find(corner[k]);
-            if (found == node.end()) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face's triangulation has a node of its own");
+            if (found == node.end()) fail(op, no_solution, "the face's triangulation has a node of its own");
             t[k] = found->second;
         }
         chart.triangles.push_back(t);
@@ -235,7 +230,7 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
     // surface's own normal.
     for (auto &t : chart.triangles) {
         const double area = signedArea(chart.source[t[0]], chart.source[t[1]], chart.source[t[2]]);
-        if (!(std::abs(area) > 0)) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face's triangulation has a degenerate triangle");
+        if (!(std::abs(area) > 0)) fail(op, no_solution, "the face's triangulation has a degenerate triangle");
         if (area < 0) std::swap(t[1], t[2]);
     }
     const int n = static_cast<int>(chart.source.size());
@@ -249,21 +244,21 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
     for (const auto &[key, opposite] : directed) {
         const int a = static_cast<int>(key / n), b = static_cast<int>(key % n);
         if (directed.count(static_cast<long long>(b) * n + a)) continue;
-        if (next[a] >= 0) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face's triangulation is not one disc");
+        if (next[a] >= 0) fail(op, no_solution, "the face's triangulation is not one disc");
         next[a] = b;
         ++edges;
     }
-    if (!edges) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face's triangulation has no boundary");
+    if (!edges) fail(op, no_solution, "the face's triangulation has no boundary");
     const int first = static_cast<int>(std::find_if(next.begin(), next.end(), [](int k) { return k >= 0; }) - next.begin());
     for (int at = first;;) {
         chart.boundary.push_back(at);
         at = next[at];
         if (at < 0 || static_cast<int>(chart.boundary.size()) > edges)
-            GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face's triangulation is not one disc");
+            fail(op, no_solution, "the face's triangulation is not one disc");
         if (at == first) break;
     }
     if (static_cast<int>(chart.boundary.size()) != edges)
-        GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face's triangulation is not one disc");
+        fail(op, no_solution, "the face's triangulation is not one disc");
     std::vector<char> onBoundary(n, 0);
     for (int b : chart.boundary) onBoundary[b] = 1;
 
@@ -276,7 +271,7 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
             const int i = t[k], j = t[(k + 1) % 3], l = t[(k + 2) % 3];
             const gp_Vec a(chart.point[l], chart.point[i]), b(chart.point[l], chart.point[j]);
             const double cross = a.Crossed(b).Magnitude(), dot = a.Dot(b);
-            if (!(cross > 0)) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face's triangulation has a degenerate triangle in space");
+            if (!(cross > 0)) fail(op, no_solution, "the face's triangulation has a degenerate triangle in space");
             angles[l] += std::atan2(cross, dot);
             weight[static_cast<long long>(std::min(i, j)) * n + std::max(i, j)] += dot / cross / 2;
         }
@@ -288,7 +283,7 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
         laplacian.diagonal[j] += w;
     }
     for (int i = 0; i < n; ++i)
-        if (!(laplacian.diagonal[i] > 0)) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face's triangulation has a node of no weight");
+        if (!(laplacian.diagonal[i] > 0)) fail(op, no_solution, "the face's triangulation has a node of no weight");
 
     // The scale that takes the curvature out of the inside, nothing along the boundary; and
     // the boundary's turning that comes of it.
@@ -312,7 +307,7 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
         rx += length[k] * c; ry += length[k] * s;
     }
     const double det = gxx * gyy - gxy * gxy;
-    if (!(det > 0)) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the conformal chart's boundary cannot be closed");
+    if (!(det > 0)) fail(op, no_solution, "the conformal chart's boundary cannot be closed");
     const double lx = (gyy * rx - gxy * ry) / det, ly = (gxx * ry - gxy * rx) / det;
     std::vector<double> x(n, 0), y(n, 0);
     gp_XY at(0, 0);
@@ -321,7 +316,7 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
         x[chart.boundary[k]] = at.X();
         y[chart.boundary[k]] = at.Y();
         const double closed = length[k] * (1 - c * lx - s * ly);
-        if (!(closed > 0)) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the conformal chart's boundary cannot be closed");
+        if (!(closed > 0)) fail(op, no_solution, "the conformal chart's boundary cannot be closed");
         at += gp_XY(c, s) * closed;
     }
     // The inside follows harmonically: a conformal map's coordinates are harmonic.
@@ -335,7 +330,7 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
     double area = 0, sx = 0, sy = 0;
     for (const auto &t : chart.triangles) {
         const double a = signedArea(chart.flat[t[0]], chart.flat[t[1]], chart.flat[t[2]]);
-        if (!(a > 0)) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the conformal chart folds a triangle over");
+        if (!(a > 0)) fail(op, no_solution, "the conformal chart folds a triangle over");
         const gp_XY centre = (chart.flat[t[0]] + chart.flat[t[1]] + chart.flat[t[2]]) / 3;
         area += a; sx += a * centre.X(); sy += a * centre.Y();
     }
@@ -364,7 +359,7 @@ ConformalChart makeConformalChart(const TopoDS_Face &face, double spacing, doubl
     const int side = std::max(1, static_cast<int>(std::sqrt(chart.triangles.size() / 2.0)));
     chart.columns = chart.rows = side;
     chart.cell = gp_XY((high.X() - chart.low.X()) / side, (high.Y() - chart.low.Y()) / side);
-    if (!(chart.cell.X() > 0 && chart.cell.Y() > 0)) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "the face to be flattened has no extent");
+    if (!(chart.cell.X() > 0 && chart.cell.Y() > 0)) fail(op, no_solution, "the face to be flattened has no extent");
     chart.cells.assign(static_cast<size_t>(side) * side, {});
     const auto index = [&](double v, double low, double size) {
         return std::clamp(static_cast<int>(std::floor((v - low) / size)), 0, side - 1);
@@ -414,7 +409,7 @@ gp_XY ConformalChart::map(const gp_XY &uv) const {
         // Inside a triangle, or the nearest of those within a ring all round.
         if (found && (best == 0 || ring > 0)) break;
     }
-    if (!found) GeomAlgoExt::fail(op, GeomAlgoExt::no_solution, "a place lies off the conformal chart");
+    if (!found) fail(op, no_solution, "a place lies off the conformal chart");
     const auto &t = *found;
     const double whole = signedArea(source[t[0]], source[t[1]], source[t[2]]);
     return flat[t[0]] * (signedArea(uv, source[t[1]], source[t[2]]) / whole) +
@@ -422,4 +417,4 @@ gp_XY ConformalChart::map(const gp_XY &uv) const {
            flat[t[2]] * (signedArea(source[t[0]], source[t[1]], uv) / whole);
 }
 
-} // namespace BRepAlgoExt
+} // namespace loft
