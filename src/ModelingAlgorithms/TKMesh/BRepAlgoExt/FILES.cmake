@@ -17,4 +17,11 @@ set(OCCT_BRepAlgoExt_FILES
   BRepAlgoExt_PatchFlow.cxx
   BRepAlgoExt_Interior.hxx
   BRepAlgoExt_Interior.cxx
+  BRepAlgoExt_Geometry.hxx
+  BRepAlgoExt_Geometry.cxx
+  BRepAlgoExt_Cells.hxx
+  BRepAlgoExt_FaceBlend.hxx
+  BRepAlgoExt_FillHoles.hxx
+  BRepAlgoExt_RoundFace.hxx
+  BRepAlgoExt_PatchLoop.hxx
 )

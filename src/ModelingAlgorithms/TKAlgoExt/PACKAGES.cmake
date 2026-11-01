@@ -1,0 +1,1 @@
+set(OCCT_TKAlgoExt_LIST_OF_PACKAGES BRepBlendExt)

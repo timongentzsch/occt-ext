@@ -31,6 +31,8 @@ set(OCCT_GeomAlgoExt_FILES
   GeomAlgoExt_ParameterRectangle.hxx
   GeomAlgoExt_SurfaceBounds.hxx
   GeomAlgoExt_UniformKnots.hxx
+  GeomAlgoExt_ModelTolerance.hxx
+  GeomAlgoExt_Timing.hxx
 )
 
 # Native defaults must not resolve a WebAssembly host's imported hook symbols.
