@@ -442,9 +442,25 @@ product). The scenes are the application's own fixtures.
 | ![A five-sided fill between free-form faces](dox/extensions/images/mixed-freeform-5.png) | ![A fill at a corner of unequal, set-back rounds](dox/extensions/images/mixed-setback-unequal-rounds.png) |
 | A five-sided fill between free-form faces (`BRepPatchExt`; the neighbouring faces are the grey strips). | A fill at a corner of unequal, set-back rounds; the orange face joins the grey rounds smoothly. |
 
-![A fill between a plane, a cylinder and a sphere](dox/extensions/images/mixed-plane-cylinder-sphere.png)
+| | |
+| --- | --- |
+| ![A small round blended into large rounds](dox/extensions/images/fillet-reblend.png) | ![Three rounds meeting at a box corner](dox/extensions/images/fillet-three-edge-corner.png) |
+| Four small rounds on the uprights run into the four large rounds of the top face (rounds blended into existing rounds). | Three rounds of one radius meeting at a single corner. |
+| ![A fill at a corner of three unequal rounds](dox/extensions/images/mixed-unequal-rounds.png) | ![A fill between a plane, a cylinder and a sphere](dox/extensions/images/mixed-plane-cylinder-sphere.png) |
+| A fill at the corner of three rounds of different radii; the orange face is tangent to all three. | A fill whose boundary lies on a plane, a cylinder and a sphere. |
+| ![A three-sided free-form fill](dox/extensions/images/mixed-freeform-3.png) | ![A six-sided free-form fill](dox/extensions/images/mixed-freeform-6.png) |
+| A three-sided fill between free-form faces. | A six-sided fill between free-form faces. |
+| ![A four-sided fill between spline faces](dox/extensions/images/mixed-bspline-4.png) | ![A fill between a round and a flat face](dox/extensions/images/mixed-fillet-flat.png) |
+| A four-sided fill between spline faces. | A fill between a round and a flat face. |
 
-A fill whose boundary lies on a plane, a cylinder and a sphere. The images are illustrations of what is
+Thirteen of the application's fifteen fill fixtures are delivered (the gallery draws all of them in
+`scripts/render-fork-gallery.ts`; two are refused on purpose, one because no surface has the curvature of
+both neighbours and one because a four-sided loop has a singular corner). Larger assemblies are **not**
+supported yet: fills that must join a surface to later fills, networks of guide curves, fills bounded by open
+curves with branching guides, and curvature-continuous fills across more than two faces at once. They appear
+in the open work below, not in the images.
+
+ The images are illustrations of what is
 supported, not measurements; the numbers are in the benchmark above and in the tests.
 
 ### Open work
