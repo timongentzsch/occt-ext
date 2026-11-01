@@ -4,4 +4,5 @@ set(OCCT_TKMesh_LIST_OF_PACKAGES
   IMeshTools
   BRepMeshData
   BRepMesh
+  BRepAlgoExt
 )

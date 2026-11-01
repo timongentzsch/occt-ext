@@ -63,6 +63,73 @@ The timing run predates the split of the numerical step from the convenience loo
 the independent native tests were repeated after that split. Integrated app CPU
 measurements, rather than this table, gate the behavior-preserving relocation.
 
+## Boundary-first patch chart and interior survey
+
+Package `BRepAlgoExt` uses existing toolkit `TKMesh`, because chart construction
+requires its Delaunay mesher; it also uses existing lower topology/geometry tools.
+`BRepAlgoExt_Chart` forms cotangent stiffness L, solves the interior equation
+L_II u=K_I with zero boundary log scale, and obtains boundary turns from
+pi-angleSum-(Lu)_boundary. For directions t_i and original lengths l_i,
+minimize sum (delta l_i)^2/l_i subject to sum (l_i+delta l_i)t_i=0.
+Lagrange multipliers give delta l_i=-l_i t_i^T G^-1 sum l_j t_j,
+G=sum l_i t_i t_i^T, the implemented 2x2 closure. Harmonic x/y extension
+then solves the Dirichlet energy equations. This follows Rohan Sawhney and
+Keenan Crane (2017), [Boundary First Flattening](https://www.cs.cmu.edu/~kmcrane/Projects/BoundaryFirstFlattening/paper.pdf),
+read sections 3–5, especially equations 6, 14 and 20. Their section 4.4 distinguishes
+boundary interpolation from harmonic conjugation: this implementation uses
+interpolation, so **exact discrete conformality is not guaranteed**.
+
+Assumptions: finite regular surface, connected nondegenerate disc mesh, usable
+boundary and nonsingular closure, positive resulting edge lengths and triangle
+orientation. Cotangent Dirichlet systems are positive definite with fixed nonempty
+boundary under the usual finite-element assumptions; arbitrary inputs can refuse.
+The node cap, finite curvature survey and parameter-space lattice do **not** certify
+3D deflection or global injectivity. The chord estimate k*l²/8 is local asymptotic,
+not a proved global surface error bound. The chart may extrapolate off its mesh.
+
+`BRepAlgoExt_Interior` keeps the original sampled curvature, fold and knot-step
+surveys. Positive rational Bernstein weights put a boundary arc in its control
+hull; outside the control-hull tubes, replacing arcs with chords preserves parity
+under valid closed-wire/homotopy assumptions. Floating construction allowances
+are unproved. Ambiguous trim points use OCCT classification. The sampled interior
+maximum is **not** a curvature supremum. The caller supplies UV tolerance and the
+bend ratio; the inherited ratio four is a host acceptance heuristic, with no native
+default or theorem. The flat G2 limit is also still unproven and outside this package.
+
+Retained **unproven choices**: 32000 chart nodes; CG residual target 1e-13 and
+4n passes; minimum two edge subdivisions, half-spacing rim margin, and the
+sqrt(triangleCount/2) lookup-grid sizing. Triangular-lattice sqrt(3)/2 and
+sqrt(3)/4 are derived from equilateral geometry; cotangent 1/2 and triangle 1/2
+are derived energy/area factors. Interior surveys use 40,64,100,300 samples;
+Bezier tube goal 1e-4 span, squared-length cutoff 1e-24, recursion 12,
+1e-10 span/length guards, 1e-12 length/collinearity/derivative cutoffs,
+0.03 span exclusion and 1e-9 one-sided knot offset. These are inherited heuristics,
+not tolerances inferred from the paper. No value or arithmetic order changed.
+
+Native tests independently check planar pair distances and sphere curvature at
+three scales, plus the explicit ratio gate. Run
+`adm/scripts/extensions/module-benchmark.sh patch-chart FORK_BUILD STOCK_BASE_BUILD`
+after building static Release TKMesh in both revisions. A rectangle and quarter
+cylinder are the same surfaces/trims at scales 0.1,1,10. Stock provides meshing
+and scaled carrier UVs; it has no equivalent boundary-first chart operation here.
+That reference does less work and generates different meshes. The survey rows
+compare stock GeomLProp's same 40x40 curvature grid with the trim-aware interior
+survey. Geometry/angle checks are outside the process CPU clock.
+
+| Scale 1 fixture | Stock CPU ms | New CPU ms | Stock/new max cosine error | Stock/new nodes |
+| --- | ---: | ---: | --- | --- |
+| plane-chart | 0.0760 | 0.2770 | 0 / 5.54e-13 | 4 / 75 |
+| cylinder-chart | 0.1005 | 0.4510 | 0.000155 / 0.00222 | 18 / 101 |
+| plane-curvature-survey | 0.0830 | 0.0965 | 0 / 0 | 0 / 0 |
+| cylinder-curvature-survey | 0.1150 | 0.1555 | 0 / 0 | 0 / 0 |
+
+Ten successes/zero refusals per row, after one warmup; GCC12.2 -O3, TBB off,
+Ryzen 9 7950X3D shared machine. Trim-aware surveys are slower than the stock
+untrimmed grid; the chart can also be slower than meshing/carrier UV alone.
+This does not compare equivalent flattening solvers. All scales, extrema,
+relative edge distortions and curvature errors are in
+[patch-chart-measurements.json](adm/scripts/extensions/patch-chart-measurements.json).
+
 ## Constrained tensor-spline fitting and certified compaction
 
 `GeomAlgoExt_SplineFit`, `GeomAlgoExt_RimFit` and `GeomAlgoExt_CompactSurface`
