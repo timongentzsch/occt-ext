@@ -17,6 +17,7 @@
 #include <BndLib_Add2dCurve.hxx>
 #include <BndLib_Add3dCurve.hxx>
 #include <BndLib_AddSurface.hxx>
+#include <ElSLib.hxx>
 #include <Bnd_Box.hxx>
 #include <Bnd_Box2d.hxx>
 #include <Geom2d_BSplineCurve.hxx>
@@ -670,6 +671,65 @@ TEST(BndLibTest, Torus_LargeNegativeVParameter)
   EXPECT_GE(aXmax, 13. - Precision::Confusion()) << "Xmax should be at least R+r";
   EXPECT_LE(aYmin, -13. + Precision::Confusion()) << "Ymin should be at least -(R+r)";
   EXPECT_GE(aYmax, 13. - Precision::Confusion()) << "Ymax should be at least R+r";
+}
+
+TEST(BndLibTest, Torus_PatchBoxContainsTheSurface)
+{
+  // The section circle's arc between the sampled angles lies outside the polygon through the
+  // samples, so a box built from sampled section points alone misses surface points: up to
+  // r * (1 - cos(pi / 8)) outside for a tilted torus. Every surface point of a patch must be in
+  // its box, whatever the axis and the parameter ranges, including reversed and long V ranges.
+  const double aAxes[][3] = {{0., 0., 1.}, {1., 0., 0.}, {0.3, -0.5, 0.8}, {-1., 2., 0.5}};
+  const double aRanges[][4] = {{0., 2. * M_PI, 0., 2. * M_PI},
+                               {0.4, 1.9, 0.3, 1.1},
+                               {1., 5., -2.8, -1.5},
+                               {0., 3., 4.9, 3.1},
+                               {-2., 4., 0.1, 7.5}};
+  for (const auto& anAxis : aAxes)
+  {
+    for (const auto& aRange : aRanges)
+    {
+      const gp_Torus aTorus(gp_Ax3(gp_Pnt(1., -2., 3.), gp_Dir(anAxis[0], anAxis[1], anAxis[2])),
+                            9.,
+                            4.);
+      Bnd_Box        aBox;
+      BndLib::Add(aTorus, aRange[0], aRange[1], aRange[2], aRange[3], 0., aBox);
+      double aXmin, aYmin, aZmin, aXmax, aYmax, aZmax;
+      aBox.Get(aXmin, aYmin, aZmin, aXmax, aYmax, aZmax);
+      for (int i = 0; i <= 80; ++i)
+      {
+        for (int j = 0; j <= 80; ++j)
+        {
+          const gp_Pnt aPoint = ElSLib::Value(aRange[0] + (aRange[1] - aRange[0]) * i / 80.,
+                                              aRange[2] + (aRange[3] - aRange[2]) * j / 80.,
+                                              aTorus);
+          EXPECT_GE(aPoint.X(), aXmin - 1.e-9);
+          EXPECT_LE(aPoint.X(), aXmax + 1.e-9);
+          EXPECT_GE(aPoint.Y(), aYmin - 1.e-9);
+          EXPECT_LE(aPoint.Y(), aYmax + 1.e-9);
+          EXPECT_GE(aPoint.Z(), aZmin - 1.e-9);
+          EXPECT_LE(aPoint.Z(), aZmax + 1.e-9);
+        }
+      }
+    }
+  }
+}
+
+TEST(BndLibTest, Torus_InnerHalfStaysInsideTheCentreCircle)
+{
+  // On V in [pi/2, 3*pi/2] the distance from the axis, R + r*cos(v), is at most R: the box of the
+  // inner half must not reach the outer equator. A circle about the axis is boxed by the
+  // circumscribed octagon, so the bound is R / cos(pi / 8), not R.
+  gp_Torus aTorus(gp_Ax3(gp_Pnt(0., 0., 0.), gp_Dir(0., 0., 1.)), 10., 3.);
+  Bnd_Box  aBox;
+  BndLib::Add(aTorus, 0., 2. * M_PI, M_PI / 2., 3. * M_PI / 2., 0., aBox);
+  double aXmin, aYmin, aZmin, aXmax, aYmax, aZmax;
+  aBox.Get(aXmin, aYmin, aZmin, aXmax, aYmax, aZmax);
+  const double aReach = 10. / std::cos(M_PI / 8.) + Precision::Confusion();
+  EXPECT_LE(aXmax, aReach);
+  EXPECT_GE(aXmin, -aReach);
+  EXPECT_NEAR(aZmin, -3., Precision::Confusion());
+  EXPECT_NEAR(aZmax, 3., Precision::Confusion());
 }
 
 TEST(BndLibTest, Torus_Translated)

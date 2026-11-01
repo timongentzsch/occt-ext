@@ -1546,28 +1546,8 @@ void BndLib::Add(const gp_Torus& S,
                  const double    Tol,
                  Bnd_Box&        B)
 {
-
-  int Fi1;
-  int Fi2;
-  if (VMax < VMin)
-  {
-    Fi1 = static_cast<int>(std::floor(VMax / (M_PI / 4.)));
-    Fi2 = static_cast<int>(std::floor(VMin / (M_PI / 4.)));
-  }
-  else
-  {
-    Fi1 = static_cast<int>(std::floor(VMin / (M_PI / 4.)));
-    Fi2 = static_cast<int>(std::floor(VMax / (M_PI / 4.)));
-  }
-  Fi2++;
-
   const double Ra = S.MajorRadius();
   const double Ri = S.MinorRadius();
-
-  if (Fi2 < Fi1)
-  {
-    return;
-  }
 
   if (Ra < Ri)
   {
@@ -1582,28 +1562,35 @@ void BndLib::Add(const gp_Torus& S,
   const gp_Pnt aXd(S.XAxis().Direction().XYZ());
   const gp_Pnt aYd(S.YAxis().Direction().XYZ());
 
-  // Multipliers for torus cross-section points at 45-degree intervals.
-  // radiusMult[i]: multiplier for Ri in radius calculation (Ra + Ri * radiusMult[i])
-  // zMult[i]: multiplier for Ri in Z offset calculation (Ri * zMult[i])
-  // THE_COS_PI4 = cos(45 deg) = sin(45 deg) = 0.707...
-  constexpr double aRadiusMult[8] =
-    {1., THE_COS_PI4, 0., -THE_COS_PI4, -1., -THE_COS_PI4, 0., THE_COS_PI4};
-  constexpr double aZMult[8] =
-    {0., THE_COS_PI4, 1., THE_COS_PI4, 0., -THE_COS_PI4, -1., -THE_COS_PI4};
+  // The patch is the rotation about the axis, through [UMin, UMax], of the arc [aVLo, aVHi] of the
+  // section circle (radius Ri about the point at distance Ra from the axis). That arc lies in the
+  // convex hull of its end points and, for each sub-arc of at most 45 degrees, of the point where
+  // the tangents at the sub-arc's ends meet: on the bisector, at Ri / cos(step / 2) from the centre
+  // of the section. A linear functional on the rotation of a convex set is largest at a vertex of
+  // the set, so the box of the patch is contained in the union of the boxes of the arcs that these
+  // points trace. Points of the section circle taken every 45 degrees instead lie inside the circle
+  // and leave its arcs between them outside the box, by up to Ri * (1 - cos(pi / 8)).
+  const double aVLo    = std::min(VMin, VMax);
+  const double aVHi    = std::max(VMin, VMax);
+  const double aSpan   = std::min(aVHi - aVLo, 2. * M_PI);
+  const int    aNbArcs = std::max(1, static_cast<int>(std::ceil(aSpan / (M_PI / 4.))));
+  const double aStep   = aSpan / aNbArcs;
 
-  // Lambda to add torus cross-section point by index (0-7).
-  const auto addTorusPoint = [&](int theIdx) {
-    const double aRadius = Ra + Ri * aRadiusMult[theIdx];
-    const gp_Pnt aCenter(aLocXYZ + (Ri * aZMult[theIdx]) * aZDir);
+  // The arc that the section point at angle theV and distance theDistance from the section's centre
+  // traces about the axis. A negative radius is the same arc turned by pi, which Compute handles.
+  const auto addSectionPoint = [&](const double theV, const double theDistance) {
+    const double aRadius = Ra + theDistance * std::cos(theV);
+    const gp_Pnt aCenter(aLocXYZ + (theDistance * std::sin(theV)) * aZDir);
     Compute(UMin, UMax, aRadius, aRadius, aXd, aYd, aCenter, B);
   };
-
-  // Add points from Fi1 to Fi2, handling wrap-around for indices.
-  // Use ((i % 8) + 8) % 8 to handle negative indices correctly
-  // (C++ modulo can return negative values for negative dividends).
-  for (int i = Fi1; i <= Fi2; ++i)
+  for (int i = 0; i <= aNbArcs; ++i)
   {
-    addTorusPoint(((i % 8) + 8) % 8);
+    addSectionPoint(aVLo + i * aStep, Ri);
+  }
+  const double aTangentDistance = Ri / std::cos(aStep / 2.);
+  for (int i = 0; i < aNbArcs; ++i)
+  {
+    addSectionPoint(aVLo + (i + 0.5) * aStep, aTangentDistance);
   }
 
   B.Enlarge(Tol);
