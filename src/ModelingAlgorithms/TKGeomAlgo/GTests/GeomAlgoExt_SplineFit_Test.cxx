@@ -136,7 +136,7 @@ TEST(GeomAlgoExtSplineFit, NestedNativeProgressRestoresCancellation) {
   {
    loft::ProgressScope outer(stop->Start());
    {
-    loft::ProgressScope inner({});
+    loft::ProgressScope inner(Message_ProgressRange{});
     auto input=make(height);
     auto reduced=loft::compactPatchSurface("nested",input,Precision::Confusion());
     ASSERT_TRUE(reduced.has_value());
