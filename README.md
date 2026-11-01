@@ -20,12 +20,19 @@ The old prepared fit/rim/compaction implementations were deleted, and their
 independent polynomial/plane/certificate tests were ported. Namespace and symbol
 names are intentionally preserved during this source relocation.
 
-Production consumption still requires the pilot release-identity gate. Later
-section-fitting, chart and interior APIs remain prepared implementations until
-their own production sources replace them. The portable band header was already
-consumed with identical release WASM and JS in the preceding same-build control.
-The full patch/fillet operations have not moved; the component benchmarks below
-are not whole-operation impact measurements or evidence of completed extraction.
+The original fit/rim/compaction, chart, contour, prism, differential-jet,
+fit-diagnostic, planar-curve, trim-domain, read-back and stored-tolerance sources
+are now consumed by the application. The face-property numerical core is included
+in its original translation unit; application handles remain in its wrapper.
+The source map preserves object order. Release byte comparisons are recorded in
+the application migration report, not inferred from native compilation.
+Section-fitting and interior APIs below remain prepared implementations without
+production consumers. They must be replaced by original sources before they count
+as migrated algorithms; their historical benchmarks do not prove delivered cost.
+The full patch/fillet operations have not moved. This is a large contribution
+that should be upstreamed in pieces: independent fixes first, then portable
+interval/Bernstein utilities, pure fitting kernels, and only then topology solvers.
+Exception adaptation and explicit tolerance/section policy remain later work.
 
 ## Exact-section blend fitting
 
@@ -82,6 +89,11 @@ step from the convenience loop. Integrated app CPU measurements separately gate
 the behavior-preserving relocation.
 
 ## Boundary-first patch chart and interior survey
+
+The chart now uses the original production source. The interior API remains a
+prepared duplicate; the ratio-four policy and production interior survey still
+live in the application. The table below is historical component evidence, not
+a remeasurement of the relocated production code.
 
 Package `BRepAlgoExt` uses existing toolkit `TKMesh`, because chart construction
 requires its Delaunay mesher; it also uses existing lower topology/geometry tools.

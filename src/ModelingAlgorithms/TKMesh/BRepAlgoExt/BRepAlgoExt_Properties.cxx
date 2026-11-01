@@ -288,7 +288,7 @@ double faceMeasureBracket(const TopoDS_Face& face, const gp_Pnt& origin) {
 
 namespace {
 
-double measure(const TopoDS_Shape& shape, bool surface, bool* converged=nullptr) {
+[[maybe_unused]] double measure(const TopoDS_Shape& shape, bool surface, bool* converged=nullptr) {
     if(converged) *converged=true;
     Bnd_Box box; BRepBndLib::Add(shape,box,false);
     if(box.IsVoid()) return 0;
