@@ -1,0 +1,17 @@
+operation | input | who | ok/runs | CPU median [min, max] ms | quality
+fillet   | plate, hole r=1, round r=0.20      | stock     | 10/10 |     0.781 [    0.774,     0.854] | V 15993.660469884111 (expected 15993.660469884111), |dV| 0.000e+00
+fillet   | plate, hole r=1, round r=0.20      | extension | 10/10 |     1.122 [    1.102,     1.153] | V 15993.660469884111 (expected 15993.660469884111), |dV| 0.000e+00
+fillet   | plate, hole r=1, round r=0.50      | stock     | 10/10 |     0.776 [    0.762,     0.950] | V 15993.342070721732 (expected 15993.342070721732), |dV| 0.000e+00
+fillet   | plate, hole r=1, round r=0.50      | extension | 10/10 |     1.075 [    1.067,     1.101] | V 15993.342070721732 (expected 15993.342070721732), |dV| 0.000e+00
+patch    | cubic quad, a=0.50                 | stock     | 10/10 |     2.998 [    2.823,     3.221] | off surface: interior 1.073e-01, sides 3.590e-04
+patch    | cubic quad, a=0.50                 | extension | 10/10 |     2.502 [    2.480,     2.565] | off surface: interior 6.859e-13, sides 6.859e-13
+patch    | cubic quad, a=2.00                 | stock     | 10/10 |    13.332 [   13.293,    13.432] | off surface: interior 4.499e-01, sides 1.016e-02
+patch    | cubic quad, a=2.00                 | extension | 10/10 |     1.921 [    1.915,     1.934] | off surface: interior 1.622e-12, sides 2.305e-12
+hollow   | box, round r=3.0, wall t=2.0       | stock     | 10/10 |     2.908 [    2.890,     2.919] | valid, |dV| 3.288e+04
+hollow   | box, round r=3.0, wall t=2.0       | extension | 10/10 |     7.406 [    7.334,     7.468] | valid, |dV| 3.638e-12
+hollow   | box, round r=3.0, wall t=4.0       | stock     | 10/10 |     2.439 [    2.423,     2.461] | INVALID, |dV| 3.533e+04
+hollow   | box, round r=3.0, wall t=4.0       | extension | 10/10 |     8.485 [    8.462,     8.511] | valid, |dV| 0.000e+00
+offset   | rectangle, outward d=2.0           | stock     | 10/10 |     0.137 [    0.136,     0.147] | |dL| 2.842e-14
+offset   | rectangle, outward d=2.0           | extension | 10/10 |     0.226 [    0.222,     0.234] | |dL| 2.842e-14
+offset   | rectangle, outward d=10.0          | stock     | 10/10 |     0.135 [    0.134,     0.137] | |dL| 0.000e+00
+offset   | rectangle, outward d=10.0          | extension | 10/10 |     0.228 [    0.225,     0.238] | |dL| 0.000e+00

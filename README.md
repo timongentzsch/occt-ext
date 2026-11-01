@@ -388,7 +388,93 @@ skin validity checks.
 
 ### Whole-operation comparison with stock OCCT
 
-BENCH_TABLE
+![CPU time per call, stock OCCT against this branch](dox/extensions/operation-benchmark.svg)
+
+Median process CPU time of ten runs after one warm-up (`std::clock`), one thread, GCC 12.2 `-O3`,
+static Release libraries, TBB off, AMD Ryzen 9 7950X3D. The complete output with minima and maxima is
+[operation-benchmark-results.txt](adm/scripts/extensions/operation-benchmark-results.txt); rerun it with
+`adm/scripts/extensions/operation-benchmark.sh NATIVE_BUILD_DIRECTORY` and redraw the chart with
+`operation-chart.py`. Every input has a closed-form answer, so the quality column is an error against
+mathematics, not against another program. Hatched bars are calls that returned no valid result or a wrong one.
+
+| Operation | Input | Stock CPU ms | Branch CPU ms | Stock quality | Branch quality |
+| --- | --- | ---: | ---: | --- | --- |
+| Fillet | plate, hole r=1, round r=0.2 | 0.78 | 1.12 | volume equals the Pappus closed form | same |
+| Fillet | plate, hole r=1, round r=0.5 | 0.78 | 1.08 | same | same |
+| Fill | four cubic sides, a=0.5 | 3.00 | 2.50 | 0.107 off the defining surface inside, 3.6e-4 on the sides | 6.9e-13 inside and on the sides |
+| Fill | four cubic sides, a=2.0 | 13.33 | 1.92 | 0.450 inside, 1.0e-2 on the sides | 1.6e-12 inside, 2.3e-12 on the sides |
+| Hollow | filleted box, wall 2 | 2.91 | 7.41 | valid, volume wrong by 3.3e4 | valid, volume error 3.6e-12 |
+| Hollow | filleted box, wall 4 (wall > round) | 2.44 | 8.49 | invalid solid | valid, volume exact |
+| Curve offset | rectangle, d=2 and d=10 | 0.14 | 0.23 | length error 3e-14 | same |
+
+How to read it, without flattering it:
+
+* **Fillet.** The constant-radius round of one circular edge is 1.4 times slower than `BRepFilletAPI_MakeFillet`
+  and equally exact. Nothing in the extension makes this case better; it is the cost of a general solver
+  (marching, section fit, attachment) on a case the stock algorithm handles in closed form. The extension is
+  for the cases stock refuses or gets wrong (variable radius, tangent chains, curved supports, corners), which
+  this single easy row does not cover. Tests for those are open work.
+* **Fill.** The input is one analytic cubic surface cut to its four sides. The extension reproduces it to
+  rounding because its four-sided construction contains cubic data; stock `BRepFill_Filling` minimises a plate
+  energy and moves away from the defining surface by 0.1 to 0.45 at a size of 1. That is a property of the
+  inputs (polynomial, four sides); it is not evidence about general loops.
+* **Hollow.** Stock `BRepOffsetAPI_MakeThickSolid` has no closed-hollow mode; the closest call, with no face to
+  open, returns a shape whose volume is not that of a hollow body. The comparison therefore measures a call that
+  does a different job, and the extension's 2.5 to 3.5 times higher CPU time is the price of classifying and removing
+  vanishing faces before offsetting.
+* **Offset.** Both give exact lengths; the extension's extra 0.09 ms is its scale normalisation (see
+  BRepCurveExt).
+
+A rigorous claim of speedups or quality on general inputs needs a corpus rather than eight rows; the corpus used
+for development belongs to the application and cannot be redistributed with this tree.
+
+
+### Gallery
+
+Results of the operations above, rendered from the meshes of the application that embeds this tree
+(`scripts/render-fork-gallery.ts` there draws them with three.js; no part of the images comes from another
+product). The scenes are the application's own fixtures.
+
+| | |
+| --- | --- |
+| ![Box with every edge rounded](dox/extensions/images/fillet-corners.png) | ![Rounded body hollowed to a wall, cut open](dox/extensions/images/hollow-cutaway.png) |
+| Twelve edge blends meeting at eight corners (`BRepBlendExt`, `BRepFilletExt`). | The same body hollowed to a wall of 2 and cut in half (`BRepOffsetExt`). |
+| ![A five-sided fill between free-form faces](dox/extensions/images/mixed-freeform-5.png) | ![A fill at a corner of unequal, set-back rounds](dox/extensions/images/mixed-setback-unequal-rounds.png) |
+| A five-sided fill between free-form faces (`BRepPatchExt`; the neighbouring faces are the grey strips). | A fill at a corner of unequal, set-back rounds; the orange face joins the grey rounds smoothly. |
+
+![A fill between a plane, a cylinder and a sphere](dox/extensions/images/mixed-plane-cylinder-sphere.png)
+
+A fill whose boundary lies on a plane, a cylinder and a sphere. The images are illustrations of what is
+supported, not measurements; the numbers are in the benchmark above and in the tests.
+
+### Open work
+
+Known limits and what remains, stated without reference to any application:
+
+1. **Blend solver.** Some configurations where several blends meet are refused although a valid result exists:
+   the trimming of a blend group needs an owner for every retained region and contact before chain ends are cut,
+   and the centre path must be parametrised consistently by arc length along the marched curve, not by the edge's
+   parameter. Steep dihedral angles (above about 75 degrees) and curvature-continuous sections at five-sided
+   corners are also refused.
+2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published bound for a
+   curvature-continuous conic or quintic section as a function of the support's curvature is missing.
+3. **Fill.** The interior acceptance gate and the flat-support curvature limit have no derivation. The fit's
+   stopping decisions depend on rounding and therefore weakly on pose (sampled, not bounded). Fills through three profiles with
+   curvature continuity can miss the curvature-share limit. Open boundaries need a host-supplied
+   chaining routine (`BRepPatchExt_Side.hxx`).
+4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
+   offsetting solids whose blends meet the wall thickness exactly has no exactness proof.
+5. **Speed.** Constant-radius fillets are 1.4 times slower than stock and closed hollows 2.5 to 3.5 times (table
+   above). The extra cost is in marching, section fitting and certification passes; none has been optimised for
+   the easy case, and skinning has not been compared with stock at all.
+6. **Tests.** Native tests exist for the utilities, the chart, the fit and five whole operations. Most of
+   `TKAlgoExt` is exercised only through the embedding application's tests; closed-form native tests are
+   needed for each package before an upstream proposal.
+7. **Conventions.** The packages use free functions in namespace `BRepExt`, a host seam and `std::runtime_error`
+   failures. OCCT style would be classes with `IsDone`/`Shape`, `Standard_Failure` and `Message_ProgressRange`.
+   That is a behaviour-changing refactor and is deferred to review.
+8. **Provenance.** Four routines that were written against the observed behaviour of other software and two
+   Patch routines are deliberately not in this tree.
 
 ## Applying modules separately
 

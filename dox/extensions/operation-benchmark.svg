@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="432" viewBox="0 0 980 432" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#d98a8a"/><line x1="0" y1="0" x2="0" y2="6" stroke="#8b1a1a" stroke-width="2"/></pattern></defs>
+<rect width="980" height="432" fill="#ffffff"/>
+<text x="330" y="22" font-size="14" font-weight="bold">CPU time per call, median of ten runs (ms, lower is better)</text>
+<rect x="680" y="10" width="12" height="12" fill="#6b7a8f"/><text x="696" y="21">stock OCCT</text>
+<rect x="780" y="10" width="12" height="12" fill="#2f8f5b"/><text x="796" y="21">this branch</text>
+<rect x="880" y="10" width="12" height="12" fill="url(#hatch)"/><text x="896" y="21">no valid result</text>
+<text x="320" y="64" text-anchor="end">fillet: plate, hole r=1, round r=0.20</text>
+<rect x="330" y="44" width="51.5" height="14" fill="#6b7a8f"/>
+<text x="387.5" y="55">0.78</text>
+<rect x="330" y="60" width="74.1" height="14" fill="#2f8f5b"/>
+<text x="410.1" y="71">1.12</text>
+<text x="320" y="122" text-anchor="end">fillet: plate, hole r=1, round r=0.50</text>
+<rect x="330" y="102" width="51.2" height="14" fill="#6b7a8f"/>
+<text x="387.2" y="113">0.78</text>
+<rect x="330" y="118" width="70.9" height="14" fill="#2f8f5b"/>
+<text x="406.9" y="129">1.07</text>
+<text x="320" y="180" text-anchor="end">hollow: box, round r=3.0, wall t=2.0</text>
+<rect x="330" y="160" width="191.9" height="14" fill="#6b7a8f"/>
+<text x="527.9" y="171">2.91</text>
+<rect x="330" y="176" width="488.8" height="14" fill="#2f8f5b"/>
+<text x="824.8" y="187">7.41</text>
+<text x="320" y="238" text-anchor="end">hollow: box, round r=3.0, wall t=4.0</text>
+<rect x="330" y="218" width="161.0" height="14" fill="url(#hatch)"/>
+<text x="497.0" y="229">2.44</text>
+<rect x="330" y="234" width="560.0" height="14" fill="#2f8f5b"/>
+<text x="896.0" y="245">8.48</text>
+<text x="320" y="296" text-anchor="end">offset: rectangle, outward d=2.0</text>
+<rect x="330" y="276" width="9.0" height="14" fill="#6b7a8f"/>
+<text x="345.0" y="287">0.14</text>
+<rect x="330" y="292" width="14.9" height="14" fill="#2f8f5b"/>
+<text x="350.9" y="303">0.23</text>
+<text x="320" y="354" text-anchor="end">offset: rectangle, outward d=10.0</text>
+<rect x="330" y="334" width="8.9" height="14" fill="#6b7a8f"/>
+<text x="344.9" y="345">0.14</text>
+<rect x="330" y="350" width="15.0" height="14" fill="#2f8f5b"/>
+<text x="351.0" y="361">0.23</text>
+</svg>
