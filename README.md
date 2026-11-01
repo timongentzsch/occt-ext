@@ -749,3 +749,39 @@ algorithm, with no new sampling count or constant. Its guarantee assumes OCCT's
 bound encloses the curve. Unsupported extrema retain stock behavior.
 This header depends only on TKGeomAlgo and Failure; whole curve editing entry
 points remain application-owned. Relocation itself adds no work.
+
+### Trim integration, read-back and stored tolerance surveys
+
+`BRepAlgoExt_TrimDomain` partitions rational boundary arcs into v-monotone
+pieces. For Y/W, v' has numerator Y'W-YW'; Bernstein hull subdivision isolates
+its zeros. Horizontal crossings define trimmed intervals, integrated with
+embedded Gauss 7/Kronrod 15 rules for area and first moments. Volume uses
+the divergence identity V=(1/3) integral (p-origin) dot n dA. Near square-root
+end behavior, v=lo+width*sin²(t) regularizes the endpoint.
+Assumptions: readable valid trim, regular finite carrier and usable positive
+weights for convex-hull reasoning. Classification can refuse Unknown. The
+embedded difference is an error estimate, **not a rigorous enclosure**.
+The nodes/weights match the primary QUADPACK `dqk15` routine by Robert Piessens
+and Elise de Doncker (1980, revised 1983), read at
+https://netlib.org/quadpack/dqk15.f (table computed by L. W. Fullerton, 1981).
+Its affine rule is used; its separate resasc/machine-error estimator is not.
+Bernstein identities use de Boor [3]; these are not a proof of the stopping policy.
+**Unproven choices retained:** station merge and horizontal-piece cutoff 1e-13;
+relative root floor 1e-14; root depth 42; boundary-box depth 40; classifier
+1e-12; crossing residual 1e-15, parameter width 1e-16 and 100 iterations;
+quadrature depth 18, two-million call budget, relative budgets 1e-8(area) and
+1e-11(volume), split 0.1 inner/0.9 outer; scale floor 1e-300.
+
+`BRepAlgoExt_ReadBack` retains geometry normalization and trimming removal.
+It searches for fixed points of the stock reader's normalization, preserving
+unchanged input geometry in `settleNew`. Its 8 normalization iterations,
+8-ULP coordinate search, 256 frame rotations at 1e-13 radians, and 8 conic
+settling iterations are **unproven search limits**. Existence and global error
+bounds are not claimed; fallback remains unchanged.
+`BRepAlgoExt_Tolerance` returns stored vertex/edge/face tolerances, then their
+maximum over the shape; containers have zero and nonfinite values map to infinity.
+It introduces no document tolerance or floor. All three depend on TKMesh's
+existing topology dependencies. Their native tests use exact eccentric-hole
+moments, nested stored maxima and independent repeated reader normalization.
+These source moves add no operation or new numeric policy; stock whole-operation
+CPU/quality comparisons remain future work, not an inferred speedup.
