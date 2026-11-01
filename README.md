@@ -497,11 +497,12 @@ remains a heuristic.
 
 ## Finite mathematical utilities
 
-The package consists of header-only helpers. It depends on OCCT and the C++
-standard library only. It neither reports application errors nor owns an
-application journal. These bounded local utilities have no long-running solver
-loop needing a progress range. Extraction of larger solvers, including their
-failure and cancellation contracts, remains outside this package.
+The originally extracted utility subset consists of header-only helpers using
+OCCT and the C++ standard library. These helpers neither report application
+errors nor own an application journal. Their bounded local calculations have no
+long-running solver loop needing a progress range. The larger solver modules
+described above have separate native failure and progress contracts; their
+application integration remains subject to the stated boundary gates.
 
 * `GeomAlgoExt_Bernstein.hxx`: for Bernstein basis `B_i^n`,
   `B_i^n B_j^m = binom(n,i) binom(m,j) / binom(n+m,i+j) B_(i+j)^(n+m)`.
