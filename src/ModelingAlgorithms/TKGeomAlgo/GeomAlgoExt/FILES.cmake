@@ -14,7 +14,6 @@ set(OCCT_GeomAlgoExt_FILES
   GeomAlgoExt_Phase.hxx
   GeomAlgoExt_Coordinates.hxx
   GeomAlgoExt_Progress.hxx
-  GeomAlgoExt_Progress.cxx
   GeomAlgoExt_BlendFit.hxx
   GeomAlgoExt_BlendFit.cxx
   GeomAlgoExt_Band.hxx
@@ -28,3 +27,9 @@ set(OCCT_GeomAlgoExt_FILES
   GeomAlgoExt_SurfaceBounds.hxx
   GeomAlgoExt_UniformKnots.hxx
 )
+
+# Native defaults must not resolve a WebAssembly host's imported hook symbols.
+# WebAssembly applications supply their own direct cancellation/observer hooks.
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+  list(APPEND OCCT_GeomAlgoExt_FILES GeomAlgoExt_Progress.cxx)
+endif()
