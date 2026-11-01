@@ -19,8 +19,12 @@ and adapter were compiled together with the original flags. The separately
 compiled extraction passed numerical/refusal comparisons; paired compilation
 was a CPU-only diagnostic. These APIs are prepared native modules,
 not a claim that those production algorithms have been fully transferred.
-The portable band header has finite bit-parity evidence, but its app consumer
-also remains original pending a complete zero-overhead integration proof.
+The portable band header is consumed through a thin app alias: migrated and
+original consumers produce identical WASM and JS in the same build. Removing
+the six new solver implementation objects also leaves that release unchanged.
+This proves no added runtime code for the band move. The four function bodies
+differing from an older cached release persist in that control; their rebuild
+drift is unresolved and is not attributed to this header.
 
 ## Exact-section blend fitting
 
