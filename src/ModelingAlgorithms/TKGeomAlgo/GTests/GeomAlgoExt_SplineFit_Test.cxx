@@ -122,3 +122,29 @@ TEST(GeomAlgoExtSplineFit, CompactCancellationEscapesOptionalFailureCatch) {
  for(int i=0;i<=8;++i)for(int j=0;j<=8;++j)
   EXPECT_LE(surface->Value(i/8.,j/8.).Distance(gp_Pnt(i/8.,j/8.,0)),Precision::Confusion());
 }
+
+// A leaked or unrestored thread-local progress range either cancels the inner
+// certificate or lets the outer cancelled call complete. Exercise real proposals.
+TEST(GeomAlgoExtSplineFit, NestedNativeProgressRestoresCancellation) {
+ for (double height : {-.125, 0., .25}) {
+  const auto make=[](double z) {
+   auto result=loft::surfaceOf(planeNet(z));
+   result->InsertUKnot(.5,1,Precision::PConfusion());
+   return result;
+  };
+  Handle(Message_ProgressIndicator) stop=new StopIndicator;
+  {
+   loft::ProgressScope outer(stop->Start());
+   {
+    loft::ProgressScope inner({});
+    auto input=make(height);
+    auto reduced=loft::compactPatchSurface("nested",input,Precision::Confusion());
+    ASSERT_TRUE(reduced.has_value());
+    for(int i=0;i<=16;++i)for(int j=0;j<=16;++j)
+     EXPECT_LE(reduced->surface->Value(i/16.,j/16.).Distance(input->Value(i/16.,j/16.)),reduced->displacement);
+   }
+   EXPECT_THROW(loft::compactPatchSurface("outer",make(height),Precision::Confusion()),loft::Failure);
+  }
+  EXPECT_NO_THROW(loft::compactPatchSurface("restored",make(height),Precision::Confusion()));
+ }
+}
