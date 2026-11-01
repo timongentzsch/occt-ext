@@ -738,3 +738,14 @@ energy (||Suu||²+2||Suv||²+||Svv||² in normalized parameters, scaled by lengt
 The inherited 32x32 cell grid (1089 vertices), reference-area squared cutoff
 1e-24 and minimum initialization 1e100 are **unproven operational choices**.
 Sampling is not a global regularity or residual certificate. No fit policy changes.
+
+### Planar curve containment
+
+`GeomAlgoExt_PlanarCurve` transforms the trimmed curve into the supplied plane
+frame and asks OCCT's optimal curve bound for [zmin,zmax]. The test
+max(|zmin|,|zmax|)<=tolerance is necessary and sufficient for this bound to lie
+in the tolerance slab. It uses the caller's tolerance and stock OCCT's extrema
+algorithm, with no new sampling count or constant. Its guarantee assumes OCCT's
+bound encloses the curve. Unsupported extrema retain stock behavior.
+This header depends only on TKGeomAlgo and Failure; whole curve editing entry
+points remain application-owned. Relocation itself adds no work.

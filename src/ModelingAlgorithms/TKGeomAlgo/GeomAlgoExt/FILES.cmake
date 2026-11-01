@@ -14,6 +14,7 @@ set(OCCT_GeomAlgoExt_FILES
   GeomAlgoExt_Phase.hxx
   GeomAlgoExt_FitDiagnostics.hxx
   GeomAlgoExt_FitDiagnostics.cxx
+  GeomAlgoExt_PlanarCurve.hxx
   GeomAlgoExt_SurfaceJet.hxx
   GeomAlgoExt_Resolution.hxx
   GeomAlgoExt_Coordinates.hxx
