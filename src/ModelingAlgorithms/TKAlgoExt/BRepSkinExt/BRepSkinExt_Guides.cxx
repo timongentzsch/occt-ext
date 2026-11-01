@@ -252,7 +252,7 @@ TopoDS_Face guidedSum(OcctKernel &kernel, const char *op, const std::vector<uint
 
 EvolutionData skinGuides(OcctKernel &kernel, const std::vector<uint32_t> &edges, uint32_t firstFace,
                          uint32_t lastFace, int firstOrder, int lastOrder, double tolerance) {
-    const char *op = "loftGuides";
+    const char *op = "skinGuides";
     if (edges.size() < 4 || firstOrder < 0 || firstOrder > 2 || lastOrder < 0 || lastOrder > 2 ||
         !std::isfinite(tolerance) || tolerance <= 0)
         fail(op, invalid_input, "at least two profiles, two guides and G0-G2 end constraints are required");
@@ -290,11 +290,11 @@ EvolutionData skinGuides(OcctKernel &kernel, const std::vector<uint32_t> &edges,
     }
     fill.Build();
     if (!fill.IsDone() || fill.G0Error() > tolerance || !BRepCheck_Analyzer(fill.Shape()).IsValid())
-        fail(op, no_solution, "guided loft did not meet its boundary tolerance");
+        fail(op, no_solution, "guided skin did not meet its boundary tolerance");
     if ((firstOrder > 0 || lastOrder > 0) && fill.G1Error() > 1e-4)
-        fail(op, no_solution, "guided loft did not meet G1");
+        fail(op, no_solution, "guided skin did not meet G1");
     if ((firstOrder > 1 || lastOrder > 1) && fill.G2Error() > 1e-3)
-        fail(op, no_solution, "guided loft did not meet G2: " + std::to_string(fill.G2Error()));
+        fail(op, no_solution, "guided skin did not meet G2: " + std::to_string(fill.G2Error()));
     return stored(kernel, fill.Shape());
 }
 } // namespace BRepExt
@@ -304,7 +304,7 @@ EvolutionData skinGuides(OcctKernel &kernel, const std::vector<uint32_t> &edges,
 #include <NCollection_Array2.hxx>
 namespace BRepExt {
 EvolutionData skinPeriodic(OcctKernel &kernel,const std::vector<uint32_t> &ids,double tolerance) {
-    const char *op="loftPeriodic";
+    const char *op="skinPeriodic";
     if(ids.size()<3 || !std::isfinite(tolerance) || tolerance<=0)
         fail(op,invalid_input,"at least three sections and positive tolerance required");
     constexpr int samples=65;
@@ -315,7 +315,7 @@ EvolutionData skinPeriodic(OcctKernel &kernel,const std::vector<uint32_t> &ids,d
         TopExp_Explorer it(shape,TopAbs_EDGE);
         if(!it.More()) fail(op,invalid_input,"empty profile");
         auto edge=TopoDS::Edge(it.Current());it.Next();
-        if(it.More() || edge.Closed()) fail(op,unsupported_geometry,"periodic loft requires single open-edge sections");
+        if(it.More() || edge.Closed()) fail(op,unsupported_geometry,"periodic skin requires single open-edge sections");
         BRepAdaptor_Curve curve(edge);
         double a=curve.FirstParameter(),b=curve.LastParameter();
         if(edge.Orientation()==TopAbs_REVERSED) std::swap(a,b);
@@ -343,7 +343,7 @@ EvolutionData skinPeriodic(OcctKernel &kernel,const std::vector<uint32_t> &ids,d
             const double f=double(j)/(2*samples-2);
             const auto expected=curve.Value(a+(b-a)*f);
             if(expected.Distance(surface->Value(u0+(u1-u0)*i/ids.size(),v0+(v1-v0)*f))>tolerance)
-                fail(op,no_solution,"periodic loft misses a section between samples; rebuild or simplify the section");
+                fail(op,no_solution,"periodic skin misses a section between samples; rebuild or simplify the section");
         }
     }
     auto face=BRepBuilderAPI_MakeFace(surface,tolerance).Face();

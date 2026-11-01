@@ -75,7 +75,7 @@
 
 namespace BRepExt {
 namespace {
-const char *op = "loftGordon";
+const char *op = "skinGordon";
 
 // One curve for an edge or for a wire of edges that run on from each other.
 Handle(Geom_BSplineCurve) curveOf(const TopoDS_Shape &shape, double tolerance) {
@@ -857,17 +857,17 @@ EvolutionData skinGordon(OcctKernel &kernel, const std::vector<uint32_t> &profil
         sewing.Perform();
         TopExp_Explorer shell(sewing.SewedShape(), TopAbs_SHELL);
         if (!shell.More() || !BRep_Tool::IsClosed(shell.Current()))
-            fail(op, no_solution, "the loft and its two ends do not close into a solid");
+            fail(op, no_solution, "the skin and its two ends do not close into a solid");
         BRepBuilderAPI_MakeSolid made(TopoDS::Shell(shell.Current()));
         if (!made.IsDone())
-            fail(op, no_solution, "the loft and its two ends do not close into a solid");
+            fail(op, no_solution, "the skin and its two ends do not close into a solid");
         TopoDS_Solid body = made.Solid();
         BRepLib::OrientClosedSolid(body);
         result = body;
     }
     // A check of the topology only: that the surface does not fold is established above.
     if (!BRepCheck_Analyzer(result).IsValid())
-        fail(op, no_solution, "the loft through the net is not a valid body");
+        fail(op, no_solution, "the skin through the net is not a valid body");
     return stored(kernel, result);
 }
 // A skin through open profiles along guides that cross them anywhere. Each guide is put at one parameter across the
@@ -890,7 +890,7 @@ EvolutionData skinGuided(OcctKernel &kernel, const std::vector<uint32_t> &profil
     for (const auto *curves : {&profiles, &guides})
         for (const auto &c : *curves)
             if (closedCurve(c, tolerance))
-                fail(op, invalid_input, "this loft is of open profiles along open guides");
+                fail(op, invalid_input, "this skin is of open profiles along open guides");
     std::vector<std::vector<Crossing>> at(np, std::vector<Crossing>(ng));
     auto meet = [&]() {
         for (size_t i = 0; i < np; ++i)
@@ -1109,7 +1109,7 @@ EvolutionData skinGuided(OcctKernel &kernel, const std::vector<uint32_t> &profil
     if (!face.IsDone())
         fail(op, no_solution, "the surface through the net could not be made a face");
     if (!BRepCheck_Analyzer(face.Face()).IsValid())
-        fail(op, no_solution, "the loft through the net is not a valid body");
+        fail(op, no_solution, "the skin through the net is not a valid body");
     return stored(kernel, face.Face());
 }
 
@@ -1229,7 +1229,7 @@ namespace {
 /// Null where a section with weights that differ has a corner along an edge: not made again by
 /// length, those stay with OpenCascade's skinning.
 TopoDS_Shape skin(const std::vector<TopoDS_Wire> &given, const gp_Pnt *start, const gp_Pnt *end, bool solid) {
-    const char *const skinOp = "loft";
+    const char *const skinOp = "skin";
     const double resolution = 1e-6; // BRepOffsetAPI_ThruSections' default, what it sews and caps to
     NCollection_Sequence<TopoDS_Shape> sections;
     for (const auto &wire : given)
@@ -1377,7 +1377,7 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire> &given, const gp_Pnt *start, co
         return shell;
     BRepBuilderAPI_MakeSolid made(shell);
     if (!made.IsDone())
-        fail(skinOp, no_solution, "the loft and its ends do not close into a solid");
+        fail(skinOp, no_solution, "the skin and its ends do not close into a solid");
     TopoDS_Solid body = made.Solid();
     BRepLib::OrientClosedSolid(body);
     return body;
@@ -1409,7 +1409,7 @@ EvolutionData skinThrough(OcctKernel &kernel, const std::vector<uint32_t> &ids, 
         maker.AddVertex(TopoDS::Vertex(get(kernel, endVertex)));
     maker.Build();
     if (!maker.IsDone())
-        fail("loft", no_solution, "operation failed");
+        fail("skin", no_solution, "operation failed");
     return stored(kernel, maker.Shape());
 }
 } // namespace BRepExt
