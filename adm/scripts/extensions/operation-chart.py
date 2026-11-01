@@ -7,6 +7,7 @@
     operation-chart.py results.txt dox/extensions/operation-benchmark.svg
 
 One group per input; two bars, stock and extension, of the median CPU time over ten runs.
+"stock, then its result checked" adds the BRepCheck pass that the branch performs on every result.
 A bar is hatched and labelled when the result is refused or invalid, since its time then
 measures a call that did not do the work.
 """
@@ -15,6 +16,7 @@ import sys
 from xml.sax.saxutils import escape
 
 rows = []
+BARS = (("stock", "#6b7a8f"), ("stock+check", "#c9a227"), ("extension", "#2f8f5b"))
 for line in open(sys.argv[1], encoding="utf-8"):
     parts = [p.strip() for p in line.split("|")]
     if len(parts) < 7 or parts[0] in ("operation", ""):
@@ -35,7 +37,7 @@ for label, who, median, flagged in rows:
     groups[-1][1][who] = (median, flagged)
 
 W, left, bar, gap, top = 980, 330, 16, 26, 44
-H = top + len(groups) * (2 * bar + gap) + 40
+H = top + len(groups) * (3 * bar + gap) + 40
 peak = max(m for _, g in groups for m, _ in g.values())
 scale = (W - left - 90) / peak
 out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" font-family="Helvetica, Arial, sans-serif" font-size="12">',
@@ -43,12 +45,13 @@ out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBo
        f'<rect width="{W}" height="{H}" fill="#ffffff"/>',
        f'<text x="{left}" y="22" font-size="14" font-weight="bold">CPU time per call, median of ten runs (ms, lower is better)</text>',
        f'<rect x="{W-300}" y="10" width="12" height="12" fill="#6b7a8f"/><text x="{W-284}" y="21">stock OCCT</text>',
+       f'<rect x="{W-420}" y="10" width="12" height="12" fill="#c9a227"/><text x="{W-404}" y="21">stock, then its result checked</text>',
        f'<rect x="{W-200}" y="10" width="12" height="12" fill="#2f8f5b"/><text x="{W-184}" y="21">this branch</text>',
        f'<rect x="{W-100}" y="10" width="12" height="12" fill="url(#hatch)"/><text x="{W-84}" y="21">no valid result</text>']
 y = top
 for label, g in groups:
     out.append(f'<text x="{left-10}" y="{y + bar + 4}" text-anchor="end">{escape(label)}</text>')
-    for k, (who, color) in enumerate((("stock", "#6b7a8f"), ("extension", "#2f8f5b"))):
+    for k, (who, color) in enumerate(BARS):
         if who not in g:
             continue
         median, flagged = g[who]
@@ -57,6 +60,6 @@ for label, g in groups:
         yy = y + k * bar
         out.append(f'<rect x="{left}" y="{yy}" width="{width:.1f}" height="{bar-2}" fill="{fill}"/>')
         out.append(f'<text x="{left + width + 6:.1f}" y="{yy + bar - 5}">{median:.2f}</text>')
-    y += 2 * bar + gap
+    y += 3 * bar + gap
 out.append('</svg>')
 open(sys.argv[2], "w", encoding="utf-8").write("\n".join(out) + "\n")

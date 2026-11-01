@@ -1,17 +1,43 @@
 operation | input | who | ok/runs | CPU median [min, max] ms | quality
-fillet   | plate, hole r=1, round r=0.20      | stock     | 10/10 |     0.781 [    0.774,     0.854] | V 15993.660469884111 (expected 15993.660469884111), |dV| 0.000e+00
-fillet   | plate, hole r=1, round r=0.20      | extension | 10/10 |     1.122 [    1.102,     1.153] | V 15993.660469884111 (expected 15993.660469884111), |dV| 0.000e+00
-fillet   | plate, hole r=1, round r=0.50      | stock     | 10/10 |     0.776 [    0.762,     0.950] | V 15993.342070721732 (expected 15993.342070721732), |dV| 0.000e+00
-fillet   | plate, hole r=1, round r=0.50      | extension | 10/10 |     1.075 [    1.067,     1.101] | V 15993.342070721732 (expected 15993.342070721732), |dV| 0.000e+00
-patch    | cubic quad, a=0.50                 | stock     | 10/10 |     2.998 [    2.823,     3.221] | off surface: interior 1.073e-01, sides 3.590e-04
-patch    | cubic quad, a=0.50                 | extension | 10/10 |     2.502 [    2.480,     2.565] | off surface: interior 6.859e-13, sides 6.859e-13
-patch    | cubic quad, a=2.00                 | stock     | 10/10 |    13.332 [   13.293,    13.432] | off surface: interior 4.499e-01, sides 1.016e-02
-patch    | cubic quad, a=2.00                 | extension | 10/10 |     1.921 [    1.915,     1.934] | off surface: interior 1.622e-12, sides 2.305e-12
-hollow   | box, round r=3.0, wall t=2.0       | stock     | 10/10 |     2.908 [    2.890,     2.919] | valid, |dV| 3.288e+04
-hollow   | box, round r=3.0, wall t=2.0       | extension | 10/10 |     7.406 [    7.334,     7.468] | valid, |dV| 3.638e-12
-hollow   | box, round r=3.0, wall t=4.0       | stock     | 10/10 |     2.439 [    2.423,     2.461] | INVALID, |dV| 3.533e+04
-hollow   | box, round r=3.0, wall t=4.0       | extension | 10/10 |     8.485 [    8.462,     8.511] | valid, |dV| 0.000e+00
-offset   | rectangle, outward d=2.0           | stock     | 10/10 |     0.137 [    0.136,     0.147] | |dL| 2.842e-14
-offset   | rectangle, outward d=2.0           | extension | 10/10 |     0.226 [    0.222,     0.234] | |dL| 2.842e-14
-offset   | rectangle, outward d=10.0          | stock     | 10/10 |     0.135 [    0.134,     0.137] | |dL| 0.000e+00
-offset   | rectangle, outward d=10.0          | extension | 10/10 |     0.228 [    0.225,     0.238] | |dL| 0.000e+00
+fillet   | plate, hole r=1, round r=0.20      | stock     | 10/10 |     0.283 [    0.256,     0.379] | V 15993.660469884107 (expected 15993.660469884111), |dV| 3.638e-12
+fillet   | plate, hole r=1, round r=0.20      | stock+check | 10/10 |     0.578 [    0.571,     0.589] | V 15993.660469884107 (expected 15993.660469884111), |dV| 3.638e-12
+fillet   | plate, hole r=1, round r=0.20      | extension | 10/10 |     0.752 [    0.596,     0.966] | V 15993.660469884107 (expected 15993.660469884111), |dV| 3.638e-12
+fillet   | plate, hole r=1, round r=0.50      | stock     | 10/10 |     0.301 [    0.260,     0.442] | V 15993.342070721726 (expected 15993.342070721732), |dV| 5.457e-12
+fillet   | plate, hole r=1, round r=0.50      | stock+check | 10/10 |     0.586 [    0.573,     0.594] | V 15993.342070721726 (expected 15993.342070721732), |dV| 5.457e-12
+fillet   | plate, hole r=1, round r=0.50      | extension | 10/10 |     0.892 [    0.622,     1.112] | V 15993.342070721726 (expected 15993.342070721732), |dV| 5.457e-12
+patch    | cubic quad, a=0.50                 | stock     | 10/10 |     3.695 [    3.178,     4.840] | off surface: interior 1.073e-01, sides 3.590e-04
+patch    | cubic quad, a=0.50                 | extension | 10/10 |     3.498 [    2.734,     4.273] | off surface: interior 6.859e-13, sides 6.859e-13
+patch    | cubic quad, a=2.00                 | stock     | 10/10 |    17.875 [   15.686,    22.359] | off surface: interior 4.499e-01, sides 1.016e-02
+patch    | cubic quad, a=2.00                 | extension | 10/10 |     2.171 [    2.112,     2.409] | off surface: interior 1.622e-12, sides 2.305e-12
+round    | box, all 12 edges r=6              | stock     | 10/10 |     3.164 [    2.964,     5.218] | valid, V 21508.034803, |dV| 2.910e-11
+round    | box, all 12 edges r=6              | stock+check | 10/10 |     3.980 [    3.850,     6.222] | valid, V 21508.034803, |dV| 2.910e-11
+round    | box, all 12 edges r=6              | extension | 10/10 |     2.340 [    2.025,     3.641] | valid, V 21508.034803, |dV| 2.547e-11
+round    | box, all 12 edges r=9 (2r near height) | stock     | 10/10 |     3.081 [    2.968,     3.415] | valid, V 18718.512237, |dV| 3.274e-11
+round    | box, all 12 edges r=9 (2r near height) | stock+check | 10/10 |     4.583 [    3.957,     6.343] | valid, V 18718.512237, |dV| 3.274e-11
+round    | box, all 12 edges r=9 (2r near height) | extension | 10/10 |     2.107 [    2.005,     3.359] | valid, V 18718.512237, |dV| 3.274e-11
+round    | box, three edges at a corner r=7   | stock     | 10/10 |     1.601 [    1.369,     1.749] | valid, V 23111.025570
+round    | box, three edges at a corner r=7   | stock+check | 10/10 |     1.410 [    1.389,     1.448] | valid, V 23111.025570
+round    | box, three edges at a corner r=7   | extension | 10/10 |     0.665 [    0.650,     0.743] | valid, V 23111.025570
+round    | box, top r=8 then uprights r=3     | stock     | 10/10 |     7.249 [    6.801,    10.499] | valid, V 22140.537141
+round    | box, top r=8 then uprights r=3     | stock+check | 10/10 |     8.477 [    7.758,     9.085] | valid, V 22140.537141
+round    | box, top r=8 then uprights r=3     | extension | 10/10 |     9.005 [    8.800,    13.212] | valid, V 22141.013991
+junction | crossed cylinders R10 and R6, r=1.0 | stock     | 10/10 |    11.626 [   11.238,    18.644] | valid, V 14917.595774
+junction | crossed cylinders R10 and R6, r=1.0 | stock+check | 10/10 |    13.945 [   13.629,    16.319] | valid, V 14917.595774
+junction | crossed cylinders R10 and R6, r=1.0 | extension | 10/10 |    14.863 [   14.182,    17.856] | valid, V 14917.588181
+junction | crossed cylinders R10 and R6, r=2.5 | stock     | 10/10 |    13.195 [   12.454,    15.132] | valid, V 14829.834661
+junction | crossed cylinders R10 and R6, r=2.5 | stock+check | 10/10 |    16.227 [   14.797,    19.076] | valid, V 14829.834661
+junction | crossed cylinders R10 and R6, r=2.5 | extension | 10/10 |    17.730 [   16.742,    21.511] | valid, V 14829.565827
+junction | sphere R14 on a box, r=2.0         | stock     | 10/10 |     1.338 [    1.090,     1.853] | valid, V 31447.225439
+junction | sphere R14 on a box, r=2.0         | stock+check | 10/10 |     1.587 [    1.569,     1.873] | valid, V 31447.225439
+junction | sphere R14 on a box, r=2.0         | extension | 10/10 |     0.734 [    0.536,     0.839] | valid, V 31447.225440
+junction | sphere R14 on a box, r=6.0         | stock     | 10/10 |     1.310 [    1.086,     2.017] | valid, V 31818.494184
+junction | sphere R14 on a box, r=6.0         | stock+check | 10/10 |     1.566 [    1.554,     1.575] | valid, V 31818.494184
+junction | sphere R14 on a box, r=6.0         | extension | 10/10 |     2.273 [    2.255,     2.339] | valid, V 31818.494263
+hollow   | box, round r=3.0, wall t=2.0       | stock     | 10/10 |     2.905 [    2.779,     4.136] | valid, |dV| 3.288e+04
+hollow   | box, round r=3.0, wall t=2.0       | extension | 10/10 |     7.343 [    7.144,    10.464] | valid, |dV| 7.276e-12
+hollow   | box, round r=3.0, wall t=4.0       | stock     | 10/10 |     2.747 [    2.685,     2.818] | INVALID, |dV| 3.533e+04
+hollow   | box, round r=3.0, wall t=4.0       | extension | 10/10 |     8.673 [    8.411,    10.836] | valid, |dV| 1.455e-11
+offset   | rectangle, outward d=2.0           | stock     | 10/10 |     0.151 [    0.149,     0.163] | |dL| 2.842e-14
+offset   | rectangle, outward d=2.0           | extension | 10/10 |     0.253 [    0.246,     0.336] | |dL| 2.842e-14
+offset   | rectangle, outward d=10.0          | stock     | 10/10 |     0.150 [    0.147,     0.176] | |dL| 0.000e+00
+offset   | rectangle, outward d=10.0          | extension | 10/10 |     0.273 [    0.253,     0.296] | |dL| 0.000e+00

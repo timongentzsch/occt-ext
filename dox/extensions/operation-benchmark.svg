@@ -1,38 +1,57 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="980" height="432" viewBox="0 0 980 432" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="676" viewBox="0 0 980 676" font-family="Helvetica, Arial, sans-serif" font-size="12">
 <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#d98a8a"/><line x1="0" y1="0" x2="0" y2="6" stroke="#8b1a1a" stroke-width="2"/></pattern></defs>
-<rect width="980" height="432" fill="#ffffff"/>
+<rect width="980" height="676" fill="#ffffff"/>
 <text x="330" y="22" font-size="14" font-weight="bold">CPU time per call, median of ten runs (ms, lower is better)</text>
 <rect x="680" y="10" width="12" height="12" fill="#6b7a8f"/><text x="696" y="21">stock OCCT</text>
+<rect x="560" y="10" width="12" height="12" fill="#c9a227"/><text x="576" y="21">stock, then its result checked</text>
 <rect x="780" y="10" width="12" height="12" fill="#2f8f5b"/><text x="796" y="21">this branch</text>
 <rect x="880" y="10" width="12" height="12" fill="url(#hatch)"/><text x="896" y="21">no valid result</text>
 <text x="320" y="64" text-anchor="end">fillet: plate, hole r=1, round r=0.20</text>
-<rect x="330" y="44" width="51.5" height="14" fill="#6b7a8f"/>
-<text x="387.5" y="55">0.78</text>
-<rect x="330" y="60" width="74.1" height="14" fill="#2f8f5b"/>
-<text x="410.1" y="71">1.12</text>
-<text x="320" y="122" text-anchor="end">fillet: plate, hole r=1, round r=0.50</text>
-<rect x="330" y="102" width="51.2" height="14" fill="#6b7a8f"/>
-<text x="387.2" y="113">0.78</text>
-<rect x="330" y="118" width="70.9" height="14" fill="#2f8f5b"/>
-<text x="406.9" y="129">1.07</text>
-<text x="320" y="180" text-anchor="end">hollow: box, round r=3.0, wall t=2.0</text>
-<rect x="330" y="160" width="191.9" height="14" fill="#6b7a8f"/>
-<text x="527.9" y="171">2.91</text>
-<rect x="330" y="176" width="488.8" height="14" fill="#2f8f5b"/>
-<text x="824.8" y="187">7.41</text>
-<text x="320" y="238" text-anchor="end">hollow: box, round r=3.0, wall t=4.0</text>
-<rect x="330" y="218" width="161.0" height="14" fill="url(#hatch)"/>
-<text x="497.0" y="229">2.44</text>
-<rect x="330" y="234" width="560.0" height="14" fill="#2f8f5b"/>
-<text x="896.0" y="245">8.48</text>
-<text x="320" y="296" text-anchor="end">offset: rectangle, outward d=2.0</text>
-<rect x="330" y="276" width="9.0" height="14" fill="#6b7a8f"/>
-<text x="345.0" y="287">0.14</text>
-<rect x="330" y="292" width="14.9" height="14" fill="#2f8f5b"/>
-<text x="350.9" y="303">0.23</text>
-<text x="320" y="354" text-anchor="end">offset: rectangle, outward d=10.0</text>
-<rect x="330" y="334" width="8.9" height="14" fill="#6b7a8f"/>
-<text x="344.9" y="345">0.14</text>
-<rect x="330" y="350" width="15.0" height="14" fill="#2f8f5b"/>
-<text x="351.0" y="361">0.23</text>
+<rect x="330" y="44" width="18.3" height="14" fill="#6b7a8f"/>
+<text x="354.3" y="55">0.28</text>
+<rect x="330" y="60" width="37.3" height="14" fill="#c9a227"/>
+<text x="373.3" y="71">0.58</text>
+<rect x="330" y="76" width="48.6" height="14" fill="#2f8f5b"/>
+<text x="384.6" y="87">0.75</text>
+<text x="320" y="138" text-anchor="end">fillet: plate, hole r=1, round r=0.50</text>
+<rect x="330" y="118" width="19.4" height="14" fill="#6b7a8f"/>
+<text x="355.4" y="129">0.30</text>
+<rect x="330" y="134" width="37.8" height="14" fill="#c9a227"/>
+<text x="373.8" y="145">0.59</text>
+<rect x="330" y="150" width="57.6" height="14" fill="#2f8f5b"/>
+<text x="393.6" y="161">0.89</text>
+<text x="320" y="212" text-anchor="end">round: box, all 12 edges r=6</text>
+<rect x="330" y="192" width="204.3" height="14" fill="#6b7a8f"/>
+<text x="540.3" y="203">3.16</text>
+<rect x="330" y="208" width="257.0" height="14" fill="#c9a227"/>
+<text x="593.0" y="219">3.98</text>
+<rect x="330" y="224" width="151.1" height="14" fill="#2f8f5b"/>
+<text x="487.1" y="235">2.34</text>
+<text x="320" y="286" text-anchor="end">round: box, all 12 edges r=9 (2r near height)</text>
+<rect x="330" y="266" width="198.9" height="14" fill="#6b7a8f"/>
+<text x="534.9" y="277">3.08</text>
+<rect x="330" y="282" width="295.9" height="14" fill="#c9a227"/>
+<text x="631.9" y="293">4.58</text>
+<rect x="330" y="298" width="136.0" height="14" fill="#2f8f5b"/>
+<text x="472.0" y="309">2.11</text>
+<text x="320" y="360" text-anchor="end">hollow: box, round r=3.0, wall t=2.0</text>
+<rect x="330" y="340" width="187.6" height="14" fill="#6b7a8f"/>
+<text x="523.6" y="351">2.90</text>
+<rect x="330" y="372" width="474.1" height="14" fill="#2f8f5b"/>
+<text x="810.1" y="383">7.34</text>
+<text x="320" y="434" text-anchor="end">hollow: box, round r=3.0, wall t=4.0</text>
+<rect x="330" y="414" width="177.4" height="14" fill="url(#hatch)"/>
+<text x="513.4" y="425">2.75</text>
+<rect x="330" y="446" width="560.0" height="14" fill="#2f8f5b"/>
+<text x="896.0" y="457">8.67</text>
+<text x="320" y="508" text-anchor="end">offset: rectangle, outward d=2.0</text>
+<rect x="330" y="488" width="9.7" height="14" fill="#6b7a8f"/>
+<text x="345.7" y="499">0.15</text>
+<rect x="330" y="520" width="16.3" height="14" fill="#2f8f5b"/>
+<text x="352.3" y="531">0.25</text>
+<text x="320" y="582" text-anchor="end">offset: rectangle, outward d=10.0</text>
+<rect x="330" y="562" width="9.7" height="14" fill="#6b7a8f"/>
+<text x="345.7" y="573">0.15</text>
+<rect x="330" y="594" width="17.6" height="14" fill="#2f8f5b"/>
+<text x="353.6" y="605">0.27</text>
 </svg>

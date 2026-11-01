@@ -265,7 +265,10 @@ struct Attach {
                 TopExp::Vertices(e, a, z);
                 if (!((a.IsSame(from) && z.IsSame(to)) || (a.IsSame(to) && z.IsSame(from)))) continue;
                 double f, l;
-                GeomAPI_ProjectPointOnCurve on(middle, BRep_Tool::Curve(e, f, l), f, l);
+                // A contact that has no 3D curve (a degenerate edge at a pole or a seam) cannot hold the point.
+                const Handle(Geom_Curve) curve = BRep_Tool::Curve(e, f, l);
+                if (curve.IsNull()) continue;
+                GeomAPI_ProjectPointOnCurve on(middle, curve, f, l);
                 if (on.NbPoints() > 0 && on.LowerDistance() <= limit::one(scale, middle.XYZ().Modulus())) return e;
             }
         return {};

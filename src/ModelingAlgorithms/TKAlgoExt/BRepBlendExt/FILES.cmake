@@ -4,6 +4,7 @@ set(OCCT_BRepBlendExt_FILES
   BRepBlendExt_Ball.cxx
   BRepBlendExt_Fit.cxx
   BRepBlendExt_Internal.hxx
+  BRepBlendExt_Operation.cxx
   BRepBlendExt_Policy.hxx
   BRepBlendExt_Request.hxx
   BRepBlendExt_Sheet.cxx

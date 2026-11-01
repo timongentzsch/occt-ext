@@ -18,6 +18,9 @@
 //           BRepOffsetAPI_MakeOffset against offsetCurve. Quality: the length P + 2 pi d.
 
 #include <BRepToolsExt_Operations.hxx>
+#include <BRepBlendExt_Request.hxx>
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
 #include <BRepPatchExt_Side.hxx>
 #include <GeomAlgoExt_Failure.hxx>
 
@@ -31,6 +34,8 @@
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRep_Tool.hxx>
@@ -56,6 +61,7 @@
 #include <ctime>
 #include <functional>
 #include <string>
+#include <typeinfo>
 #include <vector>
 
 // A host that keeps shapes in a vector, as BRepToolsExt_Session.hxx asks.
@@ -85,6 +91,14 @@ void closeGaps(const std::vector<Side>&, std::vector<Rim>&) {}
 
 namespace {
 
+// Checking a result (validity, volume, length) is not part of the operation: those functions stop the
+// clock for as long as they run.
+std::clock_t pausedTicks = 0;
+struct Pause {
+  std::clock_t begin = std::clock();
+  ~Pause() { pausedTicks += std::clock() - begin; }
+};
+
 struct Stats {
   double median = 0, low = 0, high = 0;
   int ok = 0, runs = 0;
@@ -97,11 +111,13 @@ Stats measure(const std::function<bool()>& work) {
   std::vector<double> times;
   for (int i = 0; i < 11; ++i) {
     const std::clock_t begin = std::clock();
+    pausedTicks = 0;
     bool ok = false;
     try { ok = work(); }
-    catch (const Standard_Failure& e) { ok = false; s.refusal = e.GetMessageString() ? e.GetMessageString() : "Standard_Failure"; }
-    catch (const std::exception& e) { ok = false; s.refusal = e.what(); }
-    const double ms = 1000. * (std::clock() - begin) / CLOCKS_PER_SEC;
+    catch (const Standard_Failure& e) { ok = false; s.refusal = std::string(typeid(e).name()) + ": " + (e.GetMessageString() ? e.GetMessageString() : ""); }
+    catch (const std::exception& e) { ok = false; s.refusal = std::string("std::exception: ") + e.what(); }
+    catch (...) { ok = false; s.refusal = "an exception of unknown type"; }
+    const double ms = 1000. * (std::clock() - begin - pausedTicks) / CLOCKS_PER_SEC;
     if (i == 0) continue;
     ++s.runs;
     if (ok) { ++s.ok; times.push_back(ms); }
@@ -115,17 +131,24 @@ Stats measure(const std::function<bool()>& work) {
   return s;
 }
 
+// The volume by adaptive Gauss-Kronrod integration to a relative accuracy of 1e-8. The default
+// BRepGProp::VolumeProperties uses a fixed rule, which is off by about 1e-5 of the volume on spline
+// blend faces and would be mistaken for a difference between two implementations.
 double volume(const TopoDS_Shape& shape) {
+  Pause pause;
   GProp_GProps props;
-  BRepGProp::VolumeProperties(shape, props);
+  BRepGProp::VolumePropertiesGK(shape, props, 1e-8, false, true);
   return props.Mass();
 }
 double length(const TopoDS_Shape& shape) {
+  Pause pause;
   GProp_GProps props;
   BRepGProp::LinearProperties(shape, props);
   return props.Mass();
 }
-bool valid(const TopoDS_Shape& shape) { return !shape.IsNull() && BRepCheck_Analyzer(shape).IsValid(); }
+bool valid(const TopoDS_Shape& shape) { Pause pause; return !shape.IsNull() && BRepCheck_Analyzer(shape).IsValid(); }
+// The same check, left on the clock: a call that must return only valid bodies pays for it.
+bool validTimed(const TopoDS_Shape& shape) { return !shape.IsNull() && BRepCheck_Analyzer(shape).IsValid(); }
 
 void row(const char* operation, const char* input, const char* who, const Stats& s, const char* quality) {
   const std::string refused = "REFUSED: " + s.refusal;
@@ -170,6 +193,12 @@ void fillet(double r) {
     errorStock = std::abs(volumeStock - expected);
     return true;
   });
+  const Stats checked = measure([&] {
+    BRepFilletAPI_MakeFillet maker(body);
+    maker.Add(r, top);
+    maker.Build();
+    return maker.IsDone() && validTimed(maker.Shape());
+  });
   const uint32_t bodyId = BRepExt::store(session(), body), edgeId = BRepExt::store(session(), top);
   const Stats ext = measure([&] {
     const auto result = BRepExt::filletRange(session(), bodyId, edgeId, r, 0, 1, true, {}, BRepExt::failureHashBound);
@@ -182,6 +211,7 @@ void fillet(double r) {
   char q[160];
   std::snprintf(q, sizeof q, "V %.12f (expected %.12f), |dV| %.3e", volumeStock, expected, errorStock);
   row("fillet", input, "stock", stock, q);
+  row("fillet", input, "stock+check", checked, q);
   std::snprintf(q, sizeof q, "V %.12f (expected %.12f), |dV| %.3e", volumeExt, expected, errorExt);
   row("fillet", input, "extension", ext, q);
 }
@@ -341,12 +371,168 @@ void offset(double d) {
   row("offset", input, "extension", ext, q);
 }
 
+// ---- rounds beyond the easy case ------------------------------------------------------------
+// Several edges at once, rounds that run into earlier rounds, and corners where blends meet. A body
+// is a box a x b x c (40 x 30 x 20). `all` has the closed form of Steiner's formula for a box
+// rounded by r everywhere: with x = a - 2r etc., V = xyz + 2r(xy + yz + zx) + pi r^2 (x + y + z) +
+// (4/3) pi r^3 (the Minkowski sum of the inner box and a ball). The other rows have no closed form and
+// report validity and volume only.
+std::vector<TopoDS_Edge> edgesWhere(const TopoDS_Shape& shape, const std::function<bool(const Bnd_Box&, double*)>& pick) {
+  std::vector<TopoDS_Edge> out;
+  for (TopExp_Explorer it(shape, TopAbs_EDGE); it.More(); it.Next()) {
+    Bnd_Box box;
+    BRepBndLib::Add(it.Current(), box);
+    double b[6];
+    box.Get(b[0], b[1], b[2], b[3], b[4], b[5]);
+    if (pick(box, b)) out.push_back(TopoDS::Edge(it.Current()));
+  }
+  return out;
+}
+bool near(double a, double b) { return std::abs(a - b) < 1e-6; }
+using Pick = std::function<bool(const Bnd_Box&, double*)>;
+const Pick everyEdge = [](const Bnd_Box&, double*) { return true; };
+const Pick topEdges = [](const Bnd_Box&, double* b) { return near(b[2], 20) && near(b[5], 20); };
+const Pick uprights = [](const Bnd_Box&, double* b) { return near(b[0], b[3]) && near(b[1], b[4]) && b[5] - b[2] > 5; };
+const Pick cornerEdges = [](const Bnd_Box&, double* b) {
+  const bool atX = near(b[0], 0) && near(b[3], 0), atY = near(b[1], 0) && near(b[4], 0);
+  return b[0] <= 1e-6 && b[1] <= 1e-6 && b[5] >= 20 - 1e-6 && (atX || atY || (near(b[0], b[3]) && near(b[1], b[4])));
+};
+
+struct Step { Pick pick; double radius; };
+void rounds(const char* name, const std::vector<Step>& steps, double expected) {
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 20).Shape();
+  double volumeStock = 0, volumeExt = 0;
+  bool validStock = false, validExt = false;
+  const Stats stock = measure([&] {
+    TopoDS_Shape body = box;
+    for (const Step& step : steps) {
+      BRepFilletAPI_MakeFillet maker(body);
+      for (const TopoDS_Edge& edge : edgesWhere(body, step.pick)) maker.Add(step.radius, edge);
+      maker.Build();
+      if (!maker.IsDone()) return false;
+      body = maker.Shape();
+    }
+    validStock = valid(body);
+    volumeStock = volume(body);
+    return validStock;
+  });
+  const Stats checked = measure([&] {
+    TopoDS_Shape body = box;
+    for (const Step& step : steps) {
+      BRepFilletAPI_MakeFillet maker(body);
+      for (const TopoDS_Edge& edge : edgesWhere(body, step.pick)) maker.Add(step.radius, edge);
+      maker.Build();
+      if (!maker.IsDone()) return false;
+      body = maker.Shape();
+    }
+    return validTimed(body);
+  });
+  const Stats ext = measure([&] {
+    TopoDS_Shape body = box;
+    for (const Step& step : steps) {
+      BRepExt::blend2::Request request;
+      request.operation = "round";
+      request.body = body;
+      for (const TopoDS_Edge& edge : edgesWhere(body, step.pick)) request.edges.push_back(edge);
+      request.first = step.radius;
+      request.law = BRepExt::blend2::Law::Conic;
+      request.rho = 0.5;
+      body = BRepExt::blend2::blend(request).shape;
+    }
+    validExt = valid(body);
+    volumeExt = volume(body);
+    return validExt;
+  });
+  char q[200];
+  const auto text = [&](bool ok, double v) {
+    if (expected > 0) std::snprintf(q, sizeof q, "%s, V %.6f, |dV| %.3e", ok ? "valid" : "INVALID", v, std::abs(v - expected));
+    else std::snprintf(q, sizeof q, "%s, V %.6f", ok ? "valid" : "INVALID", v);
+  };
+  text(validStock, volumeStock);
+  row("round", name, "stock", stock, q);
+  row("round", name, "stock+check", checked, q);
+  text(validExt, volumeExt);
+  row("round", name, "extension", ext, q);
+}
+// Rounds along curved junctions: two crossing cylinders and a sphere standing on a box. The edges are
+// space curves where two curved surfaces meet, the case where a blend must follow a surface-surface
+// intersection and change its contact curves as it goes. No closed form: validity and volume only,
+// and the volumes of the two implementations are compared.
+void junction(const char* name, const TopoDS_Shape& body, const Pick& pick, double radius) {
+  double volumeStock = 0, volumeExt = 0;
+  bool validStock = false, validExt = false;
+  const Stats stock = measure([&] {
+    BRepFilletAPI_MakeFillet maker(body);
+    for (const TopoDS_Edge& edge : edgesWhere(body, pick)) maker.Add(radius, edge);
+    maker.Build();
+    if (!maker.IsDone()) return false;
+    validStock = valid(maker.Shape());
+    volumeStock = volume(maker.Shape());
+    return validStock;
+  });
+  const Stats checked = measure([&] {
+    BRepFilletAPI_MakeFillet maker(body);
+    for (const TopoDS_Edge& edge : edgesWhere(body, pick)) maker.Add(radius, edge);
+    maker.Build();
+    return maker.IsDone() && validTimed(maker.Shape());
+  });
+  const Stats ext = measure([&] {
+    BRepExt::blend2::Request request;
+    request.operation = "round";
+    request.body = body;
+    for (const TopoDS_Edge& edge : edgesWhere(body, pick)) request.edges.push_back(edge);
+    request.first = radius;
+    request.law = BRepExt::blend2::Law::Conic;
+    request.rho = 0.5;
+    const TopoDS_Shape made = BRepExt::blend2::blend(request).shape;
+    validExt = valid(made);
+    volumeExt = volume(made);
+    return validExt;
+  });
+  char q[160];
+  std::snprintf(q, sizeof q, "%s, V %.6f", validStock ? "valid" : "INVALID", volumeStock);
+  row("junction", name, "stock", stock, q);
+  row("junction", name, "stock+check", checked, q);
+  std::snprintf(q, sizeof q, "%s, V %.6f", validExt ? "valid" : "INVALID", volumeExt);
+  row("junction", name, "extension", ext, q);
+}
+
+double steiner(double r) {
+  const double x = 40 - 2 * r, y = 30 - 2 * r, z = 20 - 2 * r;
+  return x * y * z + 2 * r * (x * y + y * z + z * x) + M_PI * r * r * (x + y + z) + 4. / 3 * M_PI * r * r * r;
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  // With an argument, only the rows whose name contains it are run (for debugging one case).
+  const std::string only = argc > 1 ? argv[1] : "";
   std::printf("operation | input | who | ok/runs | CPU median [min, max] ms | quality\n");
   for (double r : {0.2, 0.5}) fillet(r);
   for (double a : {0.5, 2.0}) patch(a);
+  rounds("box, all 12 edges r=6", {{everyEdge, 6}}, steiner(6));
+  rounds("box, all 12 edges r=9 (2r near height)", {{everyEdge, 9}}, steiner(9));
+  rounds("box, three edges at a corner r=7", {{cornerEdges, 7}}, 0);
+  rounds("box, top r=8 then uprights r=3", {{topEdges, 8}, {uprights, 3}}, 0);
+  {
+    const TopoDS_Shape along = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -20), gp_Dir(0, 0, 1)), 10, 40).Shape();
+    const TopoDS_Shape across = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(-20, 0, 0), gp_Dir(1, 0, 0)), 6, 40).Shape();
+    const TopoDS_Shape crossed = BRepAlgoAPI_Fuse(along, across).Shape();
+    const Pick inside = [](const Bnd_Box&, double* b) { return b[3] - b[0] < 39 && b[5] - b[2] < 39 && b[3] - b[0] > 1; };
+    for (const double r : {1.0, 2.5}) {
+      char label[64];
+      std::snprintf(label, sizeof label, "crossed cylinders R10 and R6, r=%.1f", r);
+      junction(label, crossed, inside, r);
+    }
+    const TopoDS_Shape standing = BRepAlgoAPI_Fuse(BRepPrimAPI_MakeBox(gp_Pnt(-25, -25, -10), 50, 50, 10).Shape(),
+                                                   BRepPrimAPI_MakeSphere(gp_Pnt(0, 0, 0), 14).Shape()).Shape();
+    const Pick ring = [](const Bnd_Box&, double* b) { return near(b[2], b[5]) && near(b[2], 0) && b[3] - b[0] < 29 && b[3] - b[0] > 20; };
+    for (const double r : {2.0, 6.0}) {
+      char label[64];
+      std::snprintf(label, sizeof label, "sphere R14 on a box, r=%.1f", r);
+      junction(label, standing, ring, r);
+    }
+  }
   hollow(3, 2);
   hollow(3, 4);
   for (double d : {2.0, 10.0}) offset(d);

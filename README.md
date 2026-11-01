@@ -388,46 +388,50 @@ skin validity checks.
 
 ### Whole-operation comparison with stock OCCT
 
-![CPU time per call, stock OCCT against this branch](dox/extensions/operation-benchmark.svg)
+![CPU time per call: stock OCCT, stock followed by a validity check, and this branch](dox/extensions/operation-benchmark.svg)
 
-Median process CPU time of ten runs after one warm-up (`std::clock`), one thread, GCC 12.2 `-O3`,
-static Release libraries, TBB off, AMD Ryzen 9 7950X3D. The complete output with minima and maxima is
+Median process CPU time of ten runs after one warm-up (`std::clock`), one thread, GCC 12.2 `-O3`, static
+Release libraries, TBB off, AMD Ryzen 9 7950X3D on a shared host. The complete output with minima and maxima is
 [operation-benchmark-results.txt](adm/scripts/extensions/operation-benchmark-results.txt); rerun it with
 `adm/scripts/extensions/operation-benchmark.sh NATIVE_BUILD_DIRECTORY` and redraw the chart with
-`operation-chart.py`. Every input has a closed-form answer, so the quality column is an error against
-mathematics, not against another program. Hatched bars are calls that returned no valid result or a wrong one.
+`operation-chart.py`. Checking a result (validity, volume, length) is excluded from the clock, **except** in the
+bars called "stock, then its result checked". Those add the `BRepCheck_Analyzer` pass that every call of this
+branch performs on its own result before returning it; stock does not, so that bar is the like-for-like
+comparison for an operation that must return only valid bodies. Volumes are computed by adaptive Gauss-Kronrod
+integration to 1e-8 (the default fixed rule is off by about 1e-5 on spline blends, which looks like a
+difference between implementations and is not). Hatched bars are calls with no valid result or a wrong one.
 
-| Operation | Input | Stock CPU ms | Branch CPU ms | Stock quality | Branch quality |
-| --- | --- | ---: | ---: | --- | --- |
-| Fillet | plate, hole r=1, round r=0.2 | 0.78 | 1.12 | volume equals the Pappus closed form | same |
-| Fillet | plate, hole r=1, round r=0.5 | 0.78 | 1.08 | same | same |
-| Fill | four cubic sides, a=0.5 | 3.00 | 2.50 | 0.107 off the defining surface inside, 3.6e-4 on the sides | 6.9e-13 inside and on the sides |
-| Fill | four cubic sides, a=2.0 | 13.33 | 1.92 | 0.450 inside, 1.0e-2 on the sides | 1.6e-12 inside, 2.3e-12 on the sides |
-| Hollow | filleted box, wall 2 | 2.91 | 7.41 | valid, volume wrong by 3.3e4 | valid, volume error 3.6e-12 |
-| Hollow | filleted box, wall 4 (wall > round) | 2.44 | 8.49 | invalid solid | valid, volume exact |
-| Curve offset | rectangle, d=2 and d=10 | 0.14 | 0.23 | length error 3e-14 | same |
+| Operation | Input | Stock ms | Stock + check ms | Branch ms | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Round | plate, hole r=1, edge r=0.2 / 0.5 | 0.28 / 0.30 | 0.58 / 0.59 | 0.75 / 0.89 | both exact to 5e-12 (closed form) |
+| Round | box, all 12 edges, r=6 / r=9 | 3.2 / 3.1 | 4.0 / 4.6 | 2.3 / 2.1 | both exact to 3e-11 (Steiner) |
+| Round | box, three edges at a corner, r=7 | 1.6 | 1.4 | 0.67 | same volume |
+| Round | box, top r=8 then uprights r=3 | 7.2 | 8.5 | 9.0 | volumes differ by 0.48 of 22 140 (unexplained) |
+| Round | crossed cylinders R10/R6, r=1 / 2.5 | 11.6 / 13.2 | 13.9 / 16.2 | 14.9 / 17.7 | volumes differ by 0.008 / 0.27 |
+| Round | sphere R14 on a box, r=2 / 6 | 1.3 / 1.3 | 1.6 / 1.6 | 0.73 / 2.27 | volumes agree to 1e-7 |
+| Fill | four cubic sides, a=0.5 / 2.0 | 3.7 / 17.9 | | 3.5 / 2.2 | stock 0.11 / 0.45 off the defining surface, branch 1e-12 |
+| Hollow | filleted box, wall 2 / 4 | 2.9 / 2.7 | | 7.3 / 8.7 | stock volume wrong by 3.3e4 / invalid; branch exact to 1e-11 |
+| Curve offset | rectangle, d=2 / 10 | 0.15 | | 0.25 / 0.27 | both exact |
 
 How to read it, without flattering it:
 
-* **Fillet.** The constant-radius round of one circular edge is 1.4 times slower than `BRepFilletAPI_MakeFillet`
-  and equally exact. Nothing in the extension makes this case better; it is the cost of a general solver
-  (marching, section fit, attachment) on a case the stock algorithm handles in closed form. The extension is
-  for the cases stock refuses or gets wrong (variable radius, tangent chains, curved supports, corners), which
-  this single easy row does not cover. Tests for those are open work.
-* **Fill.** The input is one analytic cubic surface cut to its four sides. The extension reproduces it to
-  rounding because its four-sided construction contains cubic data; stock `BRepFill_Filling` minimises a plate
-  energy and moves away from the defining surface by 0.1 to 0.45 at a size of 1. That is a property of the
-  inputs (polynomial, four sides); it is not evidence about general loops.
-* **Hollow.** Stock `BRepOffsetAPI_MakeThickSolid` has no closed-hollow mode; the closest call, with no face to
-  open, returns a shape whose volume is not that of a hollow body. The comparison therefore measures a call that
-  does a different job, and the extension's 2.5 to 3.5 times higher CPU time is the price of classifying and removing
-  vanishing faces before offsetting.
-* **Offset.** Both give exact lengths; the extension's extra 0.09 ms is its scale normalisation (see
-  BRepCurveExt).
+* **Where the branch matches or beats the checked stock bar:** twelve-edge and corner rounds, the sphere on a box at
+  radius 2, and the fill. These are within noise or faster, and agree with stock on the volume.
+* **Where it is slower than that bar:** a single circular edge (1.3 to 1.5 times), the sphere at radius 6 (1.4 times),
+  a round blended into earlier rounds and the crossed cylinders (1.05 to 1.1 times), the curve offset (1.7 times) and
+  the hollow (2.5 to 3.5 times, against a stock call that returns a wrong or invalid body). A profile of the single
+  circular edge shows the call is stock's builder (36 per cent) plus one validity pass (48 per cent) plus
+  bookkeeping, so there the extra cost is the verification, not the construction; the remaining 0.2 ms is face
+  history and the closedness test. Cheaper verification, or skipping it where the builder's result is provably
+  unchanged, is open work.
+* **Volume differences.** Both implementations return valid bodies where they differ by 0.008 to 0.5 in volume
+  (2e-5 relative at most). Neither has a closed form to be judged against. They are consistent with the two blends
+  being different approximations within their tolerances; this has not been established.
+* **Fill and hollow** show the cases stock does not handle well, on inputs with closed forms; they say nothing about
+  general loops.
 
-A rigorous claim of speedups or quality on general inputs needs a corpus rather than eight rows; the corpus used
-for development belongs to the application and cannot be redistributed with this tree.
-
+A rigorous claim about speed or quality on general inputs needs a corpus rather than a dozen rows; the corpus used for
+development belongs to the application and cannot be redistributed with this tree.
 
 ### Gallery
 
@@ -453,6 +457,11 @@ product). The scenes are the application's own fixtures.
 | ![A four-sided fill between spline faces](dox/extensions/images/mixed-bspline-4.png) | ![A fill between a round and a flat face](dox/extensions/images/mixed-fillet-flat.png) |
 | A four-sided fill between spline faces. | A fill between a round and a flat face. |
 
+| | |
+| --- | --- |
+| ![Two crossing cylinders with the intersection rounded](dox/extensions/images/junction-crossed-cylinders.png) | ![A sphere on a box with the junction rounded](dox/extensions/images/junction-sphere-on-box.png) |
+| Two crossing cylinders (R10, R6) with their intersection curves rounded by 2.5: the blend follows a space curve where two curved surfaces meet. The image is of the embedding application's complete operation; the raw solver of this tree refuses this input (see the benchmark), and the application's route still delivers it. | A sphere (R14) standing on a box with the circular junction rounded by 6. Stock and this branch agree on the volume to 1e-8 of it. |
+
 Thirteen of the application's fifteen fill fixtures are delivered (the gallery draws all of them in
 `scripts/render-fork-gallery.ts`; two are refused on purpose, one because no surface has the curvature of
 both neighbours and one because a four-sided loop has a singular corner). Larger assemblies are **not**
@@ -467,7 +476,9 @@ supported, not measurements; the numbers are in the benchmark above and in the t
 
 Known limits and what remains, stated without reference to any application:
 
-1. **Blend solver.** Some configurations where several blends meet are refused although a valid result exists:
+1. **Blend solver.** The raw solver refuses two crossing cylinders (R10 and R6) rounded along their intersection
+   with an internal OCCT exception, an input stock builds in 46 to 50 ms; the embedding application still delivers
+   it through its own route, and which part of that route builds it is not measured here. Some configurations where several blends meet are refused although a valid result exists:
    the trimming of a blend group needs an owner for every retained region and contact before chain ends are cut,
    and the centre path must be parametrised consistently by arc length along the marched curve, not by the edge's
    parameter. Steep dihedral angles (above about 75 degrees) and curvature-continuous sections at five-sided
@@ -480,9 +491,10 @@ Known limits and what remains, stated without reference to any application:
    chaining routine (`BRepPatchExt_Side.hxx`).
 4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
    offsetting solids whose blends meet the wall thickness exactly has no exactness proof.
-5. **Speed.** Constant-radius fillets are 1.4 times slower than stock and closed hollows 2.5 to 3.5 times (table
-   above). The extra cost is in marching, section fitting and certification passes; none has been optimised for
-   the easy case, and skinning has not been compared with stock at all.
+5. **Speed.** Every call verifies its result, and on small inputs that verification costs as much as the construction
+   (table above). Making it cheaper, or skipping it where the builder's result is provably unchanged, is open. The curve
+   offset and hollow are 1.7 and 2.5 to 3.5 times slower than stock and have not been profiled; skinning has not been
+   compared with stock at all.
 6. **Tests.** Native tests exist for the utilities, the chart, the fit and five whole operations. Most of
    `TKAlgoExt` is exercised only through the embedding application's tests; closed-form native tests are
    needed for each package before an upstream proposal.
