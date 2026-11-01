@@ -462,15 +462,27 @@ product). The scenes are the application's own fixtures.
 | ![Two crossing cylinders with the intersection rounded](dox/extensions/images/junction-crossed-cylinders.png) | ![A sphere on a box with the junction rounded](dox/extensions/images/junction-sphere-on-box.png) |
 | Two crossing cylinders (R10, R6) with their intersection curves rounded by 2.5: the blend follows a space curve where two curved surfaces meet. | A sphere (R14) standing on a box with the circular junction rounded by 6. Stock and this branch agree on the volume to 1e-8 of it. |
 
-Thirteen of the application's fifteen fill fixtures are delivered (the gallery draws all of them in
-`scripts/render-fork-gallery.ts`; two are refused on purpose, one because no surface has the curvature of
-both neighbours and one because a four-sided loop has a singular corner). Larger assemblies are **not**
-supported yet: fills that must join a surface to later fills, networks of guide curves, fills bounded by open
-curves with branching guides, and curvature-continuous fills across more than two faces at once. They appear
-in the open work below, not in the images.
+| ![A fill between three tube ends at a Y junction](dox/extensions/images/model-y-pipe.png) | ![A fill bounded by the edges of six plates](dox/extensions/images/model-mouse-network.png) |
+| A fill between three tube ends at a Y junction, curvature-continuous with the three grey sheets. | A fill bounded by the edges of six plates round a three-way junction. |
+| ![An open fill between three strips](dox/extensions/images/model-form-finding.png) | ![A cap between cylindrical surfaces](dox/extensions/images/model-cylinder-cap.png) |
+| An open fill between three strips (the boundary is not a closed loop), shaped by guide curves. | A cap between two cylindrical sheets, the whole model turned in space. |
+| ![A hull bottom between sheer lines](dox/extensions/images/model-hull-bottom.png) | ![A domed top on its boundary curves](dox/extensions/images/model-mouse-top.png) |
+| A hull bottom between sheer lines, turned in space. | A domed top on its boundary curves, turned in space. |
+| ![A panel joined to a delivered neighbour](dox/extensions/images/model-bumper-panel.png) | |
+| A panel built on an already delivered neighbouring panel. | |
 
- The images are illustrations of what is
-supported, not measurements; the numbers are in the benchmark above and in the tests.
+The last block shows seven of the application's own parameterised models of larger shapes (several faces
+around one fill, open boundaries, guide curves), each tested at two poses against a closed-form or
+symmetry oracle. Thirteen of its fifteen single-loop fill fixtures are delivered (two are refused on purpose,
+one because no surface has the curvature of both neighbours and one because a four-sided loop has a singular
+corner). Not yet delivered, and therefore not shown: curvature-continuous fills between plates meeting at
+three or more edges at once (G2 corners of the plate-fillet kind), a steep wing-tip with two fixed boundaries
+and a guide, teddy-bear-shaped strips with bending flows, flow-direction modes on steep supports, a cap whose
+boundary crosses itself, a crown fit that stays 3 to 9 units off its master surface, and profile-curve
+panels. They are in the open work below.
+
+The images are illustrations of what is supported, not measurements; the numbers are in the benchmark above
+and in the tests.
 
 ### Open work
 
