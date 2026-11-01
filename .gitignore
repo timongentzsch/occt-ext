@@ -11,6 +11,7 @@
 !/.gitignore
 !/.tgitconfig
 !/CMakeLists.txt
+!/CMakePresets.json
 !/LICENSE_LGPL_21.txt
 !/OCCT_LGPL_EXCEPTION.txt
 !/README.md

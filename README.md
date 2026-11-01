@@ -502,6 +502,25 @@ Known limits and what remains, stated without reference to any application:
 8. **Provenance.** Four routines that were written against the observed behaviour of other software and two
    Patch routines are deliberately not in this tree.
 
+## Building
+
+The tree is a normal OCCT CMake project; `CMakePresets.json` holds two configurations of the
+modules the extensions need (no Visualization or Draw, static Release libraries, no FreeType or
+RapidJSON), one per target:
+
+```sh
+cmake --preset native && cmake --build --preset native            # build machine
+source /path/to/emsdk/emsdk_env.sh                                 # Emscripten 5.0.3
+cmake --preset wasm && cmake --build --preset wasm                 # WebAssembly
+```
+
+The `wasm` preset sets the toolchain file from `$EMSDK` and compiles with
+`-fwasm-exceptions -O3 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS`. Without presets, the same
+WebAssembly build is `emcmake cmake -S . -B build/wasm -G Ninja -DCMAKE_BUILD_TYPE=Release
+-DBUILD_LIBRARY_TYPE=Static ...` with the cache variables of the preset. Applications may also
+`add_subdirectory()` the tree with the same variables set; the host seam described above is then
+defined by the application's own objects.
+
 ## Applying modules separately
 
 These modules do not depend on the 17 corrections. The accepted utility commits

@@ -1,0 +1,39 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "native",
+      "displayName": "Static Release libraries for the build machine",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/native",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_LIBRARY_TYPE": "Static",
+        "BUILD_MODULE_FoundationClasses": "TRUE",
+        "BUILD_MODULE_ModelingData": "TRUE",
+        "BUILD_MODULE_ModelingAlgorithms": "TRUE",
+        "BUILD_MODULE_DataExchange": "TRUE",
+        "BUILD_MODULE_ApplicationFramework": "TRUE",
+        "BUILD_MODULE_Visualization": "FALSE",
+        "BUILD_MODULE_Draw": "FALSE",
+        "USE_FREETYPE": "OFF",
+        "USE_RAPIDJSON": "OFF"
+      }
+    },
+    {
+      "name": "wasm",
+      "displayName": "Static Release libraries for WebAssembly (Emscripten 5.0.3)",
+      "inherits": "native",
+      "binaryDir": "${sourceDir}/build/wasm",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": {
+        "CMAKE_C_FLAGS": "-fwasm-exceptions -O3 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS",
+        "CMAKE_CXX_FLAGS": "-fwasm-exceptions -O3 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "native", "configurePreset": "native" },
+    { "name": "wasm", "configurePreset": "wasm" }
+  ]
+}
