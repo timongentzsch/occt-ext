@@ -1,15 +1,11 @@
 // Copyright (c) 2026 Timon Gentzsch
-//
-// This file is part of Open CASCADE Technology software library.
-// This library is free software; you can redistribute it and/or modify it under
-// the terms of the GNU Lesser General Public License version 2.1 as published
-// by the Free Software Foundation, with special exception defined in the file
-// OCCT_LGPL_EXCEPTION.txt. Consult LICENSE_LGPL_21.txt for the complete license.
+// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
-
-#include <GeomAlgoExt_SplineFit.hxx>
+#include <GeomAlgoExt_Phase.hxx>
+#include <GeomAlgoExt_PatchFit.hxx>
 #include <GeomAlgoExt_Band.hxx>
-#include <GeomAlgoExt_Execution.hxx>
+namespace loft { using GeomAlgoExt::Band; }
+#include <GeomAlgoExt_Failure.hxx>
 
 #include <BSplCLib.hxx>
 #include <NCollection_Array1.hxx>
@@ -22,7 +18,7 @@
 #include <cmath>
 #include <map>
 
-namespace GeomAlgoExt {
+namespace loft {
 namespace {
 
 /// What is added to the diagonal of the scaled matrix, whose entries are one, when it does not
@@ -41,7 +37,7 @@ constexpr double stallShare = 0.02;
 constexpr int mostPasses = 400;
 
 /// The multipliers have nothing left to work on when what drives them has fallen to this share
-/// of what it was at first: an unproven retained stopping choice, not epsilon squared.
+/// of what it was at first: the square of the rounding of a double.
 constexpr double spent = 1e-20;
 
 /// A condition over the unknowns it touches, scaled by the root of its weight; what the fixed
@@ -56,18 +52,24 @@ struct Row {
 
 } // namespace
 
-SplineBasis splineBasisAt(const char *op, const std::vector<double> &knots, int degree, double t) {
-    SplineBasis basis;
-    if (!splineBasisValues(knots, degree, t, basis))
+SplineBasis splineBasis(const char *op, const std::vector<double> &knots, int degree, double t) {
+    const NCollection_Array1<double> flat(knots.front(), 1, static_cast<int>(knots.size()));
+    math_Matrix values(1, splineDerivatives + 1, 1, degree + 1, 0.0);
+    SplineBasis basis{};
+    if (BSplCLib::EvalBsplineBasis(std::min(splineDerivatives, degree), degree + 1, flat, t, basis.first, values))
         fail(op, no_solution, "the patch's knots are degenerate");
+    basis.first -= 1;
+    for (int d = 0; d <= splineDerivatives; ++d)
+        for (int k = 0; k <= degree; ++k)
+            basis.value[d][k] = values(d + 1, k + 1);
     return basis;
 }
 
-std::vector<int> fitSplineNet(const char *op, SplineNet &net, const std::vector<char> &fixed,
+std::vector<int> fitNet(const char *op, SplineNet &net, const std::vector<char> &fixed,
             const std::vector<FitCondition> &conditions, const FitEnergy &energy,
             const std::function<double(double, double)> &density, const gp_XYZ *along,
-            const std::vector<FitJump> &jumps, bool leastSquares, FitEnergies *again, StageObserver observer) {
-    FitPhase phase(observer, "fit");
+            const std::vector<FitJump> &jumps, bool leastSquares, FitEnergies *again) {
+    PatchPhase phase("fit");
     if (leastSquares && !along)
         fail(op, no_solution, "the initial fair fit requires a height-graph direction");
     const int nu = net.countU(), nv = net.countV(), pu = net.degreeU, pv = net.degreeV;
@@ -115,9 +117,9 @@ std::vector<int> fitSplineNet(const char *op, SplineNet &net, const std::vector<
     }
     std::vector<SplineBasis> bus, bvs;
     for (const auto &[u, weight] : us)
-        bus.push_back(splineBasisAt(op, net.knotsU, pu, u));
+        bus.push_back(splineBasis(op, net.knotsU, pu, u));
     for (const auto &[v, weight] : vs)
-        bvs.push_back(splineBasisAt(op, net.knotsV, pv, v));
+        bvs.push_back(splineBasis(op, net.knotsV, pv, v));
     static const struct {
         int du, dv;
         double times;
@@ -156,7 +158,7 @@ std::vector<int> fitSplineNet(const char *op, SplineNet &net, const std::vector<
             if (k <= i) row[k] += scale * values[i] * values[k];
         }
     };
-    FitPhase assembly(observer, "assembly");
+    PatchPhase assembly("assembly");
     const bool derivativeConstraints = std::any_of(conditions.begin(), conditions.end(),
         [](const FitCondition &condition) {
             for (int t = 0; t < condition.count; ++t)
@@ -273,7 +275,7 @@ std::vector<int> fitSplineNet(const char *op, SplineNet &net, const std::vector<
     std::vector<Row> rows, watched;
     rows.reserve(conditions.size());
     for (const auto &condition : conditions) {
-        const auto bu = splineBasisAt(op, net.knotsU, pu, condition.u), bv = splineBasisAt(op, net.knotsV, pv, condition.v);
+        const auto bu = splineBasis(op, net.knotsU, pu, condition.u), bv = splineBasis(op, net.knotsV, pv, condition.v);
         Row row;
         row.from = static_cast<int>(&condition - conditions.data());
         const double scale = std::sqrt(condition.weight);
@@ -316,7 +318,7 @@ std::vector<int> fitSplineNet(const char *op, SplineNet &net, const std::vector<
     const auto leftBasis = [&](const std::vector<double> &knots, int degree, double t) {
         std::vector<double> reversed(knots.rbegin(), knots.rend());
         for (double &knot : reversed) knot = -knot;
-        SplineBasis basis = splineBasisAt(op, reversed, degree, -t);
+        SplineBasis basis = splineBasis(op, reversed, degree, -t);
         basis.first = static_cast<int>(knots.size()) - 2 * degree - 2 - basis.first;
         for (int d = 0; d <= splineDerivatives; ++d) {
             std::reverse(basis.value[d], basis.value[d] + degree + 1);
@@ -329,10 +331,10 @@ std::vector<int> fitSplineNet(const char *op, SplineNet &net, const std::vector<
         std::map<int, double> over;
         const auto &acrossKnots = jump.acrossU ? net.knotsU : net.knotsV;
         const int acrossDegree = jump.acrossU ? pu : pv;
-        const auto along = splineBasisAt(op, jump.acrossU ? net.knotsV : net.knotsU,
+        const auto along = splineBasis(op, jump.acrossU ? net.knotsV : net.knotsU,
                                        jump.acrossU ? pv : pu, jump.along);
         for (const double side : {1.0, -1.0}) {
-            const auto across = side > 0 ? splineBasisAt(op, acrossKnots, acrossDegree, jump.at)
+            const auto across = side > 0 ? splineBasis(op, acrossKnots, acrossDegree, jump.at)
                                          : leftBasis(acrossKnots, acrossDegree, jump.at);
             const auto &bu = jump.acrossU ? across : along, &bv = jump.acrossU ? along : across;
             for (int a = 0; a <= pu; ++a)
@@ -392,7 +394,7 @@ std::vector<int> fitSplineNet(const char *op, SplineNet &net, const std::vector<
     // are then held, as weakly as it takes, to where they were given: a pull that is nothing
     // against any condition and decides only what nothing else does.
     {
-        FitPhase phase(observer, "factorization");
+        PatchPhase phase("factorization");
         const Band assembled = matrix;
         double hold = 0;
         while (!matrix.factor()) {
@@ -422,7 +424,7 @@ std::vector<int> fitSplineNet(const char *op, SplineNet &net, const std::vector<
             for (size_t k = 0; k < rows[r].index.size(); ++k)
                 x[rows[r].index[k]] += pull * rows[r].coefficient[k];
         }
-        { FitPhase phase(observer, "linear-solves"); matrix.solve(x); }
+        { PatchPhase phase("linear-solves"); matrix.solve(x); }
         return x;
     };
     auto apply = [&](const std::vector<double> &x, bool homogeneous) {
@@ -536,4 +538,4 @@ occ::handle<Geom_BSplineSurface> surfaceOf(const SplineNet &net) {
                                    net.degreeU, net.degreeV);
 }
 
-} // namespace GeomAlgoExt
+} // namespace loft

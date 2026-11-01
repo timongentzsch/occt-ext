@@ -1,14 +1,9 @@
 // Copyright (c) 2026 Timon Gentzsch
-//
-// This file is part of Open CASCADE Technology software library.
-// This library is free software; you can redistribute it and/or modify it under
-// the terms of the GNU Lesser General Public License version 2.1 as published
-// by the Free Software Foundation, with special exception defined in the file
-// OCCT_LGPL_EXCEPTION.txt. Consult LICENSE_LGPL_21.txt for the complete license.
+// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
-#include <GeomAlgoExt_CompactSurface.hxx>
-
-#include <GeomAlgoExt_Execution.hxx>
+#include <GeomAlgoExt_PatchCompact.hxx>
+#include <GeomAlgoExt_Coordinates.hxx>
+#include <GeomAlgoExt_Cancel.hxx>
 #include <GeomAlgoExt_Interval.hxx>
 #include <Standard_Failure.hxx>
 #include <algorithm>
@@ -18,9 +13,8 @@
 #include <cstdint>
 #include <limits>
 
-namespace GeomAlgoExt {
+namespace loft {
 namespace {
-inline bool finite(const gp_Pnt& p) { return std::isfinite(p.X()) && std::isfinite(p.Y()) && std::isfinite(p.Z()); }
 // Limits affect only this optional optimization; the accepted original is retained.
 constexpr int mostTrials = 512, mostRemovals = 16;
 constexpr int64_t mostCoefficients = 262144, mostVisits = 8 * 1024 * 1024;
@@ -55,7 +49,7 @@ std::optional<IntervalNet> intervalNet(const occ::handle<Geom_BSplineSurface> &s
 // One Boehm insertion: Q_i=alpha_i P_i+(1-alpha_i)P_(i-1).
 // All knot values start as exact stored-double intervals. Positive denominator and
 // alpha intersection with [0,1] are certified before any coefficient is used.
-bool insertInterval(const Message_ProgressRange &operation, IntervalNet &net, bool alongU, double knot, int64_t &visits) {
+bool insertInterval(const char *operation, IntervalNet &net, bool alongU, double knot, int64_t &visits) {
     auto &knots=alongU?net.u:net.v;
     const int degree=alongU?net.degreeU:net.degreeV, count=alongU?net.nu:net.nv;
     const int other=alongU?net.nv:net.nu;
@@ -95,7 +89,7 @@ bool insertInterval(const Message_ProgressRange &operation, IntervalNet &net, bo
     net.poles=std::move(next);
     return true;
 }
-bool bezierIntervals(const Message_ProgressRange &operation, IntervalNet &net,
+bool bezierIntervals(const char *operation, IntervalNet &net,
                      const occ::handle<Geom_BSplineSurface> &original, int64_t &visits) {
     for (int i=2;i<original->NbUKnots();++i)
         while (std::count(net.u.begin(),net.u.end(),original->UKnot(i))<net.degreeU)
@@ -159,7 +153,7 @@ double departure(const occ::handle<Geom_BSplineSurface> &original, const occ::ha
     return apart - 1e-10 * (1 + largest);
 }
 
-double intervalDisplacement(const Message_ProgressRange &operation, const IntervalNet &reference, const IntervalNet &candidate) {
+double intervalDisplacement(const char *operation, const IntervalNet &reference, const IntervalNet &candidate) {
     // Flat knot equality checks every unique knot and its multiplicity, not only dimensions.
     if (reference.degreeU!=candidate.degreeU || reference.degreeV!=candidate.degreeV ||
         reference.nu!=candidate.nu || reference.nv!=candidate.nv ||
@@ -183,8 +177,8 @@ double intervalDisplacement(const Message_ProgressRange &operation, const Interv
 
 }
 
-std::optional<CompactPatchSurface> compactSurface(
-    const Message_ProgressRange &operation, const occ::handle<Geom_BSplineSurface> &original,
+std::optional<CompactPatchSurface> compactPatchSurface(
+    const char *operation, const occ::handle<Geom_BSplineSurface> &original,
     double maximumDisplacement) {
     if (original.IsNull() || !(maximumDisplacement > 0) || !std::isfinite(maximumDisplacement) ||
         original->IsURational() || original->IsVRational() ||
@@ -255,7 +249,7 @@ std::optional<CompactPatchSurface> compactSurface(
                         visits += coefficients;
                         const double error = intervalDisplacement(operation,*reference,*expanded);
                         if (error <= maximumDisplacement && error < least) { best = trial; least = error; }
-                    } catch (const GeomAlgoExt_Failure &) { throw; } catch (const Standard_Failure &) { /* Keep the original on an unavailable proposal. */ }
+                    } catch (const Standard_Failure &) { /* Keep the original on an unavailable proposal. */ }
                 }
             }
             if (best.IsNull()) break;
@@ -264,7 +258,7 @@ std::optional<CompactPatchSurface> compactSurface(
             ++removals;
         }
         if (removals) return CompactPatchSurface{current, displacement, removals};
-    } catch (const GeomAlgoExt_Failure &) { throw; } catch (const Standard_Failure &) { /* Optional optimization cannot invalidate its input. */ }
+    } catch (const Standard_Failure &) { /* Optional optimization cannot invalidate its input. */ }
     return {};
 }
 }

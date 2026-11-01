@@ -1,10 +1,5 @@
 // Copyright (c) 2026 Timon Gentzsch
-//
-// This file is part of Open CASCADE Technology software library.
-// This library is free software; you can redistribute it and/or modify it under
-// the terms of the GNU Lesser General Public License version 2.1 as published
-// by the Free Software Foundation, with special exception defined in the file
-// OCCT_LGPL_EXCEPTION.txt. Consult LICENSE_LGPL_21.txt for the complete license.
+// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
 #pragma once
 
@@ -14,19 +9,16 @@
 // rectangle.
 
 #include <GeomAlgoExt_Band.hxx>
-#include <BSplCLib.hxx>
-#include <NCollection_Array1.hxx>
-#include <math_Matrix.hxx>
+namespace loft { using GeomAlgoExt::Band; }
 
 #include <Geom_BSplineSurface.hxx>
-#include <GeomAlgoExt_Execution.hxx>
 #include <gp_XYZ.hxx>
 
 #include <functional>
 #include <optional>
 #include <vector>
 
-namespace GeomAlgoExt {
+namespace loft {
 
 /// Degrees up to 5; flat knots; the pole (i, j) at `poles[i * countV() + j]`.
 struct SplineNet {
@@ -44,21 +36,7 @@ struct SplineBasis {
     int first;
     double value[splineDerivatives + 1][splineOrder];
 };
-//! Status boundary for hot app adapters: no exception translation in the valid path.
-//! Preconditions and arithmetic are those of splineBasisAt; false means degenerate knots.
-inline bool splineBasisValues(const std::vector<double>& knots, int degree, double t, SplineBasis& basis) {
-    const NCollection_Array1<double> flat(knots.front(), 1, static_cast<int>(knots.size()));
-    math_Matrix values(1, splineDerivatives + 1, 1, degree + 1, 0.0);
-    basis = {};
-    if (BSplCLib::EvalBsplineBasis(std::min(splineDerivatives, degree), degree + 1, flat, t, basis.first, values))
-        return false;
-    basis.first -= 1;
-    for (int d = 0; d <= splineDerivatives; ++d)
-        for (int k = 0; k <= degree; ++k)
-            basis.value[d][k] = values(d + 1, k + 1);
-    return true;
-}
-Standard_EXPORT SplineBasis splineBasisAt(const char *operation, const std::vector<double> &knots, int degree, double t);
+SplineBasis splineBasis(const char *operation, const std::vector<double> &knots, int degree, double t);
 
 /// One scalar condition at (u, v): the sum over `count` terms of
 /// `direction . d^(du+dv) S / du^du dv^dv` is to be `value`. Derivatives up to the second.
@@ -115,17 +93,17 @@ struct FitEnergies {
 /// pays for that. The conditions that are not `soft` are met until each is `within` its own
 /// distance of its value, or the net can follow them no better. Returns which of the
 /// conditions that are only read (`watch`) are not met in the end, by their place in
-/// `conditions`. `jumps` are weighed against the energies like the wishes among the conditions. Fails with GeomAlgoExt_Failure when the system has no solution.
+/// `conditions`. `jumps` are weighed against the energies like the wishes among the conditions. Fails with a std::runtime_error when the system has no solution.
 /// `leastSquares` keeps only the unique initial weighted fair fit for a height graph;
 /// its caller must correct the original boundary and certify all delivered geometry.
 /// The default retains the multiplier correction used by supported surfaces. `again`, where
 /// given, keeps the energies as assembled for the next fit of the same net from the same poles
 /// with other conditions (see FitEnergies).
-Standard_EXPORT std::vector<int> fitSplineNet(const char *operation, SplineNet &net, const std::vector<char> &fixed,
+std::vector<int> fitNet(const char *operation, SplineNet &net, const std::vector<char> &fixed,
             const std::vector<FitCondition> &conditions, const FitEnergy &energy,
             const std::function<double(double, double)> &density, const gp_XYZ *along = nullptr,
-            const std::vector<FitJump> &jumps = {}, bool leastSquares = false, FitEnergies *again = nullptr, StageObserver observer = nullptr);
+            const std::vector<FitJump> &jumps = {}, bool leastSquares = false, FitEnergies *again = nullptr);
 
-Standard_EXPORT occ::handle<Geom_BSplineSurface> surfaceOf(const SplineNet &net);
+occ::handle<Geom_BSplineSurface> surfaceOf(const SplineNet &net);
 
-} // namespace GeomAlgoExt
+} // namespace loft

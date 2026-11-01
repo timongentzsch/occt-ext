@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Timon Gentzsch
 // SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 #ifndef OCCT_EXTENSION_STOCK_ONLY
-#include <GeomAlgoExt_SplineFit.hxx>
+#include <GeomAlgoExt_PatchFit.hxx>
 #endif
 #include <GeomPlate_BuildPlateSurface.hxx>
 #include <GeomPlate_CurveConstraint.hxx>
@@ -29,10 +29,10 @@ int main() {
   std::vector<double> times;double largest=0, boundary=0;int refused=0;
   for(int sample=-1;sample<10;++sample) {
 #ifndef OCCT_EXTENSION_STOCK_ONLY
-   GeomAlgoExt::SplineNet net; net.degreeU=net.degreeV=3;
+   loft::SplineNet net; net.degreeU=net.degreeV=3;
    net.knotsU=net.knotsV={0,0,0,0,1,1,1,1};
    for(int i=0;i<4;++i)for(int j=0;j<4;++j)net.poles.emplace_back(scale*i/3.,scale*j/3.,0);
-   std::vector<GeomAlgoExt::FitCondition> rows;
+   std::vector<loft::FitCondition> rows;
 #endif
    const double tolerance=Precision::Confusion()*scale;
    GeomPlate_BuildPlateSurface plate(new Geom_Plane(gp_Pln(gp::XOY())),3,17,3,Precision::PConfusion(),tolerance,.01,.1,false);
@@ -46,7 +46,7 @@ int main() {
     for(int k=0;k<=16;++k) {
      const auto p=uv(k/16.);const auto target=exact(p.X(),p.Y(),scale);
      for(int c=0;c<3;++c) {
-      GeomAlgoExt::FitCondition row{};row.u=p.X();row.v=p.Y();row.count=1;
+      loft::FitCondition row{};row.u=p.X();row.v=p.Y();row.count=1;
       row.terms[0]={0,0,gp_XYZ(c==0,c==1,c==2)};row.value=target.Coord(c+1);
       row.weight=1;row.within=tolerance;rows.push_back(row);
      }
@@ -57,7 +57,7 @@ int main() {
     const auto begin=std::clock();
     if(stock)plate.Perform();
 #ifndef OCCT_EXTENSION_STOCK_ONLY
-    else GeomAlgoExt::fitSplineNet("benchmark",net,std::vector<char>(16,0),rows,{1e-6,1e-8},{});
+    else loft::fitNet("benchmark",net,std::vector<char>(16,0),rows,{1e-6,1e-8},{});
 #endif
     const double cpu=1000.*(std::clock()-begin)/CLOCKS_PER_SEC;
     if(sample<0)continue;
@@ -65,7 +65,7 @@ int main() {
     Handle(Geom_Surface) surface;
     if(stock) {if(!plate.IsDone()||plate.Surface().IsNull()){++refused;continue;}surface=plate.Surface();}
 #ifndef OCCT_EXTENSION_STOCK_ONLY
-    else surface=GeomAlgoExt::surfaceOf(net);
+    else surface=loft::surfaceOf(net);
 #endif
     for(int i=0;i<=32;++i)for(int j=0;j<=32;++j) {
      const double u=i/32.,v=j/32.;

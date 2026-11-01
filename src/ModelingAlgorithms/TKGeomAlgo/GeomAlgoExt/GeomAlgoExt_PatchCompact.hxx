@@ -1,17 +1,11 @@
 // Copyright (c) 2026 Timon Gentzsch
-//
-// This file is part of Open CASCADE Technology software library.
-// This library is free software; you can redistribute it and/or modify it under
-// the terms of the GNU Lesser General Public License version 2.1 as published
-// by the Free Software Foundation, with special exception defined in the file
-// OCCT_LGPL_EXCEPTION.txt. Consult LICENSE_LGPL_21.txt for the complete license.
+// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
 #pragma once
 #include <Geom_BSplineSurface.hxx>
-#include <GeomAlgoExt_Execution.hxx>
 #include <optional>
 
-namespace GeomAlgoExt {
+namespace loft {
 struct CompactPatchSurface {
     occ::handle<Geom_BSplineSurface> surface;
     double displacement;
@@ -23,7 +17,7 @@ struct CompactPatchSurface {
 /// in a common Bezier basis (including both knot conversions). No curve, trim, normal or continuity acceptance is implied:
 /// the caller must rebuild the original rims and repeat all original physical gates.
 /// No certified removal returns nullopt. A work limit may return a certified partial reduction.
-Standard_EXPORT std::optional<CompactPatchSurface> compactSurface(
-    const Message_ProgressRange &operation, const occ::handle<Geom_BSplineSurface> &original,
+std::optional<CompactPatchSurface> compactPatchSurface(
+    const char *operation, const occ::handle<Geom_BSplineSurface> &original,
     double maximumDisplacement);
 }

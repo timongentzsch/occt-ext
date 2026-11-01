@@ -1,15 +1,11 @@
 // Copyright (c) 2026 Timon Gentzsch
-//
-// This file is part of Open CASCADE Technology software library.
-// This library is free software; you can redistribute it and/or modify it under
-// the terms of the GNU Lesser General Public License version 2.1 as published
-// by the Free Software Foundation, with special exception defined in the file
-// OCCT_LGPL_EXCEPTION.txt. Consult LICENSE_LGPL_21.txt for the complete license.
+// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
-
-#include <GeomAlgoExt_RimFit.hxx>
+#include <GeomAlgoExt_Phase.hxx>
+#include <GeomAlgoExt_PatchRim.hxx>
 #include <GeomAlgoExt_Band.hxx>
-#include <GeomAlgoExt_Execution.hxx>
+namespace loft { using GeomAlgoExt::Band; }
+#include <GeomAlgoExt_Cancel.hxx>
 
 #include <NCollection_Array1.hxx>
 
@@ -18,7 +14,7 @@
 #include <functional>
 #include <cstdio>
 
-namespace GeomAlgoExt {
+namespace loft {
 namespace {
 
 /// A span shorter than this share of the mean one is beside a knot of lower continuity, and
@@ -101,9 +97,9 @@ SplineNet netOf(const occ::handle<Geom_BSplineSurface> &surface) {
     return net;
 }
 
-double refineRim(const char *op, SplineNet &net, const std::function<std::vector<RimPlace>(double)> &placesFor,
-                  const gp_XYZ &up, double within, double enough, int mostSpans, const Message_ProgressRange& range, StageObserver observer) {
-    FitPhase phase(observer, "refinement");
+double correctRim(const char *op, SplineNet &net, const std::function<std::vector<RimPlace>(double)> &placesFor,
+                  const gp_XYZ &up, double within, double enough, int mostSpans) {
+    PatchPhase phase("refinement");
     occ::handle<Geom_BSplineSurface> surface = surfaceOf(net);
     // The shortest span of the net either way, slivers beside a knot of lower continuity apart.
     const auto shortest = [&] {
@@ -143,7 +139,7 @@ double refineRim(const char *op, SplineNet &net, const std::function<std::vector
     if (worst <= enough)
         return worst;
     while (worst > within) {
-        checkCancelled(range);
+        checkCancelled(op);
         const int nv = net.countV(), pu = net.degreeU, pv = net.degreeV;
         const int size = net.countU() * nv;
         for (int solve = 0; solve < solves && worst > within; ++solve) {
@@ -153,8 +149,8 @@ double refineRim(const char *op, SplineNet &net, const std::function<std::vector
             rows.reserve(places.size() * 2);
             for (size_t k = 0; k < places.size(); ++k) {
                 const RimPlace &place = places[k];
-                const SplineBasis bu = splineBasisAt(op, net.knotsU, pu, place.uv.X()),
-                                  bv = splineBasisAt(op, net.knotsV, pv, place.uv.Y());
+                const SplineBasis bu = splineBasis(op, net.knotsU, pu, place.uv.X()),
+                                  bv = splineBasis(op, net.knotsV, pv, place.uv.Y());
                 const bool held = place.across.SquareModulus() > 0;
                 const auto [u0, u1] = spanAt(net.knotsU, pu, place.uv.X());
                 const auto [v0, v1] = spanAt(net.knotsV, pv, place.uv.Y());
@@ -206,7 +202,7 @@ double refineRim(const char *op, SplineNet &net, const std::function<std::vector
             for (int i = 0; i < count; ++i)
                 normal.add(i, i, damping * damping);
             for (size_t r = 0; r < rows.size(); ++r) {
-                if ((r & 1023) == 0) checkCancelled(range);
+                if ((r & 1023) == 0) checkCancelled(op);
                 const Row &row = rows[r];
                 for (size_t a = 0; a < row.index.size(); ++a) {
                     right[unknown[row.index[a]]] += row.coefficient[a] * row.value;
@@ -214,7 +210,7 @@ double refineRim(const char *op, SplineNet &net, const std::function<std::vector
                         normal.add(unknown[row.index[a]], unknown[row.index[b]], row.coefficient[a] * row.coefficient[b]);
                 }
             }
-            checkCancelled(range);
+            checkCancelled(op);
             if (!normal.factor())
                 fail(op, no_solution, "the movement onto the curves cannot be solved: a place is not a number");
             normal.solve(right);
@@ -263,4 +259,4 @@ double refineRim(const char *op, SplineNet &net, const std::function<std::vector
     return worst;
 }
 
-} // namespace GeomAlgoExt
+} // namespace loft
