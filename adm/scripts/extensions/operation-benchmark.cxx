@@ -14,9 +14,12 @@
 //           and from the sides, sampled on 33 x 33 and 129 points.
 //   hollow  a box with one rounded edge, hollowed to a wall t: BRepOffsetAPI_MakeThickSolid
 //           against hollow. Quality: validity (BRepCheck_Analyzer) and the closed-form volume.
+//   ball    for the rounds and junctions that have no closed form: how far a result is from the exact
+//           rolling-ball blend, see ballDefect.
 //   offset  a rectangle's outline moved outwards by d with arcs at the corners:
 //           BRepOffsetAPI_MakeOffset against offsetCurve. Quality: the length P + 2 pi d.
 
+#include <BRepToolsExt_Checks.hxx>
 #include <BRepToolsExt_Operations.hxx>
 #include <BRepBlendExt_Request.hxx>
 #include <BRepBndLib.hxx>
@@ -46,10 +49,18 @@
 #include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <GeomConvert.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepClass_FaceClassifier.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepLProp_SLProps.hxx>
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <gp_Pnt2d.hxx>
 #include <NCollection_Array1.hxx>
 #include <NCollection_Array2.hxx>
 #include <NCollection_List.hxx>
@@ -58,6 +69,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <functional>
 #include <string>
@@ -131,6 +143,74 @@ Stats measure(const std::function<bool()>& work) {
   return s;
 }
 
+// How far the blend faces of `result` are from the exact rolling-ball blend of radius r on `input`,
+// measured without either implementation's help. A face of the ideal blend is touched by a ball of
+// radius r that lies on one side of it and touches the input; so for a point P of the blend with unit
+// normal N the centre C = P -/+ rN is at distance exactly r from the input, whatever the construction.
+// The defect is dist(C, input) - r: zero for the exact blend, positive where the surface lies inside
+// the ideal one (more material removed), negative where it lies outside. Faces lying on the input are
+// not blends and are skipped; each blend face takes the side of the normal that gives it the smaller
+// mean square. `rolls` is false where the ball cannot roll: a centre inside a face the blend runs
+// out onto would cut it. 24 x 24 interior samples per face. Distances are taken to the faces of the
+// input: a solid would be a volume to BRepExtrema_DistShapeShape and every centre inside it at 0.
+struct Defect { double worst = 0, rms = 0; int samples = 0; };
+Defect ballDefect(const TopoDS_Shape& result, const TopoDS_Shape& input, double r,
+                  const std::function<bool(const gp_Pnt&)>& rolls = [](const gp_Pnt&) { return true; }) {
+  Pause pause;
+  Defect out;
+  double sum = 0;
+  constexpr int N = 24;
+  TopoDS_Compound skin;
+  BRep_Builder builder;
+  builder.MakeCompound(skin);
+  for (TopExp_Explorer f(input, TopAbs_FACE); f.More(); f.Next()) builder.Add(skin, f.Current());
+  for (TopExp_Explorer f(result, TopAbs_FACE); f.More(); f.Next()) {
+    const TopoDS_Face face = TopoDS::Face(f.Current());
+    double u0, u1, v0, v1;
+    BRepTools::UVBounds(face, u0, u1, v0, v1);
+    const BRepAdaptor_Surface surface(face);
+    std::vector<std::pair<gp_Pnt, gp_Dir>> samples;
+    for (int i = 1; i < N; ++i)
+      for (int j = 1; j < N; ++j) {
+        const double u = u0 + (u1 - u0) * i / N, v = v0 + (v1 - v0) * j / N;
+        if (BRepClass_FaceClassifier(face, gp_Pnt2d(u, v), 1e-7).State() != TopAbs_IN) continue;
+        BRepLProp_SLProps props(surface, u, v, 1, 1e-9);
+        if (!props.IsNormalDefined()) continue;
+        gp_Dir normal = props.Normal();
+        if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+        samples.emplace_back(surface.Value(u, v), normal);
+      }
+    bool onInput = true;
+    for (size_t k = 0; k < samples.size() && onInput; k += 7) {
+      const BRepExtrema_DistShapeShape d(BRepBuilderAPI_MakeVertex(samples[k].first).Vertex(), skin);
+      onInput = d.IsDone() && d.Value() <= 1e-6;
+    }
+    if (samples.empty() || onInput) continue;
+    double bestSum = 0, bestWorst = 0;
+    int bestCount = 0;
+    for (const double side : {-1., 1.}) {
+      double faceSum = 0, faceWorst = 0;
+      int count = 0;
+      for (const auto& [point, normal] : samples) {
+        const gp_Pnt centre = point.Translated(gp_Vec(normal) * (side * r));
+        if (!rolls(centre)) continue;
+        const BRepExtrema_DistShapeShape d(BRepBuilderAPI_MakeVertex(centre).Vertex(), skin);
+        if (!d.IsDone()) continue;
+        const double defect = d.Value() - r;
+        faceSum += defect * defect;
+        ++count;
+        if (std::abs(defect) > std::abs(faceWorst)) faceWorst = defect;
+      }
+      if (count && (bestCount == 0 || faceSum / count < bestSum / bestCount)) { bestSum = faceSum; bestWorst = faceWorst; bestCount = count; }
+    }
+    sum += bestSum;
+    out.samples += bestCount;
+    if (std::abs(bestWorst) > std::abs(out.worst)) out.worst = bestWorst;
+  }
+  if (out.samples) out.rms = std::sqrt(sum / out.samples);
+  return out;
+}
+
 // The volume by adaptive Gauss-Kronrod integration to a relative accuracy of 1e-8. The default
 // BRepGProp::VolumeProperties uses a fixed rule, which is off by about 1e-5 of the volume on spline
 // blend faces and would be mistaken for a difference between two implementations.
@@ -147,8 +227,12 @@ double length(const TopoDS_Shape& shape) {
   return props.Mass();
 }
 bool valid(const TopoDS_Shape& shape) { Pause pause; return !shape.IsNull() && BRepCheck_Analyzer(shape).IsValid(); }
-// The same check, left on the clock: a call that must return only valid bodies pays for it.
-bool validTimed(const TopoDS_Shape& shape) { return !shape.IsNull() && BRepCheck_Analyzer(shape).IsValid(); }
+// The check that every call of the extension makes on its own result, left on the clock: a call that
+// must return only valid bodies pays for it. It looks only at what the operation made (the faces
+// that `earlier`, the input, does not hold, then each solid and shell whole); stock gets the same.
+bool validTimed(const TopoDS_Shape& shape, const TopoDS_Shape& earlier) {
+  return !shape.IsNull() && BRepExt::invalidity(shape, earlier).empty();
+}
 
 void row(const char* operation, const char* input, const char* who, const Stats& s, const char* quality) {
   const std::string refused = "REFUSED: " + s.refusal;
@@ -197,7 +281,7 @@ void fillet(double r) {
     BRepFilletAPI_MakeFillet maker(body);
     maker.Add(r, top);
     maker.Build();
-    return maker.IsDone() && validTimed(maker.Shape());
+    return maker.IsDone() && validTimed(maker.Shape(), body);
   });
   const uint32_t bodyId = BRepExt::store(session(), body), edgeId = BRepExt::store(session(), top);
   const Stats ext = measure([&] {
@@ -399,19 +483,24 @@ const Pick cornerEdges = [](const Bnd_Box&, double* b) {
 };
 
 struct Step { Pick pick; double radius; };
-void rounds(const char* name, const std::vector<Step>& steps, double expected) {
+// With `ballOracle`, the last step's blend faces are also compared with the exact rolling-ball blend
+// (ballDefect); that step's ball does not roll where it would reach the bottom face z = 0.
+void rounds(const char* name, const std::vector<Step>& steps, double expected, bool ballOracle = false) {
   const TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 20).Shape();
   double volumeStock = 0, volumeExt = 0;
   bool validStock = false, validExt = false;
+  TopoDS_Shape lastInputStock, lastInputExt, resultStock, resultExt;
   const Stats stock = measure([&] {
     TopoDS_Shape body = box;
     for (const Step& step : steps) {
+      lastInputStock = body;
       BRepFilletAPI_MakeFillet maker(body);
       for (const TopoDS_Edge& edge : edgesWhere(body, step.pick)) maker.Add(step.radius, edge);
       maker.Build();
       if (!maker.IsDone()) return false;
       body = maker.Shape();
     }
+    resultStock = body;
     validStock = valid(body);
     volumeStock = volume(body);
     return validStock;
@@ -422,14 +511,15 @@ void rounds(const char* name, const std::vector<Step>& steps, double expected) {
       BRepFilletAPI_MakeFillet maker(body);
       for (const TopoDS_Edge& edge : edgesWhere(body, step.pick)) maker.Add(step.radius, edge);
       maker.Build();
-      if (!maker.IsDone()) return false;
+      if (!maker.IsDone() || !validTimed(maker.Shape(), body)) return false;
       body = maker.Shape();
     }
-    return validTimed(body);
+    return true;
   });
   const Stats ext = measure([&] {
     TopoDS_Shape body = box;
     for (const Step& step : steps) {
+      lastInputExt = body;
       BRepExt::blend2::Request request;
       request.operation = "round";
       request.body = body;
@@ -439,33 +529,44 @@ void rounds(const char* name, const std::vector<Step>& steps, double expected) {
       request.rho = 0.5;
       body = BRepExt::blend2::blend(request).shape;
     }
+    resultExt = body;
     validExt = valid(body);
     volumeExt = volume(body);
     return validExt;
   });
-  char q[200];
-  const auto text = [&](bool ok, double v) {
+  char q[240];
+  const auto text = [&](bool ok, double v, const TopoDS_Shape& result, const TopoDS_Shape& input) {
     if (expected > 0) std::snprintf(q, sizeof q, "%s, V %.6f, |dV| %.3e", ok ? "valid" : "INVALID", v, std::abs(v - expected));
     else std::snprintf(q, sizeof q, "%s, V %.6f", ok ? "valid" : "INVALID", v);
+    if (ballOracle && ok) {
+      const double r = steps.back().radius;
+      const Defect d = ballDefect(result, input, r, [r](const gp_Pnt& centre) { return centre.Z() >= r; });
+      std::snprintf(q + std::strlen(q), sizeof q - std::strlen(q), ", ball defect max %+.2e rms %.2e", d.worst, d.rms);
+    }
   };
-  text(validStock, volumeStock);
+  text(validStock, volumeStock, resultStock, lastInputStock);
   row("round", name, "stock", stock, q);
   row("round", name, "stock+check", checked, q);
-  text(validExt, volumeExt);
+  text(validExt, volumeExt, resultExt, lastInputExt);
   row("round", name, "extension", ext, q);
 }
+// With a second argument, only inputs whose label contains it are run.
+std::string inputFilter;
 // Rounds along curved junctions: two crossing cylinders and a sphere standing on a box. The edges are
 // space curves where two curved surfaces meet, the case where a blend must follow a surface-surface
 // intersection and change its contact curves as it goes. No closed form: validity and volume only,
 // and the volumes of the two implementations are compared.
 void junction(const char* name, const TopoDS_Shape& body, const Pick& pick, double radius) {
+  if (std::string(name).find(inputFilter) == std::string::npos) return;
   double volumeStock = 0, volumeExt = 0;
   bool validStock = false, validExt = false;
+  TopoDS_Shape resultStock, resultExt;
   const Stats stock = measure([&] {
     BRepFilletAPI_MakeFillet maker(body);
     for (const TopoDS_Edge& edge : edgesWhere(body, pick)) maker.Add(radius, edge);
     maker.Build();
     if (!maker.IsDone()) return false;
+    resultStock = maker.Shape();
     validStock = valid(maker.Shape());
     volumeStock = volume(maker.Shape());
     return validStock;
@@ -474,7 +575,7 @@ void junction(const char* name, const TopoDS_Shape& body, const Pick& pick, doub
     BRepFilletAPI_MakeFillet maker(body);
     for (const TopoDS_Edge& edge : edgesWhere(body, pick)) maker.Add(radius, edge);
     maker.Build();
-    return maker.IsDone() && validTimed(maker.Shape());
+    return maker.IsDone() && validTimed(maker.Shape(), body);
   });
   const Stats ext = measure([&] {
     BRepExt::blend2::Request request;
@@ -485,15 +586,22 @@ void junction(const char* name, const TopoDS_Shape& body, const Pick& pick, doub
     request.law = BRepExt::blend2::Law::Conic;
     request.rho = 0.5;
     const TopoDS_Shape made = BRepExt::blend2::blend(request).shape;
+    resultExt = made;
     validExt = valid(made);
     volumeExt = volume(made);
     return validExt;
   });
-  char q[160];
-  std::snprintf(q, sizeof q, "%s, V %.6f", validStock ? "valid" : "INVALID", volumeStock);
+  char q[240];
+  const auto text = [&](bool ok, double v, const TopoDS_Shape& result) {
+    std::snprintf(q, sizeof q, "%s, V %.6f", ok ? "valid" : "INVALID", v);
+    if (!ok) return;
+    const Defect d = ballDefect(result, body, radius);
+    std::snprintf(q + std::strlen(q), sizeof q - std::strlen(q), ", ball defect max %+.2e rms %.2e", d.worst, d.rms);
+  };
+  text(validStock, volumeStock, resultStock);
   row("junction", name, "stock", stock, q);
   row("junction", name, "stock+check", checked, q);
-  std::snprintf(q, sizeof q, "%s, V %.6f", validExt ? "valid" : "INVALID", volumeExt);
+  text(validExt, volumeExt, resultExt);
   row("junction", name, "extension", ext, q);
 }
 
@@ -507,6 +615,7 @@ double steiner(double r) {
 int main(int argc, char** argv) {
   // With an argument, only that group is run (for debugging one group: fillet, patch, rounds, junction, hollow or offset).
   const std::string only = argc > 1 ? argv[1] : "";
+  inputFilter = argc > 2 ? argv[2] : "";
   const auto want = [&](const char* group) { return only.empty() || only == group; };
   std::printf("operation | input | who | ok/runs | CPU median [min, max] ms | quality\n");
   if (want("fillet")) for (double r : {0.2, 0.5}) fillet(r);
@@ -515,7 +624,7 @@ int main(int argc, char** argv) {
     rounds("box, all 12 edges r=6", {{everyEdge, 6}}, steiner(6));
     rounds("box, all 12 edges r=9 (2r near height)", {{everyEdge, 9}}, steiner(9));
     rounds("box, three edges at a corner r=7", {{cornerEdges, 7}}, 0);
-    rounds("box, top r=8 then uprights r=3", {{topEdges, 8}, {uprights, 3}}, 0);
+    rounds("box, top r=8 then uprights r=3", {{topEdges, 8}, {uprights, 3}}, 0, true);
   }
   if (want("junction")) {
     const TopoDS_Shape along = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -20), gp_Dir(0, 0, 1)), 10, 40).Shape();

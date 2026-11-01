@@ -11,7 +11,7 @@ upstream yet; it is written so that it can be proposed in pieces.
 
 | Part | Where | What it is | Depends on |
 | --- | --- | --- | --- |
-| 17 corrections | one commit each, see [Corrections](#corrections-derivations-and-independent-application) | Fixes to existing OCCT algorithms: quadratic or unbounded loops, wrong ranges, uninitialised reads, missing cancellation | nothing; 14 build against current `master` (one needs another of the 17) |
+| 17 corrections | one commit each, see [Corrections](#corrections-derivations-and-independent-application) | Fixes to existing OCCT algorithms: quadratic or unbounded loops, wrong ranges, uninitialised reads, missing cancellation | nothing; 14 build against current `master` (one needs another of the 17); one later correction is [described after them](#bndlib-torus-patch-box) |
 | Numerical utilities | `GeomAlgoExt_*` in `TKGeomAlgo` | Interval enclosures, Bernstein products, spline collocation, constrained tensor-spline fit, rim fit, certified knot compaction | existing toolkits only |
 | Patch chart and interior survey | `BRepAlgoExt_*` in `TKMesh` | Cotangent-weight chart of a boundary loop, interior fairness survey, trim integration, read-back | utilities |
 | Operations | `TKAlgoExt`, nine packages, 45 000 lines | Fillet (rolling-ball) solver, Patch (boundary-first fill), skinning and sweep, offsets and shells, curve and surface editing, Booleans on cells | all of the above |
@@ -394,39 +394,59 @@ Median process CPU time of ten runs after one warm-up (`std::clock`), one thread
 Release libraries, TBB off, AMD Ryzen 9 7950X3D on a shared host. The complete output with minima and maxima is
 [operation-benchmark-results.txt](adm/scripts/extensions/operation-benchmark-results.txt); rerun it with
 `adm/scripts/extensions/operation-benchmark.sh NATIVE_BUILD_DIRECTORY` and redraw the chart with
-`operation-chart.py`. Checking a result (validity, volume, length) is excluded from the clock, **except** in the
-bars called "stock, then its result checked". Those add the `BRepCheck_Analyzer` pass that every call of this
-branch performs on its own result before returning it; stock does not, so that bar is the like-for-like
+`operation-chart.py`. Checking a result (validity, volume, length, ball defect) is excluded from the clock,
+**except** in the bars called "stock, then its result checked". Those add the check that every call of this branch
+makes on its own result before returning it: `BRepExt::invalidity(result, input)`, which looks at the faces the input
+does not hold and then at each solid and shell as a whole (a `BRepCheck_Analyzer` pass over the whole body would
+make the single fillet 0.60 ms instead of 0.35). Stock does not check, so that bar is the like-for-like
 comparison for an operation that must return only valid bodies. Volumes are computed by adaptive Gauss-Kronrod
 integration to 1e-8 (the default fixed rule is off by about 1e-5 on spline blends, which looks like a
 difference between implementations and is not). Hatched bars are calls with no valid result or a wrong one.
 
 | Operation | Input | Stock ms | Stock + check ms | Branch ms | Result |
 | --- | --- | ---: | ---: | ---: | --- |
-| Round | plate, hole r=1, edge r=0.2 / 0.5 | 0.28 / 0.30 | 0.58 / 0.59 | 0.75 / 0.89 | both exact to 5e-12 (closed form) |
-| Round | box, all 12 edges, r=6 / r=9 | 3.2 / 3.1 | 4.0 / 4.6 | 2.3 / 2.1 | both exact to 3e-11 (Steiner) |
-| Round | box, three edges at a corner, r=7 | 1.6 | 1.4 | 0.67 | same volume |
-| Round | box, top r=8 then uprights r=3 | 7.2 | 8.5 | 9.0 | volumes differ by 0.48 of 22 140 (unexplained) |
-| Round | crossed cylinders R10/R6, r=1 / 2.5 | 11.6 / 13.2 | 13.9 / 16.2 | 14.9 / 17.7 | volumes differ by 0.008 / 0.27 |
-| Round | sphere R14 on a box, r=2 / 6 | 1.3 / 1.3 | 1.6 / 1.6 | 0.73 / 2.27 | volumes agree to 1e-7 |
-| Fill | four cubic sides, a=0.5 / 2.0 | 3.7 / 17.9 | | 3.5 / 2.2 | stock 0.11 / 0.45 off the defining surface, branch 1e-12 |
-| Hollow | filleted box, wall 2 / 4 | 2.9 / 2.7 | | 7.3 / 8.7 | stock volume wrong by 3.3e4 / invalid; branch exact to 1e-11 |
-| Curve offset | rectangle, d=2 / 10 | 0.15 | | 0.25 / 0.27 | both exact |
+| Round | plate, hole r=1, edge r=0.2 / 0.5 | 0.24 / 0.23 | 0.35 / 0.35 | 0.37 / 0.37 | both exact to 5e-12 (closed form) |
+| Round | box, all 12 edges, r=6 / r=9 | 2.6 / 2.6 | 3.4 / 3.4 | 1.8 / 1.8 | both exact to 3e-11 (Steiner) |
+| Round | box, three edges at a corner, r=7 | 0.85 | 1.2 | 0.60 | same volume |
+| Round | box, top r=8 then uprights r=3 | 5.9 | 7.3 | 8.0 | ball defect: stock 7e-3 at most, branch 2e-9 |
+| Round | crossed cylinders R10/R6, r=1 / 2.5 | 10.4 / 11.4 | 12.5 / 13.8 | 12.9 / 15.4 | ball defect: stock 2e-4 / 3e-3, branch 2e-8 / 3e-8 |
+| Round | sphere R14 on a box, r=2 / 6 | 1.03 / 1.03 | 1.2 / 1.2 | 0.49 / 0.46 | volumes agree to 1e-7; ball defect: stock 4e-6, branch 1e-14 |
+| Fill | four cubic sides, a=0.5 / 2.0 | 2.6 / 13.4 | | 1.9 / 1.9 | stock 0.11 / 0.45 off the defining surface, branch 1e-12 |
+| Hollow | filleted box, wall 2 / 4 | 2.6 / 2.5 | | 6.7 / 7.9 | stock volume wrong by 3.3e4 / invalid; branch exact to 1e-11 |
+| Curve offset | rectangle, d=2 / 10 | 0.14 | | 0.23 | both exact |
+
+*Ball defect.* The exact blend of radius r on a body B is the envelope of the balls of radius r that lie on one side
+of the surface and touch B; so for a point P of it with unit normal N, the centre c = P -/+ rN is at distance exactly r
+from the faces of B (c = P - rN where the ball is in the material, P + rN where it is in the void). The defect
+dist(c, faces of B) - r is therefore zero for the exact blend, positive where the surface lies inside the exact one
+(more material removed) and negative where it lies outside. It uses neither implementation (24 x 24 interior samples per
+new face, the side of each face taken as the one with the smaller mean square; centres where the blend runs out onto a
+face and the ball cannot roll are left out, as the bottom face in the reblend row). It measures a result against the
+definition of the operation, and a result of 1e-8 means the sampled points are exact to that, not that every point is.
+Where the two implementations' volumes differ, this accounts for it: the rms defect of stock's reblend, 1.25e-3, times the
+area of its new faces, 387, is 0.49 (an rms bounds the mean from above), against 0.48 for the difference of the
+volumes; stock's blends are the approximations and the branch's are exact to the sampling.
 
 How to read it, without flattering it:
 
-* **Where the branch matches or beats the checked stock bar:** twelve-edge and corner rounds, the sphere on a box at
-  radius 2, and the fill. These are within noise or faster, and agree with stock on the volume.
-* **Where it is slower than that bar:** a single circular edge (1.3 to 1.5 times), the sphere at radius 6 (1.4 times),
-  a round blended into earlier rounds and the crossed cylinders (1.05 to 1.1 times), the curve offset (1.7 times) and
-  the hollow (2.5 to 3.5 times, against a stock call that returns a wrong or invalid body). A profile of the single
-  circular edge shows the call is stock's builder (36 per cent) plus one validity pass (48 per cent) plus
-  bookkeeping, so there the extra cost is the verification, not the construction; the remaining 0.2 ms is face
-  history and the closedness test. Cheaper verification, or skipping it where the builder's result is provably
-  unchanged, is open work.
-* **Volume differences.** Both implementations return valid bodies where they differ by 0.008 to 0.5 in volume
-  (2e-5 relative at most). Neither has a closed form to be judged against. They are consistent with the two blends
-  being different approximations within their tolerances; this has not been established.
+* **Where the branch is faster than the checked stock bar:** twelve-edge and corner rounds (1.9 and 2.0 times), the
+  sphere on a box (2.5 and 2.7 times), and the fill, which is also exact where stock is not. Both agree with stock on
+  the volume to the tolerance of stock's blend.
+* **Where it is level:** a single circular edge is 1.05 times the checked stock bar (0.37 against 0.35 ms); the
+  remaining 0.02 ms is face history and the closedness test. Before the checks of the fillet wrappers were restricted to what
+  an operation made it was 1.7 times (the whole-body pass above).
+* **Where it is slower:** the round blended into earlier rounds (1.1 times), the crossed cylinders (1.03 and 1.12 times),
+  the curve offset (1.7 times) and the hollow (2.6 and 3.2 times, against a stock call that returns a wrong or invalid
+  body). For the crossed cylinders the profile is the construction itself (the spine march, the section fit and the
+  same-parameter pass), not a check: at r=2.5 the extension's exact blend costs about a third more instructions than
+  stock's approximation, which is what its smaller defect buys. The offset spends its extra on a self-crossing test of
+  the input, on finding the plane of the outline and on the polylines for the test (about an eighth each); the reblend
+  and the hollow have not been profiled.
+* **What changed:** a profile of the sphere on a block found 80 per cent of the call in an exact face-to-face distance
+  between the toroidal blend and the block's far sides. `BRepBndLib` boxes a face that is not planar by its whole surface,
+  so the box of the blend was that of the entire torus and reached the sides, and the torus box that `BndLib` gives for a
+  parameter range was itself smaller than the patch (see
+  [BndLib-torus-patch-box](#bndlib-torus-patch-box)). With both fixed the test is skipped where the box says it must be.
 * **Fill and hollow** show the cases stock does not handle well, on inputs with closed forms; they say nothing about
   general loops.
 
@@ -501,10 +521,11 @@ Known limits and what remains, stated without reference to any application:
    chaining routine (`BRepPatchExt_Side.hxx`).
 4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
    offsetting solids whose blends meet the wall thickness exactly has no exactness proof.
-5. **Speed.** Every call verifies its result, and on small inputs that verification costs as much as the construction
-   (table above). Making it cheaper, or skipping it where the builder's result is provably unchanged, is open. The curve
-   offset and hollow are 1.7 and 2.5 to 3.5 times slower than stock and have not been profiled; skinning has not been
-   compared with stock at all.
+5. **Speed.** Every call verifies its result (table above). A single circular edge is within 0.02 ms of stock plus the
+   same check; the reblend and crossed cylinders are 3 to 12 per cent slower, the curve offset 1.7 times and the hollow 2.6
+   to 3.2 times. The crossed cylinders are construction cost (the exact blend against stock's approximation) and the offset's extra is its
+   self-crossing test and plane finding; neither has been reduced, and the reblend and the hollow have not been profiled.
+   Skinning has not been compared with stock at all.
 6. **Tests.** Native tests exist for the utilities, the chart, the fit and five whole operations. Most of
    `TKAlgoExt` is exercised only through the embedding application's tests; closed-form native tests are
    needed for each package before an upstream proposal.
@@ -634,6 +655,24 @@ cancellation requires the progress guard and is not independently compilable;
 `upstream/BRepOffset-cancellable-with-progress` contains both commits and also builds.
 Three changes conflict with redesigned upstream implementations and are left
 unported rather than making an unsupported semantic adaptation.
+
+### BndLib-torus-patch-box
+
+Commit `810a8e12a5`, made after the measurements above and not one of the 17. Upstream: not assessed.
+
+Problem: `BndLib::Add(gp_Torus, UMin, UMax, VMin, VMax, ...)` returns a box that does not contain the patch. It boxes the arcs
+that points of the section circle, every 45 degrees, trace about the axis; those points lie on the circle, so the part of the
+circle between two of them lies outside the polygon through them. Random tilted tori: 0.6 per cent of 7.4 million surface
+points fall outside, by up to 7.1 per cent of the minor radius (the inscribed octagon's bound is 1 - cos(pi/8) = 7.6 per cent).
+
+Derivation and limits: the patch is the rotation about the axis, through the U range, of an arc of the section circle. That arc
+lies in the convex hull of its end points and, for each sub-arc of at most 45 degrees, of the intersection of the tangents at
+the sub-arc's ends, which is on the bisector at Ri / cos(step / 2) from the section's centre. A linear functional on the
+rotation of a convex set about an axis is largest at a vertex of the set, so the union of the arcs' boxes that these points
+trace contains the patch. Rotation circles are boxed as before (by the circumscribed octagon, so a full circle of radius R is
+boxed to R / cos(pi/8)); the degenerate torus (R < r) keeps its own routine. Tests: sampled surface points of tilted tori
+with reversed and long V ranges lie in the box (the test fails on the previous code), and the inner half of a torus does
+not reach the outer equator.
 
 ### Approx_BSplComputeLine-local-endpoint-parameters
 
