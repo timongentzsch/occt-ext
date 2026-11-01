@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Timon Gentzsch
 // SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
+#include <BRepToolsExt_Checks.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
 #include <BRepToolsExt_History.hxx>
@@ -133,7 +134,7 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
     if(limits.empty()) {
         for(int c=1;c<=all.NbContours();++c) setLaw(all,c);
         all.Build();
-        if(!all.IsDone() || !BRepCheck_Analyzer(all.Shape()).IsValid()) fail(op,no_solution,"station fillet failed");
+        if(!all.IsDone() || !BRepExt::invalidity(all.Shape(),shape).empty()) fail(op,no_solution,"station fillet failed");
         history.collect(all,shape);
         return history.finish(store(kernel,all.Shape()));
     }
@@ -143,7 +144,7 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
     for(int c=1;c<=all.NbContours();++c) {
         BRepFilletAPI_MakeFillet maker(shape);configure(maker);
         maker.Add(radius,all.Edge(c,1)); setLaw(maker,1); maker.Build();
-        if(!maker.IsDone() || !BRepCheck_Analyzer(maker.Shape()).IsValid()) fail(op,no_solution,"limited station fillet failed");
+        if(!maker.IsDone() || !BRepExt::invalidity(maker.Shape(),shape).empty()) fail(op,no_solution,"limited station fillet failed");
         // A limit interval must occupy one connected run of the chain. Halfspaces on a
         // winding spline can otherwise round several disjoint runs while returning a valid
         // body. Check the contour in its directed order, including the closed-chain seam.
@@ -202,7 +203,7 @@ EvolutionData filletStations(OcctKernel &kernel, uint32_t shapeId,
     Untouched<BRepAlgoAPI_Cut> cut(shape,removed);
     if(!cut.IsDone()) fail(op,no_solution,"limited blend subtraction failed");
     Untouched<BRepAlgoAPI_Fuse> fuse(cut.Shape(),added);
-    if(!fuse.IsDone() || !BRepCheck_Analyzer(fuse.Shape()).IsValid()) fail(op,no_solution,"limited blend is invalid");
+    if(!fuse.IsDone() || !BRepExt::invalidity(fuse.Shape(),shape).empty()) fail(op,no_solution,"limited blend is invalid");
     history.collectComposed(cut,fuse,shape);
     return history.finish(store(kernel,fuse.Shape()));
 }

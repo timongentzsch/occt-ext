@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Timon Gentzsch
 // SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
+#include <BRepToolsExt_Checks.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
 #include <BRepToolsExt_History.hxx>
@@ -59,7 +60,7 @@ EvolutionData filletRange(OcctKernel &kernel, uint32_t shapeId, uint32_t edgeId,
     BRepAdaptor_Curve curve(edge);
     const bool limited = start > 0 || end < 1 || (!propagate && maker.NbEdges(contour) > 1);
     maker.Build();
-    if (!maker.IsDone() || !BRepCheck_Analyzer(maker.Shape()).IsValid())
+    if (!maker.IsDone() || !BRepExt::invalidity(maker.Shape(), shape).empty())
         fail(op, no_solution, "fillet construction failed");
     FaceHistory history(op, hashes, bound);
     if (!limited) {
@@ -117,7 +118,7 @@ EvolutionData filletRange(OcctKernel &kernel, uint32_t shapeId, uint32_t edgeId,
     Untouched<BRepAlgoAPI_Cut> cut(shape,clip(removed.Shape()));
     if (!cut.IsDone()) fail(op,no_solution,"limited fillet subtraction failed");
     BRepAlgoAPI_Fuse fuse(cut.Shape(),clip(added.Shape()));
-    if (!fuse.IsDone() || !BRepCheck_Analyzer(fuse.Shape()).IsValid())
+    if (!fuse.IsDone() || !BRepExt::invalidity(fuse.Shape(), shape).empty())
         fail(op,no_solution,"limited fillet is invalid");
     history.collectComposed(cut, fuse, shape);
     return history.finish(store(kernel,fuse.Shape()));

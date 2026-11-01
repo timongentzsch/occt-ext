@@ -11,6 +11,7 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <GeomAPI_PointsToBSplineSurface.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BndLib_AddSurface.hxx>
 #include <GeomLib_IsPlanarSurface.hxx>
 #include <ShapeAnalysis_Edge.hxx>
 #include <numeric>
@@ -3262,6 +3263,23 @@ void Attach::tolerances() {
     }
 }
 
+namespace {
+// The box of a face over its own parameter range. BRepBndLib boxes a face that is not planar by its
+// whole surface, so a torus patch gets the box of the entire torus and collisions() would test its
+// exact distance to every plane that the entire torus reaches. The boxes of quadrics and the torus
+// over a parameter range bound the surface there (BndLib), which is all the pre-filter needs.
+void faceBox(const TopoDS_Face& face, Bnd_Box& box) {
+    const BRepAdaptor_Surface surface(face, true);
+    switch (surface.GetType()) {
+    case GeomAbs_Cylinder:
+    case GeomAbs_Cone:
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus: BndLib_AddSurface::Add(surface, 0., box); break;
+    default: BRepBndLib::Add(face, box);
+    }
+}
+} // namespace
+
 void Attach::collisions() {
     // Nothing else of the body may meet a blend: a face beside none of them that one reaches
     // would be cut through (a cavity's wall, a far side of a thin part). Refused with every such
@@ -3283,14 +3301,14 @@ void Attach::collisions() {
         for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next()) most = std::max(most, tol::own(f.Current()));
         for (const auto& face : made) {
             Bnd_Box box;
-            BRepBndLib::Add(face, box);
+            faceBox(face, box);
             box.Enlarge(tol::own(face) + most);
             for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next()) {
                 if (beside.Contains(f.Current()) ||
                     std::any_of(reached.begin(), reached.end(), [&](const TopoDS_Shape& r) { return r.IsSame(f.Current()); }))
                     continue;
                 Bnd_Box other;
-                BRepBndLib::Add(f.Current(), other);
+                faceBox(TopoDS::Face(f.Current()), other);
                 if (box.IsOut(other)) continue;
                 BRepExtrema_DistShapeShape distance(face, f.Current());
                 if (distance.IsDone() && distance.Value() <= tol::own(face) + tol::own(f.Current())) reached.push_back(f.Current());

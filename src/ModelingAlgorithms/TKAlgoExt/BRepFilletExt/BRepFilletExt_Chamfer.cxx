@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Timon Gentzsch
 // SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
+#include <BRepToolsExt_Checks.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
 #include <BRepToolsExt_GeomUtil.hxx>
@@ -202,7 +203,7 @@ EvolutionData chamfer(OcctKernel &kernel, uint32_t shapeId, const std::vector<ui
         const auto section = BRepBuilderAPI_MakeFace(triangle.Wire()).Face();
         const auto tool = BRepPrimAPI_MakePrism(section, gp_Vec(first, last)).Shape();
         Untouched<BRepAlgoAPI_Cut> cut(shape, tool);
-        if (!cut.IsDone() || !BRepCheck_Analyzer(cut.Shape()).IsValid())
+        if (!cut.IsDone() || !BRepExt::invalidity(cut.Shape(), shape).empty())
             fail(op, no_solution, "isolated chamfer subtraction failed");
         auto solids = TopExp_Explorer(cut.Shape(), TopAbs_SOLID);
         if (!solids.More()) fail(op, no_solution, "isolated chamfer consumes the body");
@@ -241,7 +242,7 @@ EvolutionData chamfer(OcctKernel &kernel, uint32_t shapeId, const std::vector<ui
     }
     try {
         if (!nativeFailed) maker.Build();
-        if (!nativeFailed && maker.IsDone() && BRepCheck_Analyzer(maker.Shape()).IsValid()) {
+        if (!nativeFailed && maker.IsDone() && BRepExt::invalidity(maker.Shape(), shape).empty()) {
             wrongSetbacks = angle == 0 && !chamferHasSetbacks(shape, maker, distance1, distance2,
                                                           referenceId ? get(kernel, referenceId) : TopoDS_Shape());
             if (!wrongSetbacks) {
@@ -308,7 +309,7 @@ EvolutionData chamfer(OcctKernel &kernel, uint32_t shapeId, const std::vector<ui
     cut.SetTools(tools);
     cut.SetNonDestructive(true);
     cut.Build();
-    if (!cut.IsDone() || !BRepCheck_Analyzer(cut.Shape()).IsValid() ||
+    if (!cut.IsDone() || !BRepExt::invalidity(cut.Shape(), shape).empty() ||
         !TopExp_Explorer(cut.Shape(), TopAbs_SOLID).More())
         fail(op, no_solution, "support-plane chamfer did not leave a valid solid");
     FaceHistory history(op, hashes, bound);
@@ -330,7 +331,7 @@ EvolutionData clipPlane(OcctKernel &kernel, uint32_t shapeId, Vec3 origin, Vec3 
                                                 p.Translated(n * (positive ? 1 : -1)))
                           .Solid();
     Untouched<BRepAlgoAPI_Common> clip(shape, half);
-    if (!clip.IsDone() || !BRepCheck_Analyzer(clip.Shape()).IsValid())
+    if (!clip.IsDone() || !BRepExt::invalidity(clip.Shape(), shape).empty())
         fail("clipPlane", no_solution, "plane clipping failed");
     FaceHistory history("clipPlane", hashes, bound);
     history.collect(clip, shape);
