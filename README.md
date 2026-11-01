@@ -173,12 +173,15 @@ Cancellation must escape the optional proposal's catch of OCCT builder failures.
 All retained non-derived choices are explicit: fit diagonal holds 1e-13, factor
 100 and cap 1e-6; stall count 12, stall share 0.02, maximum passes 400 and energy
 ratio stop 1e-20; basis capacity degree 5 and five terms per condition; rim Newton
-steps 8, determinant cutoff 1e-12, sliver ratio 0.2, three solves, damping 0.03,
+steps 8, determinant cutoff 1e-12, squared-step cutoff 1e-28, sliver ratio 0.2,
+three solves, damping 0.03,
 slow-progress ratio 0.5, cosine cutoff 0.17; compaction 512 trials, 16 removals,
 262144 coefficients, 8*1024*1024 visits, proposal multiplier 1024, 33-point
 rejection screen and 1e-10 screen allowance. These are implementation limits or
 heuristics, not theorems, and none was tuned by this move. In particular 1e-20
-is not binary64 epsilon squared. The parent construction's interior acceptance
+is not binary64 epsilon squared. Cancellation polling cadences 1024 rows in rim
+fitting and 16/256 items in compaction are inherited scheduling choices, not
+proved latency bounds. The parent construction's interior acceptance
 heuristic and flat G2 limit remain outside these modules and remain unproven.
 
 The WASM SIMD path is retained. A portable two-lane path rounds each operation
