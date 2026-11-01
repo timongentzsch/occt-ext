@@ -18,6 +18,17 @@ namespace loft { using GeomAlgoExt::Band; }
 #include <cmath>
 #include <map>
 
+#if !defined(__wasm_simd128__) || defined(OCCT_GEOMALGOEXT_SCALAR)
+namespace loft {
+using GeomAlgoExt::v128_t;
+using GeomAlgoExt::wasm_f64x2_splat;
+using GeomAlgoExt::wasm_v128_load;
+using GeomAlgoExt::wasm_v128_store;
+using GeomAlgoExt::wasm_f64x2_add;
+using GeomAlgoExt::wasm_f64x2_mul;
+}
+#endif
+
 namespace loft {
 namespace {
 
