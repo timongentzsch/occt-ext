@@ -11,3 +11,4 @@ ProgressScope::~ProgressScope() { current = previous; }
 extern "C" int sessionCancelled() { return current.UserBreak(); }
 }
 extern "C" void loft_patch_phase(const char*, int) {}
+extern "C" void loft_report_progress(const char*) {}

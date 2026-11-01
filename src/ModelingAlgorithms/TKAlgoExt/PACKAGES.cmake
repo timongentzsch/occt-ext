@@ -1,1 +1,1 @@
-set(OCCT_TKAlgoExt_LIST_OF_PACKAGES BRepBlendExt)
+set(OCCT_TKAlgoExt_LIST_OF_PACKAGES BRepBlendExt BRepBooleanExt BRepCurveExt BRepFilletExt BRepLoftExt BRepOffsetExt BRepPatchExt BRepSurfaceExt BRepToolsExt)

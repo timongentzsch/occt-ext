@@ -1,0 +1,25 @@
+set(OCCT_BRepSurfaceExt_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
+set(OCCT_BRepSurfaceExt_FILES
+  BRepSurfaceExt_Align.cxx
+  BRepSurfaceExt_Bridge.cxx
+  BRepSurfaceExt_Constraints.cxx
+  BRepSurfaceExt_DeformBody.cxx
+  BRepSurfaceExt_DeformUvn.cxx
+  BRepSurfaceExt_DeformUvn.hxx
+  BRepSurfaceExt_Degree.cxx
+  BRepSurfaceExt_FaceDegree.cxx
+  BRepSurfaceExt_FaceRebuild.cxx
+  BRepSurfaceExt_FaceSeparation.cxx
+  BRepSurfaceExt_FaceSeparation.hxx
+  BRepSurfaceExt_FaceSeparationAnalytic.cxx
+  BRepSurfaceExt_FaceSeparationAnalytic.hxx
+  BRepSurfaceExt_FaceSupport.cxx
+  BRepSurfaceExt_Fit.cxx
+  BRepSurfaceExt_Points.cxx
+  BRepSurfaceExt_Polyspline.cxx
+  BRepSurfaceExt_Polyspline.hxx
+  BRepSurfaceExt_ScaleAxes.cxx
+  BRepSurfaceExt_Sheets.cxx
+  BRepSurfaceExt_Square.cxx
+  BRepSurfaceExt_Tools.hxx
+)

@@ -1,0 +1,18 @@
+set(OCCT_BRepOffsetExt_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
+set(OCCT_BRepOffsetExt_FILES
+  BRepOffsetExt_Defeature.cxx
+  BRepOffsetExt_Faces.cxx
+  BRepOffsetExt_Hollow.cxx
+  BRepOffsetExt_Parts.cxx
+  BRepOffsetExt_Parts.hxx
+  BRepOffsetExt_PushFace.cxx
+  BRepOffsetExt_Reconstruct.cxx
+  BRepOffsetExt_Reconstruct.hxx
+  BRepOffsetExt_SewHistory.cxx
+  BRepOffsetExt_SewHistory.hxx
+  BRepOffsetExt_Shell.cxx
+  BRepOffsetExt_Solid.cxx
+  BRepOffsetExt_Solid.hxx
+  BRepOffsetExt_Thicken.cxx
+  BRepOffsetExt_TopologyCleanup.cxx
+)
