@@ -2,6 +2,7 @@
 set(OCCT_TKMesh_GTests_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
 
 set(OCCT_TKMesh_GTests_FILES
+  BRepAlgoExt_Prism_Test.cxx
   BRepAlgoExt_Patch_Test.cxx
   BRepMesh_BaseMeshAlgo_Test.cxx
   BRepMesh_CircleTool_Test.cxx

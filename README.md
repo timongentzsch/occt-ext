@@ -695,3 +695,22 @@ For information regarding OCCT code development, please consult the official OCC
 ### Forum and Discussions
 - [OCCT Forums](https://dev.opencascade.org/forums)
 - [GitHub Discussions](https://github.com/Open-Cascade-SAS/OCCT/discussions)
+
+### Contour seeds and prism diagnostics
+
+`BRepAlgoExt_Contours` enumerates a maker's propagated contour and chooses a
+periodic spline's closing knot as a deterministic seed. It does not change the curve.
+`BRepAlgoExt_Prism` supplies conservative diagnostics following a failed construction.
+A planar set contained by a strip of width w cannot contain a disk of diameter
+2r > w: this proves the cap-collapse implication for the recognized right prisms.
+The curvature diagnostic solves det(II-k I)=0 using exact surface derivatives;
+it is a sampled diagnostic, not a certificate between samples.
+Assumptions: regular support derivatives and correctly recognized prism supports.
+The inherited allowances are **unproven**: fineAngle=1e-12; strip slack=2e-7;
+squared differential cutoffs 1e-20 and 1e-24; classifier steps 1e-4,1e-3,1e-2
+and tolerance 1e-8; 4096 samples (one for constant-curvature elementary supports);
+curvature-ratio allowance 1e-7. No value was retuned in this relocation.
+These depend on TKMesh/TKGeomAlgo and the inherited Resolution header; they can
+be applied independently of the patch solver. There is no whole-fillet impact
+measurement here: construction remains in the application, and this source move
+is validated by identical linked production bytes rather than a new speed claim.
