@@ -248,6 +248,26 @@ slope experiment measured +0.665 ns/check (one-sided 95% upper bound +0.806).
 This is a boundary performance limitation, not a numerical disagreement. Native
 clients may use these APIs; no claim is made that the app consumes them yet.
 
+## Applying modules separately
+
+These modules do not depend on the 17 corrections. The accepted utility commits
+remain unchanged. On this pinned base, apply the following commits in order:
+
+| Module | Commits | Dependencies |
+| --- | --- | --- |
+| Spline fit, portable band, prepared rim/compaction | `bb5616bf41`, `58430e7900`, `dd709ae866` | accepted interval/Bernstein/bounds helpers; existing TKGeomAlgo→TKBRep dependency |
+| Exact-section fitting | `a28ec1fd41` | spline-fit batch and accepted Hermite helper |
+| Patch chart/interior | `3d1022a70e`, `4273531a63` | spline execution header; accepted Bernstein/interval helpers; existing TKMesh |
+| Benchmark documentation | `01bba3caa2`, `f757b82e4c` | corresponding module headers for candidate binaries only |
+
+Commit `dd709ae866` can be cherry-picked before the chart commit: it changes only
+the spline basis status boundary. A module cherry-pick includes its own GTests and
+FILES registration. If a package already exists, merge the additive FILES entries;
+do not replace unrelated toolkit registrations. Native tests above were run on the
+combined pinned branch, not on every independent commit combination or upstream tip.
+The module benchmark script accepts separate candidate and stock static build trees.
+Do not infer independent upstream-master compatibility from the correction branches.
+
 ## Reproducing the native measurements
 
 Use Linux, CMake, Ninja, a C++17 compiler, and static Release libraries.
