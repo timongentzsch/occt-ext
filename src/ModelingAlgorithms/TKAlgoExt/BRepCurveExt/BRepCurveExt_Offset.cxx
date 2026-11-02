@@ -193,17 +193,32 @@ struct Poly
   std::vector<gp_Pnt2d> points;
   double                low[2], high[2];
   int                   after = -1; // the polyline that follows this one in its wire, if any
+  // Whether the edge is a line or a conic arc, which cannot cross itself: the test of a polyline
+  // against itself is then passed over.
+  bool simple = false;
 };
 
 Poly polyOf(const char* op, const TopoDS_Edge& edge, const gp_Pln& plane, double deflection)
 {
   BRepAdaptor_Curve curve(edge);
+  Poly              poly;
+  switch (curve.GetType())
+  {
+    case GeomAbs_Line:
+    case GeomAbs_Circle:
+    case GeomAbs_Ellipse:
+    case GeomAbs_Hyperbola:
+    case GeomAbs_Parabola:
+      poly.simple = true;
+      break;
+    default:
+      break;
+  }
   // Steps that turn by no more than a tenth of a radian, beside the deflection: a walk by
   // deflection alone takes an S between two points for its chord.
   GCPnts_TangentialDeflection walk(curve, 0.1, deflection);
   if (walk.NbPoints() < 2)
     fail(op, no_solution, "a piece of the offset could not be walked along");
-  Poly poly;
   for (int i = 1; i <= walk.NbPoints(); ++i)
   {
     double u, v;
@@ -280,7 +295,7 @@ bool anyCross(const std::vector<Poly>& polys)
   for (size_t i = 0; i < polys.size(); ++i)
     for (size_t k = i; k < polys.size(); ++k)
     {
-      if (i == k                     ? cross(polys[i], polys[i], false, true)
+      if (i == k                     ? !polys[i].simple && cross(polys[i], polys[i], false, true)
           : polys[i].after == int(k) ? cross(polys[i], polys[k], true, false)
           : polys[k].after == int(i) ? cross(polys[k], polys[i], true, false)
                                      : cross(polys[i], polys[k], false, false))
