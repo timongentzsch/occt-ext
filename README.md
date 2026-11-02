@@ -2,22 +2,32 @@
 
 # OCCT extensions
 
-Mathematical extensions and corrections for [Open CASCADE Technology](https://dev.opencascade.org) (OCCT) 8.
+**A modelling layer for [Open CASCADE Technology](https://dev.opencascade.org) 8: blends that are exact where stock's are approximate, fills and skins with real continuity control, offsets that survive vanishing faces, and twenty fixes to the algorithms underneath.** Every result is checked against a definition or a closed form, and every operation checks its own answer before returning it.
+
 The repository is OCCT with its history, followed by commits that add
 
-* a toolkit of modelling operations, `TKAlgoExt`: rolling-ball fillets and chamfers, boundary-first Patch fills,
-  skinning and sweeps, offsets and shells, curve and surface editing, and cell-based Booleans;
-* numerical utilities in `TKGeomAlgo` and `TKMesh`: interval enclosures, Bernstein products, constrained
-  tensor-spline fitting, certified knot compaction, trim integration, surface jets;
-* twenty corrections to existing OCCT algorithms, one commit each, with the derivation and limits of each.
+* **`TKAlgoExt`**, about 55 000 lines in nine packages: rolling-ball fillets and chamfers, boundary-first Patch fills, Gordon and guided skins, framed sweeps, offsets and shells, G0 to G3 bridge curves, surface alignment and squaring, curve and surface deformation, and cell-based Booleans;
+* **numerical utilities** in `TKGeomAlgo` and `TKMesh`: interval enclosures, Bernstein products, constrained tensor-spline fitting, certified knot compaction, trim integration, surface jets;
+* **twenty corrections** to existing OCCT algorithms, one commit each, with the derivation and limits of each. One of them makes face classification 30 times faster on the benchmark plate.
 
-The base is OCCT `b8f597c6` (30 July 2026). Nothing here has been proposed upstream yet; it is organised so that
-it can be proposed in pieces ([Upstreaming](#upstreaming)).
+The base is OCCT `b8f597c6` (30 July 2026). Nothing here has been proposed upstream yet; it is organised so that it can be proposed in pieces ([Upstreaming](#upstreaming)).
 
-Every added result is checked against a definition or a closed form, not against another implementation:
-the rolling-ball definition of a blend, Steiner's volume of a rounded box, Archimedes' volume of two crossed
-cylinders, Pappus volumes of sweeps, the curvature and torsion of a circle and a helix. Where stock OCCT is
-wrong or invalid on such an input, the number is reported next to it.
+## What you get that stock OCCT does not give you
+
+| Capability | Stock OCCT | This tree | Evidence |
+| --- | --- | --- | --- |
+| **Rolling-ball fillets** on curved supports, chains of rounds and corners | `BRepFilletAPI_MakeFillet` leaves a defect of up to 7e-3 where a round runs into earlier rounds and 3e-3 on crossed cylinders | Blends exact to the sampling (defect 1e-8 to 1e-14); radius laws along an edge, ranges, stations, chamfers, corners of three or more blends, junctions of two curved surfaces | [Results](#results), `BRepBlendExt`, `BRepFilletExt` |
+| **Patch**: fill a loop of edges with G0, G1 or G2 to the neighbouring faces | `BRepFill_Filling` / `GeomPlate` plate fit: 0.11 to 0.45 off the defining surface on four cubic sides | Fill 1e-12 from it; n-sided loops, open boundaries chained and closed, interior guides and points; a G1 request that is geometrically impossible is refused with the reason | [operations.md](dox/extensions/operations.md#brepatchext-boundary-first-fill) |
+| **Smooth skins** through sections, and Gordon skins through networks of profiles and guides | `BRepOffsetAPI_ThruSections` bulges to half-width 19.3 through six circles of radius at most 10 | Stays within the sections (10.0); closed rings joined seam to seam; guided skins that contain their guides | [benchmarks.md](dox/extensions/benchmarks.md) |
+| **Framed sweeps and drafts** | `MakePipeShell` twists a profile unless the path starts square to it; `DraftAngle` takes planes, cylinders and cones | Rotation-minimising frames (double reflection, fourth-order error); draft of any wall by its isocline surface | [operations.md](dox/extensions/operations.md) |
+| **Hollow, shell, offset, thicken, push-pull, defeature** | An offset that reaches a fillet radius returns an invalid or wrong solid (volume off by 3.3e4 on the benchmark) | Faces the distance would shrink to nothing are removed first; exact to 1e-11 on the benchmark; sheets with C0 creases are divided before they are thickened; several features removed in one call | [benchmarks.md](dox/extensions/benchmarks.md) |
+| **Bridge curves of G0 to G3** between curves or from a point and a direction | no direct counterpart | Continuity from the end conditions of the geometric-continuity constraints (Hohmeyer and Barsky 1989), tested to 1e-12 on a circle and a helix; cusps refused | [references.md](dox/extensions/references.md) |
+| **Surface bridging, alignment, squaring, deformation** | no direct counterpart | G1 bridges and alignments whose normals agree with the supports along the shared edge; four-sided surfaces over boundaries with supports; carrying curves and bodies from one face to another in UVN | `BRepSurfaceExt`, `BRepCurveExt` |
+| **Curves**: offset at any scale, outline, regions, corner rounding of wires, tangent circles, spirals | `BRepOffsetAPI_MakeOffset` depends on the curve's size (absolute 1e-7 lengths); `HLRBRep` has documented limits on tangent and edge-on faces | Offsets that behave at any scale, exact silhouette events, all bounded cells of overlapping and nested loops | `BRepCurveExt` |
+| **Booleans that report what they did** | a single run | A ladder of fallbacks, each accepted only if its result is checked; imprints of curves along a direction or normals | `BRepBooleanExt` |
+| **Certified numerics** | no direct counterpart | Outward-rounded interval enclosures, a displacement bound for knot removal over the whole rectangle, adaptive trim integration | [utilities.md](dox/extensions/utilities.md) |
+
+Where this tree is slower than stock plus the same check, or does not do something, [Results](#results) and [Open work](#open-work) say so with the cause.
 
 ## Results
 
@@ -164,8 +174,8 @@ Two options belong to the extension packages (`adm/cmake/occt_extensions.cmake`)
 
 ## Tests
 
-`-DBUILD_GTEST=ON` adds the target `OpenCascadeGTest`, which runs the tests of every built toolkit; 88 tests
-belong to this tree (74 for the operations, 9 for the utilities, 5 for the corrections to core classes). They live in `TKAlgoExt/GTests/BRep*Ext_Test.cxx` (one file per package) with a shared
+`-DBUILD_GTEST=ON` adds the target `OpenCascadeGTest`, which runs the tests of every built toolkit; 93 tests
+belong to this tree (79 for the operations, 9 for the utilities, 5 for the corrections to core classes). They live in `TKAlgoExt/GTests/BRep*Ext_Test.cxx` (one file per package) with a shared
 session and oracles in `BRepExtTest_Support.*`, in the `GeomAlgoExt` and `BRepAlgoExt` GTests, and in one test
 file for each of the corrections to `CSLib_Class2d`, `BRepTopAdaptor_FClass2d` and `BndLib`. For example:
 
@@ -180,11 +190,11 @@ volumes of skins and sweeps; the circular segment of three arcs closed by a chor
 touching a line and an arc; and, for bridge curves, the curvature, change of curvature and torsion of a circle
 and a helix at the ends. Each test names the defect it would catch.
 
-Operations without a test of their own yet: squaring of surfaces, face separation, guided skins,
-Boolean imprints along faces' normals, deformation, defeaturing by group, and the curvature-continuous fills
-between plates meeting at three or more edges. Of the tests that exist, the ones for regions, thickening,
-bridging and aligning were each shown to fail with the code or the continuity order broken; the others have
-not been mutation-checked.
+Operations without a test of their own yet: deformation of whole bodies (`deformBody`, `deformSupports`),
+Boolean imprints along faces' normals, and the curvature-continuous fills between plates meeting at three or
+more edges (not yet supported). Of the tests that exist, the ones for regions, thickening, bridging and
+aligning were each shown to fail with the code or the continuity order broken; the others have not been
+mutation-checked.
 
 ## Repository layout
 
