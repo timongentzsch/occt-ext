@@ -236,7 +236,10 @@ Known limits and what remains:
    stopping decisions depend on rounding and therefore weakly on pose (sampled, not bounded). At a corner whose
    faces bend differently the bend asked eases to the one a surface can have over one span of the coarsest
    net, a judgement: G2 is met on the middle of each side only, the corner's miss is reported, and the coarse
-   nets of such loops can come out lopsided (5 in 50 off the teddy's symmetry). Fills through
+   nets of such loops can come out lopsided (5 in 50 off the teddy's symmetry); where a flat face meets one
+   that bends across its edge, beyond the ease the flat G2 limit is not met and the corner is refused.
+   Not tried: lines of lower continuity through such a corner, which meet G2 to the corner at the price of
+   a step of curvature inside, and a corner made of several patches. Fills through
    three profiles with curvature continuity can miss the curvature-share limit. Open boundaries are chained by
    `BRepPatchExt_Chain` (nearest-end growth, gaps closed with straight segments); a general theory of which
    chain a user means is not attempted. Not yet supported: curvature-continuous fills between plates meeting at

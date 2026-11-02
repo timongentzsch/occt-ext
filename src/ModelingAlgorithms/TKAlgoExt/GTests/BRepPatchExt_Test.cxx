@@ -570,11 +570,11 @@ struct Rounds
                           0);
   }
 
-  //! Along every edge, 33 places: the fill passes through it and keeps its face's tangent plane
-  //! within what was asked; on its middle, away from the corners (30 % of it unless held with
-  //! another share), its two principal curvatures are within 5 % of the tighter of the face's.
-  //! All from projections onto both.
-  void expectMet(const TopoDS_Face& fill) const
+  //! Along every edge, 33 places: the fill passes through it within `tolerance` and keeps its
+  //! face's tangent plane within what was asked; on its middle, away from the corners (30 % of it
+  //! unless held with another share), its two principal curvatures are within 5 % of the tighter
+  //! of the face's. All from projections onto both.
+  void expectMet(const TopoDS_Face& fill, double tolerance = 1e-3) const
   {
     const Handle(Geom_Surface) surface = BRep_Tool::Surface(fill);
     for (size_t i = 0; i < edges.size(); ++i)
@@ -588,7 +588,7 @@ struct Rounds
                                      + (curve.LastParameter() - curve.FirstParameter()) * f);
         GeomAPI_ProjectPointOnSurf onto(p, surface);
         ASSERT_GT(onto.NbPoints(), 0);
-        EXPECT_LE(onto.LowerDistance(), 1e-3) << "edge " << i << " at " << f;
+        EXPECT_LE(onto.LowerDistance(), tolerance) << "edge " << i << " at " << f;
         if (k == 0 || k == 32)
           continue;
         gp_Dir     normal = gp_Dir(0, 0, 1), own;
@@ -848,5 +848,116 @@ TEST(BRepPatchExt, ThreeRoundsAtAMillionthAreRefusedWithTheCornerWhereTheyBendDi
     const std::string what = failure.what();
     EXPECT_NE(what.find("bend differently"), std::string::npos) << what;
     EXPECT_NE(what.find("G1 can be had"), std::string::npos) << what;
+  }
+}
+
+namespace
+{
+
+//! Held out from the design of the ease: an irregular polygon of the xy plane, its sides lifted
+//! onto z = a x^2 + b y^2, each side held to a strip that leaves it outward tangent to that
+//! surface but bends k across it, placed by `pose`. Every corner is then G1-compatible, and
+//! where the strips' bends across differ from the surface's the faces bend differently there.
+Rounds strips(const std::vector<gp_XY>&  polygon,
+              double                     a,
+              double                     b,
+              const std::vector<double>& bends,
+              const gp_Trsf&             pose)
+{
+  Rounds    out;
+  const int n = static_cast<int>(polygon.size());
+  for (int i = 0; i < n; ++i)
+  {
+    const gp_XY  p = polygon[i], q = polygon[(i + 1) % n];
+    const double width = 0.3 * (q - p).Modulus(), k = bends[i % bends.size()];
+    const auto   at = [&](double s, double t) {
+      const gp_XY  xy = p + (q - p) * s;
+      const gp_Pnt c(xy.X(), xy.Y(), a * xy.X() * xy.X() + b * xy.Y() * xy.Y());
+      const gp_Vec normal = gp_Vec(-2 * a * xy.X(), -2 * b * xy.Y(), 1).Normalized();
+      const gp_Vec along(q.X() - p.X(),
+                         q.Y() - p.Y(),
+                         2 * a * xy.X() * (q.X() - p.X()) + 2 * b * xy.Y() * (q.Y() - p.Y()));
+      return c.Translated(along.Crossed(normal).Normalized() * t + normal * (k * t * t / 2))
+        .Transformed(pose);
+    };
+    NCollection_Array2<gp_Pnt> grid(1, 17, 1, 5);
+    for (int r = 1; r <= 17; ++r)
+      for (int s = 1; s <= 5; ++s)
+        grid(r, s) = at((r - 1) / 16.0, width * (s - 1) / 4);
+    GeomAPI_PointsToBSplineSurface through;
+    through.Interpolate(grid, Approx_IsoParametric);
+    out.hold(BRepBuilderAPI_MakeFace(through.Surface(), 1e-7).Face(), at(0.5, 0));
+  }
+  return out;
+}
+
+} // namespace
+
+// The family the ease was not designed on, on a dome and on a saddle, triangle and pentagon,
+// at rest, mirrored, and turned at a thousandth and a thousand times the size (the tolerance in
+// step): every one is delivered meeting its edges, tangent planes and, on the middle of every
+// edge, the strips' bends, with the corners' misses reported. On a plane, where a strip that
+// does not bend meets one that does, no eased fill meets the flat strip beyond its ease within
+// the flat G2 limit: that is refused, naming the corner.
+TEST(BRepPatchExt, HeldOutStripsOnDomesAndSaddlesAreEasedAtAnyScaleAndPose)
+{
+  const std::vector<std::vector<gp_XY>> polygons = {
+    {{20, 0}, {-8, 17}, {-12, -15}},
+    {{20, 0}, {8, 18}, {-14, 13}, {-17, -9}, {5, -19}}};
+  const std::vector<double> bends = {0.05, -0.03, 0.0};
+  gp_Trsf                   mirror, small, large;
+  mirror.SetMirror(gp_Ax2(gp_Pnt(3, -2, 1), gp_Dir(1, 2, -1)));
+  small.SetScale(gp_Pnt(0, 0, 0), 1e-3);
+  large.SetScale(gp_Pnt(0, 0, 0), 1e3);
+  const std::pair<gp_Trsf, double> poses[] = {{gp_Trsf(), 1},
+                                              {mirror, 1},
+                                              {turned(1) * small, 1e-3},
+                                              {turned(1) * large, 1e3}};
+  for (const auto& polygon : polygons)
+    for (const auto& [a, b] : {std::pair<double, double>(0.012, 0.012), {0.012, -0.008}})
+      for (const auto& [pose, scale] : poses)
+      {
+        SCOPED_TRACE(testing::Message() << polygon.size() << " sides, " << b << ", " << scale);
+        Rounds                loop = strips(polygon, a, b, bends, pose);
+        std::vector<uint32_t> edges, supports;
+        for (size_t i = 0; i < loop.edges.size(); ++i)
+        {
+          edges.push_back(BRepExt::store(session(), loop.edges[i]));
+          supports.push_back(BRepExt::store(session(), loop.faces[i]));
+        }
+        const auto        built = BRepExt::patch(session(),
+                                          edges,
+                                          supports,
+                                          std::vector<int>(edges.size(), 2),
+                                                 {},
+                                                 {},
+                                          1e-3 * scale,
+                                          0.1,
+                                          0.05,
+                                          0);
+        const TopoDS_Face fill  = onlyFace(BRepExt::get(session(), built.evolution.resultId));
+        ASSERT_FALSE(fill.IsNull());
+        loop.expectMet(fill, 1e-3 * scale);
+        double reported = 0;
+        for (size_t i = 0; i < edges.size(); ++i)
+          reported = std::max(reported, built.values[5 + 4 * i + 2]);
+        EXPECT_GT(reported, 0.05);
+      }
+  const Rounds          flat = strips(polygons[0], 0, 0, bends, gp_Trsf());
+  std::vector<uint32_t> edges, supports;
+  for (size_t i = 0; i < flat.edges.size(); ++i)
+  {
+    edges.push_back(BRepExt::store(session(), flat.edges[i]));
+    supports.push_back(BRepExt::store(session(), flat.faces[i]));
+  }
+  try
+  {
+    BRepExt::patch(session(), edges, supports, {2, 2, 2}, {}, {}, 1e-3, 0.1, 0.05, 0);
+    FAIL() << "the flat strips were filled";
+  }
+  catch (const BRepExt::Failure& failure)
+  {
+    EXPECT_NE(std::string(failure.what()).find("bend differently"), std::string::npos)
+      << failure.what();
   }
 }

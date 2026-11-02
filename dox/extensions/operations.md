@@ -116,7 +116,18 @@ less of a shorter one; the application's reading of a teddy seam counts the ease
 percentile. Coarse nets that meet an eased loop can be lopsided: the turned teddy is filled 5 off its
 three-fold symmetry on the first net, 0.4 on the third at rest. Straight-sided loops of three to six sides on
 rounds tangent to their plane (corners of 60 to 120 degrees, radii 15 to 80, rising and falling, at rest and
-turned and scaled, one side split between two radii) are all met.
+turned and scaled, one side split between two radii) are all met. On a family held out from the design
+(irregular polygons of three to six sides lifted onto a dome, a saddle and a plane, each side held to a
+strip tangent to that surface and bending 0.05, -0.03, 0, 0.02, ... across it; at rest, turned and
+mirrored, and at a thousandth and a thousand times the size with the tolerance in step) 27 of 36 per pose
+or scale are met, with the same cases met at every pose and scale, G1 within 0.015 degrees and the strips'
+bends within 1.1 % on the middle of every edge. The 9 others are the polygons of three, five and six sides
+on the plane: where a strip that does not bend meets one that does, the flat strip is held beyond its
+ease to the flat G2 limit, which no eased fill meets, and they are refused naming the corner. A commercial fill's
+own manual says the same of such corners ("the intersection of two curves or edges determines the
+generated surface's tangent plane and curvature at that point, which may not agree to the existing
+surfaces'"; "disconnecting the boundary curves is a solution for enforcing G2"), and its examples
+deliver with such corners marked as conflicting.
 
 *Stock.* `BRepFill_Filling` and `GeomPlate_BuildPlateSurface`: a plate fit that accepts G0, G1 and G2 point
 and curve constraints and minimises a different energy. See the table below.
