@@ -61,13 +61,4 @@ bool booleanTimingEnabled()
 
 void booleanPhase(const char*, double) {}
 
-namespace patch_host
-{
-void chain(std::vector<Side>&, double)
-{
-  fail("patch", unsupported_geometry, "open boundaries need a host");
-}
-
-void closeGaps(const std::vector<Side>&, std::vector<Rim>&) {}
-} // namespace patch_host
 } // namespace BRepExt

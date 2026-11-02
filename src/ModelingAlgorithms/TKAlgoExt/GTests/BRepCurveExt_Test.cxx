@@ -21,6 +21,10 @@
 
 #include <BRepAdaptor_CompCurve.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
+#include <NCollection_IndexedMap.hxx>
+#include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <Geom_BezierCurve.hxx>
@@ -44,6 +48,57 @@ TopoDS_Wire polyline(const std::vector<gp_Pnt>& points, bool closed)
 }
 
 } // namespace
+
+// Rounding the four corners of an a x b rectangle by arcs of radius r replaces, at each right-angle
+// corner, two stretches of length r (corner to tangent point) by a quarter arc of length pi r / 2:
+// P - 8 r + 2 pi r. A negative radius cuts along the chord of the same arc, r sqrt(2) long: P - 8 r
+// + 4 sqrt(2) r. Wrong tangent points change the length at first order in r. Eight edges remain:
+// four lines and four arcs or chords.
+TEST(BRepCurveExt, FilletWireOfARectangleHasTheClosedFormLength)
+{
+  const double      a = 60, b = 40, r = 5;
+  const TopoDS_Wire wire =
+    polyline({gp_Pnt(0, 0, 0), gp_Pnt(a, 0, 0), gp_Pnt(a, b, 0), gp_Pnt(0, b, 0)}, true);
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> corner;
+  TopExp::MapShapes(wire, TopAbs_VERTEX, corner);
+  ASSERT_EQ(corner.Extent(), 4);
+  std::vector<uint32_t> vertices;
+  for (int i = 1; i <= corner.Extent(); ++i)
+    vertices.push_back(BRepExt::store(session(), corner(i)));
+  const uint32_t      id      = BRepExt::store(session(), wire);
+  const double        P       = 2 * (a + b);
+  const auto          rounded = BRepExt::filletWire(session(), id, vertices, r, 1e-7);
+  const TopoDS_Shape& arcs    = BRepExt::get(session(), rounded.resultId);
+  EXPECT_NEAR(length(arcs), P - 8 * r + 2 * M_PI * r, 1e-6);
+  int edges = 0;
+  for (TopExp_Explorer it(arcs, TopAbs_EDGE); it.More(); it.Next())
+    ++edges;
+  EXPECT_EQ(edges, 8);
+  const auto cut = BRepExt::filletWire(session(), id, vertices, -r, 1e-7);
+  EXPECT_NEAR(length(BRepExt::get(session(), cut.resultId)),
+              P - 8 * r + 4 * std::sqrt(2.) * r,
+              1e-6);
+}
+
+// A corner that is too tight for the radius is refused, naming no result, and a vertex given twice
+// is an input error: neither may return a body that rounds some other corner.
+TEST(BRepCurveExt, FilletWireRefusesATightCornerAndARepeatedVertex)
+{
+  const double      a = 10;
+  const TopoDS_Wire wire =
+    polyline({gp_Pnt(0, 0, 0), gp_Pnt(a, 0, 0), gp_Pnt(a, a, 0), gp_Pnt(0, a, 0)}, true);
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> corner;
+  TopExp::MapShapes(wire, TopAbs_VERTEX, corner);
+  std::vector<uint32_t> vertices;
+  for (int i = 1; i <= corner.Extent(); ++i)
+    vertices.push_back(BRepExt::store(session(), corner(i)));
+  const uint32_t id = BRepExt::store(session(), wire);
+  // r > a / 2: the two arcs at the ends of a side would overlap.
+  EXPECT_THROW(BRepExt::filletWire(session(), id, vertices, 6, 1e-7), std::exception);
+  std::vector<uint32_t> twice = vertices;
+  twice.insert(twice.end(), vertices.begin(), vertices.end());
+  EXPECT_THROW(BRepExt::filletWire(session(), id, twice, -1, 1e-7), std::exception);
+}
 
 // Locations are by arc length, not by parameter. On a two-segment polyline of lengths 1 and 3 the
 // point at a fraction f of the length is at distance 4 f along it, so f = 1/2 is one unit into the

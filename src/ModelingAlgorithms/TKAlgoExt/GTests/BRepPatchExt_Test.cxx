@@ -125,3 +125,44 @@ TEST(BRepPatchExt, FillOfACapHoleIsTangentToTheSphere)
   }
   EXPECT_LE(worst, g1Degrees);
 }
+
+// A boundary that does not close: three quarter arcs of a circle of radius r, given in any order
+// and any direction, with the fourth missing. They are chained into one run and the gap between its
+// ends is closed by a chord, so the face is the circular segment cut off by the chord of a 270
+// degree arc: area r^2 (theta - sin theta) / 2 with theta = 3 pi / 2. A wrong chain (an arc left
+// out, a gap closed to another end) or a gap closed off its chord changes the area at first order.
+TEST(BRepPatchExt, OpenBoundaryOfThreeArcsIsClosedByTheChordOfTheGap)
+{
+  const double             r = 9;
+  const gp_Ax2             axis(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
+  std::vector<TopoDS_Edge> arcs;
+  for (const int k : {0, 1, 2})
+  {
+    Handle(Geom_Circle) circle = new Geom_Circle(axis, r);
+    arcs.push_back(BRepBuilderAPI_MakeEdge(circle, k * M_PI / 2, (k + 1) * M_PI / 2).Edge());
+  }
+  // Out of order, and the middle one against the others.
+  arcs[1].Reverse();
+  const std::vector<TopoDS_Edge> given = {arcs[2], arcs[1], arcs[0]};
+  std::vector<uint32_t>          edges;
+  for (const TopoDS_Edge& edge : given)
+    edges.push_back(BRepExt::store(session(), edge));
+  BRepExt::PatchControls controls;
+  controls.open            = true;
+  const auto        result = BRepExt::patch(session(),
+                                     edges,
+                                     std::vector<uint32_t>(3, 0),
+                                     std::vector<int>(3, 0),
+                                            {},
+                                            {},
+                                     1e-6,
+                                     1,
+                                     0.1,
+                                     0,
+                                     -1,
+                                     controls);
+  const TopoDS_Face face   = onlyFace(BRepExt::get(session(), result.evolution.resultId));
+  ASSERT_FALSE(face.IsNull());
+  const double theta = 3 * M_PI / 2;
+  EXPECT_NEAR(area(face), r * r * (theta - std::sin(theta)) / 2, 1e-3);
+}

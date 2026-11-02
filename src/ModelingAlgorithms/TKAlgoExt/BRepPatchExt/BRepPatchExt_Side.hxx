@@ -13,9 +13,8 @@
 
 #pragma once
 
-// The sides of a Patch loop, and the two routines of it that the host supplies (chaining the
-// edges of an open boundary, and closing a gap between runs), as they are not part of the
-// library. The host defines them in the namespace below.
+// The sides of a Patch loop, and the two routines of it for a boundary that does not close
+// (chaining its edges, and closing a gap between runs), defined in BRepPatchExt_Chain.cxx.
 
 #include <GeomAlgoExt_SurfaceJet.hxx>
 #include <Geom2d_BSplineCurve.hxx>
@@ -28,7 +27,7 @@
 
 #include <vector>
 
-namespace BRepExt::patch_host
+namespace BRepExt::patch_side
 {
 
 //! An edge of the loop or a curve inside it, run from `from` to `to`.
@@ -89,11 +88,11 @@ struct Rim
 };
 
 //! The sides of an open boundary in turn, with a gap wherever one run ends and the next begins.
-//! Host-defined: all the edges are made one loop.
+//! All the edges are made one loop.
 void chain(std::vector<Side>& sides, double tolerance);
 
-//! Each gap's curve in the surface's parameters. Host-defined; sides that are not gaps keep
+//! Each gap's curve in the surface's parameters; sides that are not gaps keep
 //! their rims.
 void closeGaps(const std::vector<Side>& sides, std::vector<Rim>& rims);
 
-} // namespace BRepExt::patch_host
+} // namespace BRepExt::patch_side

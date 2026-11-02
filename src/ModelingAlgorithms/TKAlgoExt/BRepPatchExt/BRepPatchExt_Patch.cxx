@@ -157,7 +157,7 @@ struct Miss
   }
 };
 
-using patch_host::Side;
+using patch_side::Side;
 
 Side sideOf(const TopoDS_Shape& shape, const TopoDS_Shape& face, int order, int input)
 {
@@ -261,7 +261,7 @@ bool arrange(std::vector<Side>& sides, double tolerance, bool open = false)
   return true;
 }
 
-using patch_host::chain;
+using patch_side::chain;
 
 //! The plane a loop lies nearest to, by the area its polygon encloses seen from every side.
 struct Frame
@@ -2573,7 +2573,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
 
 //! An edge of a trimmed face: the curve of a side in the surface's parameters, run by the
 //! side's own parameter, and the furthest the surface is there from the side at that parameter.
-using patch_host::Rim;
+using patch_side::Rim;
 
 //! What share of the tolerance the curve of an edge in the surface's parameters may add to
 //! the distance of the surface from the edge, which no such curve can do anything about.
@@ -2801,7 +2801,7 @@ Rim preimage(const occ::handle<Geom_BSplineSurface>&    surface,
   return rim;
 }
 
-using patch_host::closeGaps;
+using patch_side::closeGaps;
 
 //! How much more than the deviation that was measured an edge is given as its tolerance: the
 //! deviation is read at places, and between them it may be a little more.
