@@ -1,475 +1,50 @@
 <!-- Copyright (c) 2026 Timon Gentzsch. LGPL-2.1-only WITH OCCT-exception-1.0. -->
 
-# OCCT mathematical extensions and corrections
-
-This branch starts at official OCCT `b8f597c6` (30 July 2026), followed by `055a9a8a`
-(WebAssembly exception conversion) and `c7f60ffe` (null curve guard). It keeps OCCT's history.
-Everything below is new commits on top, under one author. Nothing here has been proposed
-upstream yet; it is written so that it can be proposed in pieces.
-
-## What is added
-
-| Part | Where | What it is | Depends on |
-| --- | --- | --- | --- |
-| 17 corrections | one commit each, see [Corrections](#corrections-derivations-and-independent-application) | Fixes to existing OCCT algorithms: quadratic or unbounded loops, wrong ranges, uninitialised reads, missing cancellation | nothing; 14 build against current `master` (one needs another of the 17); one later correction is [described after them](#bndlib-torus-patch-box) |
-| Numerical utilities | `GeomAlgoExt_*` in `TKGeomAlgo` | Interval enclosures, Bernstein products, spline collocation, constrained tensor-spline fit, rim fit, certified knot compaction | existing toolkits only |
-| Patch chart and interior survey | `BRepAlgoExt_*` in `TKMesh` | Cotangent-weight chart of a boundary loop, interior fairness survey, trim integration, read-back | utilities |
-| Operations | `TKAlgoExt`, nine packages, 45 000 lines | Fillet (rolling-ball) solver, Patch (boundary-first fill), skinning and sweep, offsets and shells, curve and surface editing, Booleans on cells | all of the above |
-
-`TKAlgoExt` is the large part. Its packages:
-
-| Package | Operations | Lines |
-| --- | --- | ---: |
-| `BRepBlendExt` | Rolling-ball blend solver: ball on two supports, spine marching, section fit, attachment to the body | 11 000 |
-| `BRepFilletExt` | Constant, variable, range and station fillets, chamfer, contour and prism support, blend validity checks | 3 400 |
-| `BRepPatchExt` | Patch: one face inside a loop of edges (chained, with gaps closed, if the boundary does not close), with G0/G1/G2 to neighbouring faces and interior guides | 4 700 |
-| `BRepSurfaceExt` | Surface alignment, bridging, constraint jets, deformation, face support and rebuild, face separation proofs | 5 800 |
-| `BRepCurveExt` | Planar and 3D curve offset, outline, tangent circles, corner rounding of wires, G0 to G3 bridge curves, projection, rebuild, refinement, regions, spiral | 5 400 |
-| `BRepOffsetExt` | Solid offset, hollow, shell, thicken, push-pull, defeaturing, sewing history | 2 400 |
-| `BRepSkinExt` | Gordon and guided skins, framed sweeps, draft | 3 700 |
-| `BRepBooleanExt` | Cell-based Booleans with a ladder of fallbacks, checked solids, imprints | 2 900 |
-| `BRepToolsExt` | Properties, bounding boxes, dimensions, fairness, hidden-line, failure hints, shared checks and history | 1 800 |
-
-### How the operations reach a host
-
-The operations were written for an application that keeps shapes under 32-bit handles. They
-keep that interface so that the code is exactly what that application runs, and the seam is
-four functions in `BRepToolsExt_Session.hxx`, which the host defines: `store` registers a
-shape, `get` returns the shape behind a handle, `release` drops a temporary, and the type
-`OcctKernel` is only ever passed back (it is declared, never defined, in this tree). A host that
-keeps shapes in a `std::vector` is twenty lines; `adm/scripts/extensions/operation-benchmark.cxx`
-is one. Failures are thrown as `BRepExt::Failure`, which derives from `std::runtime_error` and
-carries a stable reason code; cancellation polls `sessionCancelled()`, defined by the host.
-
-What is deliberately **not** in this tree is what an application chose by measuring another product,
-as opposed to what follows from the mathematics: the blend section law for curvature continuity
-(`BRepBlendExt_Policy.hxx` has a conic-section default, and refuses curvature-continuous requests
-until a host supplies a law through `BREPBLENDEXT_POLICY_HEADER`, see [Building](#building)), how a
-bridge curve chooses the tensions it was not given, which control vertices a curve alignment keeps,
-how the shapes of a sheet extension follow, which edges the application's wire corner rounding produces for the wires it was measured on, and how a curve deformation maps. Those stay with the
-application, and their declarations are not in this tree's headers. What *is* here for them is the
-derived part: the G0 to G3 bridge construction (`BRepCurveExt_Bridge.hxx`), which takes the tensions
-as arguments, and the planar construction of corner rounding (`roundWireCorners`).
-
-### Suggested order for upstream review
-
-Upstream would reasonably take this in pieces: (1) the fourteen corrections that apply to
-`master` today, each alone; (2) the interval and Bernstein utilities; (3) the spline and rim
-fits with their GTests; (4) `BRepToolsExt` and `BRepCurveExt`, which are self-contained and have
-the clearest closed-form checks; (5) `BRepOffsetExt`; (6) the blend and Patch solvers last. The
-namespace `BRepExt`, the handle seam and the diagnostic hooks are artefacts of where the code
-came from; moving the packages to OCCT's class conventions and `Standard_Failure` is mechanical
-but is a behaviour change (OCCT code catches `Standard_Failure`), so it is left for review.
-
-## Exact-section blend fitting
-
-The blend solver's section fit is `BRepBlendExt_Fit` (package `BRepBlendExt`, described under
-Operations). An earlier prepared implementation of the same numerical step as a stand-alone API
-was removed so that the tree holds one copy of what the application runs.
-
-## Boundary-first patch chart
-
-The chart is the original production source. The interior acceptance survey of Patch is
-`BRepPatchExt_Inside`; its ratio-four policy is an unproven heuristic, described under
-Operations. The table below is historical component evidence, not a remeasurement.
-
-Package `BRepAlgoExt` uses existing toolkit `TKMesh`, because chart construction
-requires its Delaunay mesher; it also uses existing lower topology/geometry tools.
-`BRepAlgoExt_PatchFlow` forms cotangent stiffness L, solves the interior equation
-L_II u=K_I with zero boundary log scale, and obtains boundary turns from
-pi-angleSum-(Lu)_boundary. For directions t_i and original lengths l_i,
-minimize sum (delta l_i)^2/l_i subject to sum (l_i+delta l_i)t_i=0.
-Lagrange multipliers give delta l_i=-l_i t_i^T G^-1 sum l_j t_j,
-G=sum l_i t_i t_i^T, the implemented 2x2 closure. Harmonic x/y extension
-then solves the Dirichlet energy equations. This follows Rohan Sawhney and
-Keenan Crane (2017), [Boundary First Flattening](https://www.cs.cmu.edu/~kmcrane/Projects/BoundaryFirstFlattening/paper.pdf),
-read sections 3–5, especially equations 6, 14 and 20. Their section 4.4 distinguishes
-boundary interpolation from harmonic conjugation: this implementation uses
-interpolation, so **exact discrete conformality is not guaranteed**.
-
-Assumptions: finite regular surface, connected nondegenerate disc mesh, usable
-boundary and nonsingular closure, positive resulting edge lengths and triangle
-orientation. Cotangent Dirichlet systems are positive definite with fixed nonempty
-boundary under the usual finite-element assumptions; arbitrary inputs can refuse.
-The node cap, finite curvature survey and parameter-space lattice do **not** certify
-3D deflection or global injectivity. The chord estimate k*l²/8 is local asymptotic,
-not a proved global surface error bound. The chart may extrapolate off its mesh.
-
-Retained **unproven choices**: 32000 chart nodes; CG residual target 1e-13 and
-4n passes; minimum two edge subdivisions, half-spacing rim margin, and the
-sqrt(triangleCount/2) lookup-grid sizing. Triangular-lattice sqrt(3)/2 and
-sqrt(3)/4 are derived from equilateral geometry; cotangent 1/2 and triangle 1/2
-are derived energy/area factors. The interior survey of `BRepPatchExt_Inside` has its own sample counts and guards
-(see its source), also inherited heuristics,
-not tolerances inferred from the paper. No value or arithmetic order changed.
-
-A native test checks planar pair distances at three scales. Run
-`adm/scripts/extensions/module-benchmark.sh patch-chart FORK_BUILD STOCK_BASE_BUILD`
-after building static Release TKMesh in both revisions. A rectangle and quarter
-cylinder are the same surfaces/trims at scales 0.1,1,10. Stock provides meshing
-and scaled carrier UVs; it has no equivalent boundary-first chart operation here.
-That reference does less work and generates different meshes. Geometry/angle checks
-are outside the process CPU clock.
-
-| Scale 1 fixture | Stock CPU ms | New CPU ms | Stock/new max cosine error | Stock/new nodes |
-| --- | ---: | ---: | --- | --- |
-| plane-chart | 0.0760 | 0.2770 | 0 / 5.54e-13 | 4 / 75 |
-| cylinder-chart | 0.1005 | 0.4510 | 0.000155 / 0.00222 | 18 / 101 |
-
-Ten successes/zero refusals per row, after one warmup; GCC12.2 -O3, TBB off,
-Ryzen 9 7950X3D shared machine. The chart can be slower than meshing/carrier UV alone.
-This does not compare equivalent flattening solvers. All scales, extrema,
-relative edge distortions and curvature errors are in
-[patch-chart-measurements.json](adm/scripts/extensions/patch-chart-measurements.json).
-
-## Constrained tensor-spline fitting and certified compaction
-
-`GeomAlgoExt_PatchFit`, `GeomAlgoExt_PatchRim` and `GeomAlgoExt_PatchCompact`
-extend `TKGeomAlgo`; `GeomAlgoExt_Band` is their banded Cholesky engine.
-They accept OCCT geometry and ordinary C++ containers. `BRepExt::Failure`,
-`fail`, `FailureKind` and stable reason constants live in `GeomAlgoExt_Failure`;
-fields, strings and the std::runtime_error base are retained. Substituting
-Standard_Failure would change which existing OCCT catch blocks intercept a
-refusal, so adapting that exception taxonomy is a later upstreaming task.
-The integer diagnostic ranking is inherited categorical policy, not geometry;
-its scores 100/90/80/70/60/40/30/10/0 encode the retained priority order.
-The hash modulus 2147483647 is the signed 31-bit interface ceiling.
-
-Cancellation remains a direct `sessionCancelled()` call at every original
-polling site. A native caller constructs `BRepExt::ProgressScope(range)` from
-`GeomAlgoExt_Progress.hxx` around the entry call; its thread-local scoped range
-backs the native default hook. Nested calls restore their previous range. The
-application defines the same link symbol with its existing host implementation.
-`BRepExt_PatchPhase` is a separate direct phase-observer hook (native default:
-no-op). No new polling or erased callback is inserted in a hot loop. The native
-default hook implementation is compiled only for native builds. It is omitted
-from WebAssembly archives: a native definition there would satisfy the linker
-before a host import and silently replace cancellation/observation.
-
-For a tensor spline S(u,v)=sum P_ij N_i(u) M_j(v), scalar conditions are
-linear forms a_r^T p=b_r in the free pole coordinates. The energy is
-integral [alpha (|S_uu|²+2|S_uv|²+|S_vv|²) +
-beta (|S_uuu|²+3|S_uuv|²+3|S_uvv|²+|S_vvv|²)] du dv.
-The coefficients 1,2,1 and 1,3,3,1 count ordered mixed derivatives, hence
-are derived. Substituting the basis gives a positive semidefinite quadratic
-p^T H p+2g^T p+c. Weighted rows add A^T W A; eliminating fixed poles adds
-their exact contribution to the right hand side. Cholesky solves the resulting
-symmetric positive definite system when it is positive definite. Multipliers
-correct row residuals using products with A M^-1 A^T. Stopped iterations are
-retained exactly; convergence, consistency or global optimality are not promised.
-The semidefinite claim assumes nonnegative energy coefficients, row weights and
-density, finite regular knot spans and consistent constraint dimensions. Solvability
-requires positive definiteness after fixed-pole elimination; these are caller
-preconditions, not a proof that arbitrary inputs produce a usable surface.
-Gauss quadrature with p+1 points integrates the polynomial basis products on
-each knot span exactly, but arbitrary supplied density functions have no such
-exactness guarantee. Basis locality/derivative identities follow de Boor (1972),
-[On Calculating with B-Splines](https://ftp.cs.wisc.edu/Approx/bsplcalc.pdf),
-DOI [10.1016/0021-9045(72)90080-9](https://doi.org/10.1016/0021-9045(72)90080-9),
-sections 1–2 (recurrences and differentiation) reopened for this mechanical move.
-These algebraic derivations do not certify conditioning.
-
-Rim correction linearizes the nearest-point displacement along a supplied unit
-vector and solves min_x ||A x-r||²+d²||x||². Its normal equations are
-(A^T A+d²I)x=A^T r; unobserved poles stay fixed. The nonlinear projection,
-refinement decisions, summation order and refusal messages are preserved.
-Compaction proposes OCCT knot removals, converts original and candidate to a
-common piecewise Bernstein basis with outward intervals, and bounds displacement
-by max_i ||Delta P_i||_2. Nonnegative basis functions summing to one imply this
-bound over the whole rectangle, provided both conversions are enclosed, degrees
-and full knot sequences agree, weights are nonrational, and the input is finite,
-clamped and nonperiodic. No normal, trim or continuity bound follows from it.
-Cancellation must escape the optional proposal's catch of OCCT builder failures.
-The outward interval enclosure uses the inclusion principle in Siegfried M. Rump
-(2010), section 5.5, [Verification methods: Rigorous results using floating-point
-arithmetic](https://www.tuhh.de/ti3/rump/intlab/ActaNumerica2010.pdf),
-DOI 10.1017/S096249291000005X. Sections 5.5–7.1 were reopened for this move;
-this reference does not certify the implementation without its stated rounding
-and finite-input assumptions.
-
-All retained non-derived choices are explicit: fit diagonal holds 1e-13, factor
-100 and cap 1e-6; stall count 12, stall share 0.02, maximum passes 400 and energy
-ratio stop 1e-20; basis capacity degree 5 and five terms per condition; rim Newton
-steps 8, determinant cutoff 1e-12, squared-step cutoff 1e-28, sliver ratio 0.2,
-three solves, damping 0.03,
-slow-progress ratio 0.5, cosine cutoff 0.17; compaction 512 trials, 16 removals,
-262144 coefficients, 8*1024*1024 visits, proposal multiplier 1024, 33-point
-rejection screen and 1e-10 screen allowance. These are implementation limits or
-heuristics, not theorems, and none was tuned by this move. In particular 1e-20
-is not binary64 epsilon squared. Cancellation polling cadences 1024 rows in rim
-fitting and 16/256 items in compaction are inherited scheduling choices, not
-proved latency bounds. The parent construction's interior acceptance
-heuristic and flat G2 limit remain outside these modules and remain unproven.
-
-The WASM SIMD path is retained. A portable two-lane path rounds each operation
-through volatile binary64 stores to prevent FMA contraction. The finite parity
-harness `adm/scripts/extensions/band-parity.cxx` exercises paired and ordinary
-factors/solves; its digest must agree between native, WASM SIMD and forced scalar
-WASM (`OCCT_GEOMALGOEXT_SCALAR`). This is finite test evidence, not a proof for
-all NaN payloads or non-default native rounding modes. GTests use closed-form
-Bernstein derivatives, tensor polynomials, SPD residuals, plane distances and
-an independently sampled displacement bound; they are registered in the toolkit.
-
-### Native fitting impact against the pinned stock base
-
-Run `adm/scripts/extensions/spline-fit-benchmark.sh FORK_BUILD STOCK_BASE_BUILD`
-after native static Release builds of this revision and stock `b8f597c6`.
-The stock-only binary excludes every extension header and call. The fixture supplies
-four straight edges of S(u,v)=s(u,v,uv), s=0.1,1,10. The new fit uses 17 sampled
-values per edge and the unchanged energy coefficients 1e-6 and 1e-8; stock
-`GeomPlate_BuildPlateSurface` receives the same four exact boundary curves,
-17 discretization points, G0 and s*1e-7 positional tolerance, with an XY initial
-plane. These are different discretizations of the same boundary problem.
-Construction/setup and the independent 33x33 quality survey are outside the clock.
-Stock measures plate construction, without conversion to a B-spline; the extension
-measures the pole solve, without conversion to a surface. Neither includes topology.
-
-| Scale | Stock plate CPU median ms | Spline fit CPU median ms | Stock max grid distance | Fit max grid distance |
-| --- | ---: | ---: | ---: | ---: |
-| 0.1 | 0.7815 | 0.1900 | 2.096e-16 | 2.187e-12 |
-| 1 | 0.7210 | 0.1885 | 3.126e-15 | 2.187e-11 |
-| 10 | 0.6870 | 0.1085 | 4.213e-14 | 2.187e-10 |
-
-Each row has ten successes and zero refusals after one warmup. GCC 12.2, -O3,
-AMD Ryzen 9 7950X3D, TBB off, shared machine, process CPU time. The extension
-was faster on these inputs and less accurate than stock; both meet the supplied
-tolerance on this finite survey. This is not a global error certificate or a
-claim about general patches. Minima/maxima and boundary distances are in
-[spline-fit-measurements.json](adm/scripts/extensions/spline-fit-measurements.json).
-Native spline GTests pass 6/6. The band harness gives `27232afcfea55306` for all
-48 finite matrix configurations in native scalar, WASM SIMD and forced scalar
-WASM. That digest establishes these finite factor/solve comparisons only.
-
-### Rim and compaction reference work
-
-Run `adm/scripts/extensions/module-benchmark.sh fit-aux FORK_BUILD STOCK_BASE_BUILD`.
-The rim fixture fits a plane displaced by 0.125s using 81 points; stock GeomPlate
-receives the same points as G0 constraints. The quality oracle is distance to that
-plane on a separate 33x33 grid. The compaction fixture is an affine plane with
-inserted quarter knots; stock removes those knots directly, whereas the new
-operation additionally certifies a global displacement enclosure. These workloads
-are related, not identical. Setup and geometric surveys are outside the clock.
-
-| Scale 1 fixture | Stock CPU ms | New CPU ms | Stock/new max grid distance |
-| --- | ---: | ---: | --- |
-| parallel-plane rim | 0.2040 | 0.2175 | 3.80e-15 / 1.89e-8 |
-| affine knot compaction | 0.0025 | 1.2890 | 2.48e-16 / 3.14e-16 |
-
-Ten successes/zero refusals per row after one warmup, same CPU/compiler settings
-as above. The certified compactor is over 500 times slower on this small case;
-plain knot removal does not provide its interval certificate. Rim accuracy is
-worse than stock here. All three scales and extrema are in
-[fit-aux-measurements.json](adm/scripts/extensions/fit-aux-measurements.json).
-
-The table above is the historical measurement of the prepared implementations,
-not a new measurement of the mechanically relocated implementation. Rerun the
-ported harness before attributing these timings to this revision. Whole Patch and
-whole fillet CPU/quality comparisons remain outstanding because their operation
-bodies are still outside the fork. No component timing substitutes for them.
-
-## Operations in TKAlgoExt
-
-Each entry gives the construction, the mathematics it rests on, the sources read for it, what is
-not proven, and the stock OCCT facility it relates to. "Unproven" always means a number or rule
-chosen for the code, not derived; the constants are named in the source next to their use.
-The whole-operation CPU and quality comparison with stock OCCT is at the end of this section.
-
-### BRepBlendExt and BRepFilletExt: rolling-ball blends
-
-*Problem.* Two supports S1, S2 meet along an edge; for a radius r (constant, or a law r(s) along
-the edge) find the envelope of balls of radius r that touch both. The ball centre c lies on both
-offset surfaces, c in O1(r) ∩ O2(r) with O_i = S_i + r n_i (the sign follows convexity); the contact
-points are p_i = c - r n_i(p_i), and the blend is swept by a section curve between p1 and p2 in the
-plane normal to the centre curve. G1 holds at p_i by construction (the section is tangent to the
-ball). The offset surface is regular where 1 - r k_i is non-zero for the principal curvatures k_i
-of the support on the side the ball is on, so a radius reaching the smallest concave radius of
-curvature is refused rather than built [Jaiswal et al.]. A section curvature-continuous with its
-support needs only the normal curvature of the section to match that of the support in one direction
-across the join, by the Linkage Curve Theorem [Salvi and Várady], so the section's third pole
-is set by the support's curvature; that rule is a section *policy* that a host supplies.
-
-*Construction.* The centre curve is marched from a start point by Newton correction of the two
-offset equations with curvature-controlled steps [Jaiswal et al., after Patrikalakis and Maekawa];
-exact sections are fitted by a spline with knots at the data's continuity breaks and interpolation
-at Greville abscissae (Schoenberg-Whitney) [de Boor]; the sheet is attached by trimming the supports
-to the contact curves and the stopping faces to the ends. The conic section is the rational quadratic
-Bézier whose shoulder weight is sin(w/2) rho/(1 - rho) for a wedge angle w, which is the circular arc at
-rho = 1/2 [standard conic form]. Supports are extended past their ends by continuing the last
-polynomial span, which keeps shape and parametrisation [Hu, as restated by Zang et al.].
-
-*Sources read.* Jaiswal, Ghosal, Gurumoorthy, "Circular blending", DETC 2001 (theory, algorithm,
-results; Hermann 1995 and Lukacs 1998 are cited second-hand there); Salvi and Várady, "Multi-sided
-surfaces with curvature continuity" (2014; statement of the Linkage Curve Theorem, appendix proof not
-read); Zang, Liu, Lai, GMP 2008, sections 1-3 (Hu's extension; Hu 2002 not obtained); de Boor 1972.
-
-*Unproven.* Every marching limit (step counts, stall windows, Newton tolerances), the radius/curvature
-refusal margins, the choice between arcs and spline sections at corners, and the number of fit
-refinements. There is no published bound for a G2 conic or quintic section as a function of the support's
-curvature [searched; none found]; curvature-continuous requests therefore refuse in this tree until a host
-supplies a policy. Where a result is delivered it is measured again from outside (seam gaps, tangent angle,
-curvature difference) and refused if it misses; that measurement is sampled, not a global certificate.
-
-*Stock.* `BRepFilletAPI_MakeFillet` (ChFi3d). See the table below.
-
-### BRepPatchExt: boundary-first fill
-
-*Problem.* Given a closed loop of edges, each optionally asked to meet a neighbouring face to G0, G1 or
-G2, and optional interior curves and points, build one face. The construction tries, in order, a plane,
-an exact rational continuation of a torus or ball, a four-sided surface with the sides as its edges
-(a Coons patch of the four curves with its inner poles moved to meet G1 and G2), and for any loop a
-fitted surface over the loop's mean plane trimmed by the loop, with a net refined where the rim turns fast.
-The fit minimises a weighted energy of squared second and third parameter derivatives subject to the
-constraints; the normal equations are positive semi-definite for a connected net, and are solved by a skyline
-Cholesky factorisation with a multiplier outer iteration. The chart over the loop uses cotangent-weight
-(Dirichlet-energy) coordinates that are injective for a convex boundary [Floater 2003, Thm 4.1 (statement
-read, proof not)]; for a non-convex boundary injectivity is not guaranteed [Karni, Gotsman, Gortler;
-Weber and Zorin], which is why the result is looked at inside its loop before it is returned. G1 and G2
-corner compatibility at a vertex where several patches meet follows the vertex-enclosure condition
-[Hermann, Peters, Strotman 2009, all five pages read].
-
-*Unproven.* The interior acceptance gate (a fault when the interior bends more than 4 times the rim's
-bend, with a floor of 2/size) has no derivation; a bound of the form K sqrt(2D) in the energy gap D was
-tried and rejected. The flat G2 limit, the stopping rules of the outer iteration (which depend on rounding
-and therefore on pose), the span and budget constants of the net, and the 0.17 slope limit are unproven.
-Pose dependence is measured, not removed: 47 sampled breaches over 154 rigid-motion variants, none changing
-whether a case is refused.
-
-*Stock.* `BRepFill_Filling` and `GeomPlate_BuildPlateSurface`: a plate fit that accepts G0, G1 and G2 point
-and curve constraints and minimises a different energy. See the table below.
-
-### BRepCurveExt and BRepSurfaceExt
-
-*Curves.* Offsets of planar curves with three corner treatments (arc, chord, extension to the crossing) by
-working on a copy moved to the origin and scaled, so that OCCT's absolute 1e-7 lengths do not change
-the result with the curve's size; the outline of a body along a direction from edges and the turning curve
-n.v = 0 of curved faces, with the places where visibility can change found exactly; tangent circles by Newton
-in a frame of the curves' own extent; projection, rebuild with a prescribed degree and count, refinement and
-regions of coplanar curves. A spiral is the helix (angle 2 pi t, radius R + p t, height h t / turns).
-
-*Surfaces.* Alignment of the control row beside a shared boundary on the line through the boundary
-pole and the neighbour's next pole, so that the control hulls make one grid; orthogonal projection of pole
-offsets onto the affine constraint space; polyspline development of an oriented quad graph in integer UV;
-face rebuild by interpolation checked on an independent grid; the number of poles a deformation target needs
-from the C2 cubic interpolation error 5 h^4 max|f| / 384 and the end-slope term h^3 max|f| / 4;
-face-separation proofs by Bernstein bounds and, for a plane beside a surface of revolution about its normal,
-in closed form (the surface meets the plane in circles; a band of width gap / sin t).
-
-*Unproven.* Work budgets and halving depths of the separation proofs, the crease threshold, interpolation
-grid sizes, and the choice of pole counts "twenty-one for any target". The sampled checks are not Hausdorff
-certificates.
-
-*Stock.* Offsets: `BRepOffsetAPI_MakeOffset`; outline: `HLRBRep` (its documented limits on tangent and
-edge-on faces are what the exact event search avoids); the rest has no direct stock counterpart.
-
-### BRepOffsetExt, BRepSkinExt, BRepBooleanExt
-
-*Offsets and shells.* A solid offset first classifies faces the distance would shrink to nothing, removes
-them from a working copy by extending their neighbours (`BRepAlgoAPI_Defeaturing`) and offsets that copy;
-a face too tightly bent in part is refused by name. Stock `BRepOffset_MakeOffset` removes vanishing faces
-only where every face is planar (`myIsPlanar`); a fillet whose radius the distance reaches comes back as an
-invalid solid or not at all. Push-pull follows Zou and Feng (2019): the solid swept by the moved faces is built
-and joined to or cut from the body by a Boolean, which resolves whatever the move does to the rest. Thicken
-divides a C0 sheet's supports without changing their geometry before offsetting.
-
-*Skins and sweeps.* Frames along a path are rotation-minimising by the double reflection method [Wang,
-Jüttler, Zheng, Liu 2008], with a fourth-order error in the step; stock `BRepOffsetAPI_MakePipeShell`
-twists a profile only where the path starts square to it. Gordon surfaces follow [Siggel et al., section 3.2]
-with compatibility by common reparametrisation; a skin's cross-section lines are natural C2 cubics, whose
-minimum of the integral of |s''|^2 over H2 interpolants is proved in the utilities section above. Closed
-sections are made fit by cyclic seam alignment: the cyclic cross-correlation of two sampled rings is maximised
-over start shifts and orientation [Dogan, Bernal, Hagwood 2025, rotation by Kabsch/SVD proof read; the
-version here fixes rotation]. Draft of walls that `BRepOffsetAPI_DraftAngle` does not take (it handles planes,
-cylinders and cones) uses the ruled isocline surface over the wall's neutral curve, whose every tangent plane
-makes the draft angle with the pull direction.
-
-*Booleans.* Cell selection from one General Fuse with a ladder of fallbacks, each rung accepted only if
-checked; a sheet tool divides rather than subtracts.
-
-*Unproven.* Seam and pairing conventions of closed skins (a convention, chosen by comparison with another
-system, not derived), tolerance ladders of the Boolean fallbacks, the sampling counts of the offset and
-skin validity checks.
-
-### Whole-operation comparison with stock OCCT
-
-![CPU time per call: stock OCCT, stock followed by a validity check, and this branch](dox/extensions/operation-benchmark.svg)
-
-Median process CPU time of ten runs after one warm-up (`std::clock`), one thread, GCC 12.2 `-O3`, static
-Release libraries, TBB off, AMD Ryzen 9 7950X3D on a shared host. The complete output with minima and maxima is
-[operation-benchmark-results.txt](adm/scripts/extensions/operation-benchmark-results.txt); rerun it with
-`adm/scripts/extensions/operation-benchmark.sh NATIVE_BUILD_DIRECTORY` and redraw the chart with
-`operation-chart.py`. Checking a result (validity, volume, length, ball defect) is excluded from the clock,
-**except** in the bars called "stock, then its result checked". Those add the check that every call of this branch
-makes on its own result before returning it: `BRepExt::invalidity(result, input)`, which looks at the faces the input
-does not hold and then at each solid and shell as a whole (a `BRepCheck_Analyzer` pass over the whole body would
-make the single fillet 0.60 ms instead of 0.35). Stock does not check, so that bar is the like-for-like
-comparison for an operation that must return only valid bodies. Volumes are computed by adaptive Gauss-Kronrod
-integration to 1e-8 (the default fixed rule is off by about 1e-5 on spline blends, which looks like a
-difference between implementations and is not). Hatched bars are calls with no valid result or a wrong one.
-
-| Operation | Input | Stock ms | Stock + check ms | Branch ms | Result |
-| --- | --- | ---: | ---: | ---: | --- |
-| Round | plate, hole r=1, edge r=0.2 / 0.5 | 0.24 / 0.24 | 0.35 / 0.35 | 0.37 / 0.37 | both exact to 5e-12 (closed form) |
-| Round | box, all 12 edges, r=6 / r=9 | 2.7 / 2.7 | 3.5 / 3.5 | 1.6 / 1.6 | both exact to 3e-11 (Steiner) |
-| Round | box, three edges at a corner, r=7 | 0.87 | 1.24 | 0.54 | same volume |
-| Round | box, top r=8 then uprights r=3 | 5.9 | 7.4 | 7.2 | ball defect: stock 7e-3 at most, branch 2e-9 |
-| Round | crossed cylinders R10/R6, r=1 / 2.5 | 10.2 / 11.1 | 12.5 / 13.7 | 8.3 / 10.2 | ball defect: stock 2e-4 / 3e-3, branch 2e-8 / 3e-8 |
-| Round | sphere R14 on a box, r=2 / 6 | 1.03 / 1.03 | 1.24 / 1.24 | 0.45 / 0.44 | volumes agree to 1e-7; ball defect: stock 4e-6, branch 1e-14 |
-| Fill | four cubic sides, a=0.5 / 2.0 | 2.6 / 13.7 | | 1.9 / 1.9 | stock 0.11 / 0.45 off the defining surface, branch 1e-12 |
-| Hollow | filleted box, wall 2 / 4 | 2.6 / 2.5 | | 6.8 / 8.0 | stock volume wrong by 3.3e4 / invalid; branch exact to 1e-11 |
-| Curve offset | rectangle, d=2 / 10 | 0.14 / 0.14 | | 0.23 / 0.23 | both exact |
-| Skin | two circles, ruled | 0.22 | 0.42 | 0.40 | frustum volume, both exact to 2e-11 |
-| Skin | six circles at unequal heights, ruled | 0.64 | 1.33 | 1.46 | stack of frusta, both exact to 1.3e-11 |
-| Skin | six circles, smooth | 1.08 | 1.26 | 1.00 | stock bulges to half-width 19.3 through sections of radius at most 10 (volume 13 000, more than any profile within the sections allows); branch 10.0 |
-| Skin | three circles, smooth | 0.56 | 0.72 | 0.80 | both valid; sections lie on the result to 1.5e-8 (stock) and 7e-15 (branch) |
-| Skin | square to circle, ruled | 1.15 | 1.79 | 1.50 | same volume |
-| Skin | square, circle, square, smooth | 1.58 | 2.18 | 9.3 | both valid (the branch's was an unconnected solid before [this correction](#brepskinext-section-vertices-exact)) |
-
-*Ball defect.* The exact blend of radius r on a body B is the envelope of the balls of radius r that lie on one side
-of the surface and touch B; so for a point P of it with unit normal N, the centre c = P -/+ rN is at distance exactly r
-from the faces of B (c = P - rN where the ball is in the material, P + rN where it is in the void). The defect
-dist(c, faces of B) - r is therefore zero for the exact blend, positive where the surface lies inside the exact one
-(more material removed) and negative where it lies outside. It uses neither implementation (24 x 24 interior samples per
-new face, the side of each face taken as the one with the smaller mean square; centres where the blend runs out onto a
-face and the ball cannot roll are left out, as the bottom face in the reblend row). It measures a result against the
-definition of the operation, and a result of 1e-8 means the sampled points are exact to that, not that every point is.
-Where the two implementations' volumes differ, this accounts for it: the rms defect of stock's reblend, 1.25e-3, times the
-area of its new faces, 387, is 0.49 (an rms bounds the mean from above), against 0.48 for the difference of the
-volumes; stock's blends are the approximations and the branch's are exact to the sampling.
-
-How to read it, without flattering it:
-
-* **Where the branch is faster than the checked stock bar:** twelve-edge and corner rounds (2.2 and 2.3 times), the sphere on a
-  box (2.8 times), the crossed cylinders (1.5 and 1.3 times), the fill (which is also exact where stock is not), the smooth skin
-  through six circles (which also stays within the radius of its sections where stock bulges to nearly twice it) and the ruled
-  skin from a square to a circle (1.2 times).
-* **Where it is level:** a single circular edge is 1.05 times the checked stock bar (0.37 against 0.35 ms; the remaining 0.02 ms is
-  face history and the closedness test), the round blended into earlier rounds is 0.97 times, the ruled skins are 1.0 to 1.1
-  times (they call the same `BRepOffsetAPI_ThruSections`; the extra is lining up the rings).
-* **Where it is slower:** the curve offset (1.65 times; it brings the curve to a working size so that offsets behave at any scale,
-  redraws it, builds the plane and polylines and tests the result for self-crossing, none of which stock does, and the offset
-  itself costs the same), the hollow (2.6 to 3.2 times, against a stock call that returns a wrong or invalid body; 22 per cent of it
-  is the check that the wall is nowhere thinner than asked, 12 per cent validity checks, the rest OCCT's offset, defeaturing and
-  Boolean), the smooth skin through three circles (1.1 times) and the smooth skin through a square, a circle and a square (4.3
-  times: the branch's own Gordon-type construction against stock's; not yet profiled).
-* **What changed:** a profile of the sphere on a block found 80 per cent of the call in an exact face-to-face distance between the
-  toroidal blend and the block's far sides. `BRepBndLib` boxes a face that is not planar by its whole surface, so the box of the
-  blend was that of the entire torus and reached the sides, and the torus box that `BndLib` gives for a parameter range was itself
-  smaller than the patch (see [BndLib-torus-patch-box](#bndlib-torus-patch-box)). With both fixed the test is skipped where the box
-  says it must be. A profile of the reblend and the crossed cylinders then found a quarter of the call in point-in-face
-  classification, which scanned every vertex of the face's boundary polygon up to five times per point
-  ([CSLib_Class2d-v-bucket-index](#cslib_class2d-v-bucket-index)), and 6 per cent in rebuilding a surface adaptor per query
-  ([BRepTopAdaptor_FClass2d-periods-read-once](#breptopadaptor_fclass2d-periods-read-once)).
-* **Fill and hollow** show the cases stock does not handle well, on inputs with closed forms; they say nothing about
-  general loops.
-
-A rigorous claim about speed or quality on general inputs needs a corpus rather than a dozen rows; the corpus used for
-development belongs to the application and cannot be redistributed with this tree.
-
-### Gallery
-
-Results of the operations above, rendered from the meshes of the application that embeds this tree
-(`scripts/render-fork-gallery.ts` there draws them with three.js; no part of the images comes from another
-product). The scenes are the application's own fixtures.
+# OCCT extensions
+
+Mathematical extensions and corrections for [Open CASCADE Technology](https://dev.opencascade.org) (OCCT) 8.
+The repository is OCCT with its history, followed by commits that add
+
+* a toolkit of modelling operations, `TKAlgoExt`: rolling-ball fillets and chamfers, boundary-first Patch fills,
+  skinning and sweeps, offsets and shells, curve and surface editing, and cell-based Booleans;
+* numerical utilities in `TKGeomAlgo` and `TKMesh`: interval enclosures, Bernstein products, constrained
+  tensor-spline fitting, certified knot compaction, trim integration, surface jets;
+* twenty corrections to existing OCCT algorithms, one commit each, with the derivation and limits of each.
+
+The base is OCCT `b8f597c6` (30 July 2026). Nothing here has been proposed upstream yet; it is organised so that
+it can be proposed in pieces ([Upstreaming](#upstreaming)).
+
+Every added result is checked against a definition or a closed form, not against another implementation:
+the rolling-ball definition of a blend, Steiner's volume of a rounded box, Archimedes' volume of two crossed
+cylinders, Pappus volumes of sweeps, the curvature and torsion of a circle and a helix. Where stock OCCT is
+wrong or invalid on such an input, the number is reported next to it.
+
+## Results
+
+![CPU time per call: stock OCCT, stock followed by a validity check, and TKAlgoExt](dox/extensions/operation-benchmark.svg)
+
+Median CPU time per call, ten runs. Every call of `TKAlgoExt` checks its own result before returning it, so the
+fair reference is the middle bar, stock followed by the same check. Hatched bars are calls with no valid or a
+wrong result. Selected rows (milliseconds; full table, method and caveats in
+[benchmarks.md](dox/extensions/benchmarks.md)):
+
+| Operation | Stock | Stock + check | TKAlgoExt | Quality |
+| --- | ---: | ---: | ---: | --- |
+| Box, all 12 edges rounded | 2.7 | 3.5 | 1.6 | both exact to 3e-11 (Steiner) |
+| Sphere R14 on a box, junction rounded | 1.03 | 1.24 | 0.45 | ball defect: stock 4e-6, TKAlgoExt 1e-14 |
+| Round blended into earlier rounds | 5.9 | 7.4 | 7.2 | ball defect: stock 7e-3, TKAlgoExt 2e-9 |
+| Crossed cylinders R10 / R6, r = 1 | 10.2 | 12.5 | 8.3 | ball defect: stock 2e-4, TKAlgoExt 2e-8 |
+| Fill of four cubic sides | 2.6 | | 1.9 | stock 0.11 off the defining surface, TKAlgoExt 1e-12 |
+| Hollow of a filleted box | 2.6 | | 6.8 | stock volume wrong by 3.3e4; TKAlgoExt exact to 1e-11 |
+| Smooth skin through six circles | 1.08 | 1.26 | 1.00 | stock bulges to half-width 19.3; sections have radius at most 10 |
+
+It is not uniformly faster: a single circular fillet is level (1.05 times stock plus check), the curve offset is
+1.65 times, the smooth skin through square, circle and square 4.3 times, and the hollow 2.6 to 3.2 times
+slower while returning a correct body. [benchmarks.md](dox/extensions/benchmarks.md) gives the cause of each.
+
+## Gallery
+
+Results of the operations, rendered from the meshes of example models with three.js.
 
 | | |
 | --- | --- |
@@ -494,75 +69,79 @@ product). The scenes are the application's own fixtures.
 | ![Two crossing cylinders with the intersection rounded](dox/extensions/images/junction-crossed-cylinders.png) | ![A sphere on a box with the junction rounded](dox/extensions/images/junction-sphere-on-box.png) |
 | Two crossing cylinders (R10, R6) with their intersection curves rounded by 2.5: the blend follows a space curve where two curved surfaces meet. | A sphere (R14) standing on a box with the circular junction rounded by 6. Stock and this branch agree on the volume to 1e-8 of it. |
 
+| | |
+| --- | --- |
 | ![A fill between three tube ends at a Y junction](dox/extensions/images/model-y-pipe.png) | ![A fill bounded by the edges of six plates](dox/extensions/images/model-mouse-network.png) |
 | A fill between three tube ends at a Y junction, curvature-continuous with the three grey sheets. | A fill bounded by the edges of six plates round a three-way junction. |
 | ![An open fill between three strips](dox/extensions/images/model-form-finding.png) | ![A cap between cylindrical surfaces](dox/extensions/images/model-cylinder-cap.png) |
 | An open fill between three strips (the boundary is not a closed loop), shaped by guide curves. | A cap between two cylindrical sheets, the whole model turned in space. |
 | ![A hull bottom between sheer lines](dox/extensions/images/model-hull-bottom.png) | ![A domed top on its boundary curves](dox/extensions/images/model-mouse-top.png) |
 | A hull bottom between sheer lines, turned in space. | A domed top on its boundary curves, turned in space. |
-| ![A panel joined to a delivered neighbour](dox/extensions/images/model-bumper-panel.png) | |
-| A panel built on an already delivered neighbouring panel. | |
+| ![A panel joined to an existing neighbour](dox/extensions/images/model-bumper-panel.png) | |
+| A panel built on an existing neighbouring panel. | |
 
-The last block shows seven of the application's own parameterised models of larger shapes (several faces
-around one fill, open boundaries, guide curves), each tested at two poses against a closed-form or
-symmetry oracle. Thirteen of its fifteen single-loop fill fixtures are delivered (two are refused on purpose,
-one because no surface has the curvature of both neighbours and one because a four-sided loop has a singular
-corner). Not yet delivered, and therefore not shown: curvature-continuous fills between plates meeting at
-three or more edges at once (G2 corners of the plate-fillet kind), a steep wing-tip with two fixed boundaries
-and a guide, teddy-bear-shaped strips with bending flows, flow-direction modes on steep supports, a cap whose
-boundary crosses itself, a crown fit that stays 3 to 9 units off its master surface, and profile-curve
-panels. They are in the open work below.
+The last block shows parameterised models of larger shapes with several faces around one fill, open boundaries
+and guide curves, each tested at two poses against a closed-form or symmetry oracle. The images illustrate what
+is supported; the numbers are in the benchmark and the tests.
 
-The images are illustrations of what is supported, not measurements; the numbers are in the benchmark above
-and in the tests.
+## What is added
 
-### Open work
+| Part | Where | What it is |
+| --- | --- | --- |
+| Corrections | one commit each, [corrections.md](dox/extensions/corrections.md) | Fixes to existing algorithms: quadratic or unbounded loops, wrong ranges, uninitialised reads, missing cancellation. 17 build against current `master` (one needs another of them), three later ones are listed with them. |
+| Numerical utilities | `GeomAlgoExt` in `TKGeomAlgo` | Interval enclosures, Bernstein products, spline collocation, constrained tensor-spline fit, rim fit, certified knot compaction, surface jets |
+| Patch chart and surveys | `BRepAlgoExt` in `TKMesh` | Cotangent-weight chart of a boundary loop, interior fairness survey, trim integration, read-back |
+| Operations | `TKAlgoExt`, nine packages, about 55 000 lines | Listed below |
 
-Known limits and what remains, stated without reference to any application:
+| Package | Operations | Lines |
+| --- | --- | ---: |
+| `BRepBlendExt` | Rolling-ball blend solver: ball on two supports, spine marching, section fit, attachment to the body | 15 400 |
+| `BRepFilletExt` | Constant, variable, range and station fillets, chamfer, contour and prism support, blend validity checks | 4 800 |
+| `BRepPatchExt` | Patch: one face inside a loop of edges (chained, with gaps closed, if the boundary does not close), with G0/G1/G2 to neighbouring faces and interior guides | 6 100 |
+| `BRepSurfaceExt` | Surface alignment, bridging, constraint jets, deformation, face support and rebuild, face separation proofs | 7 900 |
+| `BRepCurveExt` | Planar and 3D curve offset, outline, tangent circles, corner rounding of wires, G0 to G3 bridge curves, projection, rebuild, refinement, regions, spiral | 6 600 |
+| `BRepOffsetExt` | Solid offset, hollow, shell, thicken, push-pull, defeaturing, sewing history | 3 000 |
+| `BRepSkinExt` | Gordon and guided skins, framed sweeps, draft | 4 500 |
+| `BRepBooleanExt` | Cell-based Booleans with a ladder of fallbacks, checked solids, imprints | 3 900 |
+| `BRepToolsExt` | Properties, bounding boxes, dimensions, fairness, hidden-line, failure hints, shared checks and history | 2 700 |
 
-1. **Blend solver.** Some configurations where several blends meet are refused although a valid result exists:
-   the trimming of a blend group needs an owner for every retained region and contact before chain ends are cut,
-   and the centre path must be parametrised consistently by arc length along the marched curve, not by the edge's
-   parameter. Steep dihedral angles (above about 75 degrees) and curvature-continuous sections at five-sided
-   corners are also refused.
-2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published bound for a
-   curvature-continuous conic or quintic section as a function of the support's curvature is missing.
-3. **Fill.** The interior acceptance gate and the flat-support curvature limit have no derivation. The fit's
-   stopping decisions depend on rounding and therefore weakly on pose (sampled, not bounded). Fills through three profiles with
-   curvature continuity can miss the curvature-share limit. Open boundaries need a host-supplied
-   chaining routine (`BRepPatchExt_Side.hxx`).
-4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
-   offsetting solids whose blends meet the wall thickness exactly has no exactness proof.
-5. **Speed.** Every call verifies its result (table above). Measured against stock followed by the same check: a single
-   circular edge is 1.05 times (0.02 ms), the curve offset 1.65 times (its working-size normalisation, plane finding and
-   self-crossing test are the extra; the offset itself is stock's), the hollow 2.6 to 3.2 times (the wall-thickness check and the
-   validity checks are a third of it, the rest is OCCT's offset, defeaturing and Boolean; stock returns a wrong or invalid body),
-   the smooth skin through a square, a circle and a square 4.3 times (unprofiled). Everything else in the table is level or
-   faster. The reblend and the crossed cylinders were profiled and their classification cost removed
-   ([CSLib_Class2d-v-bucket-index](#cslib_class2d-v-bucket-index)).
-6. **Tests.** Every package of `TKAlgoExt` has a native test file ([Native tests](#native-tests)). Operations without a test of
-   their own yet: curve outline and regions, surface bridging, alignment, squaring and face separation, the Gordon and guided
-   skins, thickening, the Boolean imprints, and the six-plate fills of the gallery. Each test names the bug it would catch
-   and uses an expected value from a definition; a mutation of the conic section weight was caught by the spline-path blend tests
-   (the analytic-path ones, box and sphere, do not exercise it).
-7. **Conventions.** Formatting is OCCT's (`clang-format` 18.1.8 with the repository's file), headers carry the repository's
-   license text, comments use `//!`, files are named `Package_Class`. Not done: the packages use free functions in namespace
-   `BRepExt`, a host seam and `std::runtime_error` failures where OCCT style would be classes with `IsDone`/`Shape`,
-   `Standard_Failure` and `Message_ProgressRange` (a behaviour-changing refactor, deferred to review); public declarations
-   have no `Standard_EXPORT`, so a Windows DLL build would not export them (static and Linux builds are unaffected); messages
-   of the blend solver still call it "v2" and the skin "skin". A few comments were cut in an earlier clean-up of references to
-   other software and have been completed from the code around them; they deserve a reviewer's eye.
-8. **Application-specific behaviour.** Not in this tree and not claimed to be mathematics: how a bridge curve chooses the tensions
-   it was not given, which control vertices an alignment keeps, the shapes of a sheet extension and the mapping of a curve
-   deformation, and the exact edges the application's wire rounding gives on the 72 wires it was measured on. The bridge construction
-   itself (G0 to G3, tensions as arguments) is here and tested; planar corner rounding (`roundWireCorners`) and the chaining of an
-   open boundary were written from standard constructions and live here too.
+Each operation is described, with its construction, mathematics, sources, unproven choices and stock
+counterpart, in [operations.md](dox/extensions/operations.md). The utilities and their error budgets are in
+[utilities.md](dox/extensions/utilities.md), the literature in [references.md](dox/extensions/references.md).
+"Unproven" always means a number or rule chosen for the code, not derived; the constants are named in the
+source next to their use.
+
+## Using the operations
+
+The operations keep shapes under 32-bit handles and report failures by exception. The interface between an
+embedding program and the operations is four declarations in `BRepToolsExt_Session.hxx`, which the embedding
+program defines:
+
+* `store(OcctKernel&, const TopoDS_Shape&)` registers a shape and returns its handle;
+* `get(const OcctKernel&, handle)` returns the shape behind a handle;
+* `release(OcctKernel&, handle)` drops a temporary;
+* `sessionCancelled()` is polled for cancellation.
+
+`OcctKernel` is declared and never defined here; it is only passed back. A program that keeps shapes in a
+`std::vector` needs twenty lines (`adm/scripts/extensions/operation-benchmark.cxx` and the test support
+`TKAlgoExt/GTests/BRepExtTest_Support.cxx` are two). Failures are thrown as `BRepExt::Failure`, which derives
+from `std::runtime_error` and carries a stable reason code.
+
+### Section policy
+
+What follows from the mathematics is in this tree. What an application chooses is not: the blend section law
+for curvature continuity, how a bridge curve chooses tensions it was not given, which control vertices an
+alignment keeps, the shape of a sheet extension, and the mapping of a curve deformation. For curvature
+continuity, `BRepBlendExt_Policy.hxx` has a conic-section default and refuses curvature-continuous requests
+until a caller supplies a law through `BREPBLENDEXT_POLICY_HEADER` and `BREPBLENDEXT_POLICY_CLASS`
+([Building](#building)). The derived parts that those choices sit on are here: the G0 to G3 bridge
+construction `BRepCurveExt_Bridge.hxx`, which takes the tensions as arguments, and planar corner rounding
+`BRepExt::roundWireCorners`.
 
 ## Building
 
-The tree is a normal OCCT CMake project; `CMakePresets.json` holds two configurations of the
-modules the extensions need (no Visualization or Draw, static Release libraries, no FreeType or
-RapidJSON), one per target:
+The tree is an ordinary OCCT CMake project. `CMakePresets.json` holds two configurations of the modules the
+extensions need (no Visualization or Draw, static Release libraries, no FreeType or RapidJSON):
 
 ```sh
 cmake --preset native && cmake --build --preset native            # build machine
@@ -571,440 +150,103 @@ cmake --preset wasm && cmake --build --preset wasm                 # WebAssembly
 ```
 
 The `wasm` preset sets the toolchain file from `$EMSDK` and compiles with
-`-fwasm-exceptions -O3 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS`. Without presets, the same
-WebAssembly build is `emcmake cmake -S . -B build/wasm -G Ninja -DCMAKE_BUILD_TYPE=Release
--DBUILD_LIBRARY_TYPE=Static ...` with the cache variables of the preset. Applications may also
-`add_subdirectory()` the tree with the same variables set; the host seam described above is then
-defined by the application's own objects.
+`-fwasm-exceptions -O3 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS`. Applications may also
+`add_subdirectory()` the tree with the same variables set, and then define the session functions above in
+their own objects.
 
 Two options belong to the extension packages (`adm/cmake/occt_extensions.cmake`):
-`BUILD_EXT_KEEP_EXCEPTIONS` (on by default) compiles `TKAlgoExt`, `GeomAlgoExt` and `BRepAlgoExt` with
-C++ exceptions and assertions on whatever OCCT's own flags say (`-UNo_Exception -UNDEBUG`), because the
-operations report failures as exceptions and rely on their checks; and `BREPBLENDEXT_POLICY_HEADER`
-with `BREPBLENDEXT_POLICY_CLASS` name a header and class that replace the built-in section policy of
-the blend solver (force-included into the `BRepBlendExt` sources).
-
-### Native tests
-
-`-DBUILD_GTEST=ON` adds the target `OpenCascadeGTest`, which runs the tests of every built toolkit.
-The tests of this tree are `TKAlgoExt/GTests/BRep*Ext_Test.cxx` (one file per package: blend, fillet,
-patch, surface, curve, offset, skin, Boolean, checks) with a shared host and oracles in
-`BRepExtTest_Support.*`, `GeomAlgoExt_*` and `BRepAlgoExt_*` in their toolkits, and one test file each
-for the two core corrections that follow. For example
-`OpenCascadeGTest --gtest_filter='BRep*Ext*:CSLib_Class2d*:BRepTopAdaptor*:BndLib*'`. Every
-expected value in them comes from a closed form or a definition that does not use the code under
-test: Steiner's volume of a box rounded on every edge, the rolling-ball definition of a blend
-(distance of the ball's centre to the input minus the radius), Archimedes' volume of two crossed
-cylinders, the frustum and Pappus volumes of skins and sweeps, the circular segment of three arcs
-closed by a chord, the position of the touching circle between a line and an arc, and, for the bridge
-curves, the curvature, change of curvature and torsion of a circle and a helix at the ends.
-
-## Applying modules separately
-
-These modules do not depend on the 17 corrections. The accepted utility commits
-remain unchanged. On this pinned base, apply the following commits in order:
-
-| Module | Commits | Dependencies |
-| --- | --- | --- |
-| Spline fit, portable band, prepared rim/compaction | `bb5616bf41`, `58430e7900`, `dd709ae866` | accepted interval/Bernstein/bounds helpers; existing TKGeomAlgo→TKBRep dependency |
-| Original fit/rim/compaction source replacement | `72b7c5f0a0` | replaces the prepared fit family above; preserves production symbols and polling; native progress/default hook member |
-| Exact-section fitting | `a28ec1fd41` | spline-fit batch and accepted Hermite helper |
-| Patch chart/interior | `3d1022a70e`, `4273531a63` | spline execution header; accepted Bernstein/interval helpers; existing TKMesh |
-| Benchmark documentation | `01bba3caa2`, `f757b82e4c` | corresponding module headers for candidate binaries only |
-
-Commit `dd709ae866` can be cherry-picked before the chart commit: it changes only
-the spline basis status boundary. A module cherry-pick includes its own GTests and
-FILES registration. If a package already exists, merge the additive FILES entries;
-do not replace unrelated toolkit registrations. Native tests above were run on the
-combined pinned branch, not on every independent commit combination or upstream tip.
-The module benchmark script accepts separate candidate and stock static build trees.
-Do not infer independent upstream-master compatibility from the correction branches.
-
-## Reproducing the native measurements
-
-Use Linux, CMake, Ninja, a C++17 compiler, and static Release libraries.
-`adm/scripts/extensions/compare.sh BASE CANDIDATE OUTPUT_DIRECTORY` creates
-independent worktrees, builds both, and runs the same benchmark source against
-each. For this table BASE is `b8f597c6` and CANDIDATE is `14f92b09`.
-To measure a correction alone, create a branch at BASE, cherry-pick only that
-correction (and its listed dependency), and pass that branch as CANDIDATE.
-The exception and null-curve commits are included in the aggregate candidate;
-the native benchmarks do not exercise those WebAssembly/null paths.
-
-The benchmark uses `std::clock()` process CPU time, one warm-up and ten measured
-runs per case; setup is outside the clock except sphere construction in the mesh
-case. Measurements: AMD Ryzen 9 7950X3D, GCC 12.2, `-O3`, TBB off, six CPU container
-limit. These are observed medians, not complexity bounds or universal speedups.
-The four finite fixtures do not exercise every correction. A build and unchanged
-fixture result are not a triggering regression test for an unexercised correction.
-
-Fixtures have independent checks: a 100×80×2 plate with 32 radius-one through holes
-has volume `16000−64π` and area `16720+64π`; 20,000 face classification queries
-are checked against the disk complement (19,760 inside). Filleting the top hole
-edges by radius r=0.2 removes another `32π[2r²+(5/3)r³−(π/2)(1+r)r²]`.
-This follows integrating `π[((1+r)−sqrt(r²−t²))²−1]` from t=0 to r
-for each of the 32 quarter-circle profiles. The volume check runs outside
-the measured interval. Classification checks the aggregate inside count. A radius-ten sphere meshed at
-linear deflection 0.01 and angular deflection 0.1 checks mesh vertices against the
-sphere. Its 10,176 triangles and filleted volume 15797.13503629154 were identical
-between these two builds. These checks do not certify every topological invariant.
-
-| Aggregate CPU median, ms | Stock same base | Corrections | Ratio |
-| --- | ---: | ---: | ---: |
-| Plate properties | 4.645 | 4.349 | 0.936 |
-| Plate classification | 144.9025 | 4.829 | 0.0333 |
-| Plate fillet | 11.2375 | 11.1585 | 0.993 |
-| Sphere mesh | 34.020 | 26.987 | 0.793 |
-
-Sample minima/maxima and per-correction values are in
-[measurements.json](adm/scripts/extensions/measurements.json).
-Every standalone same-base correction built and completed all four fixtures.
-The analytic fillet-volume check was added after the first timing series, outside
-the clock; a later aggregate rerun also passed it. Timed operation bodies are unchanged.
-Noise and regressions in individual observations remain visible there. Each entry records
-the ten-sample median and extrema, not every individual timing.
-
-| One correction on stock base, CPU median ms | Properties | Classification | Fillet | Mesh |
-| --- | ---: | ---: | ---: | ---: |
-| Approx_BSplComputeLine-local-endpoint-parameters | 4.528 | 144.438 | 11.102 | 33.727 |
-| BOPAlgo_RemoveFeatures-extend-across-feature | 4.468 | 143.753 | 11.858 | 33.534 |
-| BRepAlgo_Loop-sort-vertices | 4.522 | 149.160 | 11.270 | 33.138 |
-| BRepCheck_Solid-stop-after-enclosed-region | 4.422 | 141.957 | 11.589 | 33.758 |
-| BRepFill_Draft-orientation-last-sample | 4.736 | 143.969 | 11.293 | 32.091 |
-| BRepGProp_Gauss-used-errors | 4.368 | 147.476 | 11.118 | 32.648 |
-| BRepMesh_Delaun-hilbert-insertion | 4.229 | 140.642 | 11.428 | 26.280 |
-| BRepMesh_DelaunayDeflectionControlMeshAlgo-node-normals | 4.488 | 140.654 | 11.019 | 33.898 |
-| Geom_OffsetSurfaceUtils-cancellable-progress | 4.447 | 144.507 | 11.335 | 33.918 |
-| BRepOffset_MakeOffset-cancellable-tolerances | 4.328 | 146.446 | 10.976 | 33.206 |
-| BRepOffset_MakeOffset-input-order | 4.363 | 142.315 | 11.386 | 32.689 |
-| BRepTopAdaptor_FClass2d-wire-bounds | 4.533 | 5.003 | 11.198 | 32.855 |
-| Extrema_ExtPExtS-spline-across | 4.656 | 145.131 | 11.127 | 32.544 |
-| IntTools_BeanFaceIntersector-whole-range | 4.953 | 143.904 | 11.118 | 33.328 |
-| IntTools_EdgeFace-line-plane-touch | 4.219 | 146.035 | 11.046 | 32.903 |
-| IntTools_FaceFace-plane-across-sweep | 4.532 | 151.938 | 10.979 | 32.733 |
-| TopOpeBRepBuild_WireEdgeClassifier-box-apart | 4.662 | 144.457 | 10.789 | 35.466 |
 
-## Corrections, derivations and independent application
-
-For each commit: `git switch -c review-N b8f597c6; git cherry-pick COMMIT`.
-All are independent except offset tolerance cancellation, which needs the
-`Geom_OffsetSurfaceUtils` progress guard first. Existing OCCT tolerances and
-limits are retained unless the entry explicitly identifies an added constant.
-These are elementary derivations unless a paper reference is named; they are
-not claims of formal machine-checked proofs.
-
-Upstream assessment was against official `master` `53706f78a8640c4407bdcc6752df13a270b159f2`.
-Branches `upstream/ID` contain one correction each; the loop sorting branch only
-adapts include context. Thirteen branches compiled independently. Offset tolerance
-cancellation requires the progress guard and is not independently compilable;
-`upstream/BRepOffset-cancellable-with-progress` contains both commits and also builds.
-Three changes conflict with redesigned upstream implementations and are left
-unported rather than making an unsupported semantic adaptation.
-
-### BndLib-torus-patch-box
-
-Commit `810a8e12a5`, made after the measurements above and not one of the 17. Upstream: not assessed.
-
-Problem: `BndLib::Add(gp_Torus, UMin, UMax, VMin, VMax, ...)` returns a box that does not contain the patch. It boxes the arcs
-that points of the section circle, every 45 degrees, trace about the axis; those points lie on the circle, so the part of the
-circle between two of them lies outside the polygon through them. Random tilted tori: 0.6 per cent of 7.4 million surface
-points fall outside, by up to 7.1 per cent of the minor radius (the inscribed octagon's bound is 1 - cos(pi/8) = 7.6 per cent).
-
-Derivation and limits: the patch is the rotation about the axis, through the U range, of an arc of the section circle. That arc
-lies in the convex hull of its end points and, for each sub-arc of at most 45 degrees, of the intersection of the tangents at
-the sub-arc's ends, which is on the bisector at Ri / cos(step / 2) from the section's centre. A linear functional on the
-rotation of a convex set about an axis is largest at a vertex of the set, so the union of the arcs' boxes that these points
-trace contains the patch. Rotation circles are boxed as before (by the circumscribed octagon, so a full circle of radius R is
-boxed to R / cos(pi/8)); the degenerate torus (R < r) keeps its own routine. Tests: sampled surface points of tilted tori
-with reversed and long V ranges lie in the box (the test fails on the previous code), and the inner half of a torus does
-not reach the outer equator.
-
-### CSLib_Class2d-v-bucket-index
-
-Commit `341272613f`, made after the measurements above and not one of the 17. Upstream: not assessed.
-
-Problem: `CSLib_Class2d::SiDans` scans every vertex of the polygon for each query, and up to five times: once for the point
-and once for each corner of its tolerance box. `BRepTopAdaptor_FClass2d::Perform` calls it for every wire of a face, so
-classifying points against a face with a rounded boundary costs the number of boundary samples each time. A profile of a blend
-into earlier rounds spent a quarter of the call in it (68 000 queries, about 4 000 instructions each).
-
-Derivation: what an edge can contribute to a classification at height Y is a crossing of the ray (needs Y between its end
-heights), a vertex within the tolerance box (needs Y within the V tolerance of the vertex's height) or the interpolated edge
-passing within the V tolerance (the interpolated height lies between the end heights, so Y is within the tolerance of the
-edge's height range). So an edge matters only when Y lies in its V range widened by the tolerance. The edges of a polygon of
-32 vertices or more are listed once under every bucket (of about four edges each) that their widened range meets, and a query
-reads the one bucket of its Y. The same edges are examined in the same order with the same arithmetic, so every answer is the one
-the scan gives. Test: random wavy polygons of 12 to 4 096 vertices and a staircase whose vertices lie on bucket boundaries,
-queried at random points, at vertices, a fraction of the tolerance from vertices and at edge middles; the three answers (inside,
-outside, uncertain) are compared with a reference written from the definition, which itself is checked against the unchanged
-class. Effect: a blend into earlier rounds 7.96 to 7.16 ms, two crossed cylinders 12.9 / 15.4 to 8.4 / 10.3 ms.
-
-### BRepTopAdaptor_FClass2d-periods-read-once
-
-Commit `6e6ea43f94`. Upstream: not assessed.
-
-Problem: `Perform` and `TestOnRestriction` build a `BRepAdaptor_Surface` of the face on every call to ask whether the surface
-is periodic in U and V and by how much. The answer cannot change after construction (about 6 per cent of a blend into earlier
-rounds). The four numbers are now read in the constructor. Test: points a whole number of periods from a half cylinder's wall
-classify as the wall does, in and out, before and after the change.
-
-### BRepSkinExt-section-vertices-exact
-
-Commit `6efcd84dcc` (an extension package, not OCCT code). Found by the skin rows of the benchmark.
-
-Problem: a smooth skin through a square, a circle and a square was an unconnected solid (`BRepCheck_NotConnected`, three
-pairs of coincident unsewn edges at the square's corners) where stock `BRepOffsetAPI_ThruSections` made a valid one. The
-circle's arcs are rational and the square's edges are not, so the arcs are made again without weights to put every edge of every
-section on one basis; neighbouring arcs then ended 1.4e-6 apart, above the sewing tolerance of 1e-6, and the corner curves of the
-faces on either side did not coincide.
-
-Fix and limit: the end poles of a clamped curve are its end points, which are exact on the curve being replaced, so the
-replacement's end poles are set to them. The fit moves by at most the error it already had (1.4e-6 at the ends), and the
-sections stay on the result to 7e-15. Test: the skin is a valid solid and every sampled point of the three sections lies on its
-faces within the sewing tolerance (the test fails without the change).
-
-### Approx_BSplComputeLine-local-endpoint-parameters
-
-Commit `806f921d8abf23864e4ef0de270f4ac340e653db`. Upstream: applies; native toolkit build passed.
-
-Problem: Endpoint fitting previously mixed physical parameters with normalized local coordinates.
-
-Derivation and limits: For a positive local span h=b-a, s=(t-a)/h and dC/dt=(dC/ds)/h. Solve the endpoint Bezier fit on [0,1] and rescale both endpoint tangents by h. Assumes strictly increasing endpoint parameters. No new threshold or sampling count.
-
-### BOPAlgo_RemoveFeatures-extend-across-feature
-
-Commit `af44c0a7023a37f38c904010e99b5c64630523bb`. Upstream: applies; native toolkit build passed.
-
-Problem: Extending both directions unnecessarily enlarges adjacent face domains during feature removal.
-
-Derivation and limits: On a forward face an oriented parameter tangent (du,dv) has outward transverse direction (dv,-du). Extend only coordinates with a nonzero outward component; a missing pcurve retains the full extension. This local derivation does not prove that five samples capture every tangent on a curved edge. Four subintervals are an unproven sampling choice. Existing angular and geometric resolutions are retained.
-
-### BRepAlgo_Loop-sort-vertices
-
-Commit `2c9b2590d8d4f695a5a33899ed545f334c233978`. Upstream: applies; native toolkit build passed.
-
-Problem: Repeated parameter evaluation and adjacent exchange sorting take quadratic work.
-
-Derivation and limits: Deduplicate in encounter order, evaluate each remaining parameter once, then stable-sort it. For finite parameters this preserves the stable order of the adjacent exchange sort, including equal parameters, while reducing sorting comparisons from quadratic to O(n log n). Assumes the shape map equality agrees with the old duplicate comparison. No new geometric constants.
-
-### BRepCheck_Solid-stop-after-enclosed-region
-
-Commit `561fa613b4d90aa2d0ce3db2c38a53b188b0cb2b`. Upstream: applies; native toolkit build passed.
-
-Problem: Continuing after an enclosed-region error reaches classifiers that were never initialized.
-
-Derivation and limits: Once a second growth shell adds EnclosedRegion, later classifiers have not been initialized. Return before their use. The already-recorded invalidity is retained; no claim is made about collecting further diagnostic errors. No new constants.
-
-### BRepFill_Draft-orientation-last-sample
-
-Commit `2401e8b9212b9695045f34ade8f006c8daa0425e`. Upstream: applies; native toolkit build passed.
-
-Problem: Rounded final abscissae can exceed the wire length and query an absent location law.
-
-Derivation and limits: Exact sample positions satisfy 0 <= (i-1)*length/N <= length. Floating-point multiplication can place the endpoint outside this closed interval. min(sample,length) restores the endpoint bound and prevents querying an absent location law. Interior arithmetic and sample count are unchanged. No new constants.
-
-### BRepGProp_Gauss-used-errors
-
-Commit `bcf74fe6c586fd395899c34da690a9498cdba0ce`. Upstream: not ported: changed upstream implementation.
-
-Problem: Adaptive integration searched unwritten zero-initialized error capacity.
-
-Derivation and limits: The error vector has an explicitly zero-initialized suffix. Its maximum is the prefix maximum unless that is negative, in which case the first suffix zero wins. Scan the used prefix with the same strict comparison and reproduce that suffix case. This retains the selected integration interval and arithmetic. No new numerical constants.
-
-### BRepMesh_Delaun-hilbert-insertion
-
-Commit `3fa3feb2d4fead0288224bc6812f68087c01f4a2`. Upstream: applies; native toolkit build passed.
-
-Problem: Geometrically scattered insertion order makes mesh refinement expensive.
-
-Derivation and limits: Map the parameter box to a 16-bit square grid and order nodes by recursive quadrant rotation, breaking ties by node index. This is an ordering change only; deflection controls are unchanged. Locality is a performance heuristic, not a runtime theorem. The 16-bit grid (65535 maximum, loop starts at bit 15) is an unproven resolution choice; triangle connectivity and sampling may change.
-
-### BRepMesh_DelaunayDeflectionControlMeshAlgo-node-normals
-
-Commit `e80dd7d596030b3dfead2994718d167fea2ba65d`. Upstream: not ported: changed upstream implementation.
-
-Problem: Repeated normal estimation at unchanged mesh nodes duplicates work.
-
-Derivation and limits: For an unchanged surface and identical parameter pair, NormEstim is the same deterministic function call. Cache its value and defined flag keyed by node index plus exact parameter coordinates, invalidating between optimizations. Coordinate validation prevents stale results after index reuse. No tolerance, angular limit or normal formula changes.
-
-### Geom_OffsetSurfaceUtils-cancellable-progress
-
-Commit `6593918e73854db64fd1d3e8729956320d05bca2`. Upstream: applies; native toolkit build passed.
-
-Problem: Offset normal retries can stop making representable progress without observing cancellation.
-
-Derivation and limits: An iteration with unchanged stored parameters evaluates the same normal again and cannot advance. Reject nonfinite or nonrepresentable steps without an iteration bound; retain arithmetic for progressing steps. A borrowed thread-local Message_ProgressRange is scoped by RAII, so nested evaluations restore their callers even on exceptions. No new numerical constants.
-
-### BRepOffset_MakeOffset-cancellable-tolerances
-
-Commit `bdd6b9a822298b88f5792a3ca51bb44c272ab112`. Upstream: applies textually; requires progress-guard dependency to build.
-
-Problem: Edge tolerance sampling lacked cancellation and loaded derivative-dependent adaptors unnecessarily.
-
-Derivation and limits: Positional D0 evaluation uses only the loaded pcurve and surface, not the endpoint derivative adaptors. Load curve then surface and retain all positional samples and arithmetic. Check the progress range before applying incomplete tolerance results. Depends on the offset evaluation progress guard. The new progress weight 1 is an unproven presentation share, not a geometry bound or deadline.
-
-### BRepOffset_MakeOffset-input-order
-
-Commit `b0456807767b5c4e2017882573a2c92cdce0ecfe`. Upstream: applies; native toolkit build passed.
-
-Problem: Offset root traversal depended on allocation-sensitive map order.
-
-Derivation and limits: Sort map entries by TopExp input index before building their generated faces. The traversal becomes a function of input topology instead of allocation addresses, provided every key has an input index. Stable sorting retains existing order for equal indices. No tolerance or geometric constant changes.
-
-### BRepTopAdaptor_FClass2d-wire-bounds
-
-Commit `c8c90a2c33699ec7e532d9614a42ba953fc36357`. Upstream: not ported: changed upstream implementation.
-
-Problem: Using a face-wide box for each wire prevents rejecting unrelated holes cheaply.
-
-Derivation and limits: A polygon lies in the coordinate-wise extrema of its vertices. A query outside that box beyond the classifier tolerance cannot be inside the polygon. Use that wire box for quick rejection while retaining the identical polygon ray test inside and the old fallback for zero-area bounds. No new constants.
-
-### Extrema_ExtPExtS-spline-across
-
-Commit `a71c466051d1aba6fe3aa7227f5bea26488e921e`. Upstream: applies; native toolkit build passed.
-
-Problem: A generic surface extremum solve ignores separability of transverse spline extrusions.
-
-Derivation and limits: For unit D and C(u).D=h constant, S(u,v)=C(u)+vD gives squared distance ||P-h_proj-C(u)||^2+(v-v0)^2. The interior minimum therefore separates into a curve projection and v=v0. Keep the generic path for boundary or unresolved cases. Existing capacity of four extrema is retained: this does not promise every boundary or non-nearest extremum. Existing tolerances are unchanged.
-
-### IntTools_BeanFaceIntersector-whole-range
-
-Commit `dc671c167bc420983b58647b6871781decc0e297`. Upstream: applies; native toolkit build passed.
-
-Problem: Localized edge/face searches may omit intersections outside their selected neighborhood.
-
-Derivation and limits: Use the existing whole-range search for all surface kinds instead of choosing a localized search for certain polynomial surfaces. Both seek the same zero distance locus; no theorem guarantees completeness of the numerical global search. This preserves the previously selected implementation, not a new intersection algorithm. No new constants.
-
-### IntTools_EdgeFace-line-plane-touch
-
-Commit `def5b1740c39f3d443ba016837ee18cf13f35393`. Upstream: applies; native toolkit build passed.
-
-Problem: Numerical touch detection can miss the analytic interior intersection of a line and a plane.
-
-Derivation and limits: For L(t)=p+td and plane (x-q).n=0, t=(q-p).n/(d.n) when d.n is nonzero. Use that intersection only inside both trimmed parameter ranges, retaining the generic extrema search elsewhere. Angular nonparallel recognition uses the existing Precision value. No new thresholds.
-
-### IntTools_FaceFace-plane-across-sweep
-
-Commit `5ce72fca97a8b6313e019f52cb876d884ca96e0f`. Upstream: applies; native toolkit build passed.
-
-Problem: The generic section search loses the exact translated-curve construction of transverse extrusions.
-
-Derivation and limits: For S(u,v)=C(u)+vD, D parallel to plane normal n, and C(u).D constant, v=(q-C(u0)).n/(D.n) is constant. Translate the basis curve by vD; its extrusion pcurve is (u,v). Preserve boundedness for section endpoints, and retain the general path near trimmed ends. Assumes positive-weight spline poles for the constant-height hull argument. Existing OCCT tolerances only.
-
-### TopOpeBRepBuild_WireEdgeClassifier-box-apart
-
-Commit `14f92b09b402c6fcfcbc95129e6a329b4184372e`. Upstream: applies; native toolkit build passed.
-
-Problem: Wire classification performs expensive curve tests even for disjoint parameter boxes.
-
-Derivation and limits: A loop is contained in the bounds of all its existing pcurves. If two expanded boxes are disjoint, one loop is in the unbounded complement of the other box and can reuse its outside classification. Missing pcurves and block classification keep the old path. The outside probe uses xmax+width+1; 1 is an unproven positive displacement, not an error bound. UV expansion retains stored edge tolerances and therefore inherits their unit assumptions.
-
-The Hilbert ordering uses the locality concept discussed in [4]; its grid resolution
-remains a heuristic.
-
-## Finite mathematical utilities
-
-The originally extracted utility subset consists of header-only helpers using
-OCCT and the C++ standard library. These helpers neither report application
-errors nor own an application journal. Their bounded local calculations have no
-long-running solver loop needing a progress range. The larger solver modules
-described above have separate native failure and progress contracts; their
-application integration remains subject to the stated boundary gates.
-
-* `GeomAlgoExt_Bernstein.hxx`: for Bernstein basis `B_i^n`,
-  `B_i^n B_j^m = binom(n,i) binom(m,j) / binom(n+m,i+j) B_(i+j)^(n+m)`.
-  Degree elevation is the corresponding multiplication by the constant one.
-  Tensor-product extension applies the identity in each coordinate [1].
-  The cached Pascal table size 96 is an **unproven performance cutoff**.
-  Floating coefficient accumulation is not a certified global error bound.
-* `GeomAlgoExt_Interval.hxx`: for finite stored IEEE binary64 endpoints, evaluate
-  endpoint operations and expand each rounded result by one adjacent representable
-  number. The enclosure follows correct round-to-nearest and monotonicity; a
-  product needs the four endpoint combinations [2]. Reject nonfinite results.
-  This assumes no unsafe reassociation, overflow acceptance, or altered rounding.
-  Binary64 precision 53 is derived from the representation, not a fitted constant.
-* `GeomAlgoExt_UniformKnots.hxx`: a degree-p clamped spline has endpoint
-  multiplicity p+1; its interior simple knots divide the finite interval into
-  equal spans. Assumes nonnegative degree, positive span count, finite endpoints.
-* `GeomAlgoExt_Hermite.hxx`: convert value and derivative constraints into rows of
-  the B-spline collocation matrix using OCCT's basis evaluation, then solve the
-  three coordinate right-hand sides. Knot multiplicities and derivative scaling
-  follow spline differentiation [3]. A singular matrix returns failure; neither
-  invertibility nor floating conditioning is promised for arbitrary constraints.
-* `GeomAlgoExt_CubicThrough.hxx`: for distinct increasing sites, a natural C²
-  cubic interpolant minimizes integral |s''|² over H² interpolants. Writing
-  another interpolant as s+e, integrate each span twice: the fourth derivative is zero, e vanishes at
-  sites, s'' is continuous internally and zero at the ends. Thus integral s''e''=0
-  and E(s+e)=E(s)+E(e). The implemented tridiagonal system and cubic Bernstein
-  controls follow the first/second derivative equations; coefficients 2, 3, 1/2
-  and 3/2 and degree/multiplicity 3/4 are derived. Closed and tangent-constrained
-  variants have their own endpoint equations, not the natural-boundary theorem.
-  `unify` retains an **unproven 1e-12 knot merge threshold**.
-* `GeomAlgoExt_ParameterRectangle.hxx`: a positive-weight rational B-spline lies
-  in its control hull [1,3]. Bound each parameter pcurve and recognize a full
-  rectangle under the existing valid-face and boundary assumptions. This is not
-  a global topology certificate. **64 epsilon** and **1e-12 times span** are
-  inherited **unproven recognition allowances**, not mathematical bounds.
-* `GeomAlgoExt_SurfaceBounds.hxx`: split a B-spline into Bezier patches and take
-  coordinate-wise control hull extrema [1,3]. Positive weights are required for
-  the rational hull argument. The inherited conversion allowance **1e-10 is
-  unproven**; the hull theorem does not prove the conversion error.
-
-Native time for the new helper APIs versus stock has not been measured: stock has
-no identical entry points. The integration comparison isolates relocation without
-changing their implementation; the first two batches produced identical WASM bytes.
-The native utility oracle runner is `adm/scripts/extensions/utilities.sh BUILD_DIRECTORY`.
-It checks independent polynomials, long-double inclusions, endpoint jets and hull containment.
-
-No numerical threshold was changed by relocating these utilities. The source
-identifiers changed mechanically to the package namespace. Host integration
-proof compares exact serialized B-reps and typed refusals against the installed
-starting release, rather than rebaselining changed geometry.
-
-## Sources actually consulted
-
-[1] Rida T. Farouki (2012), “The Bernstein polynomial basis: A centennial
-retrospective”, Computer Aided Geometric Design 29(6), 379–419.
-[Author manuscript](https://www.researchgate.net/profile/James-Peters-3/post/Since_the_Bernstein_basis_is_more_stable_than_the_1_x_x2_x3_basis_why_do_we_use_the_second_one/attachment/59d62e4cc49f478072e9ef35/AS:273573887840257@1442236505726/download/Farouki-on-Berstein-basis-2012.pdf),
-degree elevation/product formulas and convex hull sections. The floating-point
-implementation does not inherit an exact-arithmetic theorem without rounding analysis.
-
-[2] Siegfried M. Rump (2010), “Verification methods: Rigorous results using
-floating-point arithmetic”, Acta Numerica 19, 287–449.
-[Author manuscript](https://www.tuhh.de/ti3/rump/intlab/ActaNumerica2010.pdf),
-sections 2, 4 and 5.5 on IEEE arithmetic, directed rounding and inclusion.
-The finite stored-double helper is narrower than general interval arithmetic.
-
-[3] Carl de Boor (1972), “On calculating with B-splines”, Journal of Approximation
-Theory 6(1), 50–62. DOI [10.1016/0021-9045(72)90080-9](https://doi.org/10.1016/0021-9045(72)90080-9).
-[Read paper](https://ftp.cs.wisc.edu/Approx/bsplcalc.pdf), recurrence and convex combinations.
-
-[4] John Skilling (2004), “Programming the Hilbert curve”, AIP Conference
-Proceedings 707, 381. DOI [10.1063/1.1751381](https://doi.org/10.1063/1.1751381).
-[Read transcription](https://doczz.net/doc/7960692/programming-the-hilbert-curve).
-This supports the locality construction concept. The implemented two-dimensional
-quadrant rotation is not a claim to reproduce Skilling's global Gray-code algorithm;
-no speed theorem follows from the citation.
-
-[5] Michael E. Hohmeyer and Brian A. Barsky (1989), “Rational continuity: parametric, geometric, and Frenet
-frame continuity of rational curves”, ACM Transactions on Graphics 8(4), 335–359. The beta-constraints for G^n
-(equations 105 to 109) are the end conditions of `BRepCurveExt_Bridge`; the three free scalars at an end are its tensions.
-
-[6] Standard constructions, without a single source: a circle tangent to two curves has its centre on the intersection of
-their offsets by the radius (the offset curve, Newton's method with the exact derivative dO/du = C' + r (n x dT/du), here as in
-`ChFi2d_FilletAlgo`'s documentation by starts along the pieces); greedy nearest-end growth for chaining unordered curves;
-a straight segment between the surface parameters of two ends for closing a gap in a chart.
-
-## License and contribution review
-
-New utility files identify Timon Gentzsch as author and use OCCT's LGPL-2.1 terms
-with its exception. Existing OCCT files retain their existing notices.
-Upstream's own [contribution workflow](dox/contribution/contribution_workflow/contribution_workflow.md)
-states: “Before contributing, you must sign the Contributor License Agreement (CLA).”
-It requests contributions to IR, a `<Group> - <Summary>` title and review/testing.
-No CLA has been signed by preparing this local branch. Ownership and authority to
-license the extracted application sources must be confirmed before publication.
-Original OCCT project information is preserved below.
+* `BUILD_EXT_KEEP_EXCEPTIONS` (on by default) compiles `TKAlgoExt`, `GeomAlgoExt` and `BRepAlgoExt` with C++
+  exceptions and assertions on whatever OCCT's own flags say (`-UNo_Exception -UNDEBUG`), because the operations
+  report failures as exceptions and rely on their checks.
+* `BREPBLENDEXT_POLICY_HEADER` with `BREPBLENDEXT_POLICY_CLASS` name a header and a class that replace the
+  built-in section policy of the blend solver (force-included into the `BRepBlendExt` sources).
+
+## Tests
+
+`-DBUILD_GTEST=ON` adds the target `OpenCascadeGTest`, which runs the tests of every built toolkit; 165 tests
+belong to this tree. They live in `TKAlgoExt/GTests/BRep*Ext_Test.cxx` (one file per package) with a shared
+session and oracles in `BRepExtTest_Support.*`, in the `GeomAlgoExt` and `BRepAlgoExt` GTests, and in one test
+file for each of the corrections to `CSLib_Class2d`, `BRepTopAdaptor_FClass2d` and `BndLib`. For example:
+
+```sh
+OpenCascadeGTest --gtest_filter='BRep*Ext*:CSLib_Class2d*:BRepTopAdaptor*:BndLib*'
+```
+
+Every expected value comes from a closed form or a definition that does not use the code under test:
+Steiner's volume of a box rounded on every edge; the rolling-ball definition of a blend (distance of the ball
+centre to the input minus the radius); Archimedes' volume of two crossed cylinders; the frustum and Pappus
+volumes of skins and sweeps; the circular segment of three arcs closed by a chord; the position of the circle
+touching a line and an arc; and, for bridge curves, the curvature, change of curvature and torsion of a circle
+and a helix at the ends. Each test names the defect it would catch.
+
+Operations without a test of their own yet: curve outline and regions, surface bridging, alignment, squaring and
+face separation, Gordon and guided skins, thickening, Boolean imprints, and the six-plate fills of the gallery.
+
+## Repository layout
+
+| Path | Content |
+| --- | --- |
+| `src/ModelingAlgorithms/TKAlgoExt/` | The nine operation packages and their GTests |
+| `src/ModelingAlgorithms/TKGeomAlgo/GeomAlgoExt/` | Numerical utilities |
+| `src/ModelingAlgorithms/TKMesh/BRepAlgoExt/` | Charts, trim integration, properties |
+| `adm/cmake/occt_extensions.cmake` | Build options of the extension packages |
+| `adm/scripts/extensions/` | Benchmarks, their results, the chart script, parity harness |
+| `dox/extensions/` | Documentation of the additions and the images of this file |
+
+## Upstreaming
+
+OCCT would reasonably take this in pieces: (1) the corrections that apply to `master` today, each alone;
+(2) the interval and Bernstein utilities; (3) the spline and rim fits with their GTests; (4) `BRepToolsExt` and
+`BRepCurveExt`, which are self-contained and have the clearest closed-form checks; (5) `BRepOffsetExt`; (6) the
+blend and Patch solvers last. The namespace `BRepExt`, the handle interface and the diagnostic hooks are
+artefacts of how the code was first used. Moving the packages to OCCT's class conventions with
+`Standard_Failure` is mechanical but changes behaviour (OCCT code catches `Standard_Failure`), so it is left for
+review.
+
+## Open work
+
+Known limits and what remains:
+
+1. **Blend solver.** Some configurations where several blends meet are refused although a valid result exists:
+   trimming a blend group needs an owner for every retained region and contact before chain ends are cut, and
+   the centre path must be parametrised by arc length along the marched curve, not by the edge's parameter.
+   Steep dihedral angles (above about 75 degrees) and curvature-continuous sections at five-sided corners are
+   also refused.
+2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published
+   bound for a curvature-continuous conic or quintic section as a function of the support's curvature is
+   missing.
+3. **Fill.** The interior acceptance gate and the flat-support curvature limit have no derivation. The fit's
+   stopping decisions depend on rounding and therefore weakly on pose (sampled, not bounded). Fills through
+   three profiles with curvature continuity can miss the curvature-share limit. Open boundaries are chained by
+   `BRepPatchExt_Chain` (nearest-end growth, gaps closed with straight segments); a general theory of which
+   chain a user means is not attempted. Not yet supported: curvature-continuous fills between plates meeting at
+   three or more edges at once, steep wing tips with two fixed boundaries and a guide, strips with bending
+   flows, flow-direction modes on steep supports, caps whose boundary crosses itself, and profile-curve panels.
+4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
+   offsetting solids whose blends meet the wall thickness exactly has no exactness proof.
+5. **Speed.** Measured against stock followed by the same check: a single circular edge 1.05 times, the curve
+   offset 1.65 times, the hollow 2.6 to 3.2 times, the smooth skin through square, circle and square 4.3 times
+   (not yet profiled). Everything else in the [table](dox/extensions/benchmarks.md) is level or faster.
+6. **Tests.** The list above.
+7. **Conventions.** Formatting is OCCT's (`clang-format` 18.1.8 with the repository's file), headers carry the
+   repository's licence text, comments use `//!`, and files are named `Package_Class`. Not done: the packages
+   use free functions in namespace `BRepExt`, the handle interface and `std::runtime_error` failures where OCCT
+   style would be classes with `IsDone` / `Shape`, `Standard_Failure` and `Message_ProgressRange`; public
+   declarations have no `Standard_EXPORT`, so a Windows DLL build would not export them (static and Linux
+   builds are unaffected); some messages still say "v2" for the blend solver.
+8. **Policy.** The choices listed under [Section policy](#section-policy) are not mathematics and are not
+   included.
+
+## Licence and contribution
+
+New files are Copyright (c) 2026 Timon Gentzsch under OCCT's terms: GNU LGPL version 2.1 with the OCCT
+exception (`LICENSE_LGPL_21.txt`, `OCCT_LGPL_EXCEPTION.txt`). Existing OCCT files keep their notices.
+
+OCCT's own [contribution workflow](dox/contribution/contribution_workflow/contribution_workflow.md) asks
+contributors to sign its Contributor License Agreement before a change is accepted upstream, and to title a
+change `<Group> - <Summary>`. The commits here follow that title form. No CLA has been signed; it would be
+needed before offering any of this to OCCT.
 
 ---
 
@@ -1073,110 +315,3 @@ For information regarding OCCT code development, please consult the official OCC
 - [OCCT Forums](https://dev.opencascade.org/forums)
 - [GitHub Discussions](https://github.com/Open-Cascade-SAS/OCCT/discussions)
 
-### Contour seeds and prism diagnostics
-
-`BRepAlgoExt_Contours` enumerates a maker's propagated contour and chooses a
-periodic spline's closing knot as a deterministic seed. It does not change the curve.
-`BRepAlgoExt_Prism` supplies conservative diagnostics following a failed construction.
-A planar set contained by a strip of width w cannot contain a disk of diameter
-2r > w: this proves the cap-collapse implication for the recognized right prisms.
-The curvature diagnostic solves det(II-k I)=0 using exact surface derivatives;
-it is a sampled diagnostic, not a certificate between samples.
-Assumptions: regular support derivatives and correctly recognized prism supports.
-The inherited allowances are **unproven**: fineAngle=1e-12; strip slack=2e-7;
-squared differential cutoffs 1e-20 and 1e-24; classifier steps 1e-4,1e-3,1e-2
-and tolerance 1e-8; 4096 samples (one for constant-curvature elementary supports);
-curvature-ratio allowance 1e-7. No value was retuned in this relocation.
-These depend on TKMesh/TKGeomAlgo and the inherited Resolution header; they can
-be applied independently of the patch solver. There is no whole-fillet impact
-measurement here: construction remains in the application, and this source move
-is validated by identical linked production bytes rather than a new speed claim.
-
-### Surface differential jets
-
-`GeomAlgoExt_SurfaceJet` retains the production first and second derivatives,
-normal orientation, one-sided spline evaluation and curvature comparison. For
-J=[Su Sv], I=J^T J and IIij=n dot Sij, coefficients of an ambient tangent t
-are I^-1 J^T t. Thus II(a,b) is evaluated in parameter coordinates without
-assuming an orthonormal parametrization. The maximum absolute directional
-curvature difference of symmetric 2x2 D is |tr(D)/2|+hypot((D11-D22)/2,D12).
-One-sided U derivatives use adjacent distinct knots; V uses its containing span.
-Assumptions: regular differentials and compatible tangent planes for comparison.
-Inherited **unproven** cutoffs: det(I)<=1e-24, normal magnitude<1e-15 and
-curvature scale>1e-15. They are not a scale-invariant singularity theorem.
-The polynomial GTest has independent piecewise graph derivatives at C1 joins,
-including the V-span choice and reversed normals. This header needs TKGeomAlgo
-and Failure only, and can be applied independently. Production byte identity
-proves relocation adds no cost; whole surface-operation impact remains unmeasured.
-
-`GeomAlgoExt_FitDiagnostics` uses those jets to report fixed-parameter residuals
-and normal angles, signed projected Jacobian, and composite-trapezoid bending
-energy (||Suu||²+2||Suv||²+||Svv||² in normalized parameters, scaled by length²).
-The inherited 32x32 cell grid (1089 vertices), reference-area squared cutoff
-1e-24 and minimum initialization 1e100 are **unproven operational choices**.
-Sampling is not a global regularity or residual certificate. No fit policy changes.
-
-### Planar curve containment
-
-`GeomAlgoExt_PlanarCurve` transforms the trimmed curve into the supplied plane
-frame and asks OCCT's optimal curve bound for [zmin,zmax]. The test
-max(|zmin|,|zmax|)<=tolerance is necessary and sufficient for this bound to lie
-in the tolerance slab. It uses the caller's tolerance and stock OCCT's extrema
-algorithm, with no new sampling count or constant. Its guarantee assumes OCCT's
-bound encloses the curve. Unsupported extrema retain stock behavior.
-This header depends only on TKGeomAlgo and Failure; whole curve editing entry
-points remain application-owned. Relocation itself adds no work.
-
-### Trim integration, read-back and stored tolerance surveys
-
-`BRepAlgoExt_TrimDomain` partitions rational boundary arcs into v-monotone
-pieces. For Y/W, v' has numerator Y'W-YW'; Bernstein hull subdivision isolates
-its zeros. Horizontal crossings define trimmed intervals, integrated with
-embedded Gauss 7/Kronrod 15 rules for area and first moments. Volume uses
-the divergence identity V=(1/3) integral (p-origin) dot n dA. Near square-root
-end behavior, v=lo+width*sin²(t) regularizes the endpoint.
-Assumptions: readable valid trim, regular finite carrier and usable positive
-weights for convex-hull reasoning. Classification can refuse Unknown. The
-embedded difference is an error estimate, **not a rigorous enclosure**.
-The nodes/weights match the primary QUADPACK `dqk15` routine by Robert Piessens
-and Elise de Doncker (1980, revised 1983), read at
-https://netlib.org/quadpack/dqk15.f (table computed by L. W. Fullerton, 1981).
-Its affine rule is used; its separate resasc/machine-error estimator is not.
-Bernstein identities use de Boor [3]; these are not a proof of the stopping policy.
-**Unproven choices retained:** station merge and horizontal-piece cutoff 1e-13;
-relative root floor 1e-14; root depth 42; boundary-box depth 40; classifier
-1e-12; crossing residual 1e-15, parameter width 1e-16 and 100 iterations;
-quadrature depth 18, two-million call budget, relative budgets 1e-8(area) and
-1e-11(volume), split 0.1 inner/0.9 outer; scale floor 1e-300.
-
-`BRepAlgoExt_ReadBack` retains geometry normalization and trimming removal.
-It searches for fixed points of the stock reader's normalization, preserving
-unchanged input geometry in `settleNew`. Its 8 normalization iterations,
-8-ULP coordinate search, 256 frame rotations at 1e-13 radians, and 8 conic
-settling iterations are **unproven search limits**. Existence and global error
-bounds are not claimed; fallback remains unchanged.
-`BRepAlgoExt_Tolerance` returns stored vertex/edge/face tolerances, then their
-maximum over the shape; containers have zero and nonfinite values map to infinity.
-It introduces no document tolerance or floor. All three depend on TKMesh's
-existing topology dependencies. Their native tests use exact eccentric-hole
-moments, nested stored maxima and independent repeated reader normalization.
-These source moves add no operation or new numeric policy; stock whole-operation
-CPU/quality comparisons remain future work, not an inferred speedup.
-
-`BRepAlgoExt_Properties` owns the original adaptive boundary property core and
-analytic rectangular-face areas. A host may include this source in its own
-translation unit to keep its local helpers visible to its wrappers; the toolkit
-compiles the same file independently. A host's own identifiers and publication
-logic stay outside it. Areas integrate ||Su cross Sv||; signed
-volume integrates (p-origin) dot (Su cross Sv)/3. Rectangles of elementary
-surfaces use their analytic Jacobian integrals, excluding cone-apex crossings
-and spindle tori. Other paths retain their quadrature/fallback policy.
-The boundary quadrature is a numerical estimate, not a rigorous certificate.
-
-Property-core **unproven choices retained:** Gauss order 8; adaptive interval
-cutoff 1e-14; noise floors 1e-12 and 1e-14; area relative budget 1e-8;
-volume relative budget 1e-11 and floor 1e-24; relative volume noise 1e-13 and
-noise share 1e-3; inner/outer divisors 10 and 100; derivative cutoff 1e-18;
-stock area fallback tolerance 1e-9; adaptive depth 18 and two-million evaluations.
-Gauss nodes and weights derive from Legendre polynomial exactness, not empirical
-geometry data. The new sphere-rectangle oracle uses r² du (sin(v1)-sin(v0)).
