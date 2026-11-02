@@ -26,6 +26,7 @@
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 
+#include <algorithm>
 #include <vector>
 
 namespace BRepExt::patch_side
@@ -53,9 +54,51 @@ struct Side
     return to < from ? -tangent : tangent;
   }
 
+  //! What the side asks at a place: its face's jet, eased near a corner (see Ease). The ease
+  //! falls as 1 - (10 t^3 - 15 t^4 + 6 t^5), t the distance from the corner over its length: the
+  //! quintic that goes from one to none with its first two derivatives none at both ends, so
+  //! that the bend asked stays twice differentiable along the side and agrees at the corner to
+  //! second order with what the side on the other side asks there.
   SurfaceJet jet(double fraction) const
   {
+    SurfaceJet jet  = faceJet(fraction);
+    double     bend = 0;
+    for (int end = 0; end < 2; ++end)
+      if (eases[end].length > 0)
+      {
+        const double t = std::min(1.0, at(fraction).Distance(at(end)) / eases[end].length);
+        bend += eases[end].bend * (1 - t * t * t * (10 - 15 * t + 6 * t * t));
+      }
+    if (bend == 0)
+      return jet;
+    // Bent across the side by that much, and in no direction along it.
+    const gp_Vec across = jet.n.Crossed(tangent(fraction)).Normalized();
+    const double a = jet.u.Dot(across), b = jet.v.Dot(across);
+    jet.uu += jet.n * (bend * a * a);
+    jet.uv += jet.n * (bend * a * b);
+    jet.vv += jet.n * (bend * b * b);
+    return jet;
+  }
+
+  //! The jet of the face itself, uneased.
+  SurfaceJet faceJet(double fraction) const
+  {
     return surfaceJet("patch", edge, support, parameter(fraction));
+  }
+
+  bool eased() const { return eases[0].length > 0 || eases[1].length > 0; }
+
+  //! The largest ease that reaches a place, as a difference of curvature, or 0. Within it the
+  //! bend asked runs from the corner's to the face's, and a miss is a share of no less than
+  //! that: where both are near flat (straight edges whose faces bend across them), a share of
+  //! the bend asked alone would count a rounding as a miss.
+  double easing(double fraction) const
+  {
+    double out = 0;
+    for (int end = 0; end < 2; ++end)
+      if (eases[end].length > 0 && at(fraction).Distance(at(end)) < eases[end].length)
+        out = std::max(out, std::abs(eases[end].bend));
+    return out;
   }
 
   //! The face that the edge was given with, at any order, as its surface and the edge's
@@ -80,6 +123,17 @@ struct Side
   //! A gap between two runs of an open boundary: nothing is asked along it, and its curve is
   //! only the chord that stands for it until the surface is known (see closeGaps).
   bool free = false;
+
+  //! Near a corner where the faces on both sides bend differently, what this side asks across
+  //! itself eases from the bend a surface can have at the corner to its face's own: by `bend`
+  //! at the corner, as a difference of curvature, to none at `length` from it (see
+  //! agreeAtCorners). At the start and at the end of the side; none where `length` is 0.
+  struct Ease
+  {
+    double bend = 0, length = 0;
+  };
+
+  Ease eases[2];
 };
 
 struct Rim

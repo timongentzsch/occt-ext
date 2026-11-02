@@ -140,6 +140,9 @@ struct Limits
 struct Miss
 {
   double g0 = 0, g1 = 0, g2 = 0, g2Relative = 0;
+  //! The same two against the face itself, where the side eases near a corner (see
+  //! Side::Ease): what is reported, while the side is held to what it asks.
+  double faceG2 = 0, faceG2Relative = 0;
 
   bool within(const Limits& limits, int order, double size) const
   {
@@ -517,6 +520,8 @@ struct Target
   std::optional<gp_Vec> perpendicular = {};
   //! A wish and not a condition: its point is weighed against the energies and not met.
   bool soft = false;
+  //! Near a corner, the least bend a miss of the bend asked is a share of (see Side::easing).
+  double easing = 0;
 };
 
 //! What tangency and bend count for against position, in the units of the loop's size. Where
@@ -677,7 +682,9 @@ std::vector<FitCondition> conditions(const std::vector<Target>&              tar
                        target.share * size * size * bendWeight,
                        wished,
                        share * limits.g2
-                         * std::max(std::abs(bend), tangent.SquareMagnitude() * flatShare / size),
+                         * std::max({std::abs(bend),
+                                     target.easing * tangent.SquareMagnitude(),
+                                     tangent.SquareMagnitude() * flatShare / size}),
                        target.watch});
       }
       continue;
@@ -690,20 +697,21 @@ std::vector<FitCondition> conditions(const std::vector<Target>&              tar
     const gp_Vec t0 = su * du + sv * dv;
     const gp_Vec e1 = jet.u.Normalized(), e2 = jet.n.Crossed(e1);
     const gp_XYZ w = (e1 * jet.curvature(t0, e1) + e2 * jet.curvature(t0, e2)).XYZ();
-    out.push_back(
-      {target.uv.X(),
-       target.uv.Y(),
-       {{2, 0, n * (du * du)},
-        {1, 1, n * (2 * du * dv)},
-        {0, 2, n * (dv * dv)},
-        {1, 0, w * (-2 * du)},
-        {0, 1, w * (-2 * dv)}},
-       5,
-       -jet.curvature(t0, t0),
-       target.share * size * size * bendWeight,
-       wished,
-       fitShare * limits.g2 * t0.SquareMagnitude()
-         * std::max(std::abs(jet.curvature(t0, t0)) / t0.SquareMagnitude(), flatShare / size)});
+    out.push_back({target.uv.X(),
+                   target.uv.Y(),
+                   {{2, 0, n * (du * du)},
+                    {1, 1, n * (2 * du * dv)},
+                    {0, 2, n * (dv * dv)},
+                    {1, 0, w * (-2 * du)},
+                    {0, 1, w * (-2 * dv)}},
+                   5,
+                   -jet.curvature(t0, t0),
+                   target.share * size * size * bendWeight,
+                   wished,
+                   fitShare * limits.g2 * t0.SquareMagnitude()
+                     * std::max({std::abs(jet.curvature(t0, t0)) / t0.SquareMagnitude(),
+                                 target.easing,
+                                 flatShare / size})});
   }
   return out;
 }
@@ -963,10 +971,20 @@ Miss measure(const occ::handle<Geom_Surface>& surface, const Side& side, const K
     miss.g1 = std::max(miss.g1, std::acos(std::min(1.0, std::abs(cosine))) * 180 / M_PI);
     if (side.order < 2)
       continue;
-    const auto [bend, relative] =
+    auto [bend, relative] =
       bendDifference(theirs, mine, side.tangent(fraction).Normalized(), cosine < 0 ? -1 : 1);
-    miss.g2         = std::max(miss.g2, bend);
-    miss.g2Relative = std::max(miss.g2Relative, relative);
+    if (const double easing = side.easing(fraction); easing > 0)
+      relative = std::min(relative, bend / easing);
+    miss.g2                             = std::max(miss.g2, bend);
+    miss.g2Relative                     = std::max(miss.g2Relative, relative);
+    const auto [faceBend, faceRelative] = side.eased()
+                                            ? bendDifference(side.faceJet(fraction),
+                                                             mine,
+                                                             side.tangent(fraction).Normalized(),
+                                                             cosine < 0 ? -1 : 1)
+                                            : std::pair<double, double>(bend, relative);
+    miss.faceG2                         = std::max(miss.faceG2, faceBend);
+    miss.faceG2Relative                 = std::max(miss.faceG2Relative, faceRelative);
   }
   return miss;
 }
@@ -976,13 +994,114 @@ Miss measure(const occ::handle<Geom_Surface>& surface, const Side& side, const K
 //! may have no one direction.
 constexpr double cornerInset = 1e-6;
 
-//! One surface has one tangent plane and one bend at a corner. Where the faces on both sides
-//! of a corner ask for different ones, no patch can give both: say so, and where.
-void agreeAtCorners(const std::vector<Side>& sides, const Limits& limits, double size)
+//! What the faces on the two sides of a corner say of the one surface that is to leave both
+//! tangentially. Along its edge a face gives the surface its bend along the edge and its twist
+//! (the turn of the tangent plane along the edge); at a corner that is four numbers for the
+//! three of one bend, and where the four do not fit, the surface has to change its bend across a
+//! line through the corner. `conflict` is by what share of their curvature they do not: zero
+//! where they fit, as the two rounds of a ball's corner do, and a plane and a round tangent to it
+//! do not. With `bends`, each face's bend across its edge is asked as well, counting for as much
+//! less as a bend counts for against a tangent plane (see tangentWeight), so that it decides the
+//! one bend only where the four numbers leave it open (an edge that runs straight on); `across`
+//! is then by how much each face's bend across its edge differs from that one bend, a's and b's,
+//! each in its own face's sense.
+struct CornerBend
 {
+  double conflict  = 0;
+  double across[2] = {0, 0};
+};
+
+CornerBend cornerBend(const Side& a, const Side& b, bool bends)
+{
+  const SurfaceJet ja = a.jet(1 - cornerInset), jb = b.jet(cornerInset);
+  const double     sign = ja.n.Dot(jb.n) < 0 ? -1 : 1;
+  const gp_Vec     ta = a.tangent(1 - cornerInset).Normalized(), na = ja.n.Crossed(ta);
+  gp_Vec           tb = b.tangent(cornerInset);
+  double           c = tb.Dot(ta), s = tb.Dot(na);
+  const double     length = std::hypot(c, s);
+  if (length < 1e-12)
+    return {};
+  c /= length;
+  s /= length;
+  tb              = ta * c + na * s;
+  const gp_Vec nb = na * c - ta * s;
+  // The bend as L, M, N over (ta, na).
+  const double rows[6][3] = {{1, 0, 0},
+                             {0, 1, 0},
+                             {c * c, 2 * c * s, s * s},
+                             {-c * s, c * c - s * s, c * s},
+                             {0, 0, 1},
+                             {s * s, -2 * c * s, c * c}};
+  const double asked[6]   = {ja.curvature(ta, ta),
+                             ja.curvature(ta, na),
+                             sign * jb.curvature(tb, tb),
+                             sign * jb.curvature(tb, nb),
+                             ja.curvature(na, na),
+                             sign * jb.curvature(nb, nb)};
+  const double weight     = bendWeight / tangentWeight;
+  math_Matrix  normal(1, 3, 1, 3, 0.0);
+  math_Vector  right(1, 3, 0.0), bend(1, 3, 0.0);
+  for (int r = 0; r < (bends ? 6 : 4); ++r)
+  {
+    const double w = r < 4 ? 1 : weight * weight;
+    for (int i = 0; i < 3; ++i)
+    {
+      right(i + 1) += w * rows[r][i] * asked[r];
+      for (int k = 0; k < 3; ++k)
+        normal(i + 1, k + 1) += w * rows[r][i] * rows[r][k];
+    }
+  }
+  // Where the edge runs straight on, nothing says how the surface bends across it.
+  for (int i = 1; i <= 3; ++i)
+    normal(i, i) += 1e-9;
+  math_Gauss solve(normal);
+  if (!solve.IsDone())
+    return {};
+  solve.Solve(right, bend);
+  CornerBend out;
+  double     scale = 0;
+  for (int r = 0; r < 4; ++r)
+  {
+    out.conflict = std::max(
+      out.conflict,
+      std::abs(rows[r][0] * bend(1) + rows[r][1] * bend(2) + rows[r][2] * bend(3) - asked[r]));
+    scale = std::max(scale, std::abs(asked[r]));
+  }
+  out.conflict = scale > 1e-15 ? out.conflict / scale : 0;
+  for (int side = 0; bends && side < 2; ++side)
+  {
+    const double* row = rows[4 + side];
+    out.across[side]  = (row[0] * bend(1) + row[1] * bend(2) + row[2] * bend(3) - asked[4 + side])
+                       * (side ? sign : 1);
+  }
+  return out;
+}
+
+//! One surface has one tangent plane and one bend at a corner. Where the faces on both sides
+//! of a corner ask for different tangent planes, no patch can give both: say so, and where.
+//! Where they ask for different bends, a surface that is twice differentiable at the corner has
+//! the one bend there that the edges and the tangent planes along them leave it (cornerBend),
+//! and no other: the bend each side asks across itself eases to that one near the corner (see
+//! Side::Ease), and what the face itself is missed by there is reported, not refused. Over how
+//! long: with the faces' bends met along both sides beyond the ease, the surface's bend has to
+//! turn from the one side's to the other's across the corner at every distance d from it, by as
+//! much as they differ, so that it changes by that over a length of about d: as fast as the net
+//! has spans for only where d is no shorter than a span. An ease is therefore no shorter than
+//! `shortest`, a span of the coarsest net (on the corners of three arms of rounds, eases of 0.3,
+//! 3.9 and 7.8 against that span's 24 left every net short of the bends asked or bulging inside,
+//! 16 and 24 were met), and no longer than half its side. Returns what is to be said where no
+//! fill eases so and meets the faces elsewhere (three rounds round a corner at a millionth,
+//! unequal rounds and their planes round a spherical cut): the first such corner; empty where
+//! there is none.
+std::string agreeAtCorners(std::vector<Side>& sides,
+                           const Limits&      limits,
+                           double             size,
+                           double             shortest)
+{
+  std::string eased;
   for (size_t i = 0; i < sides.size(); ++i)
   {
-    const Side &a = sides[i], &b = sides[(i + 1) % sides.size()];
+    Side &a = sides[i], &b = sides[(i + 1) % sides.size()];
     if (a.free || b.free)
       continue;
     // A side that is only to be met leaves the corner in a direction of its own, and the
@@ -1021,12 +1140,23 @@ void agreeAtCorners(const std::vector<Side>& sides, const Limits& limits, double
     Miss miss;
     std::tie(miss.g2, miss.g2Relative) =
       bendDifference(before, after, a.tangent(1 - cornerInset).Normalized(), cosine < 0 ? -1 : 1);
-    if (!miss.within(limits, 2, size))
-      fail(op,
-           unsupported_geometry,
-           where + "bend differently, by a share of " + number(miss.g2Relative)
-             + " of the curvature: no surface has the curvature of both there (G1 can be had)");
+    if (miss.within(limits, 2, size))
+      continue;
+    if (eased.empty())
+      eased = where + "bend differently, by a share of " + number(miss.g2Relative)
+              + " of the curvature: no surface has the curvature of both there, and none was "
+                "found that eases to the one it can have near the corner and meets both faces "
+                "beyond (G1 can be had)";
+    const CornerBend corner = cornerBend(a, b, true);
+    for (int k = 0; k < 2; ++k)
+    {
+      Side&        side = k ? b : a;
+      const double bend = corner.across[k];
+      if (bend != 0)
+        side.eases[1 - k] = {bend, std::min(shortest, side.length / 2)};
+    }
   }
+  return eased;
 }
 
 struct Asked;
@@ -1431,7 +1561,7 @@ Measured measureAll(const occ::handle<Geom_Surface>& surface,
     if (side.free)
       continue;
     const Miss   miss      = measure(surface, side, known);
-    const double numbers[] = {miss.g0, miss.g1, miss.g2Relative, miss.g2};
+    const double numbers[] = {miss.g0, miss.g1, miss.faceG2Relative, miss.faceG2};
     std::copy_n(numbers, 4, out.values.begin() + side.input * 4);
     std::string said = "boundary edge " + std::to_string(side.input + 1) + " is missed by "
                        + number(miss.g0) + " (the limit is " + number(limits.g0) + ")";
@@ -1750,59 +1880,10 @@ std::vector<double> gradedKnots(double                     from,
 }
 
 //! By what share of their curvature the faces on the two sides of a corner disagree about the
-//! one surface that is to leave both tangentially. Along its edge a face gives the surface its
-//! bend along the edge and its twist (the turn of the tangent plane along the edge); at a
-//! corner that is four numbers for the three of one bend, and where the four do not fit, the
-//! surface has to change its bend across a line through the corner. Zero where they fit: the
-//! two rounds of a ball's corner do, a plane and a round tangent to it do not.
+//! one surface that is to leave both tangentially (see cornerBend).
 double cornerConflict(const Side& a, const Side& b)
 {
-  const SurfaceJet ja = a.jet(1 - cornerInset), jb = b.jet(cornerInset);
-  const double     sign = ja.n.Dot(jb.n) < 0 ? -1 : 1;
-  const gp_Vec     ta = a.tangent(1 - cornerInset).Normalized(), na = ja.n.Crossed(ta);
-  gp_Vec           tb = b.tangent(cornerInset);
-  double           c = tb.Dot(ta), s = tb.Dot(na);
-  const double     length = std::hypot(c, s);
-  if (length < 1e-12)
-    return 0;
-  c /= length;
-  s /= length;
-  tb              = ta * c + na * s;
-  const gp_Vec nb = na * c - ta * s;
-  // The bend as L, M, N over (ta, na).
-  const double rows[4][3] = {{1, 0, 0},
-                             {0, 1, 0},
-                             {c * c, 2 * c * s, s * s},
-                             {-c * s, c * c - s * s, c * s}};
-  const double asked[4]   = {ja.curvature(ta, ta),
-                             ja.curvature(ta, na),
-                             sign * jb.curvature(tb, tb),
-                             sign * jb.curvature(tb, nb)};
-  math_Matrix  normal(1, 3, 1, 3, 0.0);
-  math_Vector  right(1, 3, 0.0), bend(1, 3, 0.0);
-  for (int r = 0; r < 4; ++r)
-    for (int i = 0; i < 3; ++i)
-    {
-      right(i + 1) += rows[r][i] * asked[r];
-      for (int k = 0; k < 3; ++k)
-        normal(i + 1, k + 1) += rows[r][i] * rows[r][k];
-    }
-  // Where the edge runs straight on, nothing says how the surface bends across it.
-  for (int i = 1; i <= 3; ++i)
-    normal(i, i) += 1e-9;
-  math_Gauss solve(normal);
-  if (!solve.IsDone())
-    return 0;
-  solve.Solve(right, bend);
-  double conflict = 0, scale = 0;
-  for (int r = 0; r < 4; ++r)
-  {
-    conflict = std::max(
-      conflict,
-      std::abs(rows[r][0] * bend(1) + rows[r][1] * bend(2) + rows[r][2] * bend(3) - asked[r]));
-    scale = std::max(scale, std::abs(asked[r]));
-  }
-  return scale > 1e-15 ? conflict / scale : 0;
+  return cornerBend(a, b, false).conflict;
 }
 
 // --- A plane ---------------------------------------------------------------------------------
@@ -2345,6 +2426,8 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
                         runs[s].length / count / asked.size};
           if (asked.controls.flow)
             target.perpendicular = axis(s, f);
+          if (part->order)
+            target.easing = part->easing(g);
           targets.push_back(target);
         }
       }
@@ -3944,6 +4027,7 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
             if (smooth)
             {
               target.jet          = side.jet(f);
+              target.easing       = side.easing(f);
               const gp_Vec along3 = side.tangent(f);
               const gp_XY  along2(along3.Dot(frame.x), along3.Dot(frame.y));
               target.across = gp_XY(-along2.Y(), along2.X()) / along2.Modulus();
@@ -4657,6 +4741,7 @@ Built adjacentOver(const Asked&                                  asked,
         if (smooth)
         {
           target.jet           = side.jet(f);
+          target.easing        = side.easing(f);
           const double h       = std::min({step / 4, f, 1 - f});
           const gp_XY  tangent = place(side.parameter(f + h)) - place(side.parameter(f - h));
           target.across        = gp_XY(-tangent.Y(), tangent.X()) / tangent.Modulus();
@@ -5001,13 +5086,13 @@ Built plate(const Asked& asked)
 //! makes; fails with what it misses otherwise.
 Built fillFace(Asked asked, int method, double flatness, const PatchControls& controls)
 {
-  const bool gapped          = hasGaps(asked);
-  asked.controls             = controls;
-  const Asked input          = asked;
-  bool        copyBudgetMiss = false;
-  auto        placement      = method != 2 ? localSplineRim(asked, &copyBudgetMiss) : std::nullopt;
-  gp_Trsf     anchor;
-  bool        anchored = false;
+  const bool gapped      = hasGaps(asked);
+  asked.controls         = controls;
+  Asked   input          = asked;
+  bool    copyBudgetMiss = false;
+  auto    placement      = method != 2 ? localSplineRim(asked, &copyBudgetMiss) : std::nullopt;
+  gp_Trsf anchor;
+  bool    anchored = false;
   if (!placement && copyBudgetMiss)
   {
     placement = rebasedSplineRim(asked, anchor);
@@ -5064,7 +5149,11 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
   const Frame               frame   = meanPlane(outline, perimeter);
   for (const gp_Pnt& point : outline)
     asked.size = std::max(asked.size, frame.origin.Distance(point) * 2);
-  agreeAtCorners(asked.sides, asked.limits, asked.size);
+  const std::string eased =
+    agreeAtCorners(asked.sides, asked.limits, asked.size, asked.size / ladder[0]);
+  // The delivered face is held to what the sides ask near their corners as well.
+  for (size_t i = 0; i < input.sides.size(); ++i)
+    std::copy_n(asked.sides[i].eases, 2, input.sides[i].eases);
   agreeAtGuideEnds(asked);
 
   // A plane in the mean-plane coordinates has orthogonal UV everywhere, so all
@@ -5192,6 +5281,9 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
     }
   }
   measureSpatialBoundary(*built, input, true);
+  // Where a corner was eased and nothing met, the corner is the reason.
+  if (!eased.empty() && (built->measured.unkept || !built->measured.within))
+    fail(op, unsupported_geometry, eased);
   if (built->measured.unkept)
     fail(op,
          no_solution,
@@ -5208,7 +5300,11 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
   if (const auto fault = insideFault(built->face,
                                      fitted && asked.points.empty() ? rimBend(asked) : 0,
                                      built->crossing))
+  {
+    if (!eased.empty())
+      fail(op, unsupported_geometry, eased);
     fail(op, no_solution, "the surface that meets the edges is not one to keep: " + *fault);
+  }
 
   if (method != 2)
     verifySewn(*built, asked);

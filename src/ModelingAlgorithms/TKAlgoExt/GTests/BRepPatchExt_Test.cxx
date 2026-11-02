@@ -26,6 +26,9 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRep_Tool.hxx>
 #include <GeomAPI_PointsToBSplineSurface.hxx>
@@ -513,4 +516,337 @@ TEST(BRepPatchExt, InsideCheckKeepsTheElbowAcrossItsCrossingAndRefusesARippledOn
     }
   EXPECT_TRUE(BRepExt::insideFault(BRepBuilderAPI_MakeFace(rippled, 1e-7).Face(), tube, crossing)
                 .has_value());
+}
+
+namespace
+{
+
+//! A loop of edges and the faces they are held G2 to.
+struct Rounds
+{
+  std::vector<TopoDS_Face> faces;
+  std::vector<TopoDS_Edge> edges;
+  //! Per edge, the share of it either side of its middle on which the faces' bends are met.
+  std::vector<double> middles;
+
+  //! The edge of `face` whose middle is nearest `middle`.
+  void hold(const TopoDS_Face& face, const gp_Pnt& middle, double share = 0.15)
+  {
+    TopoDS_Edge best;
+    double      least = HUGE_VAL;
+    for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next())
+    {
+      const BRepAdaptor_Curve curve(TopoDS::Edge(it.Current()));
+      const double            distance =
+        curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2).Distance(middle);
+      if (distance < least)
+      {
+        least = distance;
+        best  = TopoDS::Edge(it.Current());
+      }
+    }
+    faces.push_back(face);
+    edges.push_back(best);
+    middles.push_back(share);
+  }
+
+  BRepExt::PatchResult fill() const
+  {
+    std::vector<uint32_t> ids, supports;
+    for (size_t i = 0; i < edges.size(); ++i)
+    {
+      ids.push_back(BRepExt::store(session(), edges[i]));
+      supports.push_back(BRepExt::store(session(), faces[i]));
+    }
+    return BRepExt::patch(session(),
+                          ids,
+                          supports,
+                          std::vector<int>(ids.size(), 2),
+                          {},
+                          {},
+                          1e-3,
+                          0.1,
+                          0.05,
+                          0);
+  }
+
+  //! Along every edge, 33 places: the fill passes through it and keeps its face's tangent plane
+  //! within what was asked; on its middle, away from the corners (30 % of it unless held with
+  //! another share), its two principal curvatures are within 5 % of the tighter of the face's.
+  //! All from projections onto both.
+  void expectMet(const TopoDS_Face& fill) const
+  {
+    const Handle(Geom_Surface) surface = BRep_Tool::Surface(fill);
+    for (size_t i = 0; i < edges.size(); ++i)
+    {
+      const BRepAdaptor_Curve    curve(edges[i]);
+      const Handle(Geom_Surface) face = BRep_Tool::Surface(faces[i]);
+      for (int k = 0; k <= 32; ++k)
+      {
+        const double               f = k / 32.0;
+        const gp_Pnt               p = curve.Value(curve.FirstParameter()
+                                     + (curve.LastParameter() - curve.FirstParameter()) * f);
+        GeomAPI_ProjectPointOnSurf onto(p, surface);
+        ASSERT_GT(onto.NbPoints(), 0);
+        EXPECT_LE(onto.LowerDistance(), 1e-3) << "edge " << i << " at " << f;
+        if (k == 0 || k == 32)
+          continue;
+        gp_Dir     normal = gp_Dir(0, 0, 1), own;
+        const auto theirs = bends(face, p, normal);
+        own               = normal;
+        const auto mine   = bends(surface, p, own);
+        EXPECT_LE(std::acos(std::min(1.0, own.Dot(normal))) * 180 / M_PI, 0.1)
+          << "edge " << i << " at " << f;
+        if (std::abs(f - 0.5) > middles[i])
+          continue;
+        const double tightest = std::max(std::abs(theirs.first), std::abs(theirs.second));
+        EXPECT_LE(std::abs(mine.first - theirs.first), 0.05 * tightest) << "edge " << i << " " << f;
+        EXPECT_LE(std::abs(mine.second - theirs.second), 0.05 * tightest)
+          << "edge " << i << " " << f;
+      }
+    }
+  }
+};
+
+//! Three arms of quarter rounds of radius r about the axes, each from height r + q, with concave
+//! quarter rounds of radius q between them (the teddy example), placed by `pose`. At each
+//! of the six corners an arm, which does not bend along its axis, meets a strip whose edge bends
+//! across that axis, and the other way round: the faces bend differently there.
+Rounds teddy(double r, double q, const gp_Trsf& pose)
+{
+  Rounds       out;
+  const double start = r + q, length = 60;
+  for (int arm = 0; arm < 3; ++arm)
+  {
+    const auto to = [arm](double x, double y, double z) {
+      return arm == 0 ? gp_Pnt(x, y, z) : arm == 1 ? gp_Pnt(y, z, x) : gp_Pnt(z, x, y);
+    };
+    const gp_Pnt o = to(0, 0, 0);
+    const gp_Dir x(gp_Vec(o, to(1, 0, 0))), y(gp_Vec(o, to(0, 1, 0))), z(gp_Vec(o, to(0, 0, 1)));
+    const auto   placed = [&](const TopoDS_Face& face) {
+      return TopoDS::Face(BRepBuilderAPI_Transform(face, pose, true).Shape());
+    };
+    out.hold(placed(BRepBuilderAPI_MakeFace(new Geom_CylindricalSurface(gp_Ax3(o, z, x), r),
+                                            0,
+                                            M_PI / 2,
+                                            start,
+                                            start + length,
+                                            1e-7)
+                      .Face()),
+             to(r * std::sqrt(0.5), r * std::sqrt(0.5), start).Transformed(pose));
+    out.hold(
+      placed(
+        BRepBuilderAPI_MakeFace(
+          new Geom_CylindricalSurface(gp_Ax3(to(start, 0, start), y.Reversed(), x.Reversed()), q),
+          0,
+          M_PI / 2,
+          0,
+          length,
+          1e-7)
+          .Face()),
+      to(start - q * std::sqrt(0.5), 0, start - q * std::sqrt(0.5)).Transformed(pose));
+  }
+  return out;
+}
+
+//! A regular n-gon of circumradius 20 in z = 0, placed by `pose`, each side held to a round of
+//! radius radii[i] tangent to the plane along it, above the plane with signs[i] 1 (the fill
+//! rises inward) and below it with -1. The sides are straight and the rounds bend across them:
+//! at every corner the faces bend differently. With `split` the first side is two edges, its
+//! second half on a round of twice the radius: where they meet the edge runs straight on and the
+//! two rounds bend differently across it.
+Rounds pillow(int                        n,
+              const std::vector<double>& radii,
+              const std::vector<int>&    signs,
+              const gp_Trsf&             pose,
+              bool                       split = false)
+{
+  Rounds out;
+  for (int i = split ? -1 : 0; i < n; ++i)
+  {
+    const int    k = std::max(i, 0);
+    const double a = 2 * M_PI * k / n, b = 2 * M_PI * (k + 1) / n;
+    gp_Pnt       p(20 * std::cos(a), 20 * std::sin(a), 0), q(20 * std::cos(b), 20 * std::sin(b), 0);
+    if (split && i < 1)
+      (i < 0 ? q : p) = gp_Pnt((p.XYZ() + q.XYZ()) / 2);
+    const double radius = radii[k % radii.size()] * (split && i == 0 ? 2 : 1);
+    const gp_Dir along(gp_Vec(p, q)), up(0, 0, signs[k % signs.size()]);
+    // The round's parameter turns from its line on the plane toward along x -up: outward when
+    // that is along x z, which points out of a loop that runs counterclockwise.
+    const bool outward =
+      gp_Vec(along.Crossed(up.Reversed())).Dot(gp_Vec(along.Crossed(gp_Dir(0, 0, 1)))) > 0;
+    const TopoDS_Face face =
+      BRepBuilderAPI_MakeFace(
+        new Geom_CylindricalSurface(gp_Ax3(p.Translated(gp_Vec(up) * radius), along, up.Reversed()),
+                                    radius),
+        outward ? 0 : -0.6,
+        outward ? 0.6 : 0,
+        0,
+        p.Distance(q),
+        1e-7)
+        .Face();
+    out.hold(TopoDS::Face(BRepBuilderAPI_Transform(face, pose, true).Shape()),
+             gp_Pnt((p.XYZ() + q.XYZ()) / 2).Transformed(pose),
+             split && i < 1 ? 0 : 0.15);
+  }
+  return out;
+}
+
+//! The normal curvature of `surface` at the point nearest `p` in the tangent direction nearest
+//! `direction`, for its normal turned to the side of `normal`.
+double bendAlong(const Handle(Geom_Surface)& surface,
+                 const gp_Pnt&               p,
+                 const gp_Vec&               direction,
+                 const gp_Dir&               normal)
+{
+  double u, v;
+  GeomAPI_ProjectPointOnSurf(p, surface).LowerDistanceParameters(u, v);
+  gp_Pnt at;
+  gp_Vec su, sv, suu, svv, suv;
+  surface->D2(u, v, at, su, sv, suu, svv, suv);
+  gp_Vec n = su.Crossed(sv).Normalized();
+  if (n.Dot(gp_Vec(normal)) < 0)
+    n.Reverse();
+  const double E = su.Dot(su), F = su.Dot(sv), G = sv.Dot(sv), det = E * G - F * F;
+  const double du = (G * direction.Dot(su) - F * direction.Dot(sv)) / det,
+               dv = (E * direction.Dot(sv) - F * direction.Dot(su)) / det;
+  const gp_Vec t  = su * du + sv * dv;
+  return n.Dot(suu * (du * du) + suv * (2 * du * dv) + svv * (dv * dv)) / t.SquareMagnitude();
+}
+
+gp_Trsf turned(double scale)
+{
+  gp_Trsf rotation, size, shift;
+  rotation.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, -2, 0.5)), 0.9);
+  size.SetScale(gp_Pnt(0, 0, 0), scale);
+  shift.SetTranslation(gp_Vec(30, -12, 7));
+  return shift * rotation * size;
+}
+
+} // namespace
+
+// The teddy, turned in space, and with narrower strips at rest: at its six corners an arm and a
+// strip bend differently, which no surface twice differentiable there can have both of. The fill
+// is delivered and not refused: it meets every edge and both tangent planes along it, and the
+// bend of each face on the middle of each edge, away from the corners (expectMet). What it misses
+// near the corners is reported in the per-edge numbers, a share of the curvature above the 5 %
+// asked.
+TEST(BRepPatchExt, TeddyCornersThatBendDifferentlyAreEasedAndTheFacesMetBetween)
+{
+  for (const auto& [q, pose] : {std::pair<double, gp_Trsf>(50, turned(1)), {30, gp_Trsf()}})
+  {
+    SCOPED_TRACE(q);
+    const Rounds      loop  = teddy(50, q, pose);
+    const auto        built = loop.fill();
+    const TopoDS_Face fill  = onlyFace(BRepExt::get(session(), built.evolution.resultId));
+    ASSERT_FALSE(fill.IsNull());
+    loop.expectMet(fill);
+    for (size_t i = 0; i < loop.edges.size(); ++i)
+      EXPECT_GT(built.values[5 + 4 * i + 2], 0.05) << "edge " << i;
+  }
+}
+
+// Straight-sided loops of three to six sides on rounds tangent to their plane, of one radius or
+// several, rising or falling, at rest or turned and scaled: every corner joins two straight edges
+// whose rounds bend across them, so the one bend a surface can have there is none, and the
+// rounds' is not. Each is delivered meeting every edge and tangent plane, and the rounds' bends
+// on the middle of every edge; the corners' misses are reported. Four equal sides at rest are the
+// untrimmed quad, the others fitted over their plane.
+TEST(BRepPatchExt, StraightSidesOnRoundsAreEasedAtEveryCornerAndMeetTheRoundsBetween)
+{
+  struct Case
+  {
+    int                 n;
+    std::vector<double> radii;
+    std::vector<int>    signs;
+    double              scale;
+  };
+
+  const Case cases[] = {{3, {30}, {1}, 0},
+                        {4, {30}, {1}, 0},
+                        {5, {30}, {1}, 0},
+                        {6, {30}, {-1}, 3},
+                        {4, {20, 60}, {1}, 1},
+                        {5, {25, 40, 80}, {1, -1}, 1},
+                        {3, {15, 45}, {1, 1, -1}, 0.5}};
+  for (const Case& c : cases)
+  {
+    const gp_Trsf     pose  = c.scale > 0 ? turned(c.scale) : gp_Trsf();
+    const Rounds      loop  = pillow(c.n, c.radii, c.signs, pose);
+    const auto        built = loop.fill();
+    const TopoDS_Face fill  = onlyFace(BRepExt::get(session(), built.evolution.resultId));
+    ASSERT_FALSE(fill.IsNull()) << c.n;
+    SCOPED_TRACE(c.n);
+    loop.expectMet(fill);
+    for (size_t i = 0; i < loop.edges.size(); ++i)
+      EXPECT_GT(built.values[5 + 4 * i + 2], 0.05) << "edge " << i;
+  }
+}
+
+// A square and a pentagon, at rest and turned, on rounds as above, with one side split at its
+// middle between a round and one of twice the radius: at the split the edge runs straight on, its
+// direction gives nothing of how the surface bends across it, and the bend asked across is the
+// mean of the two rounds', as near to each as one bend is. The fill meets every edge, tangent
+// plane and, at the middle of every edge, the round's bends; at the split its bend across the side
+// is that mean, within 5 % of the tighter round's.
+TEST(BRepPatchExt, ASideSplitBetweenTwoRoundsTakesTheMeanOfTheirBendsAcrossItWhereTheyMeet)
+{
+  for (const auto& [n, pose] : {std::pair<int, gp_Trsf>(4, gp_Trsf()), {5, turned(1)}})
+  {
+    SCOPED_TRACE(n);
+    const Rounds      loop  = pillow(n, {30}, {1}, pose, true);
+    const auto        built = loop.fill();
+    const TopoDS_Face fill  = onlyFace(BRepExt::get(session(), built.evolution.resultId));
+    ASSERT_FALSE(fill.IsNull());
+    loop.expectMet(fill);
+    const gp_Pnt split =
+      gp_Pnt(10 * (1 + std::cos(2 * M_PI / n)), 10 * std::sin(2 * M_PI / n), 0).Transformed(pose);
+    const gp_Vec across = gp_Vec(std::cos(M_PI / n), std::sin(M_PI / n), 0).Transformed(pose);
+    const gp_Dir up     = gp_Dir(0, 0, 1).Transformed(pose);
+    const double mean   = (bendAlong(BRep_Tool::Surface(loop.faces[0]), split, across, up)
+                         + bendAlong(BRep_Tool::Surface(loop.faces[1]), split, across, up))
+                        / 2;
+    EXPECT_NEAR(bendAlong(BRep_Tool::Surface(fill), split, across, up), mean, 0.05 / 30);
+  }
+}
+
+// The corner of a box with its three edges rounded by 4, filled G2 with the three rounds at a
+// tolerance of a millionth: no fill that eases at the corners meets the rounds beyond them that
+// near, and the refusal names the corner where the rounds bend differently, not a miss of the
+// net, and says that G1 can be had.
+TEST(BRepPatchExt, ThreeRoundsAtAMillionthAreRefusedWithTheCornerWhereTheyBendDifferently)
+{
+  const TopoDS_Shape       box = BRepPrimAPI_MakeBox(20, 20, 20).Shape();
+  BRepFilletAPI_MakeFillet rounds(box);
+  for (const TopoDS_Edge& edge : edgesWhere(box, [](const double* b) {
+         return b[3] > 19.9 && b[4] > 19.9 && b[5] > 19.9
+                && (b[0] > 19.9) + (b[1] > 19.9) + (b[2] > 19.9) == 2;
+       }))
+    rounds.Add(4, edge);
+  const TopoDS_Shape body = rounds.Shape();
+  const auto         sphere =
+    facesWhere(body, [](const double* b) { return b[0] > 15.9 && b[1] > 15.9 && b[2] > 15.9; });
+  ASSERT_EQ(sphere.size(), 1u);
+  std::vector<uint32_t> edges, supports;
+  for (TopExp_Explorer edge(sphere.front(), TopAbs_EDGE); edge.More(); edge.Next())
+    for (const TopoDS_Face& face : facesWhere(body, [](const double*) { return true; }))
+      if (!face.IsSame(sphere.front()))
+        for (TopExp_Explorer other(face, TopAbs_EDGE); other.More(); other.Next())
+          if (other.Current().IsSame(edge.Current()))
+          {
+            edges.push_back(BRepExt::store(session(), edge.Current()));
+            supports.push_back(BRepExt::store(session(), face));
+          }
+  ASSERT_EQ(edges.size(), 3u);
+  try
+  {
+    BRepExt::patch(session(), edges, supports, {2, 2, 2}, {}, {}, 1e-6, 0.1, 0.05, 0);
+    FAIL() << "a G2 fill was returned";
+  }
+  catch (const BRepExt::Failure& failure)
+  {
+    const std::string what = failure.what();
+    EXPECT_NE(what.find("bend differently"), std::string::npos) << what;
+    EXPECT_NE(what.find("G1 can be had"), std::string::npos) << what;
+  }
 }

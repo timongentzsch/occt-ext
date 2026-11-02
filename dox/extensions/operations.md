@@ -72,6 +72,29 @@ ripple or spike that leaves the rims unchanged leaves it unchanged; the fill may
 as the rim or as the bridge within a tenth of the crossing's length of the same place. With no gap, or gaps
 that are not opposite, the rule is the previous one.
 
+Where two sides asked for G2 meet at a corner whose faces bend differently (an arm of a round meeting a
+strip whose edge bends across the arm's axis), no surface that is twice differentiable at the corner has
+both bends there. It has the one bend that the two edges and the tangent planes along them leave it: four
+numbers (each edge's normal curvature and the turn of its tangent plane along it) for the three of one
+bend, by least squares, with each face's bend across its edge counting a thousandth as much, so that it
+decides only what the four leave open (an edge that runs straight on through the corner, where the bend
+across becomes the mean of the faces'). The bend each side asks across itself then eases from that one at
+the corner to its face's own, as 1 - (10 t^3 - 15 t^4 + 6 t^5) of the difference over the length of the
+ease: the quintic whose first two derivatives vanish at both ends, so the bend asked stays twice
+differentiable along the side and agrees with the other side's to second order at the corner. Within the
+ease a miss is a share of no less than the ease itself (near a corner of straight edges both the bend asked
+and the surface's are near flat). The fill is held to the eased bends; the per-edge curvature it reports
+is against the faces themselves, so the corner's miss is reported and the fill is not refused. Over how
+long (derived here): with the faces' bends met on both sides beyond the ease, the fill's bend has to turn
+across the corner by the whole difference at every distance d from it (on the one edge it is that edge's
+own curvature, on the other the other face's), so it changes by that over an arc of about d; a net
+follows it only where d is no shorter than its span. The ease is one span of the coarsest net (the loop's
+size over 6), and at most half its side. Where no fill that eases so meets the faces beyond (three rounds
+round a box corner at a tolerance of a millionth; unequal rounds and their planes round a spherical cut),
+the refusal names the corner and says that G1 can be had, as before. The G2 analogue of the
+vertex-enclosure condition is stated open in [Hermann, Peters, Strotman 2009]; this is the elementary part
+of it that a fill can be held to.
+
 *Unproven.* The interior acceptance gate (a fault when the interior bends more than 4 times the rim's
 bend, with a floor of 2/size) has no derivation; a bound of the form K sqrt(2D) in the energy gap D was
 tried and rejected. The bridge only replaces the reference that the 4 multiplies; the 4 and the tenth are
@@ -84,7 +107,16 @@ are refused, but gentler defects where the elbow turns pass more often than agai
 fiftieth 104 instead of 120. The flat G2 limit, the stopping rules of the outer iteration (which depend on rounding
 and therefore on pose), the span and budget constants of the net, and the 0.17 slope limit are unproven.
 Pose dependence is measured, not removed: 47 sampled breaches over 154 rigid-motion variants, none changing
-whether a case is refused.
+whether a case is refused. The ease of one coarse span is a judgement bounded by measurement, not an
+optimum: on the teddy (arms and strips of radius 50, sides 79 long, the span 24) eases of 0.3 (the
+distance within which a bend that differs by as much moves a surface by no more than the tolerance), 3.9
+and 7.8 left every net short of the bends asked, or meeting them and bulging inside; 16 was met on the third
+net, 24 on the first to third (1.2 to 5.3 s). G2 is then met on the middle 40 % of a teddy side and on
+less of a shorter one; the application's reading of a teddy seam counts the eases as misses above its 95th
+percentile. Coarse nets that meet an eased loop can be lopsided: the turned teddy is filled 5 off its
+three-fold symmetry on the first net, 0.4 on the third at rest. Straight-sided loops of three to six sides on
+rounds tangent to their plane (corners of 60 to 120 degrees, radii 15 to 80, rising and falling, at rest and
+turned and scaled, one side split between two radii) are all met.
 
 *Stock.* `BRepFill_Filling` and `GeomPlate_BuildPlateSurface`: a plate fit that accepts G0, G1 and G2 point
 and curve constraints and minimises a different energy. See the table below.
