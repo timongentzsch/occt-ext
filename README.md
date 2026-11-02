@@ -46,10 +46,10 @@ as opposed to what follows from the mathematics: the blend section law for curva
 (`BRepBlendExt_Policy.hxx` has a conic-section default, and refuses curvature-continuous requests
 until a host supplies a law through `BREPBLENDEXT_POLICY_HEADER`, see [Building](#building)), how a
 bridge curve chooses the tensions it was not given, which control vertices a curve alignment keeps,
-how the shapes of a sheet extension follow, and how a curve deformation maps. Those stay with the
+how the shapes of a sheet extension follow, which edges the application's wire corner rounding produces for the wires it was measured on, and how a curve deformation maps. Those stay with the
 application, and their declarations are not in this tree's headers. What *is* here for them is the
 derived part: the G0 to G3 bridge construction (`BRepCurveExt_Bridge.hxx`), which takes the tensions
-as arguments.
+as arguments, and the planar construction of corner rounding (`roundWireCorners`).
 
 ### Suggested order for upstream review
 
@@ -554,8 +554,9 @@ Known limits and what remains, stated without reference to any application:
    other software and have been completed from the code around them; they deserve a reviewer's eye.
 8. **Application-specific behaviour.** Not in this tree and not claimed to be mathematics: how a bridge curve chooses the tensions
    it was not given, which control vertices an alignment keeps, the shapes of a sheet extension and the mapping of a curve
-   deformation. The bridge construction itself (G0 to G3, tensions as arguments) is here and tested; the corner rounding of wires
-   and the chaining of an open boundary were written from standard constructions and live here too.
+   deformation, and the exact edges the application's wire rounding gives on the 72 wires it was measured on. The bridge construction
+   itself (G0 to G3, tensions as arguments) is here and tested; planar corner rounding (`roundWireCorners`) and the chaining of an
+   open boundary were written from standard constructions and live here too.
 
 ## Building
 
