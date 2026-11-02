@@ -81,7 +81,7 @@ Piece pieceOf(const TopoDS_Edge& edge)
   double             first, last;
   Handle(Geom_Curve) curve = BRep_Tool::Curve(edge, location, first, last);
   if (curve.IsNull())
-    fail("filletWire", unsupported_geometry, "an edge of the wire has no curve");
+    fail("roundWireCorners", unsupported_geometry, "an edge of the wire has no curve");
   curve = Handle(Geom_Curve)::DownCast(curve->Transformed(location.Transformation()));
   if (edge.Orientation() == TopAbs_REVERSED)
   {
@@ -232,13 +232,13 @@ std::optional<Fillet> circleAt(const Piece&  a,
 
 } // namespace
 
-EvolutionData filletWire(OcctKernel&                  kernel,
-                         uint32_t                     wireId,
-                         const std::vector<uint32_t>& vertexIds,
-                         double                       radius,
-                         double                       tolerance)
+EvolutionData roundWireCorners(OcctKernel&                  kernel,
+                               uint32_t                     wireId,
+                               const std::vector<uint32_t>& vertexIds,
+                               double                       radius,
+                               double                       tolerance)
 {
-  const char* const   op    = "filletWire";
+  const char* const   op    = "roundWireCorners";
   const TopoDS_Shape& shape = get(kernel, wireId);
   if (shape.ShapeType() != TopAbs_WIRE)
     fail(op, invalid_input, "a wire is required");

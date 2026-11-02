@@ -328,13 +328,15 @@ EvolutionData filletVariable(OcctKernel&                  kernel,
                              const std::vector<int>&      inputFaceHashes,
                              int                          hashUpperBound);
 
-//! Round the corners of a curve at `vertexIds` by circular arcs of `radius`, or with a negative
-//! radius cut them along those arcs' chords.
-EvolutionData filletWire(OcctKernel&                  kernel,
-                         uint32_t                     wireId,
-                         const std::vector<uint32_t>& vertexIds,
-                         double                       radius,
-                         double                       tolerance);
+//! Round the corners of a planar wire at `vertexIds` by circular arcs of `radius`, or with a
+//! negative radius cut them along those arcs' chords (BRepCurveExt_CornerRound.cxx). Pieces may be
+//! lines, conics or splines; the wire is refused where it is not planar, a corner is too tight, or
+//! a vertex is not a corner.
+EvolutionData roundWireCorners(OcctKernel&                  kernel,
+                               uint32_t                     wireId,
+                               const std::vector<uint32_t>& vertexIds,
+                               double                       radius,
+                               double                       tolerance);
 
 //! Scale each world axis about a fixed center, reporting the actual OCCT face
 //! history.

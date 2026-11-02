@@ -58,7 +58,7 @@ TopoDS_Wire polyline(const std::vector<gp_Pnt>& points, bool closed)
 // P - 8 r + 2 pi r. A negative radius cuts along the chord of the same arc, r sqrt(2) long: P - 8 r
 // + 4 sqrt(2) r. Wrong tangent points change the length at first order in r. Eight edges remain:
 // four lines and four arcs or chords.
-TEST(BRepCurveExt, FilletWireOfARectangleHasTheClosedFormLength)
+TEST(BRepCurveExt, RoundWireCornersOfARectangleHasTheClosedFormLength)
 {
   const double      a = 60, b = 40, r = 5;
   const TopoDS_Wire wire =
@@ -71,14 +71,14 @@ TEST(BRepCurveExt, FilletWireOfARectangleHasTheClosedFormLength)
     vertices.push_back(BRepExt::store(session(), corner(i)));
   const uint32_t      id      = BRepExt::store(session(), wire);
   const double        P       = 2 * (a + b);
-  const auto          rounded = BRepExt::filletWire(session(), id, vertices, r, 1e-7);
+  const auto          rounded = BRepExt::roundWireCorners(session(), id, vertices, r, 1e-7);
   const TopoDS_Shape& arcs    = BRepExt::get(session(), rounded.resultId);
   EXPECT_NEAR(length(arcs), P - 8 * r + 2 * M_PI * r, 1e-6);
   int edges = 0;
   for (TopExp_Explorer it(arcs, TopAbs_EDGE); it.More(); it.Next())
     ++edges;
   EXPECT_EQ(edges, 8);
-  const auto cut = BRepExt::filletWire(session(), id, vertices, -r, 1e-7);
+  const auto cut = BRepExt::roundWireCorners(session(), id, vertices, -r, 1e-7);
   EXPECT_NEAR(length(BRepExt::get(session(), cut.resultId)),
               P - 8 * r + 4 * std::sqrt(2.) * r,
               1e-6);
@@ -90,7 +90,7 @@ TEST(BRepCurveExt, FilletWireOfARectangleHasTheClosedFormLength)
 // r^2 = (R + r)^2, that is m = R - sqrt(R^2 + 2 R r), the feet are (m, 0) and (R, 0) + R (M - (R,
 // 0)) / (R + r). The wire is trimmed exactly there: the corner is solved for the pieces' own
 // geometry, not a polygon through them.
-TEST(BRepCurveExt, FilletWireBetweenALineAndAnArcTouchesAtTheClosedFormFeet)
+TEST(BRepCurveExt, RoundWireCornersBetweenALineAndAnArcTouchesAtTheClosedFormFeet)
 {
   const double R = 10, r = 2;
   const gp_Pnt origin(0, 0, 0), top(R, R, 0),
@@ -106,7 +106,7 @@ TEST(BRepCurveExt, FilletWireBetweenALineAndAnArcTouchesAtTheClosedFormFeet)
       corner = BRepExt::store(session(), vertices(i));
   ASSERT_NE(corner, 0u);
   const uint32_t      id     = BRepExt::store(session(), wire.Wire());
-  const auto          result = BRepExt::filletWire(session(), id, {corner}, r, 1e-7);
+  const auto          result = BRepExt::roundWireCorners(session(), id, {corner}, r, 1e-7);
   const double        m      = R - std::sqrt(R * R + 2 * R * r);
   const gp_Pnt        centre(m, r, 0), bigCentre(R, 0, 0);
   const gp_Pnt        footOnLine(m, 0, 0);
@@ -141,7 +141,7 @@ TEST(BRepCurveExt, FilletWireBetweenALineAndAnArcTouchesAtTheClosedFormFeet)
 
 // A corner that is too tight for the radius is refused, naming no result, and a vertex given twice
 // is an input error: neither may return a body that rounds some other corner.
-TEST(BRepCurveExt, FilletWireRefusesATightCornerAndARepeatedVertex)
+TEST(BRepCurveExt, RoundWireCornersRefusesATightCornerAndARepeatedVertex)
 {
   const double      a = 10;
   const TopoDS_Wire wire =
@@ -153,10 +153,10 @@ TEST(BRepCurveExt, FilletWireRefusesATightCornerAndARepeatedVertex)
     vertices.push_back(BRepExt::store(session(), corner(i)));
   const uint32_t id = BRepExt::store(session(), wire);
   // r > a / 2: the two arcs at the ends of a side would overlap.
-  EXPECT_THROW(BRepExt::filletWire(session(), id, vertices, 6, 1e-7), std::exception);
+  EXPECT_THROW(BRepExt::roundWireCorners(session(), id, vertices, 6, 1e-7), std::exception);
   std::vector<uint32_t> twice = vertices;
   twice.insert(twice.end(), vertices.begin(), vertices.end());
-  EXPECT_THROW(BRepExt::filletWire(session(), id, twice, -1, 1e-7), std::exception);
+  EXPECT_THROW(BRepExt::roundWireCorners(session(), id, twice, -1, 1e-7), std::exception);
 }
 
 // Locations are by arc length, not by parameter. On a two-segment polyline of lengths 1 and 3 the

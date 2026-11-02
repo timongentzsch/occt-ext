@@ -5,7 +5,7 @@ set(OCCT_BRepCurveExt_FILES
   BRepCurveExt_Curvature.cxx
   BRepCurveExt_EditMore.cxx
   BRepCurveExt_Extend.cxx
-  BRepCurveExt_FilletWire.cxx
+  BRepCurveExt_CornerRound.cxx
   BRepCurveExt_InterpolateClosed.cxx
   BRepCurveExt_Locations.cxx
   BRepCurveExt_Offset.cxx
