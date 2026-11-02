@@ -100,11 +100,6 @@ EvolutionData    skinGuides(OcctKernel&,
                             int                          firstOrder,
                             int                          lastOrder,
                             double                       tolerance);
-EvolutionData    convertCurveVertex(OcctKernel&,
-                                    uint32_t wire,
-                                    Vec3     point,
-                                    bool     smooth,
-                                    double   tolerance);
 EvolutionData    openSections(OcctKernel&, uint32_t a, uint32_t b, double tolerance);
 EvolutionData    offsetShellFaces(OcctKernel&, uint32_t body, double distance);
 EvolutionData    thicken(OcctKernel&, uint32_t, double, double, const std::vector<int>&, int);
@@ -114,14 +109,6 @@ EvolutionData    deformSupports(OcctKernel&,
                                 uint32_t target,
                                 uint32_t moving,
                                 double   tolerance);
-EvolutionData    deformCurve(OcctKernel&,
-                             uint32_t wire,
-                             uint32_t reference,
-                             uint32_t target,
-                             Vec3     scale,
-                             Vec3     offset,
-                             bool     swapUV,
-                             double   tolerance);
 EvolutionData    filletRange(OcctKernel&,
                              uint32_t                   shape,
                              uint32_t                   edge,
@@ -457,41 +444,6 @@ PatchResult patch(OcctKernel&                  kernel,
 //! third are plain numbers, the same at every scale.
 std::vector<double> faceFairness(OcctKernel& kernel, uint32_t face, int samples);
 
-//! A bridge between two curves, from any place along each: `parameter` is the share of the
-//! curve's length at which it begins, `against` whether it leaves against the way the curve
-//! runs. An end may instead be a face, left square to it from the point of it nearest the
-//! end's three coordinates in `points` (first end, then second; empty without a face). An end
-//! with a nonzero vector in `directions` is that point, left along that direction.
-//! `tensions` are three lengths for the first end and three for the second, not a number for
-//! one chosen; `used` receives the six gone by.
-EvolutionData bridgeCurveAt(OcctKernel&                kernel,
-                            uint32_t                   first,
-                            double                     firstParameter,
-                            bool                       firstAgainst,
-                            uint32_t                   second,
-                            double                     secondParameter,
-                            bool                       secondAgainst,
-                            int                        firstOrder,
-                            int                        secondOrder,
-                            const std::vector<double>& tensions,
-                            const std::vector<double>& points,
-                            const std::vector<double>& directions,
-                            std::vector<double>&       used);
-
-//! Align an end of an open curve to a place on an edge, to G0 .. G3 (`order`), with the three
-//! signed control-vertex distances (not a number: the control vertex keeps its
-//! place); a curve of straight pieces is moved whole.
-EvolutionData alignCurveTo(OcctKernel&                kernel,
-                           uint32_t                   wire,
-                           bool                       start,
-                           uint32_t                   target,
-                           double                     parameter,
-                           int                        order,
-                           const std::vector<double>& distances);
-
-//! Make the vertex between two pieces of a curve a control vertex of one spline over both.
-EvolutionData vertexToControl(OcctKernel& kernel, uint32_t wire, Vec3 point, double tolerance);
-
 //! Deform Curve in UVN: see BRepCurveExt_EditMore.cxx.
 EvolutionData deformCurveUVN(OcctKernel& kernel,
                              uint32_t    wire,
@@ -592,21 +544,6 @@ EvolutionData completeEdges(OcctKernel&                  kernel,
                             double                       tolerance,
                             const std::vector<int>&      hashes,
                             int                          bound);
-
-//! A sheet extended beyond outside edges by `distance` (cut back by a negative one), or up to
-//! the first faces of `target` it meets (0 for none), in the shape 0 linear, 1 soft, 2 natural or 3
-//! reflective. The strips are faces beside the ones they extend, or with
-//! `modify` one face with each; corners between edges of one face are filled.
-EvolutionData extendSheetEdges(OcctKernel&                  kernel,
-                               uint32_t                     sheet,
-                               const std::vector<uint32_t>& edges,
-                               double                       distance,
-                               int                          shape,
-                               bool                         modify,
-                               uint32_t                     target,
-                               double                       tolerance,
-                               const std::vector<int>&      hashes,
-                               int                          bound);
 
 //! Every face of a solid moved by `distance` along its outward normal (negative: inwards).
 //! Faces that the distance shrinks to nothing are removed first; a face that is too tight in
