@@ -12,6 +12,8 @@ on:
   push:
     branches:
       - 'master'
+  # Run by hand on any branch, for example to try the Windows build of the extension packages.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.event_name == 'pull_request' 
