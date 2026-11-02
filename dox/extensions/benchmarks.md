@@ -61,7 +61,7 @@ How to read it, without flattering it:
   itself costs the same; the test of a line or conic arc against itself is skipped, which is exact), the hollow (2.6 to 3.2 times, against a stock call that returns a wrong or invalid body; by instruction count
   36 per cent is OCCT's offset, 20 per cent defeaturing, 11 per cent the Boolean cut, 22 per cent the check that the wall is
   nowhere thinner than asked and 8 per cent validity checks), the smooth skin through three circles (1.1 times) and the smooth skin through a square, a circle and a square (4.3
-  times: TKAlgoExt's own Gordon-type construction against stock's; not yet profiled).
+  times: TKAlgoExt's own Gordon-type construction against stock's; profiled below).
 * **What changed:** a profile of the sphere on a block found 80 per cent of the call in an exact face-to-face distance between the
   toroidal blend and the block's far sides. `BRepBndLib` boxes a face that is not planar by its whole surface, so the box of the
   blend was that of the entire torus and reached the sides, and the torus box that `BndLib` gives for a parameter range was itself
