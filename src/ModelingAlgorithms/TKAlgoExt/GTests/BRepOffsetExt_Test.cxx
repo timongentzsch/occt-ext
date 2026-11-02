@@ -95,3 +95,25 @@ TEST(BRepOffsetExt, HollowOfACylinderLeavesTheClosedFormWall) {
   const double expected = M_PI * radius * radius * height - M_PI * (radius - t) * (radius - t) * (height - 2 * t);
   EXPECT_NEAR(volume(made), expected, 1e-6 * expected);
 }
+
+// Every face of a solid moved out by d: with round joins the result is the parallel body, whose
+// volume is Steiner's polynomial abc + 2d(ab + bc + ca) + pi d^2 (a + b + c) + 4/3 pi d^3; with sharp
+// joins the box simply grows to (a + 2d)(b + 2d)(c + 2d); moved in by d it shrinks to
+// (a - 2d)(b - 2d)(c - 2d). The three differ by far more than the tolerance in the corners.
+TEST(BRepOffsetExt, OffsetOfABoxIsSteinersParallelBodyOrTheGrownBox) {
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(a, b, c).Shape();
+  const double d = 4;
+  const auto offset = [&](double distance, int join) {
+    const auto result = BRepExt::offsetSolid(session(), keep(box), distance, 1e-6, join, {}, BRepExt::failureHashBound);
+    return BRepExt::get(session(), result.resultId);
+  };
+  const TopoDS_Shape rounded = offset(d, 0), sharp = offset(d, 2), inward = offset(-d, 2);
+  EXPECT_TRUE(BRepExt::invalidity(rounded).empty());
+  EXPECT_TRUE(BRepExt::invalidity(sharp).empty());
+  EXPECT_TRUE(BRepExt::invalidity(inward).empty());
+  EXPECT_NEAR(volume(rounded),
+              a * b * c + 2 * d * (a * b + b * c + c * a) + M_PI * d * d * (a + b + c) + 4. / 3 * M_PI * d * d * d,
+              1e-6 * a * b * c);
+  EXPECT_NEAR(volume(sharp), (a + 2 * d) * (b + 2 * d) * (c + 2 * d), 1e-9 * a * b * c);
+  EXPECT_NEAR(volume(inward), (a - 2 * d) * (b - 2 * d) * (c - 2 * d), 1e-9 * a * b * c);
+}
