@@ -14,7 +14,7 @@
 // Non-uniform scaling of BRepSurfaceExt on bodies with curved faces: the volume is multiplied by
 // the product of the factors and the bounding box follows the factors exactly. Bridging and
 // alignment of surfaces against the definition of G1: the normals of the two sides agree along the
-// shared boundary.
+// shared boundary, and the proofs of face separation against distances.
 
 #include "BRepExtTest_Support.hxx"
 
@@ -23,7 +23,14 @@
 #include <BRepToolsExt_Operations.hxx>
 #include <GeomAlgoExt_Failure.hxx>
 
+#include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepSurfaceExt_FaceSeparation.hxx>
+#include <GC_MakeArcOfCircle.hxx>
+#include <NCollection_IndexedMap.hxx>
+#include <TopExp.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <Geom_Plane.hxx>
@@ -287,4 +294,124 @@ TEST(BRepSurfaceExt, G1AlignmentMakesAPatchTangentToTheFloorAndKeepsTheEdge)
     EXPECT_NEAR(p.Z(), 0, 1e-9);
     EXPECT_NEAR(std::abs(normalAt(aligned, u, v).Z()), 1, 1e-9);
   }
+}
+
+// Two edges that meet, a line of length 10 along x and a quarter arc of radius 5 in the plane x = 0
+// from the same point, are completed to a four-sided surface by translating each along the other.
+// That surface is the cylinder patch swept by the arc along the line: its area is 10 times the
+// arc's length 5 pi / 2, that is 25 pi, and every point is at
+// distance 5 from the axis parallel to x through (0, 0, 5). A completion that closes the wrong
+// corner, or a surface that bulges between the boundaries, changes the area or the radius.
+TEST(BRepSurfaceExt, SquareSurfaceOfALineAndAnArcIsTheCylinderPatchTheyBound)
+{
+  const double  r = 5, tolerance = 1e-4;
+  const gp_Ax2  frame(gp_Pnt(0, 0, r), gp_Dir(1, 0, 0), gp_Dir(0, 1, 0));
+  const gp_Circ circle(frame, r);
+  // From the lowest point (0, 0, 0) a quarter turn to (0, r, r).
+  const TopoDS_Edge arc =
+    BRepBuilderAPI_MakeEdge(
+      GC_MakeArcOfCircle(circle, gp_Pnt(0, 0, 0), gp_Pnt(0, r, r), true).Value())
+      .Edge();
+  const TopoDS_Edge line = BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(10, 0, 0)).Edge();
+  const auto        result =
+    BRepExt::squareSurface(session(),
+                           {BRepExt::store(session(), line), BRepExt::store(session(), arc)},
+                           {0, 0},
+                           {0, 0},
+                           3,
+                           5,
+                           1,
+                           2,
+                           tolerance);
+  const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
+  EXPECT_NEAR(area(made), 25 * M_PI, 1e-3 * 25 * M_PI);
+  double worst = 0;
+  for (TopExp_Explorer it(made, TopAbs_FACE); it.More(); it.Next())
+  {
+    BRepAdaptor_Surface surface(TopoDS::Face(it.Current()));
+    for (int i = 0; i <= 8; ++i)
+      for (int j = 0; j <= 8; ++j)
+      {
+        const gp_Pnt p =
+          surface.Value(surface.FirstUParameter()
+                          + (surface.LastUParameter() - surface.FirstUParameter()) * i / 8,
+                        surface.FirstVParameter()
+                          + (surface.LastVParameter() - surface.FirstVParameter()) * j / 8);
+        worst = std::max(worst, std::abs(std::hypot(p.Y(), p.Z() - r) - r));
+      }
+  }
+  EXPECT_LT(worst, tolerance) << "radial error " << worst;
+}
+
+namespace
+{
+
+//! A bicubic B-spline face of 4 x 4 spans over a square of side `side`, its height a smooth wave
+//! of amplitude `wave`, placed by `placement`.
+TopoDS_Face waveFace(double side, double wave, const gp_Trsf& placement)
+{
+  const int                  spans = 4, count = spans + 3;
+  NCollection_Array2<gp_Pnt> poles(1, count, 1, count);
+  for (int i = 1; i <= count; ++i)
+    for (int j = 1; j <= count; ++j)
+      poles(i, j) = gp_Pnt(side * (i - 1) / (count - 1),
+                           side * (j - 1) / (count - 1),
+                           wave * std::sin(1.3 * i) * std::cos(0.9 * j));
+  NCollection_Array1<double> knots(1, spans + 1);
+  NCollection_Array1<int>    mult(1, spans + 1);
+  for (int k = 1; k <= spans + 1; ++k)
+  {
+    knots(k) = double(k - 1) / spans;
+    mult(k)  = (k == 1 || k == spans + 1) ? 4 : 1;
+  }
+  Handle(Geom_BSplineSurface) surface =
+    new Geom_BSplineSurface(poles, knots, knots, mult, mult, 3, 3);
+  surface->Transform(placement);
+  return BRepBuilderAPI_MakeFace(surface, 1e-7).Face();
+}
+
+} // namespace
+
+// The face separation pre-pass must never prove two faces clear of each other that are not: a
+// pair it reports as proven has a positive minimum distance, measured by BRepExtrema. Two wavy
+// 10 x 10 patches are put in 40 poses (a grid of offsets in x, z and a tilt) from far apart
+// through touching to crossing; every pair declared proven is checked against the distance, and
+// the poses include both proven and unproven pairs, so that neither "proves everything" nor
+// "proves nothing" passes.
+TEST(BRepSurfaceExt, SeparationNeverProvesFacesThatTouchOrCross)
+{
+  const TopoDS_Face base   = waveFace(10, 1.5, gp_Trsf());
+  int               proven = 0, unproven = 0;
+  for (int pose = 0; pose < 40; ++pose)
+  {
+    gp_Trsf tilt, shift;
+    tilt.SetRotation(gp_Ax1(gp_Pnt(5, 5, 0), gp_Dir(1, 0.3, 0)), 0.15 * (pose % 5));
+    shift.SetTranslation(gp_Vec(2.5 * (pose % 8) - 5, 0.7 * (pose % 3), 0.9 * (pose / 8) - 1.8));
+    const TopoDS_Face other = waveFace(10, 1.5, shift * tilt);
+    BRep_Builder      builder;
+    TopoDS_Compound   both;
+    builder.MakeCompound(both);
+    builder.Add(both, base);
+    builder.Add(both, other);
+    BRepExt::SeparationCount count;
+    BRepExt::unprovenParts(both, &count);
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    TopExp::MapShapes(both, TopAbs_FACE, faces);
+    ASSERT_EQ(faces.Extent(), 2);
+    bool crossProven = false;
+    for (const auto& pair : count.provenPairs)
+      crossProven = crossProven || pair[0] != pair[1];
+    if (crossProven)
+    {
+      ++proven;
+      BRepExtrema_DistShapeShape distance(base, other);
+      ASSERT_TRUE(distance.IsDone());
+      EXPECT_GT(distance.Value(), 1e-9)
+        << "pose " << pose << " proven but at distance " << distance.Value();
+    }
+    else
+      ++unproven;
+  }
+  EXPECT_GT(proven, 0);
+  EXPECT_GT(unproven, 0);
 }

@@ -30,6 +30,8 @@
 #include <TopoDS_Compound.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <GC_MakeArcOfCircle.hxx>
+#include <GeomAPI_Interpolate.hxx>
+#include <NCollection_HArray1.hxx>
 #include <Geom_Circle.hxx>
 #include <Geom_TrimmedCurve.hxx>
 
@@ -216,4 +218,52 @@ TEST(BRepSkinExt, GordonSkinOfArcsAndGeneratorsIsAPatchOfTheCylinder)
       }
   }
   EXPECT_LT(worst, 1e-7);
+}
+
+// A guided skin through three straight profiles (the segment from (0,0,z) to (10,0,z) at z = 0, 5
+// and 10) along a guide y = 2 sin(pi z / 5) at x = 5 that crosses each profile where y = 0 and
+// bulges between them. The profiles alone make the plane y = 0; the guide's move off that plane is
+// blended to the next crossing, so the result contains the profiles and the guide: points of each
+// lie on it to the tolerance. A guide that is ignored, or a result that passes the crossings
+// but not the bulge, leaves the guide's middle 2 away from the surface.
+TEST(BRepSkinExt, GuidedSkinContainsItsProfilesAndABulgingGuide)
+{
+  std::vector<uint32_t> profiles, guides;
+  for (const double z : {0.0, 5.0, 10.0})
+    profiles.push_back(BRepExt::store(
+      session(),
+      BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, z), gp_Pnt(10, 0, z)).Edge())
+        .Wire()));
+  NCollection_Array1<gp_Pnt> through(1, 21);
+  for (int i = 0; i <= 20; ++i)
+  {
+    const double z = 0.5 * i;
+    through(i + 1) = gp_Pnt(5, 2 * std::sin(M_PI * z / 5), z);
+  }
+  Handle(NCollection_HArray1<gp_Pnt>) points = new NCollection_HArray1<gp_Pnt>(through);
+  GeomAPI_Interpolate                 fit(points, false, 1e-9);
+  fit.Perform();
+  ASSERT_TRUE(fit.IsDone());
+  const TopoDS_Edge guide = BRepBuilderAPI_MakeEdge(fit.Curve()).Edge();
+  guides.push_back(BRepExt::store(session(), BRepBuilderAPI_MakeWire(guide).Wire()));
+  const auto          result = BRepExt::skinGuided(session(), profiles, guides, 1e-6);
+  const TopoDS_Shape& made   = BRepExt::get(session(), result.resultId);
+  double              worst  = 0;
+  for (int i = 0; i <= 20; ++i)
+  {
+    BRepExtrema_DistShapeShape distance(
+      BRepBuilderAPI_MakeVertex(gp_Pnt(5, 2 * std::sin(M_PI * 0.5 * i / 5), 0.5 * i)).Vertex(),
+      made);
+    ASSERT_TRUE(distance.IsDone());
+    worst = std::max(worst, distance.Value());
+  }
+  for (const double z : {0.0, 5.0, 10.0})
+    for (const double x : {0.0, 2.5, 5.0, 10.0})
+    {
+      BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(gp_Pnt(x, 0, z)).Vertex(),
+                                          made);
+      ASSERT_TRUE(distance.IsDone());
+      worst = std::max(worst, distance.Value());
+    }
+  EXPECT_LT(worst, 1e-5);
 }

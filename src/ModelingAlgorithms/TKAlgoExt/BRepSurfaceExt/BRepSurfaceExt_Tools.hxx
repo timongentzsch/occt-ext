@@ -68,12 +68,12 @@ struct JetFitSettings
   double curvatureWeight = 1e-6, curvatureWithin = 1e-9, metricFloor = 1;
 };
 
-void            appendJetConditions(std::vector<FitCondition>&,
-                                    const gp_XY&,
-                                    const SurfaceJet& target,
-                                    const SurfaceJet& current,
-                                    int               order,
-                                    const JetFitSettings& = {});
+Standard_EXPORT void appendJetConditions(std::vector<FitCondition>&,
+                                         const gp_XY&,
+                                         const SurfaceJet& target,
+                                         const SurfaceJet& current,
+                                         int               order,
+                                         const JetFitSettings& = {});
 Standard_EXPORT std::vector<FitCondition> conditions(const char*,
                                                      const std::vector<Constraint>&,
                                                      const occ::handle<Geom_BSplineSurface>&,

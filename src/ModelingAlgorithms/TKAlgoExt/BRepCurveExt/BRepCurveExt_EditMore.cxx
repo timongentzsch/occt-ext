@@ -67,8 +67,7 @@ namespace BRepExt
 // carried to a target face. A point at (x, y) of the reference and h above it goes to the
 // place of the target at the same shares (u, v) of its parameters, and from there
 // h * scale N + offset N along the target's normal. Scale and offset in U and V act on the
-// shares. `mirror` turns u into 1 - u (the manual: "Mirror the deformed curves in Z axis";
-// that this is the mirror meant is this kernel's reading), `flipNormal` turns the heights to
+// shares. `mirror` turns u into 1 - u, `flipNormal` turns the heights to
 // the other side of the target. Each edge becomes a spline through mapped points, refined
 // until the sampled parameter-correspondence residual is within `tolerance`.
 EvolutionData deformCurveUVN(OcctKernel& kernel,

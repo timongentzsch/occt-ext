@@ -255,3 +255,45 @@ TEST(BRepOffsetExt, ThickenOfOneFoldedFaceIsDividedAtTheFold)
               || (close(got[0], outside) && close(got[1], inside)))
     << got[0] << " " << got[1] << " expected " << inside << " and " << outside;
 }
+
+// Two bosses on one box, removed in one call: the volume is that of the box, and removing only
+// the faces of one leaves the other boss standing (box plus its cylinder, pi r^2 h). A group that
+// stops after the first feature, or extends the neighbours of one over the other, shows in the
+// volume at first order.
+TEST(BRepOffsetExt, DefeatureOfTwoBossesAtOnceLeavesTheBoxAndOneAtATimeLeavesTheOther)
+{
+  const double       radius = 6, height = 5;
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(a, b, c).Shape();
+  const TopoDS_Shape bossA =
+    BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(a / 4, b / 2, c), gp_Dir(0, 0, 1)), radius, height)
+      .Shape();
+  const TopoDS_Shape bossB =
+    BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(3 * a / 4, b / 2, c), gp_Dir(0, 0, 1)), radius, height)
+      .Shape();
+  const TopoDS_Shape fused = BRepAlgoAPI_Fuse(BRepAlgoAPI_Fuse(box, bossA).Shape(), bossB).Shape();
+  const auto         left  = facesWhere(fused, [](const double* l) {
+    return l[5] > c + 1e-6 && l[2] >= c - 1e-6 && l[3] < a / 2;
+  });
+  const auto         right = facesWhere(fused, [](const double* l) {
+    return l[5] > c + 1e-6 && l[2] >= c - 1e-6 && l[0] > a / 2;
+  });
+  ASSERT_EQ(left.size(), 2u);
+  ASSERT_EQ(right.size(), 2u);
+  std::vector<TopoDS_Face> both = left;
+  both.insert(both.end(), right.begin(), right.end());
+  const double bossVolume = M_PI * radius * radius * height;
+  {
+    const auto result =
+      BRepExt::defeature(session(), keep(fused), keep(both), {}, BRepExt::failureHashBound);
+    const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
+    EXPECT_TRUE(BRepExt::invalidity(made).empty());
+    EXPECT_NEAR(volume(made), a * b * c, 1e-9 * a * b * c);
+  }
+  {
+    const auto result =
+      BRepExt::defeature(session(), keep(fused), keep(left), {}, BRepExt::failureHashBound);
+    const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
+    EXPECT_TRUE(BRepExt::invalidity(made).empty());
+    EXPECT_NEAR(volume(made), a * b * c + bossVolume, 1e-9 * a * b * c);
+  }
+}

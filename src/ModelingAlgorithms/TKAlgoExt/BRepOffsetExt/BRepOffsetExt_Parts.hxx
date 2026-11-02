@@ -67,11 +67,11 @@ Standard_EXPORT std::vector<gp_Pnt> pointsInside(const TopoDS_Face& face, int pe
 //! The minimum distance to the skin of `body`: samples inside `faces`, or whole trimmed
 //! faces for a reconstructed solid offset. With openings, exclude samples nearer than
 //! `wall` to an opened face. Whole-face extrema are not supported for every fitted surface.
-double clearance(const std::vector<TopoDS_Shape>& faces,
-                 const TopoDS_Shape&              body,
-                 const std::vector<TopoDS_Shape>& opened     = {},
-                 double                           wall       = 0.0,
-                 bool                             wholeFaces = false);
+Standard_EXPORT double clearance(const std::vector<TopoDS_Shape>& faces,
+                                 const TopoDS_Shape&              body,
+                                 const std::vector<TopoDS_Shape>& opened     = {},
+                                 double                           wall       = 0.0,
+                                 bool                             wholeFaces = false);
 
 //! Push-pull by how much the far side of a face may lean from the direction it moves in and
 //! still count as running along it, as a cosine: 1e-7 is an angle of 1e-7 radians, which

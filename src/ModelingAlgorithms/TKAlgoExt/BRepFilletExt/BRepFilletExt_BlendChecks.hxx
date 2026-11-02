@@ -35,7 +35,8 @@ struct BlendBoundaryRoles
 
 Standard_EXPORT bool sameBlendSurface(const TopoDS_Face& a, const TopoDS_Face& b);
 Standard_EXPORT bool tangentBlendEdge(const TopoDS_Shape& shape, const TopoDS_Edge& edge);
-BlendBoundaryRoles   blendBoundaryRoles(const TopoDS_Shape&              before,
+Standard_EXPORT BlendBoundaryRoles
+                     blendBoundaryRoles(const TopoDS_Shape&              before,
                                         const std::vector<TopoDS_Shape>& selected,
                                         const TopoDS_Shape&              result,
                                         const BooleanResult&             history,

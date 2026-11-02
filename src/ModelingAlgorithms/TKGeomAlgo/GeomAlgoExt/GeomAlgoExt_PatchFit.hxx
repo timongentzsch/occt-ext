@@ -130,16 +130,16 @@ struct FitEnergies
 //! boundary and certify all delivered geometry. The default retains the multiplier correction used
 //! by supported surfaces. `again`, where given, keeps the energies as assembled for the next fit of
 //! the same net from the same poles with other conditions (see FitEnergies).
-std::vector<int> fitNet(const char*                                  operation,
-                        SplineNet&                                   net,
-                        const std::vector<char>&                     fixed,
-                        const std::vector<FitCondition>&             conditions,
-                        const FitEnergy&                             energy,
-                        const std::function<double(double, double)>& density,
-                        const gp_XYZ*                                along        = nullptr,
-                        const std::vector<FitJump>&                  jumps        = {},
-                        bool                                         leastSquares = false,
-                        FitEnergies*                                 again        = nullptr);
+Standard_EXPORT std::vector<int> fitNet(const char*                                  operation,
+                                        SplineNet&                                   net,
+                                        const std::vector<char>&                     fixed,
+                                        const std::vector<FitCondition>&             conditions,
+                                        const FitEnergy&                             energy,
+                                        const std::function<double(double, double)>& density,
+                                        const gp_XYZ*               along        = nullptr,
+                                        const std::vector<FitJump>& jumps        = {},
+                                        bool                        leastSquares = false,
+                                        FitEnergies*                again        = nullptr);
 
 Standard_EXPORT occ::handle<Geom_BSplineSurface> surfaceOf(const SplineNet& net);
 

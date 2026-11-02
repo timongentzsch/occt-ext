@@ -13,7 +13,7 @@
 
 // Curve operations of BRepCurveExt against closed forms: location by arc length on a polyline and a
 // circle, shape-preserving degree elevation, the cells of overlapping and nested loops, and the
-// outline of a sphere and a cylinder.
+// outline of a sphere and a cylinder, and a curve carried from one plane to another.
 
 #include "BRepExtTest_Support.hxx"
 
@@ -21,7 +21,9 @@
 #include <GeomAlgoExt_Failure.hxx>
 
 #include <BRepAdaptor_CompCurve.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <Geom_Plane.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <NCollection_IndexedMap.hxx>
@@ -356,4 +358,75 @@ TEST(BRepCurveExt, OutlineOfACylinderSeenSideOnIsItsTwoGenerators)
     if (std::abs(length(it.Current()) - 10) < 1e-6)
       ++generators;
   EXPECT_EQ(generators, 2);
+}
+
+namespace
+{
+
+TopoDS_Face squarePlane(double z, double side)
+{
+  return BRepBuilderAPI_MakeFace(
+           new Geom_Plane(gp_Ax3(gp_Pnt(0, 0, z), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0))),
+           0,
+           side,
+           0,
+           side,
+           1e-7)
+    .Face();
+}
+
+//! The largest distance from the points of `shape`'s edges to the segment from `a` to `b`, and the
+//! farthest the edges' ends reach from them.
+double offSegment(const TopoDS_Shape& shape, const gp_Pnt& a, const gp_Pnt& b)
+{
+  const gp_Lin line(a, gp_Dir(gp_Vec(a, b)));
+  double       worst = 0;
+  for (TopExp_Explorer it(shape, TopAbs_EDGE); it.More(); it.Next())
+  {
+    BRepAdaptor_Curve curve(TopoDS::Edge(it.Current()));
+    for (int k = 0; k <= 16; ++k)
+    {
+      const gp_Pnt p     = curve.Value(curve.FirstParameter()
+                                   + (curve.LastParameter() - curve.FirstParameter()) * k / 16);
+      worst              = std::max(worst, line.Distance(p));
+      const double along = gp_Vec(a, p).Dot(gp_Vec(a, b)) / gp_Vec(a, b).SquareMagnitude();
+      worst              = std::max(worst, std::max(-along, along - 1.0));
+    }
+  }
+  return worst;
+}
+
+} // namespace
+
+// A line from (1, 1, 0) to (9, 1, 3) over a 10 x 10 reference square, carried to a 20 x 20 square
+// at height 5 by shares of the parameters: a point (x, y) h above the reference goes to (2x, 2y)
+// on the target and h along its normal. The map is linear, so the image is the straight line
+// from (2, 2, 5) to (18, 2, 8). Mirroring turns u into 1 - u, so x goes to 20 - 2x; swapping
+// exchanges u and v, so the line runs along y; flipping the normal puts the heights below the
+// target. Each of these is a change of the shares or of the sign that a wrong order of the
+// operations would not give.
+TEST(BRepCurveExt, DeformCurveUvnCarriesALineToTheLineOfTheLinearMap)
+{
+  const uint32_t line =
+    BRepExt::store(session(), polyline({gp_Pnt(1, 1, 0), gp_Pnt(9, 1, 3)}, false));
+  const uint32_t source = BRepExt::store(session(), squarePlane(0, 10));
+  const uint32_t target = BRepExt::store(session(), squarePlane(5, 20));
+  const auto     carry  = [&](bool swap, bool mirror, bool flip) {
+    return BRepExt::get(session(),
+                        BRepExt::deformCurveUVN(session(),
+                                                line,
+                                                source,
+                                                target,
+                                                     {1, 1, 1},
+                                                     {0, 0, 0},
+                                                swap,
+                                                mirror,
+                                                flip,
+                                                1e-7)
+                          .resultId);
+  };
+  EXPECT_LT(offSegment(carry(false, false, false), gp_Pnt(2, 2, 5), gp_Pnt(18, 2, 8)), 1e-6);
+  EXPECT_LT(offSegment(carry(false, true, false), gp_Pnt(18, 2, 5), gp_Pnt(2, 2, 8)), 1e-6);
+  EXPECT_LT(offSegment(carry(true, false, false), gp_Pnt(2, 2, 5), gp_Pnt(2, 18, 8)), 1e-6);
+  EXPECT_LT(offSegment(carry(false, false, true), gp_Pnt(2, 2, 5), gp_Pnt(18, 2, 2)), 1e-6);
 }

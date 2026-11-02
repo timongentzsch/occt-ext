@@ -133,10 +133,10 @@ Standard_EXPORT BooleanResult booleanCells(const BooleanRequest& request,
 
 //! Copy and unite same-domain result faces, composing operand face history. Kept result
 //! edges/vertices retain intentional boundaries; invalid unification leaves result unchanged.
-void simplifyBooleanResult(BooleanResult&                   result,
-                           const BooleanRequest&            request,
-                           double                           angle,
-                           const std::vector<TopoDS_Shape>& kept = {});
+Standard_EXPORT void simplifyBooleanResult(BooleanResult&                   result,
+                                           const BooleanRequest&            request,
+                                           double                           angle,
+                                           const std::vector<TopoDS_Shape>& kept = {});
 
 //! Run the reference and optimized check on each SAME partition, without building a result.
 //! Paired rungs (reference, optimized) retain every verdict and diagnostic.

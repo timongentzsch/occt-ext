@@ -111,7 +111,7 @@ Standard_EXPORT EvolutionData deformSupports(OcctKernel&,
                                              uint32_t target,
                                              uint32_t moving,
                                              double   tolerance);
-EvolutionData                 filletRange(OcctKernel&,
+Standard_EXPORT EvolutionData filletRange(OcctKernel&,
                                           uint32_t                   shape,
                                           uint32_t                   edge,
                                           double                     radius,
@@ -435,18 +435,18 @@ struct PatchControls
 //! `points` coordinates in threes that the face is to pass through. Fails where what it built
 //! is measured to miss `tolerance`, `g1Degrees` or `g2Share`. `method` 0 chooses, 1 never
 //! takes the plane's shortcut, 2 is OpenCascade's plate.
-PatchResult patch(OcctKernel&                  kernel,
-                  const std::vector<uint32_t>& edges,
-                  const std::vector<uint32_t>& supports,
-                  const std::vector<int>&      orders,
-                  const std::vector<uint32_t>& guides,
-                  const std::vector<double>&   points,
-                  double                       tolerance,
-                  double                       g1Degrees,
-                  double                       g2Share,
-                  int                          method,
-                  double                       flatness = -1,
-                  const PatchControls&         controls = {});
+Standard_EXPORT PatchResult patch(OcctKernel&                  kernel,
+                                  const std::vector<uint32_t>& edges,
+                                  const std::vector<uint32_t>& supports,
+                                  const std::vector<int>&      orders,
+                                  const std::vector<uint32_t>& guides,
+                                  const std::vector<double>&   points,
+                                  double                       tolerance,
+                                  double                       g1Degrees,
+                                  double                       g2Share,
+                                  int                          method,
+                                  double                       flatness = -1,
+                                  const PatchControls&         controls = {});
 
 //! How fair a face is, sampled `samples` times each way over its parameters: its area; the
 //! integral of the squared principal curvatures; the integral of the squared change of the
