@@ -39,6 +39,7 @@ set(OCCT_TKMath_GTests_FILES
   Convert_ParabolaToBSplineCurve_Test.cxx
   Convert_SphereToBSplineSurface_Test.cxx
   Convert_TorusToBSplineSurface_Test.cxx
+  CSLib_Class2d_Test.cxx
   CSLib_Test.cxx
   ElCLib_Test.cxx
   gp_Ax3_Test.cxx

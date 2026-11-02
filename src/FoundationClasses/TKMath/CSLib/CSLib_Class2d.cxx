@@ -18,6 +18,8 @@
 #include <gp_Pnt2d.hxx>
 #include <Precision.hxx>
 
+#include <algorithm>
+
 #include <cmath>
 
 namespace
@@ -95,6 +97,89 @@ void CSLib_Class2d::init(const TCol_Containers2d& thePnts2d,
   {
     myTolV /= aDv;
   }
+
+  buildIndex();
+}
+
+//=================================================================================================
+
+namespace
+{
+//! Polygons with fewer vertices are scanned whole: the index would not pay for itself.
+constexpr int THE_MIN_INDEXED_POINTS = 32;
+//! Widening of an edge's V range beyond the tolerance, for the rounding of an interpolated Y.
+constexpr double THE_INDEX_MARGIN = 1e-9;
+
+inline int bucketOf(const double theY, const int theBucketCount)
+{
+  return static_cast<int>(std::min(std::max(theY * theBucketCount, 0.0), theBucketCount - 1.0));
+}
+} // namespace
+
+void CSLib_Class2d::buildIndex()
+{
+  myBucketCount = 0;
+  if (myPointsCount < THE_MIN_INDEXED_POINTS)
+  {
+    return;
+  }
+  const int    aBuckets = std::min(1024, std::max(8, myPointsCount / 4));
+  const double aMargin  = myTolV + THE_INDEX_MARGIN;
+
+  NCollection_Array1<int> aRange0(1, myPointsCount), aRange1(1, myPointsCount);
+  NCollection_Array1<int> aStart(0, aBuckets);
+  aStart.Init(0);
+  for (int anEdge = 1; anEdge <= myPointsCount; ++anEdge)
+  {
+    const double aY0 = myPnts2dY.Value(anEdge - 1), aY1 = myPnts2dY.Value(anEdge);
+    if (!std::isfinite(aY0) || !std::isfinite(aY1))
+    {
+      return; // no index for a polygon that is not numbers
+    }
+    const int aFrom = bucketOf(std::min(aY0, aY1) - aMargin, aBuckets);
+    const int aTo   = bucketOf(std::max(aY0, aY1) + aMargin, aBuckets);
+    aRange0.SetValue(anEdge, aFrom);
+    aRange1.SetValue(anEdge, aTo);
+    for (int aBucket = aFrom; aBucket <= aTo; ++aBucket)
+    {
+      ++aStart.ChangeValue(aBucket + 1);
+    }
+  }
+  for (int aBucket = 1; aBucket <= aBuckets; ++aBucket)
+  {
+    aStart.ChangeValue(aBucket) += aStart.Value(aBucket - 1);
+  }
+  NCollection_Array1<int> aEdges(0, aStart.Value(aBuckets) - 1);
+  NCollection_Array1<int> aFill(0, aBuckets - 1);
+  for (int aBucket = 0; aBucket < aBuckets; ++aBucket)
+  {
+    aFill.SetValue(aBucket, aStart.Value(aBucket));
+  }
+  for (int anEdge = 1; anEdge <= myPointsCount; ++anEdge)
+  {
+    for (int aBucket = aRange0.Value(anEdge); aBucket <= aRange1.Value(anEdge); ++aBucket)
+    {
+      aEdges.SetValue(aFill.ChangeValue(aBucket)++, anEdge);
+    }
+  }
+  myBucketStart = std::move(aStart);
+  myBucketEdges = std::move(aEdges);
+  myBucketCount = aBuckets;
+}
+
+//=================================================================================================
+
+void CSLib_Class2d::candidates(const double theY, const int*& theList, int& theCount) const
+{
+  if (myBucketCount == 0 || !std::isfinite(theY))
+  {
+    theList  = nullptr;
+    theCount = myPointsCount;
+    return;
+  }
+  const int aBucket = bucketOf(theY, myBucketCount);
+  theCount          = myBucketStart.Value(aBucket + 1) - myBucketStart.Value(aBucket);
+  theList = theCount > 0 ? &myBucketEdges.Value(myBucketStart.Value(aBucket)) : nullptr;
 }
 
 //=================================================================================================
@@ -236,14 +321,17 @@ bool CSLib_Class2d::internalSiDans(const double thePx, const double thePy) const
   // Ray-casting algorithm: count edge crossings with a horizontal ray from (Px, Py) to +infinity.
   int aNbCrossings = 0;
 
-  double aPrevDx          = myPnts2dX.Value(0) - thePx;
-  double aPrevDy          = myPnts2dY.Value(0) - thePy;
-  bool   aPrevYIsNegative = (aPrevDy < 0.0);
-
-  for (int aNextIdx = 1; aNextIdx <= myPointsCount; ++aNextIdx)
+  const int* aList  = nullptr;
+  int        aCount = 0;
+  candidates(thePy, aList, aCount);
+  for (int anIdx = 0; anIdx < aCount; ++anIdx)
   {
+    const int    aNextIdx         = aList != nullptr ? aList[anIdx] : anIdx + 1;
+    const double aPrevDx          = myPnts2dX.Value(aNextIdx - 1) - thePx;
+    const double aPrevDy          = myPnts2dY.Value(aNextIdx - 1) - thePy;
     const double aCurrDx          = myPnts2dX.Value(aNextIdx) - thePx;
     const double aCurrDy          = myPnts2dY.Value(aNextIdx) - thePy;
+    const bool   aPrevYIsNegative = (aPrevDy < 0.0);
     const bool   aCurrYIsNegative = (aCurrDy < 0.0);
 
     // Check for edge crossing when Y changes sign.
@@ -263,11 +351,7 @@ bool CSLib_Class2d::internalSiDans(const double thePx, const double thePy) const
           ++aNbCrossings;
         }
       }
-      aPrevYIsNegative = aCurrYIsNegative;
     }
-
-    aPrevDx = aCurrDx;
-    aPrevDy = aCurrDy;
   }
 
   // Odd number of crossings means inside.
@@ -282,15 +366,18 @@ CSLib_Class2d::Result CSLib_Class2d::internalSiDansOuOn(const double thePx,
   // Ray-casting algorithm with ON detection.
   int aNbCrossings = 0;
 
-  double aPrevDx          = myPnts2dX.Value(0) - thePx;
-  double aPrevDy          = myPnts2dY.Value(0) - thePy;
-  bool   aPrevYIsNegative = (aPrevDy < 0.0);
-
-  for (int aNextIdx = 1; aNextIdx <= myPointsCount; ++aNextIdx)
+  const int* aList  = nullptr;
+  int        aCount = 0;
+  candidates(thePy, aList, aCount);
+  for (int anIdx = 0; anIdx < aCount; ++anIdx)
   {
-    const int    aPrevIdx = aNextIdx - 1;
-    const double aCurrDx  = myPnts2dX.Value(aNextIdx) - thePx;
-    const double aCurrDy  = myPnts2dY.Value(aNextIdx) - thePy;
+    const int    aNextIdx         = aList != nullptr ? aList[anIdx] : anIdx + 1;
+    const int    aPrevIdx         = aNextIdx - 1;
+    const double aPrevDx          = myPnts2dX.Value(aPrevIdx) - thePx;
+    const double aPrevDy          = myPnts2dY.Value(aPrevIdx) - thePy;
+    const double aCurrDx          = myPnts2dX.Value(aNextIdx) - thePx;
+    const double aCurrDy          = myPnts2dY.Value(aNextIdx) - thePy;
+    const bool   aPrevYIsNegative = (aPrevDy < 0.0);
 
     // Check if point is very close to current vertex.
     if (aCurrDx < myTolU && aCurrDx > -myTolU && aCurrDy < myTolV && aCurrDy > -myTolV)
@@ -330,11 +417,7 @@ CSLib_Class2d::Result CSLib_Class2d::internalSiDansOuOn(const double thePx,
           ++aNbCrossings;
         }
       }
-      aPrevYIsNegative = aCurrYIsNegative;
     }
-
-    aPrevDx = aCurrDx;
-    aPrevDy = aCurrDy;
   }
 
   // Odd number of crossings means inside.

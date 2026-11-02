@@ -114,6 +114,9 @@ public:
   CSLib_Class2d(CSLib_Class2d&& theOther) noexcept
       : myPnts2dX(std::move(theOther.myPnts2dX)),
         myPnts2dY(std::move(theOther.myPnts2dY)),
+        myBucketStart(std::move(theOther.myBucketStart)),
+        myBucketEdges(std::move(theOther.myBucketEdges)),
+        myBucketCount(theOther.myBucketCount),
         myTolU(theOther.myTolU),
         myTolV(theOther.myTolV),
         myPointsCount(theOther.myPointsCount),
@@ -131,6 +134,9 @@ public:
     {
       myPnts2dX     = std::move(theOther.myPnts2dX);
       myPnts2dY     = std::move(theOther.myPnts2dY);
+      myBucketStart = std::move(theOther.myBucketStart);
+      myBucketEdges = std::move(theOther.myBucketEdges);
+      myBucketCount = theOther.myBucketCount;
       myTolU        = theOther.myTolU;
       myTolV        = theOther.myTolV;
       myPointsCount = theOther.myPointsCount;
@@ -178,6 +184,20 @@ private:
   //! @return Classification result
   Result internalSiDansOuOn(double theX, double theY) const;
 
+  //! Builds the bucket index of the polygon's edges by their range in V (large polygons only).
+  //!
+  //! Whatever an edge can contribute to a classification at height Y (a crossing of the ray, a
+  //! vertex or an edge within the tolerance) needs Y within the edge's V range widened by the
+  //! tolerance. The edges are listed under every bucket their widened range meets, so a query
+  //! reads one bucket instead of the whole polygon and finds the same edges, in the same order.
+  void buildIndex();
+
+  //! The edges that can matter at height theY: a list of edge numbers (1..myPointsCount, edge
+  //! k runs from vertex k-1 to vertex k), or no list for every edge in turn.
+  //! @param[out] theList  edge numbers, or nullptr for 1..theCount
+  //! @param[out] theCount number of edges to visit
+  void candidates(double theY, const int*& theList, int& theCount) const;
+
   //! Initializes the classifier with polygon data.
   //! @tparam TCol_Containers2d Container type (Array1 or Sequence)
   template <class TCol_Containers2d>
@@ -198,6 +218,9 @@ private:
 private:
   NCollection_Array1<double> myPnts2dX;           //!< X coordinates (normalized)
   NCollection_Array1<double> myPnts2dY;           //!< Y coordinates (normalized)
+  NCollection_Array1<int>    myBucketStart;       //!< First entry of each V bucket in myBucketEdges
+  NCollection_Array1<int>    myBucketEdges;       //!< Edge numbers by V bucket, ascending in each
+  int                        myBucketCount = 0;   //!< Number of V buckets, 0 for no index
   double                     myTolU        = 0.0; //!< Tolerance in U direction (normalized)
   double                     myTolV        = 0.0; //!< Tolerance in V direction (normalized)
   int                        myPointsCount = 0;   //!< Number of polygon vertices
