@@ -48,6 +48,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
+#include <gp_Circ.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Vec.hxx>
 
@@ -287,24 +288,30 @@ EvolutionData filletWire(OcctKernel&                  kernel,
     if (which < 0)
       continue;
     used[size_t(which)] = true;
-    const auto circle   = circleAt(pieces[i], pieces[next], plane, std::abs(radius), tolerance);
-    if (!circle)
+    const auto found    = circleAt(pieces[i], pieces[next], plane, std::abs(radius), tolerance);
+    if (!found)
       fail(op,
            no_solution,
            "a corner is too tight for the radius, or its pieces are tangent: no circle of that "
            "radius touches both and stays clear of what is kept");
     const gp_Pnt at = pieces[i].end();
-    const gp_Pnt a = pieces[i].curve->Value(circle->s), b = pieces[next].curve->Value(circle->t);
-    pieces[i].last     = circle->s;
-    pieces[next].first = circle->t;
+    const gp_Pnt a = pieces[i].curve->Value(found->s), b = pieces[next].curve->Value(found->t);
+    pieces[i].last     = found->s;
+    pieces[next].first = found->t;
     if (radius < 0.0)
       arcs[i] = BRepBuilderAPI_MakeEdge(a, b).Edge();
     else
     {
-      // The arc passes nearest the corner: its middle is the circle's point towards it.
-      const gp_Pnt middle =
-        circle->centre.Translated(gp_Vec(circle->centre, at).Normalized() * std::abs(radius));
-      GC_MakeArcOfCircle arc(a, middle, b);
+      // The circle is made from its centre and radius, not through three points: a short arc would
+      // lose its radius to the rounding of the points. Its axis is turned so that the arc runs
+      // counterclockwise from a to b, by the shorter way.
+      const gp_Vec toA(found->centre, a), toB(found->centre, b);
+      const bool   left = gp_Vec(plane.Axis().Direction()).Dot(toA.Crossed(toB)) > 0;
+      gp_Dir       axis = plane.Axis().Direction();
+      if (!left)
+        axis.Reverse();
+      const gp_Circ      circle(gp_Ax2(found->centre, axis), std::abs(radius));
+      GC_MakeArcOfCircle arc(circle, a, b, true);
       if (!arc.IsDone())
         fail(op, no_solution, "the arc of a corner could not be made");
       arcs[i] = BRepBuilderAPI_MakeEdge(arc.Value()).Edge();
