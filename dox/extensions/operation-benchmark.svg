@@ -97,15 +97,15 @@
 <rect x="330" y="1060" width="324.7" height="14" fill="#2f8f5b"/>
 <text x="660.7" y="1071">7.95</text>
 <text x="320" y="1122" text-anchor="end">offset: rectangle, outward d=2.0</text>
-<rect x="330" y="1102" width="5.7" height="14" fill="#6b7a8f"/>
-<text x="341.7" y="1113">0.14</text>
-<rect x="330" y="1134" width="9.3" height="14" fill="#2f8f5b"/>
-<text x="345.3" y="1145">0.23</text>
+<rect x="330" y="1102" width="5.6" height="14" fill="#6b7a8f"/>
+<text x="341.6" y="1113">0.14</text>
+<rect x="330" y="1134" width="8.5" height="14" fill="#2f8f5b"/>
+<text x="344.5" y="1145">0.21</text>
 <text x="320" y="1196" text-anchor="end">offset: rectangle, outward d=10.0</text>
-<rect x="330" y="1176" width="5.6" height="14" fill="#6b7a8f"/>
-<text x="341.6" y="1187">0.14</text>
-<rect x="330" y="1208" width="9.4" height="14" fill="#2f8f5b"/>
-<text x="345.4" y="1219">0.23</text>
+<rect x="330" y="1176" width="5.5" height="14" fill="#6b7a8f"/>
+<text x="341.5" y="1187">0.14</text>
+<rect x="330" y="1208" width="8.6" height="14" fill="#2f8f5b"/>
+<text x="344.6" y="1219">0.21</text>
 <text x="320" y="1270" text-anchor="end">skin: 2 circles, ruled (frustum)</text>
 <rect x="330" y="1250" width="9.1" height="14" fill="#6b7a8f"/>
 <text x="345.1" y="1261">0.22</text>

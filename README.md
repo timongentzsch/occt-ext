@@ -49,7 +49,7 @@ wrong result. Selected rows (milliseconds; full table, method and caveats in
 | Smooth skin through six circles | 1.08 | 1.26 | 1.00 | stock bulges to half-width 19.3; sections have radius at most 10 |
 
 It is not uniformly faster: a single circular fillet is level (1.05 times stock plus check), the curve offset is
-1.65 times, the smooth skin through square, circle and square 4.3 times, and the hollow 2.6 to 3.2 times
+1.5 times, the smooth skin through square, circle and square 4.3 times, and the hollow 2.6 to 3.2 times
 slower while returning a correct body. [benchmarks.md](dox/extensions/benchmarks.md) gives the cause of each.
 
 ## Gallery
@@ -239,7 +239,7 @@ Known limits and what remains:
 4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
    offsetting solids whose blends meet the wall thickness exactly has no exactness proof.
 5. **Speed.** Measured against stock followed by the same check: a single circular edge 1.05 times, the curve
-   offset 1.65 times, the hollow 2.6 to 3.2 times, the smooth skin through square, circle and square 4.3 times.
+   offset 1.5 times, the hollow 2.6 to 3.2 times, the smooth skin through square, circle and square 4.3 times.
    Everything else in the [table](dox/extensions/benchmarks.md) is level or faster. A profile of that skin
    ([benchmarks.md](dox/extensions/benchmarks.md#smooth-skin-through-square-circle-square)) puts a third of
    it in arc-length placement of points while a grid is refined, a quarter in sewing, a sixth each in face

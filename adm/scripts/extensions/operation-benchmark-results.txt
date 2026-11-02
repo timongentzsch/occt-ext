@@ -37,10 +37,10 @@ hollow   | box, round r=3.0, wall t=2.0       | stock     | 10/10 |     2.578 [ 
 hollow   | box, round r=3.0, wall t=2.0       | extension | 10/10 |     6.776 [    6.725,     6.799] | valid, |dV| 7.276e-12
 hollow   | box, round r=3.0, wall t=4.0       | stock     | 10/10 |     2.465 [    2.454,     2.508] | INVALID, |dV| 3.533e+04
 hollow   | box, round r=3.0, wall t=4.0       | extension | 10/10 |     7.951 [    7.930,     8.090] | valid, |dV| 1.455e-11
-offset   | rectangle, outward d=2.0           | stock     | 10/10 |     0.139 [    0.137,     0.147] | |dL| 2.842e-14
-offset   | rectangle, outward d=2.0           | extension | 10/10 |     0.228 [    0.226,     0.232] | |dL| 2.842e-14
-offset   | rectangle, outward d=10.0          | stock     | 10/10 |     0.136 [    0.134,     0.142] | |dL| 0.000e+00
-offset   | rectangle, outward d=10.0          | extension | 10/10 |     0.231 [    0.228,     0.234] | |dL| 0.000e+00
+offset   | rectangle, outward d=2.0           | stock     | 10/10 |     0.137 [    0.135,     0.147] | |dL| 2.842e-14
+offset   | rectangle, outward d=2.0           | extension | 10/10 |     0.208 [    0.205,     0.216] | |dL| 2.842e-14
+offset   | rectangle, outward d=10.0          | stock     | 10/10 |     0.135 [    0.133,     0.138] | |dL| 0.000e+00
+offset   | rectangle, outward d=10.0          | extension | 10/10 |     0.210 [    0.208,     0.219] | |dL| 0.000e+00
 skin     | 2 circles, ruled (frustum)         | stock     | 10/10 |     0.223 [    0.201,     0.248] | valid, V 7194.247177, |dV| 1.728e-11, half-width 12.000, sections 1.78e-15 off
 skin     | 2 circles, ruled (frustum)         | stock+check | 10/10 |     0.416 [    0.388,     0.447] | valid, V 7194.247177, |dV| 1.728e-11, half-width 12.000, sections 1.78e-15 off
 skin     | 2 circles, ruled (frustum)         | extension | 10/10 |     0.395 [    0.354,     0.425] | valid, V 7194.247177, |dV| 1.728e-11, half-width 12.000, sections 1.78e-15 off

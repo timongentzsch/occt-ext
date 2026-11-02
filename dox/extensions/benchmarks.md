@@ -27,7 +27,7 @@ difference between implementations and is not). Hatched bars are calls with no v
 | Round | sphere R14 on a box, r=2 / 6 | 1.03 / 1.03 | 1.24 / 1.24 | 0.45 / 0.44 | volumes agree to 1e-7; ball defect: stock 4e-6, TKAlgoExt 1e-14 |
 | Fill | four cubic sides, a=0.5 / 2.0 | 2.6 / 13.7 | | 1.9 / 1.9 | stock 0.11 / 0.45 off the defining surface, TKAlgoExt 1e-12 |
 | Hollow | filleted box, wall 2 / 4 | 2.6 / 2.5 | | 6.8 / 8.0 | stock volume wrong by 3.3e4 / invalid; TKAlgoExt exact to 1e-11 |
-| Curve offset | rectangle, d=2 / 10 | 0.14 / 0.14 | | 0.23 / 0.23 | both exact |
+| Curve offset | rectangle, d=2 / 10 | 0.14 / 0.14 | | 0.21 / 0.21 | both exact |
 | Skin | two circles, ruled | 0.22 | 0.42 | 0.40 | frustum volume, both exact to 2e-11 |
 | Skin | six circles at unequal heights, ruled | 0.64 | 1.33 | 1.46 | stack of frusta, both exact to 1.3e-11 |
 | Skin | six circles, smooth | 1.08 | 1.26 | 1.00 | stock bulges to half-width 19.3 through sections of radius at most 10 (volume 13 000, more than any profile within the sections allows); TKAlgoExt 10.0 |
@@ -56,11 +56,11 @@ How to read it, without flattering it:
 * **Where it is level:** a single circular edge is 1.05 times the checked stock bar (0.37 against 0.35 ms; the remaining 0.02 ms is
   face history and the closedness test), the round blended into earlier rounds is 0.97 times, the ruled skins are 1.0 to 1.1
   times (they call the same `BRepOffsetAPI_ThruSections`; the extra is lining up the rings).
-* **Where it is slower:** the curve offset (1.65 times; it brings the curve to a working size so that offsets behave at any scale,
-  redraws it, builds the plane and polylines and tests the result for self-crossing, none of which stock does, and the offset
-  itself costs the same), the hollow (2.6 to 3.2 times, against a stock call that returns a wrong or invalid body; 22 per cent of it
-  is the check that the wall is nowhere thinner than asked, 12 per cent validity checks, the rest OCCT's offset, defeaturing and
-  Boolean), the smooth skin through three circles (1.1 times) and the smooth skin through a square, a circle and a square (4.3
+* **Where it is slower:** the curve offset (1.5 times; it brings the curve to a working size so that offsets behave at any scale,
+  redraws it, builds the plane and polylines and tests the result for crossing, none of which stock does, and the offset
+  itself costs the same; the test of a line or conic arc against itself is skipped, which is exact), the hollow (2.6 to 3.2 times, against a stock call that returns a wrong or invalid body; by instruction count
+  36 per cent is OCCT's offset, 20 per cent defeaturing, 11 per cent the Boolean cut, 22 per cent the check that the wall is
+  nowhere thinner than asked and 8 per cent validity checks), the smooth skin through three circles (1.1 times) and the smooth skin through a square, a circle and a square (4.3
   times: TKAlgoExt's own Gordon-type construction against stock's; not yet profiled).
 * **What changed:** a profile of the sphere on a block found 80 per cent of the call in an exact face-to-face distance between the
   toroidal blend and the block's far sides. `BRepBndLib` boxes a face that is not planar by its whole surface, so the box of the
