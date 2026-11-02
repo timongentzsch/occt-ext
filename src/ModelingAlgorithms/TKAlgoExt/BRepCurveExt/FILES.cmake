@@ -1,5 +1,7 @@
 set(OCCT_BRepCurveExt_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
 set(OCCT_BRepCurveExt_FILES
+  BRepCurveExt_Bridge.cxx
+  BRepCurveExt_Bridge.hxx
   BRepCurveExt_Curvature.cxx
   BRepCurveExt_EditMore.cxx
   BRepCurveExt_Extend.cxx
