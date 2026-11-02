@@ -9,8 +9,14 @@
 #include <BRepToolsExt_Checks.hxx>
 #include <BRepToolsExt_Operations.hxx>
 #include <GeomAlgoExt_Failure.hxx>
+#include <GeomAlgoExt_ModelTolerance.hxx>
 
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Compound.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <Geom_Circle.hxx>
 #include <Geom_TrimmedCurve.hxx>
@@ -25,6 +31,13 @@ TopoDS_Wire circleAt(double z, double radius) {
   return BRepBuilderAPI_MakeWire(
              BRepBuilderAPI_MakeEdge(new Geom_Circle(gp_Ax2(gp_Pnt(0, 0, z), gp_Dir(0, 0, 1)), radius)).Edge())
       .Wire();
+}
+
+TopoDS_Wire squareAt(double z, double half) {
+  const gp_Pnt p[4] = {gp_Pnt(-half, -half, z), gp_Pnt(half, -half, z), gp_Pnt(half, half, z), gp_Pnt(-half, half, z)};
+  BRepBuilderAPI_MakeWire maker;
+  for (int i = 0; i < 4; ++i) maker.Add(BRepBuilderAPI_MakeEdge(p[i], p[(i + 1) % 4]).Edge());
+  return maker.Wire();
 }
 
 double frustum(double height, double r0, double r1) { return M_PI * height / 3 * (r0 * r0 + r0 * r1 + r1 * r1); }
@@ -52,6 +65,35 @@ TEST(BRepSkinExt, SmoothSkinThroughTwoCirclesIsTheFrustum) {
   const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
   EXPECT_NEAR(volume(made), frustum(9, 6, 2), 1e-6 * frustum(9, 6, 2));
+}
+
+// A smooth skin through a square, a circle and a square. The circle's arcs are rational and the
+// square's edges are not, so the arcs are made again without weights, and neighbouring arcs must
+// still meet at the section's vertices: ends that miss each other by the size of the fit's error
+// (1.4e-6 here) leave three pairs of coincident, unsewn edges and a solid that is not connected. The
+// sections are exact on the result: every sampled point of them lies on its faces.
+TEST(BRepSkinExt, SmoothSkinThroughSquareCircleSquareIsAClosedSolidThroughTheSections) {
+  const std::vector<TopoDS_Wire> wires = {squareAt(0, 10), circleAt(20, 6), squareAt(40, 9)};
+  std::vector<uint32_t> sections;
+  for (const TopoDS_Wire& wire : wires) sections.push_back(BRepExt::store(session(), wire));
+  const auto result = BRepExt::skinThrough(session(), sections, 0, 0, true, false);
+  const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
+  EXPECT_TRUE(BRepExt::invalidity(made).empty());
+  EXPECT_GT(volume(made), 0);
+  TopoDS_Compound skin;
+  BRep_Builder builder;
+  builder.MakeCompound(skin);
+  for (TopExp_Explorer f(made, TopAbs_FACE); f.More(); f.Next()) builder.Add(skin, f.Current());
+  for (const TopoDS_Wire& wire : wires)
+    for (TopExp_Explorer e(wire, TopAbs_EDGE); e.More(); e.Next()) {
+      BRepAdaptor_Curve curve(TopoDS::Edge(e.Current()));
+      for (int k = 0; k <= 8; ++k) {
+        const gp_Pnt p = curve.Value(curve.FirstParameter() + (curve.LastParameter() - curve.FirstParameter()) * k / 8);
+        const BRepExtrema_DistShapeShape d(BRepBuilderAPI_MakeVertex(p).Vertex(), skin);
+        ASSERT_TRUE(d.IsDone());
+        EXPECT_LE(d.Value(), BRepExt::tolerance::sewing);
+      }
+    }
 }
 
 // A disc of radius r swept along a circular arc of radius rho through angle theta, square to the path

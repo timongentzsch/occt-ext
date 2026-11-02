@@ -1131,8 +1131,18 @@ bool withoutUnlikeWeights(std::vector<Handle(Geom_BSplineCurve)> &curves, bool p
     const auto made = onOneGrid(those, byLength, {}, periodic);
     if (made.empty())
         return false;
-    for (size_t k = 0; k < weighted.size(); ++k)
+    for (size_t k = 0; k < weighted.size(); ++k) {
+        // The curve made again is near the one it replaces, not equal to it, and neighbouring edges of
+        // a section meet at its vertices: left alone, their ends miss each other by the fit's error
+        // (1e-6 on circles beside lines, the size of the sewing tolerance) and the faces do not close.
+        // The end poles of a clamped curve are its end points, which are exact on the one it replaces.
+        const Handle(Geom_BSplineCurve) &old = curves[weighted[k]];
+        if (!made[k]->IsPeriodic() && !old->IsPeriodic()) {
+            made[k]->SetPole(1, old->Pole(1));
+            made[k]->SetPole(made[k]->NbPoles(), old->Pole(old->NbPoles()));
+        }
         curves[weighted[k]] = made[k];
+    }
     return true;
 }
 
