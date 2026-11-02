@@ -1341,6 +1341,9 @@ foreach (BUILD_TOOLKIT ${BUILD_TOOLKITS})
   add_subdirectory ("${OCCT_${BUILD_TOOLKIT}_FILES_LOCATION}")
 endforeach()
 
+# options of the extension packages
+OCCT_INCLUDE_CMAKE_FILE ("adm/cmake/occt_extensions")
+
 # Setup Google Test integration if enabled
 if (BUILD_GTEST)
   enable_testing()
