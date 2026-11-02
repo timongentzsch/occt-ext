@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
@@ -87,8 +97,8 @@ namespace
 {
 const char* op = "sweepFramed";
 
-/// A part of an edge of the path with continuous curvature, run in the path's direction by x
-/// from 0 to 1, and the x where the curvature has a kink.
+//! A part of an edge of the path with continuous curvature, run in the path's direction by x
+//! from 0 to 1, and the x where the curvature has a kink.
 struct Piece
 {
   BRepAdaptor_Curve   curve;
@@ -114,14 +124,14 @@ struct Piece
   }
 };
 
-/// A stretch of a piece over which the map is smooth.
+//! A stretch of a piece over which the map is smooth.
 struct Stretch
 {
   int    piece;
   double from, to;
 };
 
-/// A map of the plane square to the path, x -> A x + d, with A = [[a b] [c e]].
+//! A map of the plane square to the path, x -> A x + d, with A = [[a b] [c e]].
 struct PlaneMap
 {
   double a = 1, b = 0, c = 0, e = 1;
@@ -136,10 +146,10 @@ struct Node
   PlaneMap guided;     // where the guides put the profile, in the plane of (r, t x r)
 };
 
-/// The map at a node: where the three axes of the profile's own frame go, and its origin.
+//! The map at a node: where the three axes of the profile's own frame go, and its origin.
 using Map = std::array<gp_Vec, 4>;
 
-/// The normal `r` of the frame (a, ta) carried to (b, tb) by double reflection.
+//! The normal `r` of the frame (a, ta) carried to (b, tb) by double reflection.
 gp_Vec carriedNormal(const gp_Pnt& a,
                      const gp_Vec& ta,
                      const gp_Vec& r,
@@ -162,7 +172,7 @@ gp_Vec carriedNormal(const gp_Pnt& a,
   return next.Normalized();
 }
 
-/// The length of a piece between x = a and x = b: Gauss-Legendre with four points.
+//! The length of a piece between x = a and x = b: Gauss-Legendre with four points.
 double lengthOf(const Piece& piece, double a, double b)
 {
   static const double place[4]  = {-0.8611363115940526,
@@ -184,7 +194,7 @@ double lengthOf(const Piece& piece, double a, double b)
   return sum * (b - a) / 2;
 }
 
-/// The pieces of the path, in its direction.
+//! The pieces of the path, in its direction.
 std::vector<Piece> piecesOf(const TopoDS_Wire& path)
 {
   std::vector<Piece> pieces;
@@ -214,7 +224,7 @@ std::vector<Piece> piecesOf(const TopoDS_Wire& path)
   return pieces;
 }
 
-/// Where the profile is on the path: the piece and x.
+//! Where the profile is on the path: the piece and x.
 struct Station
 {
   int    piece = 0;
@@ -296,8 +306,8 @@ Station stationOf(const TopoDS_Wire& profile, const std::vector<Piece>& pieces, 
   return crossing.gap >= 0 && crossing.gap <= nearest.gap + reach ? crossing.at : nearest.at;
 }
 
-/// Where a guide crosses the plane through `origin` square to `heading`: of the crossings, the
-/// one nearest `origin`. An end of the guide within the tolerance of the plane counts.
+//! Where a guide crosses the plane through `origin` square to `heading`: of the crossings, the
+//! one nearest `origin`. An end of the guide within the tolerance of the plane counts.
 double crossing(const BRepAdaptor_CompCurve& guide,
                 const gp_Pnt&                origin,
                 const gp_Vec&                heading,
@@ -345,7 +355,7 @@ double crossing(const BRepAdaptor_CompCurve& guide,
   return at;
 }
 
-/// An edge of the profile as a spline, and its control points in the profile's frame.
+//! An edge of the profile as a spline, and its control points in the profile's frame.
 struct ProfileCurve
 {
   Handle(Geom_BSplineCurve) curve;

@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #pragma once
 #include <GeomAlgoExt_Failure.hxx>
@@ -9,7 +19,7 @@
 namespace BRepExt
 {
 extern "C" int sessionCancelled();
-/// Host hook receiving the name of each progress scope OCCT opens (diagnostics only).
+//! Host hook receiving the name of each progress scope OCCT opens (diagnostics only).
 extern "C" void BRepExt_ReportProgress(const char* name);
 
 inline void checkCancelled(const char* operation, bool enabled = true)
@@ -18,7 +28,7 @@ inline void checkCancelled(const char* operation, bool enabled = true)
     fail(operation, "cancelled", "Operation cancelled");
 }
 
-/// A progress indicator that stops an OCCT algorithm when the host's cancel flag is raised.
+//! A progress indicator that stops an OCCT algorithm when the host's cancel flag is raised.
 class CancelProgress : public Message_ProgressIndicator
 {
 protected:

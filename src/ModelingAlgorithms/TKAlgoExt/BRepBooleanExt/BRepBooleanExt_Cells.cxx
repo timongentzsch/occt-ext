@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
@@ -73,13 +83,13 @@ namespace
 // side it is. Vertex tolerances are left out of T: they are local (a ball round one point),
 // and a probe at a vertex takes that vertex's own tolerance instead.
 
-/// A point within kOnFactor x T of an operand's boundary is "on" it and decides nothing. Two,
-/// because the point and the boundary may each be T off where they are meant to be.
+//! A point within kOnFactor x T of an operand's boundary is "on" it and decides nothing. Two,
+//! because the point and the boundary may each be T off where they are meant to be.
 constexpr double kOnFactor = 2;
-/// A point inside a cell counts as inside only if it is at least kDepthFactor "on" distances
-/// from the two faces it was found between; a cell thinner than that is "thin". Two: clear of
-/// "on" with as much again to spare. (At four, a wall of 1e-6 between two cylinders was thin,
-/// and a right Boolean refused.)
+//! A point inside a cell counts as inside only if it is at least kDepthFactor "on" distances
+//! from the two faces it was found between; a cell thinner than that is "thin". Two: clear of
+//! "on" with as much again to spare. (At four, a wall of 1e-6 between two cylinders was thin,
+//! and a right Boolean refused.)
 constexpr double kDepthFactor = 2;
 // T is no more than tolerance::booleanCeiling, or than the largest tolerance an operand came
 // with if that is more: ten times the document's tolerance of 1e-6. OpenCascade loosens an edge or
@@ -90,27 +100,26 @@ constexpr double kDepthFactor = 2;
 // not refused for being loose: it is checked at the ceiling, and what the fuse took for one
 // must be one at that (check 4).
 
-/// A face that the fuse took for a face of two operands is asked at up to kSharedSamples x
-/// kSharedSamples places, or, where that grid misses it, along kSharedSamples lines across it
-/// each way.
+//! A face that the fuse took for a face of two operands is asked at up to kSharedSamples x
+//! kSharedSamples places, or, where that grid misses it, along kSharedSamples lines across it
+//! each way.
 constexpr int kSharedSamples = 3;
-/// How many faces of a cell are tried for a point inside it before the cell is called thin.
+//! How many faces of a cell are tried for a point inside it before the cell is called thin.
 constexpr int kInsideTries = 6;
-/// The fuzzy rung runs at kFuzzyFactor x the largest tolerance of the operands (not below
-/// Precision::Confusion()): 1e-6 for operands at OpenCascade's default, which is the
-/// document's tolerance. OpenCascade names the fuzzy value for "touching and near-coincident,
-/// misaligned entities". Ten is one step up and no measurement: over 216 Booleans of the
-/// reviewers' kinds this rung made none that the plain one had refused
-/// (docs/kernel-booleans.md). It is never above tolerance::booleanFuzzyRelative of the
-/// operands' diagonal, however loose they are.
+//! The fuzzy rung runs at kFuzzyFactor x the largest tolerance of the operands (not below
+//! Precision::Confusion()): 1e-6 for operands at OpenCascade's default, which is the
+//! document's tolerance. OpenCascade names the fuzzy value for "touching and near-coincident,
+//! misaligned entities". Ten is one step up and no measurement: over 216 Booleans of the
+//! reviewers' kinds this rung made none that the plain one had refused
+//! It is never above tolerance::booleanFuzzyRelative of the
+//! operands' diagonal, however loose they are.
 constexpr double kFuzzyFactor = 10;
-/// The cells of an operand must add up to the operand within
-///   kTube x T x (what bounds the faces that were cut)
-///     + tolerance::booleanQuadrature x (what those faces hold),
-/// summed over the faces that had to be integrated at all (see Balance). The first term is
-/// what a boundary that is T off can hold, on either side of it. The second is five times the
-/// 1e-8 of a face that properties.cpp integrates to; what was measured is far inside it
-/// (docs/kernel-booleans.md).
+//! The cells of an operand must add up to the operand within
+//!   kTube x T x (what bounds the faces that were cut)
+//!     + tolerance::booleanQuadrature x (what those faces hold),
+//! summed over the faces that had to be integrated at all (see Balance). The first term is
+//! what a boundary that is T off can hold, on either side of it. The second is five times the
+//! 1e-8 of a face that BRepAlgoExt_Properties.cxx integrates to; what was measured is far inside it
 constexpr double kTube = 2;
 
 using Hasher    = TopTools_ShapeMapHasher;
@@ -158,7 +167,7 @@ struct Freedom
   }
 };
 
-/// Why a rung does not give the result. Caught by the ladder, which goes on to the next.
+//! Why a rung does not give the result. Caught by the ladder, which goes on to the next.
 struct Refused
 {
   std::string why;
@@ -196,7 +205,7 @@ const char* nameOf(Select select)
   return "boolean";
 }
 
-/// How every refusal of a partition begins.
+//! How every refusal of a partition begins.
 std::string inconsistent(const BooleanRequest& request)
 {
   return std::string("the cells did not form a consistent ") + nameOf(request.select)
@@ -210,8 +219,8 @@ std::string at(const gp_Pnt& p)
   return text;
 }
 
-/// 3 for solids, 2 for sheets, 1 for curves: the highest of what the operand holds. A body may
-/// hold several kinds (a solid and a curve beside it); each is cut into cells of its own kind.
+//! 3 for solids, 2 for sheets, 1 for curves: the highest of what the operand holds. A body may
+//! hold several kinds (a solid and a curve beside it); each is cut into cells of its own kind.
 int dimensionOf(const char* operation, const TopoDS_Shape& shape)
 {
   if (shape.IsNull())
@@ -225,7 +234,7 @@ int dimensionOf(const char* operation, const TopoDS_Shape& shape)
   fail(operation, invalid_input, "an operand has no solid, no face and no edge");
 }
 
-/// The solids of a shape, its faces that are of no solid, or its edges that are of no face.
+//! The solids of a shape, its faces that are of no solid, or its edges that are of no face.
 TopExp_Explorer unitsOf(const TopoDS_Shape& shape, int dimension)
 {
   return dimension == 3   ? TopExp_Explorer(shape, TopAbs_SOLID)
@@ -238,24 +247,24 @@ TopAbs_ShapeEnum unitType(int dimension)
   return dimension == 3 ? TopAbs_SOLID : dimension == 2 ? TopAbs_FACE : TopAbs_EDGE;
 }
 
-/// Whether two sets of shapes hold the same, in volume (area for sheets, length for curves),
-/// without measuring what they have in common. Each side is added up face by face, one side
-/// counted for and the other against; a face that both have, the same way round, and a face
-/// between two cells of one side, cancel as they are counted, and are never integrated. What
-/// is left is where the Boolean worked: the pieces of a face on one side and the face they
-/// were cut from on the other. Those are integrated, all volumes about one origin: a flat
-/// face bounded by lines and arcs by OpenCascade's plain Gauss rule, which is exact there and
-/// quick; any other adaptively (properties.cpp, to 1e-8 of the face), since with splines in
-/// the surface or its outline the plain rule is off by more than a wrong result is (2.4e-5
-/// of a prism on a closed spline).
+//! Whether two sets of shapes hold the same, in volume (area for sheets, length for curves),
+//! without measuring what they have in common. Each side is added up face by face, one side
+//! counted for and the other against; a face that both have, the same way round, and a face
+//! between two cells of one side, cancel as they are counted, and are never integrated. What
+//! is left is where the Boolean worked: the pieces of a face on one side and the face they
+//! were cut from on the other. Those are integrated, all volumes about one origin: a flat
+//! face bounded by lines and arcs by OpenCascade's plain Gauss rule, which is exact there and
+//! quick; any other adaptively (BRepAlgoExt_Properties.cxx, to 1e-8 of the face), since with
+//! splines in the surface or its outline the plain rule is off by more than a wrong result is
+//! (2.4e-5 of a prism on a closed spline).
 struct Balance
 {
   gp_Pnt origin;
   NCollection_IndexedDataMap<TopoDS_Shape, int, Hasher>
     net[4]; // per dimension: face (or edge) -> count
 
-  /// `twins`, if given, says of which face a face of `shape` is an exact copy: it is counted
-  /// as that face, the way round the copy is.
+  //! `twins`, if given, says of which face a face of `shape` is an exact copy: it is counted
+  //! as that face, the way round the copy is.
   void add(const TopoDS_Shape&                                            shape,
            int                                                            dimension,
            int                                                            weight,
@@ -295,8 +304,8 @@ struct Balance
     }
   }
 
-  /// What the two sides differ by, and what that may be: see kTube and
-  /// tolerance::booleanQuadrature.
+  //! What the two sides differ by, and what that may be: see kTube and
+  //! tolerance::booleanQuadrature.
   static bool plain(const TopoDS_Face& face)
   {
     if (BRepAdaptor_Surface(face, false).GetType() != GeomAbs_Plane)
@@ -383,7 +392,7 @@ struct Balance
   }
 };
 
-/// A volume, an area or a length by itself, where one is needed (a cell too thin to place).
+//! A volume, an area or a length by itself, where one is needed (a cell too thin to place).
 double measureOf(const TopoDS_Shape& shape, int dimension, const gp_Pnt& origin)
 {
   Balance alone;
@@ -407,7 +416,7 @@ double measureOf(const TopoDS_Shape& shape, int dimension, const gp_Pnt& origin)
   return total;
 }
 
-/// The largest tolerance of an edge or a face.
+//! The largest tolerance of an edge or a face.
 double tubeOf(const TopoDS_Shape& shape)
 {
   double   largest = 0;
@@ -430,8 +439,8 @@ double vertexToleranceOf(const TopoDS_Shape& shape)
   return largest;
 }
 
-/// A face of a solid operand, with what a line is intersected with it by: made when the
-/// first line comes near the face, and kept for the lines after it.
+//! A face of a solid operand, with what a line is intersected with it by: made when the
+//! first line comes near the face, and kept for the lines after it.
 struct Skin
 {
   TopoDS_Face                                face;
@@ -446,17 +455,17 @@ struct Lump
   std::vector<Skin> skin;
 };
 
-/// The directions a point is looked out from, none along anything a model is likely to have.
+//! The directions a point is looked out from, none along anything a model is likely to have.
 const gp_Dir kOutlooks[] = {gp_Dir(0.5377, 0.2939, 0.7903),
                             gp_Dir(-0.6831, 0.6102, 0.4012),
                             gp_Dir(0.2319, -0.8547, 0.4645),
                             gp_Dir(-0.4129, -0.3391, -0.8453)};
 
-/// Where a point is against one solid: a line from it crosses the solid's faces an odd number
-/// of times if it is inside. A line that meets a face on its rim or only grazes it says
-/// nothing, and another direction is taken, from `turn` on. Only faces whose boxes the line
-/// goes through are asked; OpenCascade's own classifier prepares every face of the solid
-/// first, which on a body of spline faces took longer than the Boolean.
+//! Where a point is against one solid: a line from it crosses the solid's faces an odd number
+//! of times if it is inside. A line that meets a face on its rim or only grazes it says
+//! nothing, and another direction is taken, from `turn` on. Only faces whose boxes the line
+//! goes through are asked; OpenCascade's own classifier prepares every face of the solid
+//! first, which on a body of spline faces took longer than the Boolean.
 TopAbs_State stateAgainst(Lump& lump, const gp_Pnt& point, double reach, int turn)
 {
   for (int tried = 0; tried < 4; ++tried)
@@ -504,7 +513,7 @@ struct Piece
   std::shared_ptr<DistanceTo> distance; // made when first measured to
 };
 
-/// One operand, as the caller gave it: what is fused, and what everything is checked against.
+//! One operand, as the caller gave it: what is fused, and what everything is checked against.
 struct Operand
 {
   TopoDS_Shape original;
@@ -668,15 +677,15 @@ bool divideSeams(std::vector<Operand>& operands)
   return changed;
 }
 
-/// Warnings that are not refusals by themselves, because what they warn of is what the check
-/// of the cells measures:
-/// - a piece of a face that OpenCascade could not tell the way round of: the wrong way round
-///   it gives its cell a wrong volume;
-/// - edges that no face was divided along: a line where two faces touch and do not cross
-///   divides nothing and is such an edge; one that should have divided a face leaves a cell
-///   that lies on both sides of an operand's boundary, which the probes find;
-/// - faces that no solid was built from, where a sheet is among the operands: the part of a
-///   sheet that ends inside a solid bounds nothing. Between solids alone it stays a refusal.
+//! Warnings that are not refusals by themselves, because what they warn of is what the check
+//! of the cells measures:
+//! - a piece of a face that OpenCascade could not tell the way round of: the wrong way round
+//!   it gives its cell a wrong volume;
+//! - edges that no face was divided along: a line where two faces touch and do not cross
+//!   divides nothing and is such an edge; one that should have divided a face leaves a cell
+//!   that lies on both sides of an operand's boundary, which the probes find;
+//! - faces that no solid was built from, where a sheet is among the operands: the part of a
+//!   sheet that ends inside a solid bounds nothing. Between solids alone it stays a refusal.
 bool checked(const Handle(Message_Alert)& alert, bool sheets)
 {
   return alert->IsKind(STANDARD_TYPE(BOPAlgo_AlertUnableToOrientTheShape))
@@ -684,7 +693,7 @@ bool checked(const Handle(Message_Alert)& alert, bool sheets)
          || (sheets && alert->IsKind(STANDARD_TYPE(BOPAlgo_AlertSolidBuilderUnusedFaces)));
 }
 
-/// OpenCascade's alerts of one gravity, by name; of its warnings those that `checked` leaves.
+//! OpenCascade's alerts of one gravity, by name; of its warnings those that `checked` leaves.
 std::string alerts(const BOPAlgo_CellsBuilder& builder,
                    Message_Gravity             gravity,
                    bool                        sheets = false)
@@ -704,9 +713,9 @@ std::string alerts(const BOPAlgo_CellsBuilder& builder,
   return names;
 }
 
-/// Where `point` is against the original operand: inside, outside, or within `reach` of its
-/// boundary. A sheet or a curve has no inside: a point is on it or off it.
-/// For a point inside a solid cell only the operand's solids are asked (`solidsOnly`).
+//! Where `point` is against the original operand: inside, outside, or within `reach` of its
+//! boundary. A sheet or a curve has no inside: a point is on it or off it.
+//! For a point inside a solid cell only the operand's solids are asked (`solidsOnly`).
 TopAbs_State stateAgainst(Operand&      operand,
                           const gp_Pnt& point,
                           double        reach,
@@ -752,7 +761,7 @@ TopAbs_State stateAgainst(Operand&      operand,
   }
 }
 
-/// A point of a face, an edge or a vertex, away from what bounds it. False if none was found.
+//! A point of a face, an edge or a vertex, away from what bounds it. False if none was found.
 bool pointOn(const TopoDS_Shape& element, const Handle(IntTools_Context)& context, gp_Pnt& point)
 {
   try
@@ -782,9 +791,9 @@ bool pointOn(const TopoDS_Shape& element, const Handle(IntTools_Context)& contex
   }
 }
 
-/// A point inside a solid cell and how deep it is: from a point of one of its faces, straight
-/// in, half way to the first thing the cell has there. The count of what the line meets must
-/// be odd, or the line was not going in (a cell thinner than `floor`, or a grazing line).
+//! A point inside a solid cell and how deep it is: from a point of one of its faces, straight
+//! in, half way to the first thing the cell has there. The count of what the line meets must
+//! be odd, or the line was not going in (a cell thinner than `floor`, or a grazing line).
 bool pointInside(const TopoDS_Shape&             cell,
                  double                          floor,
                  const Handle(IntTools_Context)& context,
@@ -891,12 +900,12 @@ Operand operandOf(const BooleanRequest& request, const TopoDS_Shape& shape, bool
   return operand;
 }
 
-/// Where two walls that were swept along the same direction cross, they cross in straight
-/// lines along it, from one rim to the other. OpenCascade looks for such a line by walking
-/// over both surfaces and loses it where the walls cross at a shallow angle (a prism and a
-/// copy moved a little); where a rim meets the other wall it finds without trouble. So the
-/// lines are made here, from where the rims of each wall meet the other, and given to the
-/// fuse beside the operands: it cuts both walls along them.
+//! Where two walls that were swept along the same direction cross, they cross in straight
+//! lines along it, from one rim to the other. OpenCascade looks for such a line by walking
+//! over both surfaces and loses it where the walls cross at a shallow angle (a prism and a
+//! copy moved a little); where a rim meets the other wall it finds without trouble. So the
+//! lines are made here, from where the rims of each wall meet the other, and given to the
+//! fuse beside the operands: it cuts both walls along them.
 ShapeList sweptCrossings(const std::vector<Operand>& operands, double crossingTolerance = 1e-4)
 {
   struct Wall
@@ -1040,15 +1049,15 @@ ShapeList sweptCrossings(const std::vector<Operand>& operands, double crossingTo
   return lines;
 }
 
-/// One way of running the fuse.
+//! One way of running the fuse.
 struct Step
 {
   const char* name;
   double      fuzzy; // OpenCascade's fuzzy value
 };
 
-/// `lines` are given to the fuse beside the operands: they are cut with them and cut them, and
-/// are none of them, so they make no cell.
+//! `lines` are given to the fuse beside the operands: they are cut with them and cut them, and
+//! are none of them, so they make no cell.
 void fuse(Partition&            partition,
           const BooleanRequest& request,
           const Step&           step,
@@ -1554,11 +1563,11 @@ void verify(Partition& partition, const BooleanRequest& request, Rung& rung)
 
 // ---- Choosing and putting together -----------------------------------------------------------
 
-/// Takes out of a body's faces the edges of intersection that lie inside a face and divide nothing:
-/// where two operands touch along a line in a face, the partition keeps that line in the face as a
-/// wire of INTERNAL edges. It has the face on both sides, so the face's points are the same without
-/// it, and it is an edge on one face in the shell. In place: these wires are the partition's own,
-/// and an edge an operand brought with it is left alone.
+//! Takes out of a body's faces the edges of intersection that lie inside a face and divide nothing:
+//! where two operands touch along a line in a face, the partition keeps that line in the face as a
+//! wire of INTERNAL edges. It has the face on both sides, so the face's points are the same without
+//! it, and it is an edge on one face in the shell. In place: these wires are the partition's own,
+//! and an edge an operand brought with it is left alone.
 void dropIntersectionWithin(const TopoDS_Shape& body, const BooleanRequest& request)
 {
   NCollection_IndexedMap<TopoDS_Shape, Hasher> given;
@@ -1595,7 +1604,7 @@ void dropIntersectionWithin(const TopoDS_Shape& body, const BooleanRequest& requ
   }
 }
 
-/// A solid without the faces and shells that hang inside it and bound nothing.
+//! A solid without the faces and shells that hang inside it and bound nothing.
 TopoDS_Shape withoutInternals(const TopoDS_Shape& solid)
 {
   bool any = false;
@@ -1646,7 +1655,7 @@ TopoDS_Shape solidFrom(const ShapeList& faces, const BooleanRequest& request)
   return maker.Areas().First();
 }
 
-/// Cells that touch across a face become one solid, without that face.
+//! Cells that touch across a face become one solid, without that face.
 std::vector<TopoDS_Shape> joined(const std::vector<TopoDS_Shape>& cells,
                                  const BooleanRequest&            request)
 {
@@ -1699,7 +1708,7 @@ std::vector<TopoDS_Shape> joined(const std::vector<TopoDS_Shape>& cells,
   return solids;
 }
 
-/// Faces as sheets: those in `groups[i]` make one shell (a face alone stays a face).
+//! Faces as sheets: those in `groups[i]` make one shell (a face alone stays a face).
 TopoDS_Shape sheetOf(const std::vector<TopoDS_Shape>& faces)
 {
   if (faces.size() == 1)
@@ -1713,8 +1722,8 @@ TopoDS_Shape sheetOf(const std::vector<TopoDS_Shape>& faces)
   return shell;
 }
 
-/// Faces (or edges) gathered into what hangs together, across every shared edge (or end) that
-/// is not in `walls`.
+//! Faces (or edges) gathered into what hangs together, across every shared edge (or end) that
+//! is not in `walls`.
 std::vector<std::vector<TopoDS_Shape>> connected(
   const std::vector<TopoDS_Shape>&                parts,
   TopAbs_ShapeEnum                                across,
@@ -1761,10 +1770,10 @@ TopoDS_Shape wireOf(const std::vector<TopoDS_Shape>& edges)
   return wire;
 }
 
-/// A solid with a sheet, joined: what the sheet closes off together with the solid's skin is
-/// added to the solid (the enclosed regions of a solid and a sheet body). The pockets are built
-/// from the solid's faces seen from outside and the sheet's pieces outside it, seen from both
-/// sides.
+//! A solid with a sheet, joined: what the sheet closes off together with the solid's skin is
+//! added to the solid (the enclosed regions of a solid and a sheet body). The pockets are built
+//! from the solid's faces seen from outside and the sheet's pieces outside it, seen from both
+//! sides.
 std::vector<TopoDS_Shape> enclosed(Partition&            partition,
                                    const BooleanRequest& request,
                                    Rung&                 rung,
@@ -1850,8 +1859,8 @@ Side joinSides(Side a, Side b)
   return Side::Both;
 }
 
-/// The faces of the partition that lie on the sheet tools, each with the tool's face it is a
-/// piece of; and the edges of those pieces, each with every tool face it borders.
+//! The faces of the partition that lie on the sheet tools, each with the tool's face it is a
+//! piece of; and the edges of those pieces, each with every tool face it borders.
 struct SheetFaces
 {
   NCollection_DataMap<TopoDS_Shape, TopoDS_Face, Hasher>              faceOf;
@@ -1883,7 +1892,7 @@ struct SheetFaces
   }
 };
 
-/// The normal of the tool's face `face` (as the tool has it) at its point nearest `point`.
+//! The normal of the tool's face `face` (as the tool has it) at its point nearest `point`.
 bool toolNormal(const TopoDS_Face&              face,
                 const gp_Pnt&                   point,
                 const Handle(IntTools_Context)& context,
@@ -1908,10 +1917,10 @@ bool toolNormal(const TopoDS_Face&              face,
   return true;
 }
 
-/// Which side of the sheet tools `cell` lies on. A solid cell is bounded by pieces of the
-/// sheet: it lies on the side its outward normal there points away from. A face of a sheet
-/// source meets the sheet along edges: it lies on the side it leaves the sheet towards, which
-/// a point of it just off such an edge says when it is clear of "on" (kOnFactor x T).
+//! Which side of the sheet tools `cell` lies on. A solid cell is bounded by pieces of the
+//! sheet: it lies on the side its outward normal there points away from. A face of a sheet
+//! source meets the sheet along edges: it lies on the side it leaves the sheet towards, which
+//! a point of it just off such an edge says when it is clear of "on" (kOnFactor x T).
 Side sideOf(const Cell& cell, const SheetFaces& sheets, Partition& partition)
 {
   Side side = Side::None;
@@ -2254,7 +2263,7 @@ Chosen choose(Partition& partition, const BooleanRequest& request, Rung& rung)
   return chosen;
 }
 
-/// The faces of the operands as the bodies have them now.
+//! The faces of the operands as the bodies have them now.
 using Families = NCollection_DataMap<TopoDS_Shape, ShapeList, Hasher>;
 
 Families familiesOf(Partition&                                                     partition,
@@ -2286,15 +2295,15 @@ Families familiesOf(Partition&                                                  
   return families;
 }
 
-/// Pieces of one original face that lie side by side in one body of the result are that face
-/// again, and an edge that ran through to a new vertex is one edge again. Faces of different
-/// origin keep the edge between them, and every vertex that an operand had stays.
-///
-/// It is done on a copy of the body, geometry and all. The body shares every face that the
-/// fuse left alone with an operand, and ShapeUpgrade_UnifySameDomain changes what it works on
-/// in place where a surface is closed (it moved the curves of a torus operand's face on its
-/// surface, which left the operand invalid and with it the body that was returned). `twins`
-/// receives, for each face of the copy, the face it is a copy of.
+//! Pieces of one original face that lie side by side in one body of the result are that face
+//! again, and an edge that ran through to a new vertex is one edge again. Faces of different
+//! origin keep the edge between them, and every vertex that an operand had stays.
+//!
+//! It is done on a copy of the body, geometry and all. The body shares every face that the
+//! fuse left alone with an operand, and ShapeUpgrade_UnifySameDomain changes what it works on
+//! in place where a surface is closed (it moved the curves of a torus operand's face on its
+//! surface, which left the operand invalid and with it the body that was returned). `twins`
+//! receives, for each face of the copy, the face it is a copy of.
 TopoDS_Shape reunite(Partition&                                               partition,
                      const TopoDS_Shape&                                      shape,
                      const std::vector<TopoDS_Shape>&                         bodies,

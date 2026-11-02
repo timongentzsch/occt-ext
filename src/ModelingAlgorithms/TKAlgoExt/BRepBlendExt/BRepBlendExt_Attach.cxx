@@ -1,7 +1,17 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
-// Fillet v2: The blends attached to the body (design §6), stage by stage.
+// Blend: The blends attached to the body, stage by stage.
 
 #include <BRepBlendExt_Internal.hxx>
 #include <BRepAlgoExt_PatchLoop.hxx>
@@ -19,11 +29,11 @@
 namespace BRepExt::blend2::detail
 {
 
-/// The blends of chains of edges attached to the body (design §6): each support cut back to its
-/// contacts, each stopping face to the blend's end section, the other edges at a chain's inner
-/// vertices to its corners, and the blend faces put in between, all on shared edges, so that
-/// nothing but the faces beside the edges is touched. The faces it changed are listed with what
-/// each became.
+//! The blends of chains of edges attached to the body: each support cut back to its
+//! contacts, each stopping face to the blend's end section, the other edges at a chain's inner
+//! vertices to its corners, and the blend faces put in between, all on shared edges, so that
+//! nothing but the faces beside the edges is touched. The faces it changed are listed with what
+//! each became.
 struct Attach
 {
   Attach(TopoDS_Shape                     body,
@@ -32,8 +42,8 @@ struct Attach
          const Handle(BRepTools_History)& history);
 
   // The stages, in order.
-  /// Each end of each piece: a stop face cut back to the blend's end section, a joint or a
-  /// split shared with the next piece.
+  //! Each end of each piece: a stop face cut back to the blend's end section, a joint or a
+  //! split shared with the next piece.
   void         chainEnds();
   void         miters();
   void         cornerPatches();
@@ -66,8 +76,8 @@ struct Attach
                                         const Meeting&       pb);
   void                        rollPatches();
 
-  /// Whether a rail's section is the ball's own circle: the round (a conic of rho 1/2 at equal
-  /// distances).
+  //! Whether a rail's section is the ball's own circle: the round (a conic of rho 1/2 at equal
+  //! distances).
   static bool round(const Rail& rail)
   {
     return rail.law == Law::Conic && std::abs(rail.rho - 0.5) < limit::equal
@@ -110,8 +120,8 @@ struct Attach
     return false;
   }
 
-  /// A seam from the vertex to a pole in the strip the blend replaces (poleInStrip) goes, with the
-  /// pole's degenerate edge: the contact closes by itself.
+  //! A seam from the vertex to a pole in the strip the blend replaces (poleInStrip) goes, with the
+  //! pole's degenerate edge: the contact closes by itself.
   bool sweepToPole(const TopoDS_Edge& seam, const TopoDS_Vertex& vertex)
   {
     const TopoDS_Face face = TopoDS::Face(facesOfEdge.FindFromKey(seam).First());
@@ -140,7 +150,7 @@ struct Attach
     const TopoDS_Edge current = TopoDS::Edge(cuts.Contains(edge) ? cuts.FindFromKey(edge) : edge);
     const TopoDS_Edge out     = trimmed(current, from, to, at);
     // Cut back from both ends to each other or past, the edge is gone: the blends at its ends
-    // meet on it (the full round, which v2 does not make) or overlap.
+    // meet on it (the full round, which the blend does not make) or overlap.
     double f, l;
     BRep_Tool::Range(out, f, l);
     if (!(l - f > tol::parameter * std::max(1.0, std::abs(f) + std::abs(l))))
@@ -155,15 +165,15 @@ struct Attach
       cuts.Add(edge, out);
   }
 
-  /// The half of a piece's fit at one end.
+  //! The half of a piece's fit at one end.
   static std::pair<double, double> halfOf(const Piece& p, int end)
   {
     const double middle = p.uAt(0) / 2 + p.uAt(1) / 2;
     return end == 0 ? std::make_pair(0.0, middle) : std::make_pair(middle, 1.0);
   }
 
-  /// Where piece k's contact on its face `side`, in the half at `end`, meets piece `other`'s
-  /// sheet: the fit's u, nearest the end.
+  //! Where piece k's contact on its face `side`, in the half at `end`, meets piece `other`'s
+  //! sheet: the fit's u, nearest the end.
   std::optional<double> meetsSheet(int k, int end, int side, int other) const
   {
     const Piece& mine   = pieces[k];
@@ -186,9 +196,9 @@ struct Attach
     return best;
   }
 
-  /// Where piece k's contact on its face `side` crosses, in the half at `end`, the contact of
-  /// the piece it is mitred against there on that face (the mitre's inner end), nearest the end;
-  /// none where the end is no mitre on that face.
+  //! Where piece k's contact on its face `side` crosses, in the half at `end`, the contact of
+  //! the piece it is mitred against there on that face (the mitre's inner end), nearest the end;
+  //! none where the end is no mitre on that face.
   std::optional<Meeting> commonCrossing(int k, int end, int side) const
   {
     const auto& joint = pieces[k].joint[end];
@@ -210,13 +220,12 @@ struct Attach
     return {};
   }
 
-  /// Whether the mitre at piece k's end cannot be made: its contacts on the face the two blends
-  /// share, carried on past the vertex to where they cross (a re-entrant corner), run over a
-  /// contact as it is kept before they get there, the other's or their own. One blend would
-
-  /// refuses these); the ball rolls round the vertex instead (rollRound). A contact is kept
-  /// between its ends, or out to where a mitre at an end crosses it, where that mitre is made
-  /// (judged with the contacts kept to their ends: `alone`).
+  //! Whether the mitre at piece k's end cannot be made: its contacts on the face the two blends
+  //! share, carried on past the vertex to where they cross (a re-entrant corner), run over a
+  //! contact as it is kept before they get there, the other's or their own. The ball rolls round
+  //! the vertex instead (rollRound). A contact is kept
+  //! between its ends, or out to where a mitre at an end crosses it, where that mitre is made
+  //! (judged with the contacts kept to their ends: `alone`).
   bool runsAcross(int k, int ea, bool alone) const
   {
     const auto& joint = pieces[k].joint[ea];
@@ -273,7 +282,7 @@ struct Attach
     return false;
   }
 
-  /// A point of piece k's sheet in its parameters, the period taken nearest its end `end`.
+  //! A point of piece k's sheet in its parameters, the period taken nearest its end `end`.
   gp_Pnt2d onSheet(int k, int end, const gp_Pnt& point) const
   {
     const Piece&               piece = pieces[k];
@@ -328,9 +337,9 @@ struct Attach
   NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher>
                            crossed; // edges contacts cross onto the next face
   std::vector<TopoDS_Face> patches; // [corner]
-  /// The corners' feet, one vertex for each place (within the length resolution): where the
-  /// balls of two corners are one (a face used up between them, as a cube's round to half its
-  /// side is a ball) they share them.
+  //! The corners' feet, one vertex for each place (within the length resolution): where the
+  //! balls of two corners are one (a face used up between them, as a cube's round to half its
+  //! side is a ball) they share them.
   std::vector<TopoDS_Vertex> feet;
 
   TopoDS_Vertex footAt(const gp_Pnt& p, double scale)
@@ -343,18 +352,18 @@ struct Attach
     return feet.emplace_back(v);
   }
 
-  /// A blend between two corners whose balls are one: it has no length and no face, and the
-  /// corners share its section.
+  //! A blend between two corners whose balls are one: it has no length and no face, and the
+  //! corners share its section.
   bool vanished(int k) const
   {
     return pieces[k].joint[0].meets == Meets::Corner && pieces[k].joint[1].meets == Meets::Corner
            && !section[k][0].IsNull() && section[k][0].IsSame(section[k][1]);
   }
 
-  /// Faces used up between blends whose contacts on them are one, or that have no length.
+  //! Faces used up between blends whose contacts on them are one, or that have no length.
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> usedUp;
 
-  /// Another blend's contact on `face` from `from` to `to` through `middle`, else null.
+  //! Another blend's contact on `face` from `from` to `to` through `middle`, else null.
   TopoDS_Edge sharedContact(const TopoDS_Face&   face,
                             const TopoDS_Vertex& from,
                             const TopoDS_Vertex& to,
@@ -384,10 +393,10 @@ struct Attach
     return {};
   }
 
-  /// Where a contact on a flat cap folded over itself: the piece ending at the loop on one side
-  /// (a at its end ea) and the one on the other (b at eb), the other contact's run round the loop
-  /// from a's section to b's (one edge, or one on each piece's face where the loop runs across a
-  /// joint), and the patch over the loop.
+  //! Where a contact on a flat cap folded over itself: the piece ending at the loop on one side
+  //! (a at its end ea) and the one on the other (b at eb), the other contact's run round the loop
+  //! from a's section to b's (one edge, or one on each piece's face where the loop runs across a
+  //! joint), and the patch over the loop.
   struct Run
   {
     TopoDS_Edge edge;
@@ -404,11 +413,11 @@ struct Attach
 
   std::vector<Folded> folded;
 
-  /// A ball rolled round a re-entrant vertex between two blends that cannot be mitred there
-  /// (rollRound): the pieces and their ends, their sides on the face they share, the vertex,
-  /// the place X on the third edge where both other contacts cross it, the contact on the shared
-  /// face between the blends' ends, and the surface the ball sweeps (a torus about the shared
-  /// face's normal through X) over u0..u1 about its axis, closing to X at vX.
+  //! A ball rolled round a re-entrant vertex between two blends that cannot be mitred there
+  //! (rollRound): the pieces and their ends, their sides on the face they share, the vertex,
+  //! the place X on the third edge where both other contacts cross it, the contact on the shared
+  //! face between the blends' ends, and the surface the ball sweeps (a torus about the shared
+  //! face's normal through X) over u0..u1 about its axis, closing to X at vX.
   struct Roll
   {
     int                          a, ea, b, eb, sa, sb;
@@ -421,7 +430,7 @@ struct Attach
 
   std::vector<Roll> rolls;
 
-  /// The roll a piece's end ends in, if any.
+  //! The roll a piece's end ends in, if any.
   const Roll* rollAt(int k, int end) const
   {
     for (const auto& r : rolls)
@@ -430,7 +439,7 @@ struct Attach
     return nullptr;
   }
 
-  /// The loop a piece's end meets.
+  //! The loop a piece's end meets.
   const Folded& foldAt(int k, int end) const
   {
     for (const auto& f : folded)
@@ -439,9 +448,9 @@ struct Attach
     fail(op, no_solution, "a blend's end at a fold has no loop", {pieces[k].rail.edge});
   }
 
-  /// A loop's run at `count` equal steps of its length from a's section towards b's (the patch's
-  /// v, from 0 to 1): each place's edge and parameter there, with each edge's own parameter and v
-  /// at its ends and at the places on it, rising along the edge (its curve on the patch).
+  //! A loop's run at `count` equal steps of its length from a's section towards b's (the patch's
+  //! v, from 0 to 1): each place's edge and parameter there, with each edge's own parameter and v
+  //! at its ends and at the places on it, rising along the edge (its curve on the patch).
   struct RunPlace
   {
     size_t edge;
@@ -501,9 +510,9 @@ struct Attach
     return out;
   }
 
-  /// Where the blends of two parts of an outline cross each other over a flat cap (a neck narrower
-  /// than both: the cap's offset is islands): between each two places where their contacts on it
-  /// cross, the two sheets meet in a crease, which takes both contacts' place there.
+  //! Where the blends of two parts of an outline cross each other over a flat cap (a neck narrower
+  //! than both: the cap's offset is islands): between each two places where their contacts on it
+  //! cross, the two sheets meet in a crease, which takes both contacts' place there.
   struct Ridge
   {
     int           k, sk, m, sm; // the pieces and their sides on the cap
@@ -513,11 +522,11 @@ struct Attach
   };
 
   std::vector<Ridge> ridged;
-  /// A side whose contact ridges cross: its contact's parts and the ridges, from its corner at the
-  /// start to the one at the end.
+  //! A side whose contact ridges cross: its contact's parts and the ridges, from its corner at the
+  //! start to the one at the end.
   std::map<std::pair<int, int>, std::vector<TopoDS_Edge>> runs;
 
-  /// The edges along a side, from its start's corner to its end's.
+  //! The edges along a side, from its start's corner to its end's.
   std::vector<TopoDS_Edge> sideEdges(int k, int side) const
   {
     const auto it = runs.find({k, side});
@@ -525,10 +534,10 @@ struct Attach
   }
 
   std::vector<TopoDS_Face> blends; // [piece]
-  /// An end made of several edges, from side 0's corner to side 1's (a notch's), else empty.
+  //! An end made of several edges, from side 0's corner to side 1's (a notch's), else empty.
   std::vector<std::array<std::vector<TopoDS_Edge>, 2>> chain; // [piece][end]
 
-  /// Each notch's edge where a blend's end runs on the other blend's face.
+  //! Each notch's edge where a blend's end runs on the other blend's face.
   struct Notch
   {
     int         blend;
@@ -542,8 +551,8 @@ struct Attach
                            seamCrossed; // a seam's first crossing, until its second
   std::vector<TopoDS_Face> removed;     // faces a blend replaces whole (a cliff's narrow face)
 
-  /// A notch's edge on the face that trims the blend: where each of the sheet's sections meets
-  /// that face's surface, along the sheet's whole rail (its parameter that of the sheet's rail).
+  //! A notch's edge on the face that trims the blend: where each of the sheet's sections meets
+  //! that face's surface, along the sheet's whole rail (its parameter that of the sheet's rail).
   struct TrimCurve
   {
     Handle(Geom_Curve)   curve;
@@ -552,13 +561,13 @@ struct Attach
   };
 
   std::map<std::pair<int, int>, TrimCurve> trimCurves;
-  /// Where a notch's narrow face goes on past an end: the far edge's vertex made where the stop
-  /// face's surface crosses it [piece][side][end] (null where the strip ends there too).
+  //! Where a notch's narrow face goes on past an end: the far edge's vertex made where the stop
+  //! face's surface crosses it [piece][side][end] (null where the strip ends there too).
   std::map<std::tuple<int, int, int>, TopoDS_Vertex> trimFar;
   const TrimCurve&                                   trimOf(int k, int side);
 
-  /// Refused where the notch's edge does not run over the rail parameters s0 to s1: the face
-  /// beyond does not reach the blend's sections there.
+  //! Refused where the notch's edge does not run over the rail parameters s0 to s1: the face
+  //! beyond does not reach the blend's sections there.
   void checkTrim(int k, int side, double s0, double s1)
   {
     const auto&  trim  = trimOf(k, side);
@@ -578,7 +587,7 @@ struct Attach
                 const TopoDS_Face&   stop,
                 gp_Pnt2d&            cornerOnStop);
 
-  /// The section's own parameter where the notch's edge meets it at the sheet's rail parameter s.
+  //! The section's own parameter where the notch's edge meets it at the sheet's rail parameter s.
   double trimAcross(int k, int side, double s)
   {
     const auto& trim = trimOf(k, side);
@@ -587,8 +596,8 @@ struct Attach
     return pieces[k].sheet.swapped ? uv.X() : uv.Y();
   }
 
-  /// Whether piece k's side is notched from where a split found its contact running off the face
-  /// over the far edge partway: the narrow face stays, the edge cut back to the crossing.
+  //! Whether piece k's side is notched from where a split found its contact running off the face
+  //! over the far edge partway: the narrow face stays, the edge cut back to the crossing.
   bool splitNotch(int k, int side) const
   {
     const Side& s = pieces[k].rail.s[side];
@@ -602,7 +611,7 @@ struct Attach
                        });
   }
 
-  /// A cliff's face beyond its edge: the one beside it that the blend does not replace.
+  //! A cliff's face beyond its edge: the one beside it that the blend does not replace.
   TopoDS_Face beyondCliff(const Side& side) const
   {
     for (const auto& face : facesOfEdge.FindFromKey(side.cliff))
@@ -893,13 +902,13 @@ void Attach::chainEnds()
     }
 }
 
-/// The loop where the contact on the cap folds over itself, between piece `a`'s end `ea` and
-/// piece `b`'s end `eb`: both end at the place where the contact crosses itself (the one ball
-/// there), each in its own section of that ball down to the other contact, and the other contact's
-/// run between them is an edge of its face, which the patch over the loop meets. Within one edge
-/// the run is the fit's, on either part's sheet alike; across a joint of a chain it runs on each
-/// piece's sheet to the joint's place, where the edges at the joint's vertex between the faces it
-/// runs on end, cut back to it as at any joint.
+//! The loop where the contact on the cap folds over itself, between piece `a`'s end `ea` and
+//! piece `b`'s end `eb`: both end at the place where the contact crosses itself (the one ball
+//! there), each in its own section of that ball down to the other contact, and the other contact's
+//! run between them is an edge of its face, which the patch over the loop meets. Within one edge
+//! the run is the fit's, on either part's sheet alike; across a joint of a chain it runs on each
+//! piece's sheet to the joint's place, where the edges at the joint's vertex between the faces it
+//! runs on end, cut back to it as at any joint.
 void Attach::fold(int a, int ea, int b, int eb)
 {
   const Piece& one = pieces[a];
@@ -1013,10 +1022,10 @@ void Attach::fold(int a, int ea, int b, int eb)
   folded.push_back(f);
 }
 
-/// The bicubic through a grid of points at uniform parameters in [0, 1] both ways, its knots
-/// at the inner parameters (de Boor's not-a-knot ends); empty where it is singular.
-/// (GeomAPI_PointsToBSplineSurface's interpolation sets end tangents that ripple back from the
-/// ends across the first spans by up to the spacing itself.)
+//! The bicubic through a grid of points at uniform parameters in [0, 1] both ways, its knots
+//! at the inner parameters (de Boor's not-a-knot ends); empty where it is singular.
+//! (GeomAPI_PointsToBSplineSurface's interpolation sets end tangents that ripple back from the
+//! ends across the first spans by up to the spacing itself.)
 static Handle(Geom_BSplineSurface) interpolated(const NCollection_Array2<gp_Pnt>& grid)
 {
   constexpr int degree = 3;
@@ -1077,16 +1086,16 @@ static Handle(Geom_BSplineSurface) interpolated(const NCollection_Array2<gp_Pnt>
   return new Geom_BSplineSurface(poles, uKnots, vKnots, uMults, vMults, degree, degree);
 }
 
-/// A round's patch over the loop where its contact on the cap folded: the ball where the contact
-/// crosses itself, whose arcs both sections are and which touches both blends along them (so it is
-/// G1 to them as it is), carried out radially to meet the other contact, which runs outside it,
-/// with that face's tangent plane. Over u from the place on the cap (0, where the surface closes
-/// to a point) to the other contact (1), and v from the first section (0) to the second (1): with
-/// d(u, v) the direction from the centre turning from the cap's place to the contact at v, and
-/// g(v) how far the contact lies beyond the ball, the point is C + (r + h1(u) g(v) + h2(u) k(v)) d,
-/// h1 = 3u^2 - 2u^3 and h2 = u^2 (u - 1), k chosen so the radial slope at u = 1 lies in that face.
-/// The contact is where the ball touches that face at both sections, so g and its slope vanish
-/// there and the sections stay the ball's. Interpolated at a grid; empty where it does not hold.
+//! A round's patch over the loop where its contact on the cap folded: the ball where the contact
+//! crosses itself, whose arcs both sections are and which touches both blends along them (so it is
+//! G1 to them as it is), carried out radially to meet the other contact, which runs outside it,
+//! with that face's tangent plane. Over u from the place on the cap (0, where the surface closes
+//! to a point) to the other contact (1), and v from the first section (0) to the second (1): with
+//! d(u, v) the direction from the centre turning from the cap's place to the contact at v, and
+//! g(v) how far the contact lies beyond the ball, the point is C + (r + h1(u) g(v) + h2(u) k(v)) d,
+//! h1 = 3u^2 - 2u^3 and h2 = u^2 (u - 1), k chosen so the radial slope at u = 1 lies in that face.
+//! The contact is where the ball touches that face at both sections, so g and its slope vanish
+//! there and the sections stay the ball's. Interpolated at a grid; empty where it does not hold.
 Handle(Geom_BSplineSurface) Attach::ballPatch(const Folded& f, int nv)
 {
   const Piece&   one  = pieces[f.a];
@@ -1139,10 +1148,10 @@ Handle(Geom_BSplineSurface) Attach::ballPatch(const Folded& f, int nv)
   return interpolated(grid);
 }
 
-/// rolling-ball blend, fd_chap.078 §77.14: "suitable faces to patch self-intersecting regions"):
-/// for a round the ball there (ballPatch), else Patch's face, G2 (for a G2 blend, where Patch can
-/// make it) or G1 to both blends along their sections and to the face the other contact runs on;
-/// laid on the edges already made so that it shares them.
+//! The face laid over a fold cut out of the rolling-ball blend:
+//! for a round the ball there (ballPatch), else Patch's face, G2 (for a G2 blend, where Patch can
+//! make it) or G1 to both blends along their sections and to the face the other contact runs on;
+//! laid on the edges already made so that it shares them.
 void Attach::foldPatches()
 {
   for (auto& f : folded)
@@ -1321,10 +1330,9 @@ const Attach::TrimCurve& Attach::trimOf(int k, int side)
   return trimCurves.emplace(key, out).first->second;
 }
 
-/// Where a notch's narrow face goes on past the face that stops the blend: that face's surface is
-
-/// blend's edge on the face beyond meets it, up the face beyond to the far edge, and across the
-/// strip to the vertex.
+//! Where a notch's narrow face goes on past the face that stops the blend: the surface of that face
+//! is taken to where the blend's edge on the face beyond meets it, up the face beyond to the far
+//! edge, and across the strip to the vertex.
 void Attach::capNotch(int                  k,
                       int                  side,
                       int                  end,
@@ -1408,10 +1416,10 @@ void Attach::capNotch(int                  k,
   segment(F, vertex, narrow.face);
 }
 
-/// The ball patch's face on the loop's own edges: the sections along v = 0 and v = 1 (their curves
-/// on it from the angle at the centre, as their points lie on the ball), the other contact along
-/// u = 1 at its own parameter, and the place on the cap a degenerate edge along u = 0. Empty
-/// where the edges do not lie on it (the tolerances stage records how near they do).
+//! The ball patch's face on the loop's own edges: the sections along v = 0 and v = 1 (their curves
+//! on it from the angle at the centre, as their points lie on the ball), the other contact along
+//! u = 1 at its own parameter, and the place on the cap a degenerate edge along u = 0. Empty
+//! where the edges do not lie on it (the tolerances stage records how near they do).
 std::optional<TopoDS_Face> Attach::ballFace(Folded&                            f,
                                             const Handle(Geom_BSplineSurface)& surface,
                                             int                                nv)
@@ -1547,14 +1555,14 @@ std::optional<TopoDS_Face> Attach::ballFace(Folded&                            f
   return face;
 }
 
-/// A stop face a notch's blend uses up: a triangle of the vertex, the notch's narrow face's far
-/// vertex and a third, whose edge from the vertex on the other support and edge from the far
-/// vertex on the face beyond the narrow face end at that third vertex, where the support and the
-/// face beyond meet in an edge. The other support's contact crosses that edge, and there the blend
-/// closes: the face beyond, which a notch's blend is cut by, takes the blend's end whole (the
-/// round meets it along the notch's edge, which runs from the blend's start to that crossing,
-/// turning back along the rail where the face leans over it, with no section of the blend at that
-/// end), and the stop face is gone with the edges it had (a back face leaning over a front edge).
+//! A stop face a notch's blend uses up: a triangle of the vertex, the notch's narrow face's far
+//! vertex and a third, whose edge from the vertex on the other support and edge from the far
+//! vertex on the face beyond the narrow face end at that third vertex, where the support and the
+//! face beyond meet in an edge. The other support's contact crosses that edge, and there the blend
+//! closes: the face beyond, which a notch's blend is cut by, takes the blend's end whole (the
+//! round meets it along the notch's edge, which runs from the blend's start to that crossing,
+//! turning back along the rail where the face leans over it, with no section of the blend at that
+//! end), and the stop face is gone with the edges it had (a back face leaning over a front edge).
 bool Attach::consumed(int                  k,
                       int                  end,
                       const TopoDS_Vertex& vertex,
@@ -1629,9 +1637,9 @@ bool Attach::consumed(int                  k,
   return true;
 }
 
-/// A notch's edge on the face beyond, for a blend that closes on that face: the sheet's meeting
-/// with the face from the notch's first corner to the second, by the arc that lies across the
-/// sheet between its contacts. The face must hold all of it on the stop face's inner side.
+//! A notch's edge on the face beyond, for a blend that closes on that face: the sheet's meeting
+//! with the face from the notch's first corner to the second, by the arc that lies across the
+//! sheet between its contacts. The face must hold all of it on the stop face's inner side.
 TopoDS_Edge Attach::rolledEdge(int k, int side, const TopoDS_Face& stop)
 {
   const Piece&       piece       = pieces[k];
@@ -1720,10 +1728,10 @@ TopoDS_Edge Attach::rolledEdge(int k, int side, const TopoDS_Face& stop)
   return {};
 }
 
-/// A face across both sides stops a piece at one end (its vertex there): the edges it shares with
-/// the supports are cut back to where the contacts cross them, and the blend ends in its section
-/// on that face, or its meeting with it. At a vertex of more edges, or where a contact sweeps over
-/// short edges of its support, several faces stop it (stops).
+//! A face across both sides stops a piece at one end (its vertex there): the edges it shares with
+//! the supports are cut back to where the contacts cross them, and the blend ends in its section
+//! on that face, or its meeting with it. At a vertex of more edges, or where a contact sweeps over
+//! short edges of its support, several faces stop it (stops).
 void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
 {
   const Piece& piece = pieces[k];
@@ -2451,16 +2459,15 @@ void Attach::miters()
     }
 }
 
-/// Two mitred blends whose contacts, carried on past a re-entrant vertex, would run across each
-/// other before they cross (Attach::miters): the ball rolls round the vertex from one blend's end
-/// to the other's, as it does round any obstacle it cannot pass (the rolling ball's own envelope
-
-/// other face reaches the third edge, at X, where both must reach it; every ball between touches
-/// the face they share and passes through X: their centres lie on a circle about the shared
-/// face's normal through X, and they sweep a torus that closes to a point at X. The third edge is
-/// cut back to X, and the shared face takes the arc of the balls' contacts between the blends.
-/// For the round on a flat shared face, where the balls' envelope is that torus; elsewhere v2
-/// declines.
+//! Two mitred blends whose contacts, carried on past a re-entrant vertex, would run across each
+//! other before they cross (Attach::miters): the ball rolls round the vertex from one blend's end
+//! to the other's, as it does round any obstacle it cannot pass. The other face reaches the third
+//! edge at X, where both must reach it; every ball between touches
+//! the face they share and passes through X: their centres lie on a circle about the shared
+//! face's normal through X, and they sweep a torus that closes to a point at X. The third edge is
+//! cut back to X, and the shared face takes the arc of the balls' contacts between the blends.
+//! For the round on a flat shared face, where the balls' envelope is that torus; elsewhere the
+//! blend declines.
 void Attach::rollRound(int                  k,
                        int                  ea,
                        int                  j,
@@ -2710,18 +2717,17 @@ void Attach::rollPatches()
   }
 }
 
-/// Two blends of one kind whose edges meet at a vertex of four faces with none in common (a
-
-/// edges at the vertex lies between a face of each blend; on it, the blend whose contact reaches
-/// the edge before it reaches the other blend's sheet wins: the edge is cut back to where that
-/// contact crosses it, the winner's end runs from there along its sheet on the loser's face (which
-/// grows to it where needed) to where the loser's contact meets the winner's sheet, and the
-/// loser's contact ends there. Between those two places both ends run where the sheets meet.
-/// A contact that never crosses the edge, which goes on straight from its own blended edge on
-/// its face, wins it whole: the edge goes, and its blend runs on along it, trimmed by the loser's
-
-/// notch whose wall stands parallel to the other blended edge).
-/// Everything is found before anything is changed: false where the blends do not end so.
+//! Two blends of one kind whose edges meet at a vertex of four faces with none in common (a notch).
+//! The one of the edges at the vertex that lies between a face of each blend is in question; on
+//! it, the blend whose contact reaches
+//! the edge before it reaches the other blend's sheet wins: the edge is cut back to where that
+//! contact crosses it, the winner's end runs from there along its sheet on the loser's face (which
+//! grows to it where needed) to where the loser's contact meets the winner's sheet, and the
+//! loser's contact ends there. Between those two places both ends run where the sheets meet.
+//! A contact that never crosses the edge, which goes on straight from its own blended edge on
+//! its face, wins it whole: the edge goes, and its blend runs on along it, trimmed by the loser's
+//! notch (whose wall stands parallel to the other blended edge).
+//! Everything is found before anything is changed: false where the blends do not end so.
 bool Attach::notch(int ka, int ea, int kb, int eb)
 {
   const int     k[2] = {ka, kb}, end[2] = {ea, eb};
@@ -3001,13 +3007,13 @@ bool Attach::notch(int ka, int ea, int kb, int eb)
   return true;
 }
 
-/// A stop where the blend's end is not one face's section: at a vertex of more edges, or where a
-/// contact sweeps over short edges of its support before it crosses one. Out from the vertex
-/// along each support's boundary, the edges the contact sweeps over go, and the faces across
-/// them stop the blend, in turn with the faces around the vertex between the two supports' first
-/// ones (and those around each swept vertex). The edges between consecutive stop faces are cut
-/// where the sheet crosses them, the crossed edges at the contacts, and the blend's end runs along
-/// the sheet on each stop face in turn.
+//! A stop where the blend's end is not one face's section: at a vertex of more edges, or where a
+//! contact sweeps over short edges of its support before it crosses one. Out from the vertex
+//! along each support's boundary, the edges the contact sweeps over go, and the faces across
+//! them stop the blend, in turn with the faces around the vertex between the two supports' first
+//! ones (and those around each swept vertex). The edges between consecutive stop faces are cut
+//! where the sheet crosses them, the crossed edges at the contacts, and the blend's end runs along
+//! the sheet on each stop face in turn.
 void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
 {
   const Piece& piece   = pieces[k];
@@ -3493,9 +3499,8 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
 void Attach::cornerPatches()
 {
   // Three or more edges that meet: the rolling ball's corner. At equal distances the round's
-  // corner is the ball itself where one rests on all the faces (three always have one; more
-
-  // simplification, §29.6.2).
+  // corner is the ball itself where one rests on all the faces (three always have one; more need
+  // not).
   for (size_t c = 0; c < cornersAt.size(); ++c)
   {
     const auto&  at    = cornersAt[c];
@@ -4067,8 +4072,8 @@ TopoDS_Face Attach::lawCorner(const Corner& at, size_t c)
   return face;
 }
 
-/// `edge` oriented to run as `along` does, by their directions where it starts (round a closed
-/// edge its start is a vertex of its own).
+//! `edge` oriented to run as `along` does, by their directions where it starts (round a closed
+//! edge its start is a vertex of its own).
 static TopoDS_Edge sameWay(const TopoDS_Edge& edge, const TopoDS_Edge& along)
 {
   BRepAdaptor_Curve own(TopoDS::Edge(edge.Oriented(TopAbs_FORWARD)));

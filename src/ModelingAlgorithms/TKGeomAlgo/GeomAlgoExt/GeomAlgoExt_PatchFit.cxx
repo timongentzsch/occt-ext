@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <GeomAlgoExt_Phase.hxx>
 #include <GeomAlgoExt_PatchFit.hxx>
@@ -40,33 +50,33 @@ namespace BRepExt
 namespace
 {
 
-/// What is added to the diagonal of the scaled matrix, whose entries are one, when it does not
-/// factor: from the rounding of a sum of some hundred products of doubles (1e-13) in steps of
-/// a hundred up to a millionth, beyond which the pull would show against the conditions.
+//! What is added to the diagonal of the scaled matrix, whose entries are one, when it does not
+//! factor: from the rounding of a sum of some hundred products of doubles (1e-13) in steps of
+//! a hundred up to a millionth, beyond which the pull would show against the conditions.
 constexpr double firstHold = 1e-13, holdStep = 100, lastHold = 1e-6;
 
-/// The multipliers are given up when, over this many passes, the misses of the conditions have
-/// fallen by less than this share: what is left then is what the net cannot follow.
+//! The multipliers are given up when, over this many passes, the misses of the conditions have
+//! fallen by less than this share: what is left then is what the net cannot follow.
 constexpr int stallPasses = 12;
 
 constexpr double stallShare = 0.02;
 
-/// The most passes of the multipliers: with every one the miss falls or the stall above ends
-/// them, and a net that is not there after some hundreds is not brought there by more.
+//! The most passes of the multipliers: with every one the miss falls or the stall above ends
+//! them, and a net that is not there after some hundreds is not brought there by more.
 constexpr int mostPasses = 400;
 
-/// The multipliers have nothing left to work on when what drives them has fallen to this share
-/// of what it was at first: the square of the rounding of a double.
+//! The multipliers have nothing left to work on when what drives them has fallen to this share
+//! of what it was at first: the square of the rounding of a double.
 constexpr double spent = 1e-20;
 
-/// A condition over the unknowns it touches, scaled by the root of its weight; what the fixed
-/// poles contribute is taken to its value.
+//! A condition over the unknowns it touches, scaled by the root of its weight; what the fixed
+//! poles contribute is taken to its value.
 struct Row
 {
   std::vector<int>    index;
   std::vector<double> coefficient;
   double              value, within;
-  /// Which of the conditions it is.
+  //! Which of the conditions it is.
   int from;
 };
 

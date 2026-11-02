@@ -1,7 +1,17 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
-// Fillet v2: Where curves and surfaces meet, the edges made there, and the body's edges and faces
+// Blend: Where curves and surfaces meet, the edges made there, and the body's edges and faces
 // cut back to them.
 
 #include <BRepBlendExt_Internal.hxx>
@@ -602,10 +612,10 @@ std::optional<Meeting> crossing(const Handle(Geom2d_Curve)& contact,
   return nearest(within, near);
 }
 
-/// How far from `vertex` the contact between `from` and `to` lies on its support, at most: a
-/// place where it crosses an edge of the support through the vertex lies no further than that,
-/// so no reach need be guessed (a wedge the stop face makes with the support acutely, where the
-/// contact crosses far from the vertex, asks for more than a blend's size).
+//! How far from `vertex` the contact between `from` and `to` lies on its support, at most: a
+//! place where it crosses an edge of the support through the vertex lies no further than that,
+//! so no reach need be guessed (a wedge the stop face makes with the support acutely, where the
+//! contact crosses far from the vertex, asks for more than a blend's size).
 static double contactReach(const Handle(Geom2d_Curve)& contact,
                            double                      from,
                            double                      to,
@@ -773,10 +783,10 @@ Placed placedFace(const TopoDS_Face& face)
   return {BRep_Tool::Surface(face), basis, location};
 }
 
-/// Where the meeting comes in two branches, one through each corner, that end at one place (the
-/// surfaces' meeting split where one of them is only G1, as a full round's two arcs are): one edge
-/// along both, interpolated at places on them with the same parameter on its curve and on each
-/// surface, and held to the branches between the places.
+//! Where the meeting comes in two branches, one through each corner, that end at one place (the
+//! surfaces' meeting split where one of them is only G1, as a full round's two arcs are): one edge
+//! along both, interpolated at places on them with the same parameter on its curve and on each
+//! surface, and held to the branches between the places.
 static std::optional<TopoDS_Edge> joinedMeeting(const SurfaceMeeting& meet,
                                                 const Placed&         one,
                                                 const gp_Pnt2d&       firstOnOne,
@@ -951,13 +961,13 @@ static std::optional<TopoDS_Edge> joinedMeeting(const SurfaceMeeting& meet,
   return {};
 }
 
-/// Where an extruded sheet whose section is polynomial meets a plane across the extrusion: the
-/// section carried along the extrusion onto the plane, which is an affine image of it (its poles
-/// moved, the same degree and knots), with its curve on the sheet (the section's own parameter,
-/// and the distance along the extrusion as a spline of the same knots) and on the plane, all exact.
-/// GeomInt approximates this meeting by a C1 curve of degree 8, whose knots a later blend along
-/// the edge takes for breaks of its rail (and is only C0 there). Empty where the surfaces are not
-/// these.
+//! Where an extruded sheet whose section is polynomial meets a plane across the extrusion: the
+//! section carried along the extrusion onto the plane, which is an affine image of it (its poles
+//! moved, the same degree and knots), with its curve on the sheet (the section's own parameter,
+//! and the distance along the extrusion as a spline of the same knots) and on the plane, all exact.
+//! GeomInt approximates this meeting by a C1 curve of degree 8, whose knots a later blend along
+//! the edge takes for breaks of its rail (and is only C0 there). Empty where the surfaces are not
+//! these.
 static std::optional<TopoDS_Edge> extrusionMeetsPlane(const Placed&        one,
                                                       const Placed&        two,
                                                       const TopoDS_Vertex& first,
@@ -1125,17 +1135,17 @@ std::optional<TopoDS_Edge> meetingEdge(const Placed&        one,
 
 namespace
 {
-/// A place where two sheets meet: on the first sheet's surface, on the second's, and in space.
+//! A place where two sheets meet: on the first sheet's surface, on the second's, and in space.
 struct Place
 {
   gp_Pnt2d a, b;
   gp_Pnt   p;
 };
 
-/// The edge through the places where two sheets meet from `first` to `last`, `solve(t, place)`
-/// finding the place at t in (0, 1) from the place before it, moved on as the straight line between
-/// the ends would: the curve and both parameter curves interpolate the same places at the same
-/// parameter, doubled until the places between them are met within the length tolerance.
+//! The edge through the places where two sheets meet from `first` to `last`, `solve(t, place)`
+//! finding the place at t in (0, 1) from the place before it, moved on as the straight line between
+//! the ends would: the curve and both parameter curves interpolate the same places at the same
+//! parameter, doubled until the places between them are met within the length tolerance.
 std::optional<TopoDS_Edge> throughPlaces(const Placed&                              one,
                                          const Placed&                              two,
                                          const Place&                               first,
@@ -1307,7 +1317,7 @@ std::optional<TopoDS_Edge> marchedMeeting(const Sheet&         one,
   if (!(length > limit::degenerate))
     return {};
   // Halving the steps takes a smooth meeting's error down some 16 times (cubic interpolation);
-  // as the fit's refinement (blend2_fit.cpp), an error still a thousand tolerances that does
+  // as the fit's refinement (BRepBlendExt_Fit.cxx), an error still a thousand tolerances that does
   // not halve in three is a break in it, and the meeting is declined; near the tolerance a slow
   // tail goes on. The places are bounded by memory (a long meeting at a small tolerance, as a
   // large body has, takes many).

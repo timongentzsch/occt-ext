@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <BRepFilletExt_BlendChecks.hxx>
 #include <GeomAlgoExt_SurfaceJet.hxx>
@@ -300,7 +310,7 @@ void certifyBlendBoundaries(const char*               op,
   }
 }
 
-/// A face the blend made that runs into a face behind its supports is no blend.
+//! A face the blend made that runs into a face behind its supports is no blend.
 void checkBlendClear(const TopoDS_Shape&              before,
                      const TopoDS_Shape&              after,
                      const std::vector<TopoDS_Shape>& selected,

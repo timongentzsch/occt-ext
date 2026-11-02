@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <BRepOffsetExt_Parts.hxx>
 
@@ -27,8 +37,8 @@ namespace BRepExt
 namespace
 {
 
-/// The (u, v) inside `face` on a grid of `perSide` squared, cell centres; along lines across it
-/// where the grid misses it (a ring, a slot).
+//! The (u, v) inside `face` on a grid of `perSide` squared, cell centres; along lines across it
+//! where the grid misses it (a ring, a slot).
 std::vector<gp_Pnt2d> parametersInside(const TopoDS_Face& face, int perSide)
 {
   const BRepAdaptor_Surface surface(face);
@@ -91,7 +101,8 @@ OffsetFate classifyForOffset(const TopoDS_Shape& body, double distance)
 
 bool intersectsItself(const TopoDS_Shape& shape)
 {
-  // Only what the separation pre-pass cannot prove clear goes to the check (face_separation.h).
+  // Only what the separation pre-pass cannot prove clear goes to the check
+  // (BRepSurfaceExt_FaceSeparation.hxx).
   for (const TopoDS_Shape& part : unprovenParts(shape))
   {
     BOPAlgo_ArgumentAnalyzer analyzer;

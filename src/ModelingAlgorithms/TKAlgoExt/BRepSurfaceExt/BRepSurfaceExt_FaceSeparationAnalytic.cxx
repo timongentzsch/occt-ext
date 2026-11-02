@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 // A planar face beside a face of a cylinder, a cone, a sphere or a torus whose axis is normal to
 // its plane: the wall of a hole or a boss on the face it passes through, a countersink, a rim
@@ -42,8 +52,8 @@ namespace BRepExt
 namespace
 {
 
-/// sin 15 degrees: two surfaces crossing at less than this come within a gap of each other
-/// more than four gaps away from their line, more than face_separation's NEAR_EDGE allows.
+//! sin 15 degrees: two surfaces crossing at less than this come within a gap of each other
+//! more than four gaps away from their line, more than face_separation's NEAR_EDGE allows.
 constexpr double kCrease = 0.2588;
 
 struct Ring
@@ -59,7 +69,7 @@ bool revolution(const BRepAdaptor_Surface& surface)
          || type == GeomAbs_Torus;
 }
 
-/// The axis of a surface of revolution, along `normal` for a sphere.
+//! The axis of a surface of revolution, along `normal` for a sphere.
 gp_Ax1 axisOf(const BRepAdaptor_Surface& surface, const gp_Dir& normal)
 {
   switch (surface.GetType())
@@ -75,8 +85,8 @@ gp_Ax1 axisOf(const BRepAdaptor_Surface& surface, const gp_Dir& normal)
   }
 }
 
-/// Where `plane` cuts the surface of `face`, about its axis normal to the plane; none where the
-/// pair is not of that kind or the cut is singular.
+//! Where `plane` cuts the surface of `face`, about its axis normal to the plane; none where the
+//! pair is not of that kind or the cut is singular.
 std::optional<std::vector<Ring>> ringsOf(const gp_Pln&              plane,
                                          const BRepAdaptor_Surface& surface,
                                          double                     gap)
@@ -133,8 +143,8 @@ std::optional<std::vector<Ring>> ringsOf(const gp_Pln&              plane,
   return rings;
 }
 
-/// Whether `edge` is the whole of `circle`, within its own tolerance: the two surfaces cross on
-/// the circle, so there they cross on the edge.
+//! Whether `edge` is the whole of `circle`, within its own tolerance: the two surfaces cross on
+//! the circle, so there they cross on the edge.
 bool wholeOf(const TopoDS_Edge& edge, const gp_Circ& circle)
 {
   const double  gap = std::max(Precision::Confusion(), BRep_Tool::Tolerance(edge));

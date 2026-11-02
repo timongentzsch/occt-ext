@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <GeomAlgoExt_Phase.hxx>
 #include <BRepToolsExt_GeomUtil.hxx>
@@ -99,25 +109,25 @@ namespace
 
 const char* const op = "patch";
 
-/// How many places along an edge the result is measured at: those of Measure Continuity.
+//! How many places along an edge the result is measured at: those of Measure Continuity.
 constexpr int places = 129;
 
-/// Below this share of a G2 limit, as a difference of curvature times the loop's size, two
-/// bends count as the same though one of them is flat and every difference is all of it.
+//! Below this share of a G2 limit, as a difference of curvature times the loop's size, two
+//! bends count as the same though one of them is flat and every difference is all of it.
 constexpr double flatShare = 1e-3;
 
-/// What the fairness of a trimmed surface counts for outside its loop.
+//! What the fairness of a trimmed surface counts for outside its loop.
 constexpr double outsideWeight = 1e-3;
 
-/// The steepest a trimmed surface may stand against the loop's mean plane, as the cosine: 80
-/// degrees. A surface over a plane is a height above it, and the slope of that height is the
-/// tangent of this angle; at 80 degrees it is 5.7 and the net's spans, even across the plane,
-/// are six times as long on the surface.
+//! The steepest a trimmed surface may stand against the loop's mean plane, as the cosine: 80
+//! degrees. A surface over a plane is a height above it, and the slope of that height is the
+//! tangent of this angle; at 80 degrees it is 5.7 and the net's spans, even across the plane,
+//! are six times as long on the surface.
 constexpr double steepest = 0.17;
 
-/// How far outside the loop's polygon a guide or a point may lie and still count as inside, as
-/// a share of the loop's size: the polygon has 32 corners per side and cuts off that much of a
-/// curved side (a full circle of 32 chords is 0.5 % of its radius inside the circle).
+//! How far outside the loop's polygon a guide or a point may lie and still count as inside, as
+//! a share of the loop's size: the polygon has 32 corners per side and cuts off that much of a
+//! curved side (a full circle of 32 chords is 0.5 % of its radius inside the circle).
 constexpr double outsideSlack = 0.01;
 
 struct Limits
@@ -125,8 +135,8 @@ struct Limits
   double g0, g1, g2;
 };
 
-/// The largest misses along an edge: a length, degrees, a difference of curvature and that as
-/// a share (see bendDifference).
+//! The largest misses along an edge: a length, degrees, a difference of curvature and that as
+//! a share (see bendDifference).
 struct Miss
 {
   double g0 = 0, g1 = 0, g2 = 0, g2Relative = 0;
@@ -137,7 +147,7 @@ struct Miss
            && (order < 2 || g2Relative <= limits.g2 || g2 * size <= limits.g2 * flatShare);
   }
 
-  /// The largest of the misses as a multiple of its limit.
+  //! The largest of the misses as a multiple of its limit.
   double excess(const Limits& limits, int order, double size) const
   {
     return std::max(
@@ -202,8 +212,8 @@ Side sideOf(const OcctKernel& kernel, uint32_t id, uint32_t supportId, int order
   return sideOf(get(kernel, id), supportId ? get(kernel, supportId) : TopoDS_Shape(), order, input);
 }
 
-/// Put the sides in the order and the directions in which they run round the loop. With `open`
-/// a boundary that does not close says so and is not refused.
+//! Put the sides in the order and the directions in which they run round the loop. With `open`
+//! a boundary that does not close says so and is not refused.
 bool arrange(std::vector<Side>& sides, double tolerance, bool open = false)
 {
   auto refuse = [](double gap, const gp_Pnt& at) {
@@ -253,7 +263,7 @@ bool arrange(std::vector<Side>& sides, double tolerance, bool open = false)
 
 using patch_host::chain;
 
-/// The plane a loop lies nearest to, by the area its polygon encloses seen from every side.
+//! The plane a loop lies nearest to, by the area its polygon encloses seen from every side.
 struct Frame
 {
   gp_Pnt origin;
@@ -268,7 +278,7 @@ struct Frame
   double height(const gp_Pnt& point) const { return gp_Vec(origin, point).Dot(z); }
 };
 
-/// The corners that a side is given in the polygon that stands for the loop.
+//! The corners that a side is given in the polygon that stands for the loop.
 constexpr int polygonCorners = 32;
 
 std::vector<gp_Pnt> polygon(const std::vector<Side>& sides)
@@ -280,17 +290,17 @@ std::vector<gp_Pnt> polygon(const std::vector<Side>& sides)
   return points;
 }
 
-/// The least area a loop encloses seen along its mean direction, as a share of the square of
-/// its length (a circle has 0.08): below it the loop is a line there and back.
+//! The least area a loop encloses seen along its mean direction, as a share of the square of
+//! its length (a circle has 0.08): below it the loop is a line there and back.
 constexpr double leastArea = 1e-6;
 
-/// Below this share of its size, the difference between the longer and the shorter axis of
-/// the area a loop encloses says nothing of a direction: the 32 chords that stand for a side
-/// are that far from its curve.
+//! Below this share of its size, the difference between the longer and the shorter axis of
+//! the area a loop encloses says nothing of a direction: the 32 chords that stand for a side
+//! are that far from its curve.
 constexpr double roundLoop = 1e-3;
 
-/// Two corners are as far from the middle when they differ by less than this share: the
-/// rounding of the sums they are measured from, with room.
+//! Two corners are as far from the middle when they differ by less than this share: the
+//! rounding of the sums they are measured from, with room.
 constexpr double sameCorner = BRepExt::tolerance::exactLength;
 
 Frame meanPlane(const std::vector<gp_Pnt>& points, double perimeter)
@@ -386,7 +396,7 @@ bool crosses(const gp_XY& a, const gp_XY& b, const gp_XY& c, const gp_XY& d)
   return side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0;
 }
 
-/// The area a polygon encloses, negative when it runs clockwise. Fails where it crosses itself.
+//! The area a polygon encloses, negative when it runs clockwise. Fails where it crosses itself.
 double enclosed(const std::vector<gp_XY>& loop)
 {
   double area = 0;
@@ -403,7 +413,7 @@ double enclosed(const std::vector<gp_XY>& loop)
   return area;
 }
 
-/// Whether `point` is no further than `slack` from the side of a polygon from `from` to `to`.
+//! Whether `point` is no further than `slack` from the side of a polygon from `from` to `to`.
 bool near(const gp_XY& from, const gp_XY& to, const gp_XY& point, double slack)
 {
   const gp_XY edge = to - from, away = point - from;
@@ -411,7 +421,7 @@ bool near(const gp_XY& from, const gp_XY& to, const gp_XY& point, double slack)
          <= slack;
 }
 
-/// Where the side of a polygon from `from` to `to` crosses the line at height `y`, if it does.
+//! Where the side of a polygon from `from` to `to` crosses the line at height `y`, if it does.
 std::optional<double> crossing(const gp_XY& from, const gp_XY& to, double y)
 {
   if ((to.Y() > y) == (from.Y() > y))
@@ -419,8 +429,8 @@ std::optional<double> crossing(const gp_XY& from, const gp_XY& to, double y)
   return from.X() + (to.X() - from.X()) * (y - from.Y()) / (to.Y() - from.Y());
 }
 
-/// Whether a point is inside a polygon, or no further outside it than `slack`: the polygon
-/// stands for curves, which a point on them may be a little outside of.
+//! Whether a point is inside a polygon, or no further outside it than `slack`: the polygon
+//! stands for curves, which a point on them may be a little outside of.
 bool inside(const std::vector<gp_XY>& loop, const gp_XY& point, double slack)
 {
   bool in = false;
@@ -434,9 +444,9 @@ bool inside(const std::vector<gp_XY>& loop, const gp_XY& point, double slack)
   return in;
 }
 
-/// `inside` for many points of one polygon, as a fit reads its density over a grid: per
-/// height, the polygon's crossings are found once and sorted, and only sides that come near a
-/// point are measured. The same answers as `inside`.
+//! `inside` for many points of one polygon, as a fit reads its density over a grid: per
+//! height, the polygon's crossings are found once and sorted, and only sides that come near a
+//! point are measured. The same answers as `inside`.
 class Inside
 {
 public:
@@ -488,9 +498,9 @@ private:
   mutable std::unordered_map<double, Row> rows;
 };
 
-/// What the surface is to meet at one place: a point, and with an order the tangent plane and
-/// the bend of `jet` there. `across` is a direction of the surface's parameters that leaves
-/// the curve the place is on.
+//! What the surface is to meet at one place: a point, and with an order the tangent plane and
+//! the bend of `jet` there. `across` is a direction of the surface's parameters that leaves
+//! the curve the place is on.
 struct Target
 {
   gp_Pnt                    point;
@@ -498,60 +508,60 @@ struct Target
   int                       order;
   std::optional<SurfaceJet> jet;
   gp_XY                     across;
-  /// The share of the loop's size that the place stands for.
+  //! The share of the loop's size that the place stands for.
   double share;
-  /// With order 1: the neighbour's bend is wished for as well, and not asked.
+  //! With order 1: the neighbour's bend is wished for as well, and not asked.
   bool wish = false;
-  /// Read and not asked: see FitCondition.
+  //! Read and not asked: see FitCondition.
   bool                  watch         = false;
   std::optional<gp_Vec> perpendicular = {};
-  /// A wish and not a condition: its point is weighed against the energies and not met.
+  //! A wish and not a condition: its point is weighed against the energies and not met.
   bool soft = false;
 };
 
-/// What tangency and bend count for against position, in the units of the loop's size. Where
-/// not all can be had, at a corner that two neighbours bend differently into, the lower order
-/// is kept and the higher one gives.
+//! What tangency and bend count for against position, in the units of the loop's size. Where
+//! not all can be had, at a corner that two neighbours bend differently into, the lower order
+//! is kept and the higher one gives.
 constexpr double tangentWeight = 1e-3, bendWeight = 1e-6;
 
-/// What the energy of bending counts for against a condition of weight one. The conditions are
-/// met by multipliers, whatever it is; it decides how near the first solution is to them, and
-/// with that how many passes the multipliers need, and must stay well above the rounding of
-/// the sums it is added to (1e-16 of the conditions' weights).
+//! What the energy of bending counts for against a condition of weight one. The conditions are
+//! met by multipliers, whatever it is; it decides how near the first solution is to them, and
+//! with that how many passes the multipliers need, and must stay well above the rounding of
+//! the sums it is added to (1e-16 of the conditions' weights).
 constexpr double bendingWeight = 1e-11;
 
-/// What the change of the bend counts for against the bend, with the loop's size as the unit
-/// of length: in full where a bend is asked or wished for along the rim, and by these shares
-/// where the rim is only tangent to its faces, and where curves are only met. With more of
-/// it the surface is pulled flat between its edges; with none, a point inside the loop stands
-/// in a spike. Measured for the tangent rim on the corner of three rounds of 4, whose own
-/// surface is a ball, as the distance from that ball at tolerances of 1e-3 and 1e-6: with
-/// 0.03, 0.066 and 0.065; with 0.003, 0.024 and 0.068; with none, 0.010 and 0.069. For curves
-/// that are only met, 0.03 is the first author's, from a round hole in a sphere; with 0.003
-/// an L of six sides on a curved height is missed by 2.6e-6 on every net where 0.03 meets a
-/// millionth on the fourth.
+//! What the change of the bend counts for against the bend, with the loop's size as the unit
+//! of length: in full where a bend is asked or wished for along the rim, and by these shares
+//! where the rim is only tangent to its faces, and where curves are only met. With more of
+//! it the surface is pulled flat between its edges; with none, a point inside the loop stands
+//! in a spike. Measured for the tangent rim on the corner of three rounds of 4, whose own
+//! surface is a ball, as the distance from that ball at tolerances of 1e-3 and 1e-6: with
+//! 0.03, 0.066 and 0.065; with 0.003, 0.024 and 0.068; with none, 0.010 and 0.069. For curves
+//! that are only met, 0.03 is the first author's, from a round hole in a sphere; with 0.003
+//! an L of six sides on a curved height is missed by 2.6e-6 on every net where 0.03 meets a
+//! millionth on the fourth.
 constexpr double variationTangent = 0.003, variationMet = 0.03;
 
-/// The fits of a net whose bend is asked along an edge, the first of them without the bend:
-/// what is asked is taken about the surface before, and over a steep rim (a ball cut at a
-/// quarter of its radius) the third still left the bend 6 to 8 % off where the fifth meets it.
+//! The fits of a net whose bend is asked along an edge, the first of them without the bend:
+//! what is asked is taken about the surface before, and over a steep rim (a ball cut at a
+//! quarter of its radius) the third still left the bend 6 to 8 % off where the fifth meets it.
 constexpr int askedPasses = 5;
 
-/// The same where the bend is only wished for: nearer than the third is not needed, and on a
-/// ball's cap the third is nearer the ball than the fifth.
+//! The same where the bend is only wished for: nearer than the third is not needed, and on a
+//! ball's cap the third is nearer the ball than the fifth.
 constexpr int wishedPasses = 3;
 
-/// How often the places that a fit misses between those it was asked are added to them.
+//! How often the places that a fit misses between those it was asked are added to them.
 constexpr int placeRounds = 3;
 
-/// How near its value a condition of the fit is brought, as a share of the limit that the
-/// finished surface is held to. The fit reads at its own places and the surface is measured
-/// between them, where it is a little further off: a quarter leaves room for that.
+//! How near its value a condition of the fit is brought, as a share of the limit that the
+//! finished surface is held to. The fit reads at its own places and the surface is measured
+//! between them, where it is a little further off: a quarter leaves room for that.
 constexpr double fitShare = 0.25;
 
-/// The same for the places between, which the fit only reads: half, since the surface is
-/// measured at yet other places, and a miss that is at its largest between two places of the
-/// fit is found there.
+//! The same for the places between, which the fit only reads: half, since the surface is
+//! measured at yet other places, and a miss that is at its largest between two places of the
+//! fit is found there.
 constexpr double watchShare = 0.5;
 
 enum class GraphFit
@@ -561,9 +571,9 @@ enum class GraphFit
   complete
 };
 
-/// The conditions that say so. For a height graph in the normalized mean-plane frame,
-/// tangency determines its spatial derivatives exactly, making G2 linear as well. Otherwise
-/// G2 is taken about `current`, and left out while there is none.
+//! The conditions that say so. For a height graph in the normalized mean-plane frame,
+//! tangency determines its spatial derivatives exactly, making G2 linear as well. Otherwise
+//! G2 is taken about `current`, and left out while there is none.
 std::vector<FitCondition> conditions(const std::vector<Target>&              targets,
                                      const occ::handle<Geom_BSplineSurface>& current,
                                      double                                  size,
@@ -698,8 +708,8 @@ std::vector<FitCondition> conditions(const std::vector<Target>&              tar
   return out;
 }
 
-/// Fit the free poles: once, or where a bend is asked or wished for several times over, the
-/// bend each time about the surface before. With `along`, the poles are free along it only.
+//! Fit the free poles: once, or where a bend is asked or wished for several times over, the
+//! bend each time about the surface before. With `along`, the poles are free along it only.
 occ::handle<Geom_BSplineSurface> fit(SplineNet&                                   net,
                                      const std::vector<char>&                     fixed,
                                      std::vector<Target>                          targets,
@@ -845,11 +855,11 @@ std::string number(double value)
   return text;
 }
 
-/// Where on the surface a place of a side is, for the constructions that know. `own` says that
-/// this is where the face itself holds the place, by the curve of its edge in the surface's
-/// parameters: the place is then read there and nowhere else, as Measure Continuity reads it.
-/// Otherwise it is where to start looking for the surface's nearest point, which has then not
-/// to be looked for over a surface that may fold outside the loop.
+//! Where on the surface a place of a side is, for the constructions that know. `own` says that
+//! this is where the face itself holds the place, by the curve of its edge in the surface's
+//! parameters: the place is then read there and nowhere else, as Measure Continuity reads it.
+//! Otherwise it is where to start looking for the surface's nearest point, which has then not
+//! to be looked for over a surface that may fold outside the loop.
 struct Place
 {
   gp_XY uv;
@@ -858,11 +868,11 @@ struct Place
 
 using Known = std::function<std::optional<Place>(const Side&, double fraction, const gp_Pnt&)>;
 
-/// The parameters of the surface's point nearest `point`, looked for from `uv` within the
-/// surface's parameter bounds: steps of Gauss and Newton, and along the border once a step
-/// would leave it, until the step falls to the rounding of the parameters. A coordinate held at
-/// the border is let go again when the free step leads back inside. Nothing where the steps do
-/// not settle; the global search is then the one to ask.
+//! The parameters of the surface's point nearest `point`, looked for from `uv` within the
+//! surface's parameter bounds: steps of Gauss and Newton, and along the border once a step
+//! would leave it, until the step falls to the rounding of the parameters. A coordinate held at
+//! the border is let go again when the free step leads back inside. Nothing where the steps do
+//! not settle; the global search is then the one to ask.
 std::optional<gp_XY> nearestWithin(const occ::handle<Geom_Surface>& surface,
                                    gp_XY                            uv,
                                    const gp_Pnt&                    point)
@@ -911,7 +921,7 @@ std::optional<gp_XY> nearestWithin(const occ::handle<Geom_Surface>& surface,
   return std::nullopt;
 }
 
-/// How far a surface is from what a side asks, read from the surface alone.
+//! How far a surface is from what a side asks, read from the surface alone.
 Miss measure(const occ::handle<Geom_Surface>& surface, const Side& side, const Known& known)
 {
   ShapeAnalysis_Surface project(surface);
@@ -961,13 +971,13 @@ Miss measure(const occ::handle<Geom_Surface>& surface, const Side& side, const K
   return miss;
 }
 
-/// How far from a corner, as a share of a side, the face along the side is read for what it
-/// asks at the corner: off the corner itself, where the faces of both sides meet and a face
-/// may have no one direction.
+//! How far from a corner, as a share of a side, the face along the side is read for what it
+//! asks at the corner: off the corner itself, where the faces of both sides meet and a face
+//! may have no one direction.
 constexpr double cornerInset = 1e-6;
 
-/// One surface has one tangent plane and one bend at a corner. Where the faces on both sides
-/// of a corner ask for different ones, no patch can give both: say so, and where.
+//! One surface has one tangent plane and one bend at a corner. Where the faces on both sides
+//! of a corner ask for different ones, no patch can give both: say so, and where.
 void agreeAtCorners(const std::vector<Side>& sides, const Limits& limits, double size)
 {
   for (size_t i = 0; i < sides.size(); ++i)
@@ -1090,9 +1100,9 @@ struct RimPoles
   }
 };
 
-/// Work on a private, consistently directed spline rim in its intrinsic frame. Equivalent
-/// pole reversal and rigid placement must be removed before sampling and net decisions,
-/// rather than rounding only the eventual linear system. Original curves are measured later.
+//! Work on a private, consistently directed spline rim in its intrinsic frame. Equivalent
+//! pole reversal and rigid placement must be removed before sampling and net decisions,
+//! rather than rounding only the eventual linear system. Original curves are measured later.
 std::optional<gp_Trsf> localSplineRim(Asked& asked, bool* copyBudgetMiss = nullptr)
 {
   if (copyBudgetMiss)
@@ -1264,9 +1274,9 @@ std::optional<gp_Trsf> localSplineRim(Asked& asked, bool* copyBudgetMiss = nullp
   return world;
 }
 
-/// A failed world-space copy may instead be represented relative to an exact anchor.
-/// TwoDiff certifies each subtraction; no source-pole displacement is spent here. Keep
-/// the anchor as a face placement, so it never gets rounded back into the fitted poles.
+//! A failed world-space copy may instead be represented relative to an exact anchor.
+//! TwoDiff certifies each subtraction; no source-pole displacement is spent here. Keep
+//! the anchor as a face placement, so it never gets rounded back into the fitted poles.
 std::optional<gp_Trsf> rebasedSplineRim(Asked& asked, gp_Trsf& anchor)
 {
   Asked          local = asked;
@@ -1306,8 +1316,8 @@ std::optional<gp_Trsf> rebasedSplineRim(Asked& asked, gp_Trsf& anchor)
   return placement;
 }
 
-/// A guide ending on a supported edge must leave in that face's tangent plane, and at G2
-/// have its normal curvature. Test this before any fit, using the same jet as the joint.
+//! A guide ending on a supported edge must leave in that face's tangent plane, and at G2
+//! have its normal curvature. Test this before any fit, using the same jet as the joint.
 void agreeAtGuideEnds(const Asked& asked)
 {
   for (const Side& guide : asked.guides)
@@ -1355,8 +1365,8 @@ void agreeAtGuideEnds(const Asked& asked)
     }
 }
 
-/// The tightest bend on the rim of what is asked: of its curves and guides, of the faces
-/// that it is to run on from, and of a ball as large as the loop.
+//! The tightest bend on the rim of what is asked: of its curves and guides, of the faces
+//! that it is to run on from, and of a ball as large as the loop.
 double rimBend(const Asked& asked)
 {
   double bend  = 2 / asked.size;
@@ -1387,16 +1397,16 @@ double rimBend(const Asked& asked)
   return bend;
 }
 
-/// The misses in the order of the input: per boundary edge four numbers, then per guide and
-/// per point the distance. `worst` says what the first miss beyond the limits is.
+//! The misses in the order of the input: per boundary edge four numbers, then per guide and
+//! per point the distance. `worst` says what the first miss beyond the limits is.
 struct Measured
 {
   std::vector<double> values;
   bool                within = true;
   std::string         worst;
-  /// The largest miss as a multiple of its limit.
+  //! The largest miss as a multiple of its limit.
   double excess = 0;
-  /// Within the limits along the edges, and not a surface to keep: `worst` says why.
+  //! Within the limits along the edges, and not a surface to keep: `worst` says why.
   bool unkept = false;
 };
 
@@ -1462,17 +1472,17 @@ Measured measureAll(const occ::handle<Geom_Surface>& surface,
   return out;
 }
 
-/// A surface with the face made of it and how it measures.
+//! A surface with the face made of it and how it measures.
 struct Built
 {
   int         construction;
   TopoDS_Face face;
   Measured    measured;
-  /// For a surface over a conformal chart, how square its U and V come out inside the loop,
-  /// a goal and not a limit: the root mean square, the 95th percentile and the largest angle
-  /// from square in degrees, then the least and largest ratio |S_u| / |S_v|.
+  //! For a surface over a conformal chart, how square its U and V come out inside the loop,
+  //! a goal and not a limit: the root mean square, the 95th percentile and the largest angle
+  //! from square in degrees, then the least and largest ratio |S_u| / |S_v|.
   std::vector<double> squareness = {};
-  /// Whether the soft interior-shape target was met, and how many nets were tried.
+  //! Whether the soft interior-shape target was met, and how many nets were tried.
   std::vector<double> shapeTarget = {};
 
   // The actual delivered boundary traces of the new free height-graph construction.
@@ -1487,7 +1497,7 @@ struct Built
   };
 
   std::vector<SpatialRim> spatialBoundary = {};
-  /// Per side, the curve of a gap in the surface's parameters; null for every other side.
+  //! Per side, the curve of a gap in the surface's parameters; null for every other side.
   std::vector<occ::handle<Geom2d_Curve>> gaps = {};
 };
 
@@ -1554,9 +1564,9 @@ std::vector<double> clampedKnots(double from, double to, int spans, int degree)
   return knots;
 }
 
-/// A harmonic height polynomial for a free rim, or a quadratic fixed by interior positions.
-/// Seed the exact polynomial rather than driving tiny interpolation errors into the fit.
-/// The later correction and measurement hold the same limits as for a general fitted surface.
+//! A harmonic height polynomial for a free rim, or a quadratic fixed by interior positions.
+//! Seed the exact polynomial rather than driving tiny interpolation errors into the fit.
+//! The later correction and measurement hold the same limits as for a general fitted surface.
 bool polynomialHeight(const Asked& asked,
                       const Frame& frame,
                       SplineNet&   net,
@@ -1657,21 +1667,21 @@ bool polynomialHeight(const Asked& asked,
   return false;
 }
 
-/// The most spans a net is given across one direction, however much is asked to be finer.
+//! The most spans a net is given across one direction, however much is asked to be finer.
 constexpr int mostSpans = 72;
 
-/// A place where the net is to be finer than it is elsewhere: spans no longer than `span`
-/// from `at - span` to `at + span`.
+//! A place where the net is to be finer than it is elsewhere: spans no longer than `span`
+//! from `at - span` to `at + span`.
 struct Finer
 {
   double at, span;
 };
 
-/// The knots of `spans` even spans, made finer where `finer` says and no coarser anywhere:
-/// each knot where the number of spans wanted up to there is whole. Then `breaks` among them
-/// at one less than the degree times: the surface is there only once differentiable across,
-/// and free to change its bend. A knot that is nearer to a break than `snap` of a span gives
-/// way to it, so that no span is left a sliver.
+//! The knots of `spans` even spans, made finer where `finer` says and no coarser anywhere:
+//! each knot where the number of spans wanted up to there is whole. Then `breaks` among them
+//! at one less than the degree times: the surface is there only once differentiable across,
+//! and free to change its bend. A knot that is nearer to a break than `snap` of a span gives
+//! way to it, so that no span is left a sliver.
 std::vector<double> gradedKnots(double                     from,
                                 double                     to,
                                 int                        spans,
@@ -1737,12 +1747,12 @@ std::vector<double> gradedKnots(double                     from,
   return knots;
 }
 
-/// By what share of their curvature the faces on the two sides of a corner disagree about the
-/// one surface that is to leave both tangentially. Along its edge a face gives the surface its
-/// bend along the edge and its twist (the turn of the tangent plane along the edge); at a
-/// corner that is four numbers for the three of one bend, and where the four do not fit, the
-/// surface has to change its bend across a line through the corner. Zero where they fit: the
-/// two rounds of a ball's corner do, a plane and a round tangent to it do not.
+//! By what share of their curvature the faces on the two sides of a corner disagree about the
+//! one surface that is to leave both tangentially. Along its edge a face gives the surface its
+//! bend along the edge and its twist (the turn of the tangent plane along the edge); at a
+//! corner that is four numbers for the three of one bend, and where the four do not fit, the
+//! surface has to change its bend across a line through the corner. Zero where they fit: the
+//! two rounds of a ball's corner do, a plane and a round tangent to it do not.
 double cornerConflict(const Side& a, const Side& b)
 {
   const SurfaceJet ja = a.jet(1 - cornerInset), jb = b.jet(cornerInset);
@@ -1844,14 +1854,14 @@ std::optional<TopoDS_Face> planar(const Asked& asked, const Frame& frame)
 
 // --- Four sides ------------------------------------------------------------------------------
 
-/// What share of the tolerance a side that has no polynomial form (an arc, a rational spline)
-/// may be off the spline that stands for it in a four-sided surface, and the most pieces of
-/// degree 5 that spline is given: a half circle is within 1e-8 of its radius with 16.
+//! What share of the tolerance a side that has no polynomial form (an arc, a rational spline)
+//! may be off the spline that stands for it in a four-sided surface, and the most pieces of
+//! degree 5 that spline is given: a half circle is within 1e-8 of its radius with 16.
 constexpr double plainShare    = 0.1;
 constexpr int    plainSegments = 64;
 
-/// A side as a polynomial B-spline over [0, length] with the side's own run of parameters, or
-/// nothing where no such curve comes within the tolerance.
+//! A side as a polynomial B-spline over [0, length] with the side's own run of parameters, or
+//! nothing where no such curve comes within the tolerance.
 occ::handle<Geom_BSplineCurve> plain(const Side& side, double length, bool turned, double tolerance)
 {
   const double            first = std::min(side.from, side.to), last = std::max(side.from, side.to);
@@ -1892,14 +1902,14 @@ std::vector<double> flatKnots(const occ::handle<Geom_BSplineCurve>& curve)
   return {sequence.begin(), sequence.end()};
 }
 
-/// A finer net is not tried when the one before it brought the worst miss down by less than
-/// to this share of what it was: the miss has then stopped falling, and what is left of the
-/// ladder would be spent on a net that comes no nearer.
+//! A finer net is not tried when the one before it brought the worst miss down by less than
+//! to this share of what it was: the miss has then stopped falling, and what is left of the
+//! ladder would be spent on a net that comes no nearer.
 constexpr double stillFalling = 0.75;
 
-/// The Coons patch of four curves that agree in degree and knots pairwise: `bottom` and `top`
-/// along u, `left` and `right` along v. A linear blend is exact in a B-spline basis when taken
-/// at the Greville abscissae.
+//! The Coons patch of four curves that agree in degree and knots pairwise: `bottom` and `top`
+//! along u, `left` and `right` along v. A linear blend is exact in a B-spline basis when taken
+//! at the Greville abscissae.
 SplineNet coons(const occ::handle<Geom_BSplineCurve>& bottom,
                 const occ::handle<Geom_BSplineCurve>& right,
                 const occ::handle<Geom_BSplineCurve>& top,
@@ -1931,15 +1941,15 @@ SplineNet coons(const occ::handle<Geom_BSplineCurve>& bottom,
   return net;
 }
 
-/// The sharpest and the widest corner of a four-sided surface, as the cosine of what the
-/// corner lacks of a straight line or of a turn back: 15 and 165 degrees. A surface's two
-/// directions stand at the corner's angle to each other there, and at 15 degrees its area is
-/// still a quarter of what a right angle gives it (the sine); nearer to a line than that, the
-/// sides are better taken as one loop and trimmed.
+//! The sharpest and the widest corner of a four-sided surface, as the cosine of what the
+//! corner lacks of a straight line or of a turn back: 15 and 165 degrees. A surface's two
+//! directions stand at the corner's angle to each other there, and at 15 degrees its area is
+//! still a quarter of what a right angle gives it (the sine); nearer to a line than that, the
+//! sides are better taken as one loop and trimmed.
 constexpr double sharpestCorner = 0.966;
 
-/// How far one side turns into the next at their corner, in degrees: none where it goes straight
-/// on, 180 where it turns back.
+//! How far one side turns into the next at their corner, in degrees: none where it goes straight
+//! on, 180 where it turns back.
 double turning(const Side& from, const Side& to)
 {
   return std::acos(
@@ -1947,16 +1957,16 @@ double turning(const Side& from, const Side& to)
          * 180 / M_PI;
 }
 
-/// Whether two sides meet at a corner of a quad: one that turns by more than the angular
-/// tolerance, and turns back by less: four curves make a quad at turns from under 4 to over 176
-/// degrees.
+//! Whether two sides meet at a corner of a quad: one that turns by more than the angular
+//! tolerance, and turns back by less: four curves make a quad at turns from under 4 to over 176
+//! degrees.
 bool cornered(const Side& from, const Side& to, double g1Degrees)
 {
   const double angle = turning(from, to);
   return angle > g1Degrees && angle < 180 - g1Degrees;
 }
 
-/// Whether four sides meet at corners, so that they can be the edges of one surface.
+//! Whether four sides meet at corners, so that they can be the edges of one surface.
 bool squarish(const std::vector<Side>& sides, double g1Degrees)
 {
   if (sides.size() != 4)
@@ -1967,15 +1977,15 @@ bool squarish(const std::vector<Side>& sides, double g1Degrees)
   return true;
 }
 
-/// One side of a quad: an edge, or edges in loop order that meet without a corner.
+//! One side of a quad: an edge, or edges in loop order that meet without a corner.
 struct Run
 {
   std::vector<const Side*> parts;
-  /// Where each part starts, as a share of the run's length.
+  //! Where each part starts, as a share of the run's length.
   std::vector<double> starts;
   double              length = 0;
 
-  /// The part at a share of the run, and how far along that part.
+  //! The part at a share of the run, and how far along that part.
   std::pair<const Side*, double> at(double fraction) const
   {
     size_t k = 0;
@@ -1998,9 +2008,9 @@ struct Run
   }
 };
 
-/// The four sides of a quad, the first holding the first edge. Four edges are four sides.
-/// Of more edges, those that meet without a corner (within the angular tolerance) make one
-/// side: there must be four corners then.
+//! The four sides of a quad, the first holding the first edge. Four edges are four sides.
+//! Of more edges, those that meet without a corner (within the angular tolerance) make one
+//! side: there must be four corners then.
 std::optional<std::vector<Run>> quadRuns(const std::vector<Side>& sides, double g1Degrees)
 {
   const size_t n = sides.size();
@@ -2036,10 +2046,10 @@ std::optional<std::vector<Run>> quadRuns(const std::vector<Side>& sides, double 
   return runs;
 }
 
-/// Whether two edges are certainly farther apart than `gap`, from the pole boxes of their
-/// Bezier pieces: positive weights keep each piece inside its poles. Pieces whose boxes come
-/// nearer than `gap` are halved, the longer first, a few times over; false says only that it
-/// could not be shown so, and the edges are then measured.
+//! Whether two edges are certainly farther apart than `gap`, from the pole boxes of their
+//! Bezier pieces: positive weights keep each piece inside its poles. Pieces whose boxes come
+//! nearer than `gap` are halved, the longer first, a few times over; false says only that it
+//! could not be shown so, and the edges are then measured.
 bool apart(const TopoDS_Edge& a, const TopoDS_Edge& b, double gap)
 {
   const auto pieces = [](const TopoDS_Edge& edge) {
@@ -2103,17 +2113,17 @@ bool apart(const TopoDS_Edge& a, const TopoDS_Edge& b, double gap)
   return true;
 }
 
-/// Places along a side of a four-sided net per pole of it that way: four, so that between
-/// two knots of the border, which the surface follows exactly, the tangent plane is asked
-/// more often than the net has freedom to wiggle between.
+//! Places along a side of a four-sided net per pole of it that way: four, so that between
+//! two knots of the border, which the surface follows exactly, the tangent plane is asked
+//! more often than the net has freedom to wiggle between.
 constexpr int placesPerPole = 4;
 
-/// The most poles each way that the Coons patch of four sides is built with: the sides' own,
-/// which a curve with some hundred poles of its own may ask for.
+//! The most poles each way that the Coons patch of four sides is built with: the sides' own,
+//! which a curve with some hundred poles of its own may ask for.
 constexpr int mostCoonsPoles = 1024;
 
-/// The most poles each way of a four-sided net whose inner poles are fitted: about what the
-/// finest net of a trimmed surface has.
+//! The most poles each way of a four-sided net whose inner poles are fitted: about what the
+//! finest net of a trimmed surface has.
 constexpr int mostFittedPoles = 64;
 
 std::optional<Built> foursided(const Asked& asked, const Frame& frame)
@@ -2561,32 +2571,32 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
 
 // --- Any loop --------------------------------------------------------------------------------
 
-/// An edge of a trimmed face: the curve of a side in the surface's parameters, run by the
-/// side's own parameter, and the furthest the surface is there from the side at that parameter.
+//! An edge of a trimmed face: the curve of a side in the surface's parameters, run by the
+//! side's own parameter, and the furthest the surface is there from the side at that parameter.
 using patch_host::Rim;
 
-/// What share of the tolerance the curve of an edge in the surface's parameters may add to
-/// the distance of the surface from the edge, which no such curve can do anything about.
+//! What share of the tolerance the curve of an edge in the surface's parameters may add to
+//! the distance of the surface from the edge, which no such curve can do anything about.
 constexpr double preimageShare = 0.05;
 
-/// The most poles such a curve is given before it is taken as it is.
+//! The most poles such a curve is given before it is taken as it is.
 constexpr int preimagePoles = 1000;
 
-/// The most passes in which its poles are moved onto their places: each takes a third or more
-/// off what is left, so that these leave a millionth of it.
+//! The most passes in which its poles are moved onto their places: each takes a third or more
+//! off what is left, so that these leave a millionth of it.
 constexpr int preimagePasses = 40;
 
-/// Where a side lies on a surface: for every parameter of the side's curve, the parameters of
-/// the surface's point nearest to the curve's. A face whose edge has this as its curve in the
-/// surface's parameters is as near its edge at every parameter as its surface is to the curve
-/// at all, which is what continuity across the edge is read by.
-///
-/// It starts as the side laid into the mean plane, which is where the fit asked the surface to
-/// be, and is then moved onto the true places pole by pole (each pole by what its own place on
-/// the curve is off: progressive iteration, which converges for a B-spline's basis), with knots
-/// added while the curve between those places is off by more than a share of the tolerance.
-/// `parameterLayout` gives the place for a curve parameter in a chart that is not linear in
-/// space: the curve then starts from those places, not from its poles laid into the chart.
+//! Where a side lies on a surface: for every parameter of the side's curve, the parameters of
+//! the surface's point nearest to the curve's. A face whose edge has this as its curve in the
+//! surface's parameters is as near its edge at every parameter as its surface is to the curve
+//! at all, which is what continuity across the edge is read by.
+//!
+//! It starts as the side laid into the mean plane, which is where the fit asked the surface to
+//! be, and is then moved onto the true places pole by pole (each pole by what its own place on
+//! the curve is off: progressive iteration, which converges for a B-spline's basis), with knots
+//! added while the curve between those places is off by more than a share of the tolerance.
+//! `parameterLayout` gives the place for a curve parameter in a chart that is not linear in
+//! space: the curve then starts from those places, not from its poles laid into the chart.
 Rim preimage(const occ::handle<Geom_BSplineSurface>&    surface,
              const Side&                                side,
              const Frame&                               frame,
@@ -2793,12 +2803,12 @@ Rim preimage(const occ::handle<Geom_BSplineSurface>&    surface,
 
 using patch_host::closeGaps;
 
-/// How much more than the deviation that was measured an edge is given as its tolerance: the
-/// deviation is read at places, and between them it may be a little more.
+//! How much more than the deviation that was measured an edge is given as its tolerance: the
+//! deviation is read at places, and between them it may be a little more.
 constexpr double edgeHeadroom = 1.1;
 
-/// The face of `surface` inside the loop. Each edge is the side's own curve, with `rims` as
-/// its curve in the surface's parameters.
+//! The face of `surface` inside the loop. Each edge is the side's own curve, with `rims` as
+//! its curve in the surface's parameters.
 TopoDS_Face trimmed(const occ::handle<Geom_BSplineSurface>& surface,
                     const Asked&                            asked,
                     const std::vector<Rim>&                 rims,
@@ -2861,7 +2871,7 @@ TopoDS_Face trimmed(const occ::handle<Geom_BSplineSurface>& surface,
   return face;
 }
 
-/// Check the p-curves that sewing actually delivers, including its same-parameter repair.
+//! Check the p-curves that sewing actually delivers, including its same-parameter repair.
 void verifySewn(Built& built, const Asked& asked)
 {
   PatchPhase          phase("sewing");
@@ -2968,8 +2978,8 @@ void verifySewn(Built& built, const Asked& asked)
       built.measured.values[i * 4] = delivered[i];
 }
 
-/// Trim an exact continuation and measure its delivered parameter curves, rather than
-/// merely measuring the untrimmed surface at nearest points.
+//! Trim an exact continuation and measure its delivered parameter curves, rather than
+//! merely measuring the untrimmed surface at nearest points.
 std::optional<Built> continued(const occ::handle<Geom_BSplineSurface>&    surface,
                                const Asked&                               asked,
                                const Frame&                               frame,
@@ -3001,11 +3011,11 @@ std::optional<Built> continued(const occ::handle<Geom_BSplineSurface>&    surfac
   return built;
 }
 
-/// A G0 loop may have four logical sides split into tangent edge chains. Seed a
-/// Coons surface from those chains, including degrees above the fitter's limit.
-/// `plain` bounds rational approximation and Coons averages mismatched corner ends;
-/// every original edge still supplies its own rim and measured constraint. This path
-/// never calls fitNet and only follows a regular fit that has missed its limits.
+//! A G0 loop may have four logical sides split into tangent edge chains. Seed a
+//! Coons surface from those chains, including degrees above the fitter's limit.
+//! `plain` bounds rational approximation and Coons averages mismatched corner ends;
+//! every original edge still supplies its own rim and measured constraint. This path
+//! never calls fitNet and only follows a regular fit that has missed its limits.
 std::optional<Built> chainedQuad(const Asked& asked, const Frame& frame)
 {
   if (asked.sides.size() <= 4 || !asked.guides.empty() || !asked.points.empty()
@@ -3094,9 +3104,9 @@ std::optional<Built> chainedQuad(const Asked& asked, const Frame& frame)
   return continued(surface, asked, frame, layout);
 }
 
-/// If every edge supplies the very same spline surface, its continuation is a candidate
-/// before a variational fill. This uses the supplied geometry, never a guessed interior
-/// reconstructed from G0 curves. Different supports and explicit shape controls still fit.
+//! If every edge supplies the very same spline surface, its continuation is a candidate
+//! before a variational fill. This uses the supplied geometry, never a guessed interior
+//! reconstructed from G0 curves. Different supports and explicit shape controls still fit.
 std::optional<Built> splineContinuation(const Asked& asked, const Frame&)
 {
   if (!asked.guides.empty() || !asked.points.empty())
@@ -3154,9 +3164,9 @@ std::optional<Built> splineContinuation(const Asked& asked, const Frame&)
   return built;
 }
 
-/// A toroidal neighbour has an exact rational continuation too. Trim the analytic torus
-/// in its angular parameters before conversion, so the rational rectangle has no seam
-/// inside the requested window. Its B-spline parameters differ from the angles.
+//! A toroidal neighbour has an exact rational continuation too. Trim the analytic torus
+//! in its angular parameters before conversion, so the rational rectangle has no seam
+//! inside the requested window. Its B-spline parameters differ from the angles.
 std::optional<Built> toroidal(const Asked& asked, const Frame& frame)
 {
   if (!asked.guides.empty() || !asked.points.empty())
@@ -3200,9 +3210,9 @@ std::optional<Built> toroidal(const Asked& asked, const Frame& frame)
   return continued(surface, asked, frame, layout);
 }
 
-/// Continue a spherical neighbour exactly, using stereographic parameters. Unlike longitude
-/// and latitude this rational biquadratic rectangle has no pole or seam inside the cap.
-/// Only a rim wholly on the same ball qualifies; the delivered joint is still measured.
+//! Continue a spherical neighbour exactly, using stereographic parameters. Unlike longitude
+//! and latitude this rational biquadratic rectangle has no pole or seam inside the cap.
+//! Only a rim wholly on the same ball qualifies; the delivered joint is still measured.
 std::optional<Built> spherical(const Asked& asked, const Frame& flat)
 {
   if (!asked.guides.empty() || !asked.points.empty())
@@ -3328,8 +3338,8 @@ std::optional<Built> spherical(const Asked& asked, const Frame& flat)
   return continued(surface, asked, frame, layout);
 }
 
-/// Continue two tangent planes and the cylinder between them as one ruled NURBS.
-/// Its only curvature breaks are the two existing plane/round joins, along the round's axis.
+//! Continue two tangent planes and the cylinder between them as one ruled NURBS.
+//! Its only curvature breaks are the two existing plane/round joins, along the round's axis.
 std::optional<Built> ruledRound(const Asked& asked, const Frame& frame)
 {
   if (!asked.guides.empty() || !asked.points.empty())
@@ -3446,107 +3456,107 @@ std::optional<Built> ruledRound(const Asked& asked, const Frame& frame)
   return continued(surface, asked, frame, layout);
 }
 
-/// How far the surface reaches past the loop, as a share of the loop's extent that way: what is
-/// asked along the loop is then asked inside the surface and not on its own edge.
+//! How far the surface reaches past the loop, as a share of the loop's extent that way: what is
+//! asked along the loop is then asked inside the surface and not on its own edge.
 constexpr double marginShare = 0.1;
 
-/// The spans across the longer extent of the loop, net by net, each about 1.6 times the one
-/// before: a miss that falls with the fourth power of the span falls sixfold from one to the
-/// next.
+//! The spans across the longer extent of the loop, net by net, each about 1.6 times the one
+//! before: a miss that falls with the fourth power of the span falls sixfold from one to the
+//! next.
 constexpr int ladder[] = {6, 10, 16, 24, 36, 54};
 
-/// The fewest spans a direction is given, however short the loop is that way.
+//! The fewest spans a direction is given, however short the loop is that way.
 constexpr int fewestSpans = 3;
 
-/// How near the curves a fit is asked to come where they are only met, as a share of the
-/// loop's size: about as near as a fair surface over the coarsest net comes (z = sin 2a on a
-/// radius of 6: 1.7e-5 over six spans, which is 1.4e-6 of the size 12).
+//! How near the curves a fit is asked to come where they are only met, as a share of the
+//! loop's size: about as near as a fair surface over the coarsest net comes (z = sin 2a on a
+//! radius of 6: 1.7e-5 over six spans, which is 1.4e-6 of the size 12).
 constexpr double fitReach = 1e-4;
 
-/// How much less the surface moved onto its curves must bend than the one fitted at the
-/// tolerance to be kept instead.
+//! How much less the surface moved onto its curves must bend than the one fitted at the
+//! tolerance to be kept instead.
 constexpr double clearlyFairer = 0.75;
 
-/// How near the curves the surface is moved after the fit, as a share of the tolerance: half,
-/// which leaves the other half to what the curve of an edge in the surface's parameters adds
-/// and to the places between those that are looked at.
+//! How near the curves the surface is moved after the fit, as a share of the tolerance: half,
+//! which leaves the other half to what the curve of an edge in the surface's parameters adds
+//! and to the places between those that are looked at.
 constexpr double rimShare = 0.5;
 
-/// A surface that is within this share of the tolerance at every place is left as it is: it
-/// is within the limit wherever it is read, and moved, its net would be made finer for nothing
-/// (a window in the inside of a torus went from 10 x 11 to 17 x 17 poles).
+//! A surface that is within this share of the tolerance at every place is left as it is: it
+//! is within the limit wherever it is read, and moved, its net would be made finer for nothing
+//! (a window in the inside of a torus went from 10 x 11 to 17 x 17 poles).
 constexpr double enoughShare = 0.9;
 
-/// The places along a curve at which the surface is moved onto it: this many to a span of the
-/// net as fitted, and no fewer than this many to a curve (64 short sides with 96 each took
-/// minutes).
+//! The places along a curve at which the surface is moved onto it: this many to a span of the
+//! net as fitted, and no fewer than this many to a curve (64 short sides with 96 each took
+//! minutes).
 constexpr int rimPlacesPerSpan = 6, fewestRimPlaces = 16, mostRimPlaces = 4096;
 
-/// The most spans either way of a net whose surface is moved onto its curves, and how many
-/// times finer than it was fitted a net may become that goes over into a face: there the
-/// fit has come near already, and what is left is what its passes did not reach; and where
-/// curves are only met, where the fit was not asked for the tolerance (a hexagon round a
-/// cube's corner asked for 1e-9 took 26 s on the way to the most).
+//! The most spans either way of a net whose surface is moved onto its curves, and how many
+//! times finer than it was fitted a net may become that goes over into a face: there the
+//! fit has come near already, and what is left is what its passes did not reach; and where
+//! curves are only met, where the fit was not asked for the tolerance (a hexagon round a
+//! cube's corner asked for 1e-9 took 26 s on the way to the most).
 constexpr int mostRimSpans = 192, rimFiner = 2, rimFinerMet = 4;
 
-/// Places along a side per span of the net that it crosses. Three met everything with the
-/// fewest poles and rippled; two is what was kept.
+//! Places along a side per span of the net that it crosses. Three met everything with the
+//! fewest poles and rippled; two is what was kept.
 constexpr int placesPerSpan = 2;
 
-/// How far the rim may turn within one span of the coarsest net, in radians, before the net
-/// is made finer there: its own direction, or the tangent plane of the face it runs on.
+//! How far the rim may turn within one span of the coarsest net, in radians, before the net
+//! is made finer there: its own direction, or the tangent plane of the face it runs on.
 constexpr double turnPerSpan = 0.2;
 
-/// The most poles of a net that is free in space. A net that is to go over smoothly into a
-/// face does better so than as a height over the mean plane: its parameters can then run with
-/// the surface where it is steep, and the energy, which is of the parameters, is nearer to
-/// one of the shape (a ball's cap cut at 6 of 10 comes out 0.13 off the ball, as a height 1.3).
-/// It has three times the unknowns and takes 27 times the work: 25 x 25 poles free are about
-/// what a height of 57 x 57 takes.
+//! The most poles of a net that is free in space. A net that is to go over smoothly into a
+//! face does better so than as a height over the mean plane: its parameters can then run with
+//! the surface where it is steep, and the energy, which is of the parameters, is nearer to
+//! one of the shape (a ball's cap cut at 6 of 10 comes out 0.13 off the ball, as a height 1.3).
+//! It has three times the unknowns and takes 27 times the work: 25 x 25 poles free are about
+//! what a height of 57 x 57 takes.
 constexpr int freePoles = 640;
 
-/// The places along a side at which the turning of its face is read.
+//! The places along a side at which the turning of its face is read.
 constexpr int turningSteps = 48;
 
-/// Whether the neighbours' bend is wished for also where two of them disagree about it at a
-/// corner of the rim.
+//! Whether the neighbours' bend is wished for also where two of them disagree about it at a
+//! corner of the rim.
 constexpr bool wishAcrossCorners = false;
 
-/// The nets that are tried with the neighbours' bend wished for, before the surface is made
-/// tangent and no more.
+//! The nets that are tried with the neighbours' bend wished for, before the surface is made
+//! tangent and no more.
 constexpr int wishNets = 3;
 
-/// The steps along a curve at which it is looked for the lines of the net that it crosses.
+//! The steps along a curve at which it is looked for the lines of the net that it crosses.
 constexpr int crossingSteps = 256;
 
-/// Two lines of the net across which it may change its bend count as well apart when this many
-/// of them, as far apart, would cross the loop: about the spans of the third net.
+//! Two lines of the net across which it may change its bend count as well apart when this many
+//! of them, as far apart, would cross the loop: about the spans of the third net.
 constexpr double apartSpans = 16;
 
-/// What a surface that meets its edges and is not one to keep counts as missing by, in units
-/// of the limits: no more than any that misses an edge, so that where no net gives a patch it
-/// is said that the edges can be met and what is wrong with the surface that meets them.
+//! What a surface that meets its edges and is not one to keep counts as missing by, in units
+//! of the limits: no more than any that misses an edge, so that where no net gives a patch it
+//! is said that the edges can be met and what is wrong with the surface that meets them.
 constexpr double unkeptExcess = 1;
 
-/// The nets that may meet the edges with a surface that is not one to keep before it is given
-/// up: the two coarsest and one more.
+//! The nets that may meet the edges with a surface that is not one to keep before it is given
+//! up: the two coarsest and one more.
 constexpr int mostUnkept = 3;
 
-/// A miss of no more than this many times its limit is nearly met.
+//! A miss of no more than this many times its limit is nearly met.
 constexpr double nearly = 2;
 
-/// What a step of the second derivative across a line of lower continuity counts for against
-/// the bend, per length of the line and with the loop's size as the unit; the places to a span
-/// along the line at which it is read; and how far from its corner, as a share of the loop's
-/// size, a step counts in full.
+//! What a step of the second derivative across a line of lower continuity counts for against
+//! the bend, per length of the line and with the loop's size as the unit; the places to a span
+//! along the line at which it is read; and how far from its corner, as a share of the loop's
+//! size, a step counts in full.
 constexpr double jumpWeight = 30, jumpReach = 0.3;
 constexpr int    jumpPlaces = 3;
 
-/// Within this share of the miss before, a miss counts as the same: what is in the way is then
-/// not the net.
+//! Within this share of the miss before, a miss counts as the same: what is in the way is then
+//! not the net.
 constexpr double same = 0.02;
 
-/// The coarsest nets, whose misses say nothing yet of how the finer ones will do.
+//! The coarsest nets, whose misses say nothing yet of how the finer ones will do.
 constexpr int unruly = 2;
 
 Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
@@ -4076,7 +4086,7 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
       // ladder react to a missed trace instead of accepting a coarse preimage and refusing
       // only after placement. The final world-coordinate measurement remains authoritative.
       measureSpatialBoundary(built, asked, false);
-      // Within every limit along its edges is not yet a patch: see patch_inside.h. A net
+      // Within every limit along its edges is not yet a patch: see BRepPatchExt_Inside.hxx. A net
       // that meets the edges with a surface that is not one to keep is too coarse for what
       // is asked along them, and what it cannot follow shows inside the loop; a finer one
       // may do. Points inside may ask for any bend, so with those only a fold is a fault.
@@ -4319,17 +4329,17 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
 
 // --- Adjacent over a conformal chart ---------------------------------------------------------
 
-/// The triangulation that is flattened: at least this many triangles across the loop's
-/// narrowest part (its area over its length round).
+//! The triangulation that is flattened: at least this many triangles across the loop's
+//! narrowest part (its area over its length round).
 constexpr double trianglesAcross = 4;
 
-/// How far the triangulation may stand off the face, as a share of the tolerance: where the
-/// face bends its triangles are as small as that makes them, and the chart is as near the
-/// face's own as its triangles are to the face.
+//! How far the triangulation may stand off the face, as a share of the tolerance: where the
+//! face bends its triangles are as small as that makes them, and the chart is as near the
+//! face's own as its triangles are to the face.
 constexpr double chartDeflection = 0.1;
 
-/// The Adjacent fit over the chart: a net made finer span by span where what it is held to is
-/// not met, from the coarsest of the ladder.
+//! The Adjacent fit over the chart: a net made finer span by span where what it is held to is
+//! not met, from the coarsest of the ladder.
 Built adjacentOver(const Asked&                                  asked,
                    const Frame&                                  frame,
                    const Built&                                  natural,
@@ -4865,11 +4875,11 @@ Built adjacentOver(const Asked&                                  asked,
   return *best;
 }
 
-/// Next/Adjacent with Quad sided off. Over a conformal chart of a surface, the
-/// surface's U and V meet at right angles; so the Natural fill is laid flat conformally, and
-/// a new surface is fitted over that chart: one that meets the same edges as asked and keeps
-/// near the Natural fill inside, as a wish and not a limit. How square U and V
-/// come out is read at every node and in every triangle and reported (see Built::squareness).
+//! Next/Adjacent with Quad sided off. Over a conformal chart of a surface, the
+//! surface's U and V meet at right angles; so the Natural fill is laid flat conformally, and
+//! a new surface is fitted over that chart: one that meets the same edges as asked and keeps
+//! near the Natural fill inside, as a wish and not a limit. How square U and V
+//! come out is read at every node and in every triangle and reported (see Built::squareness).
 Built adjacent(const Asked& asked, const Frame& frame, const Built& natural)
 {
   PatchPhase phase("adjacent");
@@ -4946,8 +4956,8 @@ Built plate(const Asked& asked)
   return {4, fill.Face(), measureAll(BRep_Tool::Surface(fill.Face()), asked)};
 }
 
-/// The face of the loop `asked` holds, held to every check Patch makes; fails with what it
-/// misses otherwise.
+//! The face of the loop `asked` holds, held to every check Patch makes; fails with what it
+//! misses otherwise.
 Built patchFace(Asked asked, int method, double flatness, PatchControls controls)
 {
   if (!arrange(asked.sides, asked.limits.g0, controls.open && method != 2))
@@ -5158,10 +5168,10 @@ Built patchFace(Asked asked, int method, double flatness, PatchControls controls
     fail(op, no_solution, "no Patch candidate meets what was asked: " + built->measured.worst);
   if (!BRepCheck_Analyzer(built->face).IsValid())
     fail(op, no_solution, "the patch is not a valid face");
-  // Within every limit along its edges is not yet a patch: see patch_inside.h. Points inside
-  // may ask for any bend, so with those only a fold is a fault.
-  // A plane, or the one surface that four curves have between them with nothing fitted,
-  // bends as its edges make it: there only a fold is a fault.
+  // Within every limit along its edges is not yet a patch: see BRepPatchExt_Inside.hxx. Points
+  // inside may ask for any bend, so with those only a fold is a fault. A plane, or the one surface
+  // that four curves have between them with nothing fitted, bends as its edges make it: there only
+  // a fold is a fault.
   const bool fitted = built->construction >= 2;
   if (const auto fault =
         insideFault(built->face, fitted && asked.points.empty() ? rimBend(asked) : 0))

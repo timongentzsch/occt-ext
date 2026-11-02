@@ -1,7 +1,17 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
-// Fillet v2: The ball resting on both supports at a place along the edge, and the section through
+// Blend: The ball resting on both supports at a place along the edge, and the section through
 // its feet.
 
 #include <BRepBlendExt_Internal.hxx>
@@ -16,8 +26,8 @@ namespace BRepExt::blend2::detail
 
 namespace
 {
-/// A cliff's frame across its edge at `w`: the unit tangent, and two unit normals to it, with
-/// their derivatives along w (the normals from a fixed direction, made normal to the tangent).
+//! A cliff's frame across its edge at `w`: the unit tangent, and two unit normals to it, with
+//! their derivatives along w (the normals from a fixed direction, made normal to the tangent).
 struct CliffFrame
 {
   gp_Pnt p;
@@ -225,9 +235,9 @@ bool jetAt(const Side& side, double u, double v, Jet& j)
   return true;
 }
 
-/// Where the centre of a ball of signed radii r0 and r1 would be at the edge's point E at `t` if
-/// its faces were their tangent planes there: off each by its radius, in the plane across the edge
-/// (Rail::byCentre).
+//! Where the centre of a ball of signed radii r0 and r1 would be at the edge's point E at `t` if
+//! its faces were their tangent planes there: off each by its radius, in the plane across the edge
+//! (Rail::byCentre).
 static std::optional<gp_Pnt> centreAcross(const Rail&   rail,
                                           double        t,
                                           const gp_Pnt& E,
@@ -256,8 +266,8 @@ static std::optional<gp_Pnt> centreAcross(const Rail&   rail,
   return gp_Pnt(E.XYZ() + n[0] * ((r0 - c * r1) / det) + n[1] * ((r1 - c * r0) / det));
 }
 
-/// The ball of signed radii r0 and r1 off the supports whose section's plane passes through the
-/// edge's point at `t` (or the centre across it there, Rail::byCentre).
+//! The ball of signed radii r0 and r1 off the supports whose section's plane passes through the
+//! edge's point at `t` (or the centre across it there, Rail::byCentre).
 static bool ballAt(const Rail& rail, double t, Station& s, double r0, double r1)
 {
   gp_Pnt E;
@@ -355,10 +365,10 @@ static bool ballAt(const Rail& rail, double t, Station& s, double r0, double r1)
   return true;
 }
 
-/// A full round's ball (Law::Full): resting on both supports and on the face between them, its
-/// centre in the plane across its path through the edge's point at `t`, its radius what that takes.
-/// The path lies on the three offsets, across all three normals, so its direction is that of the
-/// first support's normal crossed with the middle face's (the supports may be parallel).
+//! A full round's ball (Law::Full): resting on both supports and on the face between them, its
+//! centre in the plane across its path through the edge's point at `t`, its radius what that takes.
+//! The path lies on the three offsets, across all three normals, so its direction is that of the
+//! first support's normal crossed with the middle face's (the supports may be parallel).
 static bool fullAt(const Rail& rail, double t, Station& s)
 {
   gp_Pnt E;
@@ -456,7 +466,7 @@ static bool fullAt(const Rail& rail, double t, Station& s)
   return true;
 }
 
-/// A chordal blend's ball at `t`.
+//! A chordal blend's ball at `t`.
 static bool chordAt(const Rail& rail, double t, Station& s, double scale)
 {
   // A chordal blend's ball is the one whose feet are the chord apart: its radius from the last
@@ -484,11 +494,11 @@ static bool chordAt(const Rail& rail, double t, Station& s, double scale)
   return false;
 }
 
-/// distances: setbacks, each foot on its face in the plane across the edge at its point, its
-/// distance from that point. Each face is solved on its own: two conditions, its two parameters.
-/// Where a foot is still at the edge (the first station), it starts from a setback into its face:
-/// into the face from the edge is along the other face's normal, across the edge, for a concave
-/// blend, and against it for a convex one.
+//! distances: setbacks, each foot on its face in the plane across the edge at its point, its
+//! distance from that point. Each face is solved on its own: two conditions, its two parameters.
+//! Where a foot is still at the edge (the first station), it starts from a setback into its face:
+//! into the face from the edge is along the other face's normal, across the edge, for a concave
+//! blend, and against it for a convex one.
 static bool setbackAt(const Rail& rail, double t, Station& s, double d0, double d1)
 {
   gp_Pnt E;
@@ -588,11 +598,10 @@ bool contactAt(const Rail& rail, double t, Station& s, double scale)
   return true;
 }
 
-/// The centre of the circle the section is an arc of: the ball's own, but for a full round, whose
-/// radius changes along its path, where the ball touches the blend in a small circle across the
-/// path (a canal surface's characteristic circle): the circle through its three feet. (A chordal
-
-/// changes, and within 5e-5 of the great circle.)
+//! The centre of the circle the section is an arc of: the ball's own, but for a full round, whose
+//! radius changes along its path, where the ball touches the blend in a small circle across the
+//! path (a canal surface's characteristic circle): the circle through its three feet. (For a
+//! chordal round the radius barely changes, and the circle is within 5e-5 of the great circle.)
 static std::optional<gp_Pnt> sectionCentre(const Rail& rail, const Station& s)
 {
   if (rail.law != Law::Full)

@@ -1,7 +1,17 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
-// Fillet v2: The blend approximated from its exact sections: knots at the
+// Blend: The blend approximated from its exact sections: knots at the
 // data's breaks, Greville interpolation refined to the tolerance, and the fold
 // check.
 
@@ -600,11 +610,11 @@ Fitted fit(const Rail&                      rail,
   fail(rail.op, no_solution, "the blend surface cannot meet the length tolerance", {rail.edge});
 }
 
-/// A contact's speed the way the ball rolls at the fit's u: its foot's velocity along the direction
-/// across both supports' normals at the contacts, taken the way the edge runs there (as a station's
-/// is, ballAt). Not the edge's direction itself: a contact far from the edge (in an acute wedge)
-/// moves across it, down a leaning wall, without running back.
-/// Through adaptors, which keep the span last evaluated: a thousand and more evaluations each.
+//! A contact's speed the way the ball rolls at the fit's u: its foot's velocity along the direction
+//! across both supports' normals at the contacts, taken the way the edge runs there (as a station's
+//! is, ballAt). Not the edge's direction itself: a contact far from the edge (in an acute wedge)
+//! moves across it, down a leaning wall, without running back.
+//! Through adaptors, which keep the span last evaluated: a thousand and more evaluations each.
 struct Speed
 {
   const Rail&         rail;
@@ -644,10 +654,10 @@ struct Speed
   }
 };
 
-/// The places the speed is read at between u0 and u1: within each knot span of the fitted contact
-/// (where its own refinement put them, as finely as the data asks: a fold however short on however
-/// long an edge), 2 (kDegree - 1) places, two more than a span's speed (of degree kDegree - 1 on a
-/// flat cap) can have turns.
+//! The places the speed is read at between u0 and u1: within each knot span of the fitted contact
+//! (where its own refinement put them, as finely as the data asks: a fold however short on however
+//! long an edge), 2 (kDegree - 1) places, two more than a span's speed (of degree kDegree - 1 on a
+//! flat cap) can have turns.
 static std::vector<double> sites(const Fitted& fitted, int side, double u0, double u1)
 {
   const auto&         contact = fitted.contact[side];
@@ -665,9 +675,9 @@ static std::vector<double> sites(const Fitted& fitted, int side, double u0, doub
   return out;
 }
 
-/// Where a contact's speed along the edge dips, and how low: each strict least of the samples,
-/// refined by golden-section search to the true least, and each end where it is running back
-/// (checkFold).
+//! Where a contact's speed along the edge dips, and how low: each strict least of the samples,
+//! refined by golden-section search to the true least, and each end where it is running back
+//! (checkFold).
 static std::vector<std::pair<double, double>> dips(const Rail& rail, const Fitted& fitted, int side)
 {
   const double        u0 = rail.u(rail.first), u1 = rail.u(rail.last);
@@ -726,7 +736,7 @@ const std::vector<std::pair<double, double>>& Dips::of(int side)
   return *found[side];
 }
 
-/// Whether a contact runs back anywhere along the edge.
+//! Whether a contact runs back anywhere along the edge.
 static bool runsBack(Dips& dips, int side)
 {
   const auto& found = dips.of(side);
@@ -750,7 +760,7 @@ void checkFold(Dips& dips)
       continue; // a cliff's contact is its edge; a notch's is trimmed away
     if (!runsBack(dips, side))
       continue;
-    // Where a contact folds, the blend's own swallowtail is to be trimmed, which v2 does
+    // Where a contact folds, the blend's own swallowtail is to be trimmed, which the blend does
     // not do yet; past the faces' bound nothing can be made.
     const bool flat = GeomAdaptor_Surface(rail.s[side].surface).GetType() == GeomAbs_Plane;
     fail(rail.op,
@@ -771,9 +781,8 @@ std::vector<Fold> capFolds(Dips& dips, std::vector<Fold>* open)
   const double  u0 = rail.u(rail.first), u1 = rail.u(rail.last);
   for (int side = 0; side < 2; ++side)
   {
-    // A flat cap, whatever its surface's kind (a plane scaled unevenly is a spline): only the
-
-    // not patch either).
+    // A flat cap, whatever its surface's kind (a plane scaled unevenly is a spline): only a plane
+    // is patched (a cliff is not patched either).
     if (rail.s[side].cliffCurve
         || !GeomLib_IsPlanarSurface(rail.s[side].surface, tol::length).IsPlanar())
       continue;

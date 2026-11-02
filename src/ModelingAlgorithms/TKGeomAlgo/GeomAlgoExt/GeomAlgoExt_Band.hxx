@@ -17,15 +17,15 @@
 namespace GeomAlgoExt
 {
 
-/// The lower half of a symmetric matrix whose entries lie within `half` of the diagonal.
+//! The lower half of a symmetric matrix whose entries lie within `half` of the diagonal.
 struct Band
 {
   int                 size, half;
   std::vector<double> data;
   std::vector<int>    first;
   bool                paired;
-  /// Three equal blocks along the diagonal that nothing joins, each block's rows beginning
-  /// where the first's do: see sideBySide.
+  //! Three equal blocks along the diagonal that nothing joins, each block's rows beginning
+  //! where the first's do: see sideBySide.
   bool threeBlocks = false;
 
   Band(int size, int half, bool paired)
@@ -39,9 +39,9 @@ struct Band
       first[i] = i;
   }
 
-  /// Whether the matrix is three equal blocks along the diagonal as threeBlocks says: then
-  /// factor and solve take the same row of the three side by side, so that their sums, each
-  /// formed in its own order as before, overlap.
+  //! Whether the matrix is three equal blocks along the diagonal as threeBlocks says: then
+  //! factor and solve take the same row of the three side by side, so that their sums, each
+  //! formed in its own order as before, overlap.
   bool sideBySide() const
   {
     if (size % 3 || paired)
@@ -96,7 +96,7 @@ struct Band
     return sum;
   }
 
-  /// Replace the matrix by its Cholesky factor; false when it is not positive definite.
+  //! Replace the matrix by its Cholesky factor; false when it is not positive definite.
   bool factor()
   {
     if (threeBlocks && sideBySide())
@@ -151,7 +151,7 @@ struct Band
     return true;
   }
 
-  /// Solve in place with the factor.
+  //! Solve in place with the factor.
   void solve(std::vector<double>& x)
   {
     if (threeBlocks && sideBySide())

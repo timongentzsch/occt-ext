@@ -25,13 +25,13 @@
 namespace GeomAlgoExt
 {
 
-/// The cubic spline through values at rising places, C2 with a knot at each place: the unique such
-/// spline once its two end conditions are fixed. `Free` ends have no second derivative (the natural
-/// spline, which among all C2 interpolants minimises the integral of the squared second
-/// derivative). `Follow` ends take the slope of the cubic through the first and last four values,
-/// which makes it good to the fourth power of the spacing for a smooth function. `Closed` makes the
-/// first and last value one, and the slope and second derivative meet there too. What it gives for
-/// each set of values is its poles.
+//! The cubic spline through values at rising places, C2 with a knot at each place: the unique such
+//! spline once its two end conditions are fixed. `Free` ends have no second derivative (the natural
+//! spline, which among all C2 interpolants minimises the integral of the squared second
+//! derivative). `Follow` ends take the slope of the cubic through the first and last four values,
+//! which makes it good to the fourth power of the spacing for a smooth function. `Closed` makes the
+//! first and last value one, and the slope and second derivative meet there too. What it gives for
+//! each set of values is its poles.
 struct CubicThrough
 {
   enum class Ends
@@ -176,8 +176,8 @@ struct CubicThrough
   }
 };
 
-/// Curves of one degree with the same knots, by raising degrees and inserting knots, which moves
-/// none of them.
+//! Curves of one degree with the same knots, by raising degrees and inserting knots, which moves
+//! none of them.
 inline void unify(std::vector<Handle(Geom_BSplineCurve)>& curves)
 {
   int degree = 1;

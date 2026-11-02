@@ -1,9 +1,19 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #pragma once
 
-// Fillet v2: one blend pipeline built from its exact definition (docs/fillet-v2/DESIGN.md).
+// Rolling-ball blends: one blend pipeline built from the exact definition of the blend.
 // A blend is defined by its two supports, the offset distances off each, and a section law;
 // the ball's centre (the spine) and its feet (the spring curves) are marched exactly, the
 // blend surface is approximated from the exact sections with knots at the data's breaks, and
@@ -19,8 +29,8 @@
 namespace BRepExt::blend2
 {
 
-/// Section law: rational conic, curvature-continuous spline, bevel, chord-controlled or
-/// three-support round.
+//! Section law: rational conic, curvature-continuous spline, bevel, chord-controlled or
+//! three-support round.
 enum class Law
 {
   Conic   = 0,
@@ -35,27 +45,27 @@ struct Request
   const char*               operation = "filletV2";
   TopoDS_Shape              body;
   std::vector<TopoDS_Shape> edges;
-  /// Offset distances of the supports, as a ball's radius is; `second` zero means `first`.
-  /// `first` is off `reference` where one is given, else off the first face of each edge.
+  //! Offset distances of the supports, as a ball's radius is; `second` zero means `first`.
+  //! `first` is off `reference` where one is given, else off the first face of each edge.
   double       first = 0, second = 0;
   TopoDS_Shape reference;
   Law          law = Law::Conic;
   double       rho = 0.5;
-  /// Where not empty, the only edges that tangent ones may be added from (the edges asked are
-  /// kept whatever it holds).
+  //! Where not empty, the only edges that tangent ones may be added from (the edges asked are
+  //! kept whatever it holds).
   std::vector<TopoDS_Shape> mayAdd;
-  /// For a full round, the radius it must have all along: the two rounds of this radius whose
-  /// contacts meet on the face between, made as two faces meeting where they touch it.
+  //! For a full round, the radius it must have all along: the two rounds of this radius whose
+  //! contacts meet on the face between, made as two faces meeting where they touch it.
   double meet = 0;
-  /// How many replays (replayOverrun) this request is made inside: bounded, so that rounds taken
-  /// off and put back that fail the same way end.
+  //! How many replays (replayOverrun) this request is made inside: bounded, so that rounds taken
+  //! off and put back that fail the same way end.
   int replays = 0;
 };
 
-/// The blended body, made on a copy of the input without its meshes (it shares nothing with the
-/// input); what became of every face, edge and vertex of the input (for the face history and the
-/// journal); the faces and edges the blends left as they were, each with its copy; and what was
-/// made: the pieces, the edges added as tangent to the picked ones and the pieces on exact sheets.
+//! The blended body, made on a copy of the input without its meshes (it shares nothing with the
+//! input); what became of every face, edge and vertex of the input (for the face history and the
+//! journal); the faces and edges the blends left as they were, each with its copy; and what was
+//! made: the pieces, the edges added as tangent to the picked ones and the pieces on exact sheets.
 struct Blended
 {
   TopoDS_Shape                                       shape;
@@ -66,12 +76,12 @@ struct Blended
 
 Blended blend(const Request& request);
 
-/// The kernel's stored body `shape` blended at its `edges` and checked valid: what fillet v2's
-/// two entry points, with a journal session and without, share. `law` is a Law's value and
-/// `reference` 0 for none.
-/// A result the blend may return for this input: valid, closed where the input was, and every edge
-/// that claims it curvature continuous to within limit::seamBend of a blend of `size`. Refused by
-/// name otherwise.
+//! The kernel's stored body `shape` blended at its `edges` and checked valid: what the blend's
+//! two entry points, with a journal session and without, share. `law` is a Law's value and
+//! `reference` 0 for none.
+//! A result the blend may return for this input: valid, closed where the input was, and every edge
+//! that claims it curvature continuous to within limit::seamBend of a blend of `size`. Refused by
+//! name otherwise.
 void accepted(const char*         operation,
               const TopoDS_Shape& input,
               const TopoDS_Shape& result,

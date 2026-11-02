@@ -1066,10 +1066,10 @@ These source moves add no operation or new numeric policy; stock whole-operation
 CPU/quality comparisons remain future work, not an inferred speedup.
 
 `BRepAlgoExt_Properties` owns the original adaptive boundary property core and
-analytic rectangular-face areas. The application includes this source inside its
-original translation unit, retaining visibility of its local helpers for host
-wrappers. Native CMake compiles the same file independently. The app's IDs and
-publication logic stay outside it. Areas integrate ||Su cross Sv||; signed
+analytic rectangular-face areas. A host may include this source in its own
+translation unit to keep its local helpers visible to its wrappers; the toolkit
+compiles the same file independently. A host's own identifiers and publication
+logic stay outside it. Areas integrate ||Su cross Sv||; signed
 volume integrates (p-origin) dot (Su cross Sv)/3. Rectangles of elementary
 surfaces use their analytic Jacobian integrals, excluding cone-apex crossings
 and spindle tori. Other paths retain their quadrature/fallback policy.

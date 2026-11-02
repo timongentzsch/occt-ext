@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
@@ -9,8 +19,8 @@
 // The drafted wall is the ruled isocline surface over the wall's neutral curve: at the height
 // z above the neutral plane it is the curve moved sideways, along its own normal in that
 // plane, by -z tan(angle). Every tangent plane of it makes the angle with the pull direction.
-// The wall is replaced by that surface the way push_face.cpp moves a face: what lies between
-// the two is a solid of its own, taken from the body where the new surface lies inside it
+// The wall is replaced by that surface the way BRepOffsetExt_Faces.cxx moves a face: what lies
+// between the two is a solid of its own, taken from the body where the new surface lies inside it
 // and joined to it where it lies outside.
 //
 // What is taken stands a little out of the body, past the wall and past its upper and lower
@@ -65,21 +75,21 @@ namespace
 
 const char* const op = "draftFaces";
 
-/// The curves of the drafted wall and of the walls beside it are fitted to this: the
-/// distance at which OpenCascade takes two points for one.
+//! The curves of the drafted wall and of the walls beside it are fitted to this: the
+//! distance at which OpenCascade takes two points for one.
 constexpr double isoclineFit = BRepExt::tolerance::length;
-/// The faces of a solid that is taken or joined are sewn at ten times that fit.
+//! The faces of a solid that is taken or joined are sewn at ten times that fit.
 constexpr double isoclineSew = BRepExt::tolerance::sewing;
-/// How far what is taken stands out of the body and what is joined into it, in units of the
-/// caller's tolerance: far above the Boolean's fuzz (1e-7), small against any wall.
+//! How far what is taken stands out of the body and what is joined into it, in units of the
+//! caller's tolerance: far above the Boolean's fuzz (1e-7), small against any wall.
 constexpr double isoclineOverlap = 1e3;
-/// How far (radians) a wall's normal may lean from square to the pull direction and the wall
-/// still count as running along it, and how far the angle that is measured on the result may
-/// be from the angle asked: the normals of a surface ruled between curves fitted to 1e-7.
+//! How far (radians) a wall's normal may lean from square to the pull direction and the wall
+//! still count as running along it, and how far the angle that is measured on the result may
+//! be from the angle asked: the normals of a surface ruled between curves fitted to 1e-7.
 constexpr double isoclineAngle = 1e-5;
 
-/// One wall as the draft needs it: a curve at the wall's lower level, the levels, and the
-/// side of the curve that the wall faces.
+//! One wall as the draft needs it: a curve at the wall's lower level, the levels, and the
+//! side of the curve that the wall faces.
 struct Wall
 {
   TopoDS_Face        face;
@@ -94,8 +104,8 @@ double heightOf(const gp_Pnt& point, const gp_Pln& neutral, const gp_Dir& pull)
   return gp_Vec(neutral.Location(), point).Dot(gp_Vec(pull));
 }
 
-/// The wall, or a failure that names the face: it has to run along the pull direction, from
-/// one level to another, between straight ends.
+//! The wall, or a failure that names the face: it has to run along the pull direction, from
+//! one level to another, between straight ends.
 Wall wallOf(const TopoDS_Face& face, const gp_Pln& neutral, const gp_Dir& pull, double tolerance)
 {
   Wall wall;
@@ -233,7 +243,7 @@ Wall wallOf(const TopoDS_Face& face, const gp_Pln& neutral, const gp_Dir& pull, 
   return wall;
 }
 
-/// The wall's curve at the height `z`, moved sideways out of the wall by `shift`: fitted.
+//! The wall's curve at the height `z`, moved sideways out of the wall by `shift`: fitted.
 Handle(Geom_BSplineCurve) shifted(const Wall& wall, const gp_Dir& pull, double z, double shift)
 {
   Handle(Geom_Curve) at =
@@ -251,8 +261,8 @@ Handle(Geom_BSplineCurve) shifted(const Wall& wall, const gp_Dir& pull, double z
   return {};
 }
 
-/// The least of 1 - shift * curvature along the wall's curve: at zero and below the curve
-/// moved by `shift` folds over itself.
+//! The least of 1 - shift * curvature along the wall's curve: at zero and below the curve
+//! moved by `shift` folds over itself.
 double roomFor(const Wall& wall, const gp_Dir& pull, double shift)
 {
   double       least = 1.0;
@@ -279,7 +289,7 @@ struct Ruled
   bool                 alongU = true; // the curve runs along u, the height along v
   double               from = 0, to = 0;
 
-  /// The (u, v) limits of the piece between the heights a and b of a surface that spans z0 to z1.
+  //! The (u, v) limits of the piece between the heights a and b of a surface that spans z0 to z1.
   TopoDS_Face piece(double z0, double z1, double a, double b) const
   {
     double u0, u1, v0, v1;
@@ -301,7 +311,7 @@ struct Ruled
   }
 };
 
-/// The surface ruled between two curves, and which way its parameters run.
+//! The surface ruled between two curves, and which way its parameters run.
 Ruled ruledBetween(const Handle(Geom_BSplineCurve)& lower, const Handle(Geom_BSplineCurve)& upper)
 {
   Ruled                  ruled;
@@ -319,7 +329,7 @@ Ruled ruledBetween(const Handle(Geom_BSplineCurve)& lower, const Handle(Geom_BSp
   return ruled;
 }
 
-/// A solid between two walls ruled over the same curve, from the height a to b.
+//! A solid between two walls ruled over the same curve, from the height a to b.
 TopoDS_Shape slab(const Ruled& inner,
                   const Ruled& outer,
                   double       z0,

@@ -1,12 +1,22 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 // The offset of a whole body, with the faces that it cannot keep taken out first.
 //
 // OpenCascade removes faces that an offset shrinks to nothing only where every face is flat
 // (BRepOffset_MakeOffset.cxx, `myIsPlanar`): a fillet whose radius the distance reaches comes
 // back turned inside out, as an invalid solid or not at all. So the faces are classified first
-// (offset_parts.h), those that vanish are removed from a working copy by extending their
+// (BRepOffsetExt_Parts.hxx), those that vanish are removed from a working copy by extending their
 // neighbours (BRepAlgoAPI_Defeaturing), and that copy is offset. What is bent too tightly in a
 // part of a face only cannot be removed like that and is refused, naming the face.
 

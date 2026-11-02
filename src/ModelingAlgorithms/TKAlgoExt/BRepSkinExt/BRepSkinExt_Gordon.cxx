@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
@@ -124,7 +134,7 @@ bool closedCurve(const Handle(Geom_BSplineCurve)& c, double tolerance)
   return c->StartPoint().Distance(c->EndPoint()) <= tolerance;
 }
 
-/// Where two curves meet: the parameter on each, and how far apart they are there.
+//! Where two curves meet: the parameter on each, and how far apart they are there.
 struct Crossing
 {
   double onFirst = 0, onSecond = 0, gap = 0;
@@ -147,7 +157,7 @@ gp_Vec tangentAt(const Handle(Geom_BSplineCurve)& c, double u)
   return d;
 }
 
-/// A closed curve begun at `u` instead: the same points, the same way round.
+//! A closed curve begun at `u` instead: the same points, the same way round.
 Handle(Geom_BSplineCurve) reseamed(const Handle(Geom_BSplineCurve)& c, double u, double tolerance)
 {
   Handle(Geom_BSplineCurve) head = Handle(Geom_BSplineCurve)::DownCast(c->Copy());
@@ -195,10 +205,10 @@ const char* said(GeomFill_Gordon::ResultStatus status)
   }
 }
 
-/// What comes back is checked apart from how it was built: every profile and guide, at eight
-/// places to each of its spans, lies on the surface to the tolerance; the surface's normal nowhere
-/// vanishes or turns by a right angle between neighbours of a grid of four to each span; and at
-/// every crossing it is on the same side of the two curves there.
+//! What comes back is checked apart from how it was built: every profile and guide, at eight
+//! places to each of its spans, lies on the surface to the tolerance; the surface's normal nowhere
+//! vanishes or turns by a right angle between neighbours of a grid of four to each span; and at
+//! every crossing it is on the same side of the two curves there.
 void certify(const Handle(Geom_BSplineSurface)&            surface,
              const std::vector<Handle(Geom_BSplineCurve)>& profiles,
              const std::vector<Handle(Geom_BSplineCurve)>& guides,
@@ -278,9 +288,9 @@ void certify(const Handle(Geom_BSplineSurface)&            surface,
   }
 }
 
-/// A rising map through rising points: the cubic spline through them, smooth to the second
-/// derivative and as steep at its ends as the first and last stretches, where that rises
-/// everywhere; otherwise the monotone cubic of Fritsch and Carlson, smooth to the first only.
+//! A rising map through rising points: the cubic spline through them, smooth to the second
+//! derivative and as steep at its ends as the first and last stretches, where that rises
+//! everywhere; otherwise the monotone cubic of Fritsch and Carlson, smooth to the first only.
 struct Monotone
 {
   std::vector<double> x, y, m;
@@ -357,10 +367,10 @@ struct Monotone
   }
 };
 
-/// A curve between two of its parameters made again as a spline whose parameter is `to(s)`, s the
-/// share of its length up to the point, or of its own parameter where `byLength` is false: the
-/// spline through points of the curve, the given parameters of the curve among them, more of them
-/// until the spline is within a quarter of the tolerance of the curve between them too.
+//! A curve between two of its parameters made again as a spline whose parameter is `to(s)`, s the
+//! share of its length up to the point, or of its own parameter where `byLength` is false: the
+//! spline through points of the curve, the given parameters of the curve among them, more of them
+//! until the spline is within a quarter of the tolerance of the curve between them too.
 Handle(Geom_BSplineCurve) refit(const Handle(Geom_BSplineCurve)& c,
                                 double                           a,
                                 double                           b,
@@ -432,8 +442,8 @@ Handle(Geom_BSplineCurve) refit(const Handle(Geom_BSplineCurve)& c,
   }
 }
 
-/// Whether two curves run alike: one degree, and the same knots and weights at the same shares of
-/// their parameters.
+//! Whether two curves run alike: one degree, and the same knots and weights at the same shares of
+//! their parameters.
 bool runAlike(const Handle(Geom_BSplineCurve)& a, const Handle(Geom_BSplineCurve)& b)
 {
   if (a->Degree() != b->Degree() || a->NbKnots() != b->NbKnots() || a->NbPoles() != b->NbPoles())
@@ -451,13 +461,13 @@ bool runAlike(const Handle(Geom_BSplineCurve)& a, const Handle(Geom_BSplineCurve
   return true;
 }
 
-/// Curves made again as cubics on one grid of parameters from 0 to 1, each parameter at the share
-/// of its curve's length that `shares[i]` gives, closed ones periodic: same knots, no weights, the
-/// parameters `given` among the grid's. Each is within 1e-8 of its length of its curve; the grid
-/// is refined for all together. Curves that are not made periodic keep their directions at their
-/// ends. Empty where 4096 points do not bring one there (a corner along it). The accuracy is set by
-/// the closed forms of rings on a cone or a cylinder, not by comparison with another product. Open
-/// speed finding: skin.net-seams-apart is 4.3 times its time, in these spans.
+//! Curves made again as cubics on one grid of parameters from 0 to 1, each parameter at the share
+//! of its curve's length that `shares[i]` gives, closed ones periodic: same knots, no weights, the
+//! parameters `given` among the grid's. Each is within 1e-8 of its length of its curve; the grid
+//! is refined for all together. Curves that are not made periodic keep their directions at their
+//! ends. Empty where 4096 points do not bring one there (a corner along it). The accuracy is set by
+//! the closed forms of rings on a cone or a cylinder, not by comparison with another product. Open
+//! speed finding: skin.net-seams-apart is 4.3 times its time, in these spans.
 std::vector<Handle(Geom_BSplineCurve)> onOneGrid(
   const std::vector<Handle(Geom_BSplineCurve)>& curves,
   const std::vector<Monotone>&                  shares,
@@ -551,11 +561,11 @@ std::vector<Handle(Geom_BSplineCurve)> onOneGrid(
   return {};
 }
 
-/// The surface through closed rings and guides, as the sum of the skin of the rings and the skin of
-/// the guides less the skin of their crossings. All of them are made again on one grid each, every
-/// guide at one parameter of the rings, the mean of the shares of their lengths at which it crosses
-/// them, and every ring at one of the guides likewise. Null where a curve cannot be made again or a
-/// guide does not run from ring to ring in their order, for GeomFill_Gordon to say what it finds.
+//! The surface through closed rings and guides, as the sum of the skin of the rings and the skin of
+//! the guides less the skin of their crossings. All of them are made again on one grid each, every
+//! guide at one parameter of the rings, the mean of the shares of their lengths at which it crosses
+//! them, and every ring at one of the guides likewise. Null where a curve cannot be made again or a
+//! guide does not run from ring to ring in their order, for GeomFill_Gordon to say what it finds.
 Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&       rings,
                                      const std::vector<Handle(Geom_BSplineCurve)>& guidesGiven,
                                      std::vector<std::vector<Crossing>>&           at,
@@ -1322,9 +1332,9 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
 
 namespace
 {
-/// Curves ready to be brought to one basis exactly: those with weights that differ have no such
-/// basis, so they are made again by length, without weights, on one grid; those without weights
-/// keep their own parameter. False where one cannot be made again (a corner along it).
+//! Curves ready to be brought to one basis exactly: those with weights that differ have no such
+//! basis, so they are made again by length, without weights, on one grid; those without weights
+//! keep their own parameter. False where one cannot be made again (a corner along it).
 bool withoutUnlikeWeights(std::vector<Handle(Geom_BSplineCurve)>& curves, bool periodic)
 {
   std::vector<size_t> weighted;
@@ -1359,18 +1369,18 @@ bool withoutUnlikeWeights(std::vector<Handle(Geom_BSplineCurve)>& curves, bool p
   return true;
 }
 
-/// Closed rings of one edge each, made fit to be joined point to point. Their seams go in one line,
-/// as a convention of this code: the first keeps its seam, each next has its seam at its point
-/// nearest to the seam before, carried over by the difference of the centres of the two rings'
-/// world boxes. This convention was chosen by comparison with another system (a skin of a spline,
-/// an ellipse and a circle rings, shifted and turned, to 2e-4 mm in place and 0.03 mm in a general
-/// pose), not a theorem: it is pose dependent and greedy from the first ring. The alternative with
-/// a proof is cyclic alignment, minimising the squared mismatch over shifts as a cyclic
-/// cross-correlation (Dogan, Bernal and Hagwood 2025), which is globally optimal pairwise but moves
-/// the seam elsewhere than this convention does. Rational rings that then do not run alike are made
-/// again with the share of their length as their parameter, so that the same share of each is
-/// joined and rings of one circle make a cylinder. Other sections are left to the skinning, which
-/// matches their vertices.
+//! Closed rings of one edge each, made fit to be joined point to point. Their seams go in one line,
+//! as a convention of this code: the first keeps its seam, each next has its seam at its point
+//! nearest to the seam before, carried over by the difference of the centres of the two rings'
+//! world boxes. This convention was chosen by comparison with another system (a skin of a spline,
+//! an ellipse and a circle rings, shifted and turned, to 2e-4 mm in place and 0.03 mm in a general
+//! pose), not a theorem: it is pose dependent and greedy from the first ring. The alternative with
+//! a proof is cyclic alignment, minimising the squared mismatch over shifts as a cyclic
+//! cross-correlation (Dogan, Bernal and Hagwood 2025), which is globally optimal pairwise but moves
+//! the seam elsewhere than this convention does. Rational rings that then do not run alike are made
+//! again with the share of their length as their parameter, so that the same share of each is
+//! joined and rings of one circle make a cylinder. Other sections are left to the skinning, which
+//! matches their vertices.
 std::vector<TopoDS_Wire> ringsInLine(std::vector<TopoDS_Wire> wires)
 {
   const auto soleEdge = [](const TopoDS_Wire& wire) {
@@ -1451,19 +1461,19 @@ std::vector<TopoDS_Wire> ringsInLine(std::vector<TopoDS_Wire> wires)
 
 namespace
 {
-/// A smooth skin through sections: a tensor product whose every line
-/// across the sections is the natural C2 cubic through them, with knots at chord-length places. The
-/// law is measured (its poles fit it to four decimals over 2 to 5 rings), not a
-/// theorem of the skin's; the natural spline has its own variational theorem. Sections are matched
-/// by OpenCascade's compatible wires, a face to each edge; rational sections that do not run alike
-/// are made again by length. A section may be a point, which is a row of equal poles. A skin that
-/// comes back to its first section closes its line across: `Closed` (periodic form). How far apart
-/// two sections are is empirical: for sections of several edges the mean of the distance at the
-/// edges' middles (fits squares to 4e-4 of a share), for one edge the mean over it at 64 even
-/// shares, an estimate of an integral, not tuned. How the points of rational sections of unlike
-/// size or shape are paired is a choice of this code, not derived. Null where a section with
-/// weights that differ has a corner along an edge: not made again by length, those stay with
-/// OpenCascade's skinning.
+//! A smooth skin through sections: a tensor product whose every line
+//! across the sections is the natural C2 cubic through them, with knots at chord-length places. The
+//! law is measured (its poles fit it to four decimals over 2 to 5 rings), not a
+//! theorem of the skin's; the natural spline has its own variational theorem. Sections are matched
+//! by OpenCascade's compatible wires, a face to each edge; rational sections that do not run alike
+//! are made again by length. A section may be a point, which is a row of equal poles. A skin that
+//! comes back to its first section closes its line across: `Closed` (periodic form). How far apart
+//! two sections are is empirical: for sections of several edges the mean of the distance at the
+//! edges' middles (fits squares to 4e-4 of a share), for one edge the mean over it at 64 even
+//! shares, an estimate of an integral, not tuned. How the points of rational sections of unlike
+//! size or shape are paired is a choice of this code, not derived. Null where a section with
+//! weights that differ has a corner along an edge: not made again by length, those stay with
+//! OpenCascade's skinning.
 TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
                   const gp_Pnt*                   start,
                   const gp_Pnt*                   end,

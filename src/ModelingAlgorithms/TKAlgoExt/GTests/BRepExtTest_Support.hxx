@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 // Shared by the TKAlgoExt tests: the host seam of BRepToolsExt_Session.hxx (a vector of shapes,
 // defined in BRepExtTest_Support.cxx) and oracles that use nothing of the code under test.
@@ -33,8 +43,8 @@ namespace BRepExtTest
 
 OcctKernel& session();
 
-/// The volume by adaptive Gauss-Kronrod integration to 1e-8 relative accuracy. The default fixed
-/// rule is off by about 1e-5 of the volume on spline blend faces.
+//! The volume by adaptive Gauss-Kronrod integration to 1e-8 relative accuracy. The default fixed
+//! rule is off by about 1e-5 of the volume on spline blend faces.
 inline double volume(const TopoDS_Shape& shape)
 {
   GProp_GProps props;
@@ -56,9 +66,9 @@ inline double area(const TopoDS_Shape& shape)
   return props.Mass();
 }
 
-/// The sub-shapes of `shape` of one type, each once, whose bounding box `pick` accepts (the box
-/// limits as xmin ymin zmin xmax ymax zmax). An explorer meets an edge once for every face and
-/// wire that holds it.
+//! The sub-shapes of `shape` of one type, each once, whose bounding box `pick` accepts (the box
+//! limits as xmin ymin zmin xmax ymax zmax). An explorer meets an edge once for every face and
+//! wire that holds it.
 inline std::vector<TopoDS_Shape> subShapesWhere(const TopoDS_Shape&                       shape,
                                                 TopAbs_ShapeEnum                          type,
                                                 const std::function<bool(const double*)>& pick)
@@ -110,15 +120,15 @@ struct Defect
   int    samples = 0;
 };
 
-/// How far the blend faces of `result` are from the exact rolling-ball blend of radius r on
-/// `input`, measured without help from the blend. A point P of the exact blend with unit normal N
-/// has the ball centre C = P -/+ rN at distance exactly r from the input's faces, so the defect
-/// dist(C, input) - r is zero for the exact blend, positive where the surface lies inside it (more
-/// material removed) and negative outside. Faces lying on the input are not blends and are skipped;
-/// each blend face takes the side of the normal with the smaller mean square. `rolls` is false
-/// where the ball cannot roll (a centre inside a face the blend runs out onto). Distances are taken
-/// to the faces of the input, because a solid is a volume to BRepExtrema_DistShapeShape and every
-/// centre inside it would be at 0. 24 x 24 interior samples per face.
+//! How far the blend faces of `result` are from the exact rolling-ball blend of radius r on
+//! `input`, measured without help from the blend. A point P of the exact blend with unit normal N
+//! has the ball centre C = P -/+ rN at distance exactly r from the input's faces, so the defect
+//! dist(C, input) - r is zero for the exact blend, positive where the surface lies inside it (more
+//! material removed) and negative outside. Faces lying on the input are not blends and are skipped;
+//! each blend face takes the side of the normal with the smaller mean square. `rolls` is false
+//! where the ball cannot roll (a centre inside a face the blend runs out onto). Distances are taken
+//! to the faces of the input, because a solid is a volume to BRepExtrema_DistShapeShape and every
+//! centre inside it would be at 0. 24 x 24 interior samples per face.
 inline Defect ballDefect(
   const TopoDS_Shape&                       result,
   const TopoDS_Shape&                       input,
@@ -200,8 +210,8 @@ inline Defect ballDefect(
   return out;
 }
 
-/// The volume of a box a x b x c with every edge rounded by r (Steiner's formula for the parallel
-/// body of the inner box): corners are eighths of a sphere, edges quarter cylinders, faces slabs.
+//! The volume of a box a x b x c with every edge rounded by r (Steiner's formula for the parallel
+//! body of the inner box): corners are eighths of a sphere, edges quarter cylinders, faces slabs.
 inline double roundedBoxVolume(double a, double b, double c, double r)
 {
   const double x = a - 2 * r, y = b - 2 * r, z = c - 2 * r;

@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 // Geometry as a file gives it back: BRepTools and BinTools normalise every direction they read
 // and rebuild every frame, so a shape reads back bit for bit only where its directions and frames
@@ -20,13 +30,13 @@
 namespace BRepExt
 {
 
-/// A curve or surface without the trimming OpenCascade wraps it in.
+//! A curve or surface without the trimming OpenCascade wraps it in.
 Handle(Geom_Curve)   basisOf(Handle(Geom_Curve) curve);
 Handle(Geom2d_Curve) basisOf(Handle(Geom2d_Curve) curve);
 Handle(Geom_Surface) basisOf(Handle(Geom_Surface) surface);
 
-/// A direction as a file gives it back: BRepTools and BinTools read its coordinates and normalise
-/// them again (SetCoord); this is that normalising's fixed point.
+//! A direction as a file gives it back: BRepTools and BinTools read its coordinates and normalise
+//! them again (SetCoord); this is that normalising's fixed point.
 inline bool same(const gp_Dir& a, const gp_Dir& b)
 {
   return a.X() == b.X() && a.Y() == b.Y() && a.Z() == b.Z();
@@ -77,20 +87,20 @@ Dir readBack(Dir d)
   return d;
 }
 
-/// A frame as a file gives it back: OpenCascade rebuilds a surface's frame from its axis and x
-/// direction, read back, re-deriving y and x; this is a fixed point of that rebuilding, with x
-/// turned about the axis by at most a few 1e-13 where the frame itself is none, so that new
-/// surfaces read back bit for bit, as a file's own analytic surfaces do.
+//! A frame as a file gives it back: OpenCascade rebuilds a surface's frame from its axis and x
+//! direction, read back, re-deriving y and x; this is a fixed point of that rebuilding, with x
+//! turned about the axis by at most a few 1e-13 where the frame itself is none, so that new
+//! surfaces read back bit for bit, as a file's own analytic surfaces do.
 gp_Ax3 fixedFrame(gp_Ax3 frame);
 
-/// The same for a new edge's curves, in space and on its faces: lines' directions and conics'
-/// frames (a conic's y comes back re-derived from its x).
+//! The same for a new edge's curves, in space and on its faces: lines' directions and conics'
+//! frames (a conic's y comes back re-derived from its x).
 void settle(const Handle(Geom_Curve)& stored);
 
 void settle(const Handle(Geom2d_Curve)& stored);
 
-/// Settles the geometry `result` has that `input` does not share: elementary surfaces' frames and
-/// the curves of its edges. Geometry the input holds is left as it is, so the input is untouched.
+//! Settles the geometry `result` has that `input` does not share: elementary surfaces' frames and
+//! the curves of its edges. Geometry the input holds is left as it is, so the input is untouched.
 void settleNew(const TopoDS_Shape& input, const TopoDS_Shape& result);
 
 } // namespace BRepExt

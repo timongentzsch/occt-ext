@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #pragma once
 
@@ -21,7 +31,7 @@
 namespace BRepExt::patch_host
 {
 
-/// An edge of the loop or a curve inside it, run from `from` to `to`.
+//! An edge of the loop or a curve inside it, run from `from` to `to`.
 struct Side
 {
   int                     input;
@@ -48,15 +58,15 @@ struct Side
     return surfaceJet("patch", edge, support, parameter(fraction));
   }
 
-  /// The face that the edge was given with, at any order, as its surface and the edge's
-  /// curve in that surface's parameters.
+  //! The face that the edge was given with, at any order, as its surface and the edge's
+  //! curve in that surface's parameters.
   occ::handle<Geom_Surface> held;
   occ::handle<Geom2d_Curve> onHeld;
   bool                      originalReversed = false;
 
-  /// Meet the face at its own edge parameter curve, exactly as faceContinuity reads it.
-  /// The support's curve may differ from the spatial edge, especially after a Boolean;
-  /// projecting the edge onto the support hides that parameter discrepancy from the report.
+  //! Meet the face at its own edge parameter curve, exactly as faceContinuity reads it.
+  //! The support's curve may differ from the spatial edge, especially after a Boolean;
+  //! projecting the edge onto the support hides that parameter discrepancy from the report.
   gp_Pnt meetAt(double t) const
   {
     if (held.IsNull())
@@ -67,8 +77,8 @@ struct Side
 
   gp_Pnt meet(double fraction) const { return meetAt(parameter(fraction)); }
 
-  /// A gap between two runs of an open boundary: nothing is asked along it, and its curve is
-  /// only the chord that stands for it until the surface is known (see closeGaps).
+  //! A gap between two runs of an open boundary: nothing is asked along it, and its curve is
+  //! only the chord that stands for it until the surface is known (see closeGaps).
   bool free = false;
 };
 
@@ -78,12 +88,12 @@ struct Rim
   double                           deviation = 0;
 };
 
-/// The sides of an open boundary in turn, with a gap wherever one run ends and the next begins.
-/// Host-defined: all the edges are made one loop.
+//! The sides of an open boundary in turn, with a gap wherever one run ends and the next begins.
+//! Host-defined: all the edges are made one loop.
 void chain(std::vector<Side>& sides, double tolerance);
 
-/// Each gap's curve in the surface's parameters. Host-defined; sides that are not gaps keep
-/// their rims.
+//! Each gap's curve in the surface's parameters. Host-defined; sides that are not gaps keep
+//! their rims.
 void closeGaps(const std::vector<Side>& sides, std::vector<Rim>& rims);
 
 } // namespace BRepExt::patch_host

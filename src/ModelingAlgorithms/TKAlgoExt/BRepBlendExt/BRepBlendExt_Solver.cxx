@@ -1,7 +1,18 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
-// Fillet v2 (blend2.h): a request's pieces, their joints and splits, and the blends attached.
+// Blend (BRepBlendExt_Internal.hxx): a request's pieces, their joints and splits, and the blends
+// attached.
 
 #include <GeomAlgoExt_Cancel.hxx>
 #include <BRepBlendExt_Internal.hxx>
@@ -31,10 +42,10 @@ static Blended blendCopy(const Request&                   request,
                          BRepBuilderAPI_Copy&             copy,
                          const std::vector<TopoDS_Shape>& byCentre = {});
 
-/// How the faces beside an edge turn at its middle: -1 where the edge is convex, 1 where it is
-/// concave, 0 where they are tangent for a blend of `size` (tolerance::tangentFor). A face lies to
-/// the left of its boundary seen along its outward normal, so with d the edge's direction in the
-/// first face the edge is convex where (n0 x n1) . d > 0.
+//! How the faces beside an edge turn at its middle: -1 where the edge is convex, 1 where it is
+//! concave, 0 where they are tangent for a blend of `size` (tolerance::tangentFor). A face lies to
+//! the left of its boundary seen along its outward normal, so with d the edge's direction in the
+//! first face the edge is convex where (n0 x n1) . d > 0.
 static int convexity(const char*        op,
                      const TopoDS_Edge& edge,
                      const TopoDS_Face& first,
@@ -70,7 +81,7 @@ static int convexity(const char*        op,
   return normals[0].Crossed(normals[1]).Dot(d) * (inFirst == TopAbs_REVERSED ? -1 : 1) > 0 ? -1 : 1;
 }
 
-/// How far an edge reaches from the origin: the largest coordinate of its box (Rail::magnitude).
+//! How far an edge reaches from the origin: the largest coordinate of its box (Rail::magnitude).
 static double magnitudeOf(const TopoDS_Edge& edge)
 {
   Bnd_Box box;
@@ -83,8 +94,8 @@ static double magnitudeOf(const TopoDS_Edge& edge)
     {std::abs(x0), std::abs(y0), std::abs(z0), std::abs(x1), std::abs(y1), std::abs(z1)});
 }
 
-/// The side as a cliff on `edge`: the ball rests on the edge, its angle about it measured from
-/// the axis most across the edge.
+//! The side as a cliff on `edge`: the ball rests on the edge, its angle about it measured from
+//! the axis most across the edge.
 static bool restOn(Side& side, const TopoDS_Edge& edge)
 {
   double     f, l;
@@ -103,8 +114,8 @@ static bool restOn(Side& side, const TopoDS_Edge& edge)
   return true;
 }
 
-/// The edge of `face` first met going across it from `edge` at its parameter `t`, along the face's
-/// parameters at right angles to the edge's curve on it, into the face: empty where none is met.
+//! The edge of `face` first met going across it from `edge` at its parameter `t`, along the face's
+//! parameters at right angles to the edge's curve on it, into the face: empty where none is met.
 static TopoDS_Edge firstAcross(const TopoDS_Face& face, const TopoDS_Edge& edge, double t)
 {
   double     f, l;
@@ -152,11 +163,11 @@ static TopoDS_Edge firstAcross(const TopoDS_Face& face, const TopoDS_Edge& edge,
   return first;
 }
 
-/// The far edge of a face the blend's contact runs off along the whole edge: the edge first met
-/// across it from the blended one, the same along it; whether the face is that strip alone (four
-/// edges, the far one joined to each end of the blended one by one), and whether the far edge ends
-/// with the strip at one end of the blend at least (the face's edge from the blended edge's vertex
-/// there reaches it).
+//! The far edge of a face the blend's contact runs off along the whole edge: the edge first met
+//! across it from the blended one, the same along it; whether the face is that strip alone (four
+//! edges, the far one joined to each end of the blended one by one), and whether the far edge ends
+//! with the strip at one end of the blend at least (the face's edge from the blended edge's vertex
+//! there reaches it).
 struct Far
 {
   TopoDS_Edge edge;
@@ -201,10 +212,10 @@ static std::optional<Far> farEdge(const Rail& rail, int side)
   return out;
 }
 
-/// Where a blend's contact runs off its face `side` along the whole edge, the face is narrower
-
-/// the strip goes on past both ends, it keeps the round and trims it by the face beyond (a notch).
-/// The Round only, which is the ball's own section: no law is tangent to an edge.
+//! Where a blend's contact runs off its face `side` along the whole edge, the face is narrower
+//! than the blend: a strip between the edge and its far edge. The blend replaces the strip; where
+//! the strip goes on past both ends, it keeps the round and trims it by the face beyond (a notch).
+//! The Round only, which is the ball's own section: no law is tangent to an edge.
 static bool cliffOf(Rail& rail, int side, const Far& far)
 {
   if (rail.law != Law::Conic || std::abs(rail.rho - 0.5) > limit::equal
@@ -214,11 +225,11 @@ static bool cliffOf(Rail& rail, int side, const Far& far)
   return restOn(rail.s[side], far.edge);
 }
 
-/// a blend (Blending, 10.2.4: to the next edge where it meets the previous one smoothly) and
-
-/// (tangent for a blend of `size`, tolerance::tangentFor). An edge that goes on straight between
-/// other faces is a sharp continuation, not added. Where `mayAdd` is not empty, only edges in it
-/// are added.
+//! The edges asked, with those tangent to them added: a blend goes on to the next edge where it
+//! meets the previous one smoothly (tangent for a blend of `size`, tolerance::tangentFor). An edge
+//! that goes on straight between
+//! other faces is a sharp continuation, not added. Where `mayAdd` is not empty, only edges in it
+//! are added.
 static std::vector<TopoDS_Shape> withTangent(const TopoDS_Shape&              body,
                                              std::vector<TopoDS_Shape>        edges,
                                              double                           size,
@@ -274,15 +285,14 @@ static std::vector<TopoDS_Shape> withTangent(const TopoDS_Shape&              bo
   return edges;
 }
 
-/// Convex and concave edges asked together: those of the minority convexity at the vertices where
-
-/// vertices of mixed convexity, Blending options §75.3.9: an edge is of the majority where most of
-/// the edges at the vertex, blended or not, are of its kind), so that the later balls roll on over
-
-/// concave blend (a torus about its axis), a boss's concave ball round the convex round. The
-/// concave edges go first where the vertices tie or disagree. Empty where the edges asked are all
-/// of one kind. `opposite` tries the other order after the preferred one refuses; each stage
-/// keeps its ordinary geometry and validity checks.
+//! Convex and concave edges asked together: those of the minority convexity at the vertices of
+//! mixed convexity go first (an edge is of the majority where most of the edges at the vertex,
+//! blended or not, are of its kind), so that the later balls roll on over the earlier blends: a
+//! convex ball over a concave blend (a torus about its axis), a boss's concave ball round the
+//! convex round. The
+//! concave edges go first where the vertices tie or disagree. Empty where the edges asked are all
+//! of one kind. `opposite` tries the other order after the preferred one refuses; each stage
+//! keeps its ordinary geometry and validity checks.
 static std::optional<Blended> minorityFirst(const Request& request,
                                             bool           opposite,
                                             bool           continuation)
@@ -401,9 +411,9 @@ static std::optional<Blended> minorityFirst(const Request& request,
   return out;
 }
 
-/// Whether a ball of radius `r` beside `edge` folds on `cap`: somewhere the edge bends towards
-/// the cap's inside, read with the cap's outward normal along the edge as the cap's loop runs it,
-/// by 1/r or more (its geodesic curvature), so that the contact there, its offset by r, folds back.
+//! Whether a ball of radius `r` beside `edge` folds on `cap`: somewhere the edge bends towards
+//! the cap's inside, read with the cap's outward normal along the edge as the cap's loop runs it,
+//! by 1/r or more (its geodesic curvature), so that the contact there, its offset by r, folds back.
 static bool foldsOn(const TopoDS_Edge& edge, const TopoDS_Face& cap, double r)
 {
   for (TopExp_Explorer e(cap, TopAbs_EDGE); e.More(); e.Next())
@@ -434,13 +444,13 @@ static bool foldsOn(const TopoDS_Edge& edge, const TopoDS_Face& cap, double r)
   return false;
 }
 
-/// An existing round that the blends asked cannot roll over, because its radius is the smaller
-/// (the contact on the face beside it folds, or no ball rests on it): the round is taken off, the
-/// edges asked are blended on the sharp body, and the round is put back at its own radius along
-
-/// edge rounded 1 under a top rounded 3 ends in a rolling ball of 1 between the two 3s). `folded`
-/// are the edges that could not be blended; empty where no round beside them is smaller.
-/// What one stage made of these shapes: each modified, kept or removed.
+//! An existing round that the blends asked cannot roll over, because its radius is the smaller
+//! (the contact on the face beside it folds, or no ball rests on it): the round is taken off, the
+//! edges asked are blended on the sharp body, and the round is put back at its own radius along
+//! them (an edge rounded 1 under a top rounded 3 ends in a rolling ball of 1 between the two 3s).
+//! `folded`
+//! are the edges that could not be blended; empty where no round beside them is smaller.
+//! What one stage made of these shapes: each modified, kept or removed.
 static std::vector<TopoDS_Shape> onward(const Handle(BRepTools_History)& stage,
                                         const std::vector<TopoDS_Shape>& from)
 {
@@ -457,9 +467,9 @@ static std::vector<TopoDS_Shape> onward(const Handle(BRepTools_History)& stage,
   return to;
 }
 
-/// What became of each shape of `body` through the histories one after the other: its images
-/// carried through every stage (modified, kept or removed), and what each stage generated from
-/// them carried through the stages after.
+//! What became of each shape of `body` through the histories one after the other: its images
+//! carried through every stage (modified, kept or removed), and what each stage generated from
+//! them carried through the stages after.
 static Handle(BRepTools_History) composed(const TopoDS_Shape&                           body,
                                           const std::vector<Handle(BRepTools_History)>& stages)
 {
@@ -716,10 +726,10 @@ static std::optional<Blended> replayOverrun(const Request&                   req
   }
 }
 
-/// A feature taken off a copy of the body for the blends: the body without it, the copy's shapes
-/// carried there (the feature's faces kept, as they are put back), the feature's solids to put
-/// back, its faces in the copy, and (where the solids were cut from the bodies) how the copy's
-/// feature faces went into them.
+//! A feature taken off a copy of the body for the blends: the body without it, the copy's shapes
+//! carried there (the feature's faces kept, as they are put back), the feature's solids to put
+//! back, its faces in the copy, and (where the solids were cut from the bodies) how the copy's
+//! feature faces went into them.
 struct Lifted
 {
   TopoDS_Shape              shape;
@@ -729,11 +739,11 @@ struct Lifted
   bool                      continuedBoss = false;
 };
 
-/// The copy's feature faces whose features meet the rest only in hole loops of their neighbours:
-/// those loops filled (fillHoles), and each feature's solid its faces and the loops capped on
-/// their neighbours' surfaces (holeCap), used against them. Its faces face into it for a hole or a
-/// pocket, out of it for a boss; `kind` -1 asks for the first (a convex blend), 1 the second.
-/// A prismatic boss may also trim a convex blend with its walls continued inside the body.
+//! The copy's feature faces whose features meet the rest only in hole loops of their neighbours:
+//! those loops filled (fillHoles), and each feature's solid its faces and the loops capped on
+//! their neighbours' surfaces (holeCap), used against them. Its faces face into it for a hole or a
+//! pocket, out of it for a boss; `kind` -1 asks for the first (a convex blend), 1 the second.
+//! A prismatic boss may also trim a convex blend with its walls continued inside the body.
 static std::optional<Lifted> liftLoops(const TopoDS_Shape&              body,
                                        const std::vector<TopoDS_Shape>& lift,
                                        int                              kind,
@@ -919,12 +929,12 @@ static std::optional<Lifted> liftLoops(const TopoDS_Shape&              body,
   return out;
 }
 
-/// The copy's faces `lift` removed as Delete Face removes them where no hole loop bounds them: the
-/// faces beside them extended over the gap (BRepAlgoAPI_Defeaturing, patched to extend each only
-/// across its edges with them). What that filled, the body without them less the body, is the
-/// hole put back from a convex blend (`kind` -1); what it took, the body less the body without
-/// them, the boss put back to a concave one. Empty where the faces cannot be removed or the
-/// feature is of the other kind.
+//! The copy's faces `lift` removed as Delete Face removes them where no hole loop bounds them: the
+//! faces beside them extended over the gap (BRepAlgoAPI_Defeaturing, patched to extend each only
+//! across its edges with them). What that filled, the body without them less the body, is the
+//! hole put back from a convex blend (`kind` -1); what it took, the body less the body without
+//! them, the boss put back to a concave one. Empty where the faces cannot be removed or the
+//! feature is of the other kind.
 static std::optional<Lifted> liftFaces(const char*                      op,
                                        const TopoDS_Shape&              body,
                                        const std::vector<TopoDS_Shape>& lift,
@@ -979,17 +989,17 @@ static std::optional<Lifted> liftFaces(const char*                      op,
   return out;
 }
 
-/// A blend that runs into faces of the body beside none of its edges (`reached`, the input's), or
-/// rolls on past a face its edge ends on to the next piece of the same edge (a hole drilled
-/// through it, narrower than the blend): the feature is lifted off, the edges asked blended on the
-/// body without it, and the feature put back with the kernel's Boolean, its faces trimming the
-/// blend: a hole or a pocket cut from a convex blend, a boss joined to a concave one. A feature
-/// that meets the rest only in hole loops of its neighbours is lifted by filling the loops
+//! A blend that runs into faces of the body beside none of its edges (`reached`, the input's), or
+//! rolls on past a face its edge ends on to the next piece of the same edge (a hole drilled
+//! through it, narrower than the blend): the feature is lifted off, the edges asked blended on the
+//! body without it, and the feature put back with the kernel's Boolean, its faces trimming the
+//! blend: a hole or a pocket cut from a convex blend, a boss joined to a concave one. A feature
+//! that meets the rest only in hole loops of its neighbours is lifted by filling the loops
 
-/// 26.1.3 makes the rounds of a top edge running into a hole and a pocket, and a round over a hole
-/// drilled through its edge, so, to 4e-15 mm (docs/fillet-v2/DESIGN.md). Empty otherwise, and for a
-/// feature of the other kind unless its walls can be continued: a prismatic boss meeting a
-/// convex blend is extended inside the original body. Other extensions remain unsupported.
+//! This makes the rounds of a top edge running into a hole and a pocket, and a round over a hole
+//! drilled through its edge, to 4e-15 mm. Empty otherwise, and for a
+//! feature of the other kind unless its walls can be continued: a prismatic boss meeting a
+//! convex blend is extended inside the original body. Other extensions remain unsupported.
 static std::optional<Blended> liftFeatures(const Request&                   request,
                                            const std::vector<TopoDS_Shape>& reached)
 {
@@ -1256,9 +1266,9 @@ static std::optional<Blended> joinedPlanarSupports(const Request& request)
   }
 }
 
-/// Rounds of the two edges of a face that is only the strip between them, of half its width: their
-
-/// makes them, as two faces that meet where they touch it. Empty where the request is not that.
+//! Rounds of the two edges of a face that is only the strip between them, of half its width: their
+//! contacts meet on the strip, and the full round is made as two faces that meet where they touch
+//! it. Empty where the request is not that.
 static std::optional<Blended> meetingRounds(const Request& request)
 {
   if (request.law != Law::Conic || std::abs(request.rho - 0.5) > limit::equal
@@ -1495,8 +1505,8 @@ static Blended blendStage(const Request& request, bool continuation)
   }
 }
 
-/// A request's blends, stage by stage: its pieces, how their ends meet, their sheets and splits,
-/// and the blends attached (design §1-6).
+//! A request's blends, stage by stage: its pieces, how their ends meet, their sheets and splits,
+//! and the blends attached.
 struct Blend
 {
   Blend(const Request&            request_,
@@ -1512,42 +1522,42 @@ struct Blend
     TopExp::MapShapesAndUniqueAncestors(body, TopAbs_VERTEX, TopAbs_EDGE, edgesOfVertex);
   }
 
-  /// The pieces: one per edge asked and per tangent edge added, with its supports, distances and
-  /// kind.
+  //! The pieces: one per edge asked and per tangent edge added, with its supports, distances and
+  //! kind.
   void rails();
-  /// A full round's one piece.
+  //! A full round's one piece.
   void fullRail(const std::vector<TopoDS_Shape>& asked);
-  /// How each piece's ends meet the others': a joint, a mitre or a corner.
+  //! How each piece's ends meet the others': a joint, a mitre or a corner.
   void joints();
-  /// The corner where more than three blended edges meet.
+  //! The corner where more than three blended edges meet.
   void vertexBlend(const TopoDS_Vertex& vertex, const std::vector<std::pair<int, int>>& meeting);
-  /// Each rail carried on past an end that a face stops.
+  //! Each rail carried on past an end that a face stops.
   void carries();
-  /// Each piece's stations and sheet, split where a contact crosses a smooth edge onto the next
-  /// face.
+  //! Each piece's stations and sheet, split where a contact crosses a smooth edge onto the next
+  //! face.
   void sheets();
-  /// The loops where a contact on a cap runs back across a joint into the next piece.
+  //! The loops where a contact on a cap runs back across a joint into the next piece.
   void crossFolds(const std::vector<std::pair<int, std::vector<Fold>>>& folds);
-  /// One kind of sheet along each chain: exact where every piece of it can be, else fitted.
+  //! One kind of sheet along each chain: exact where every piece of it can be, else fitted.
   void chains();
-  /// The parts of one split edge on one sheet.
+  //! The parts of one split edge on one sheet.
   void joinSplits();
-  /// Which sides pair at each joint.
+  //! Which sides pair at each joint.
   void pairJoints();
-  /// The edges of each chain whose blends end in different balls at a joint, where the balls
-  /// found through the edge's points fold back (Rail::byCentre); empty where every joint agrees.
+  //! The edges of each chain whose blends end in different balls at a joint, where the balls
+  //! found through the edge's points fold back (Rail::byCentre); empty where every joint agrees.
   std::vector<TopoDS_Shape> foldedJoints() const;
-  /// The blends attached, with the history from the input.
+  //! The blends attached, with the history from the input.
   Blended result();
   void    splitMeeting(Blended& out);
-  /// Which points of a face's surface lie off it: made once for each face, as a face of many
-  /// holes takes long to make it for.
+  //! Which points of a face's surface lie off it: made once for each face, as a face of many
+  //! holes takes long to make it for.
   Inside& inside(const TopoDS_Face& face);
-  /// Whether piece k's rail is one whose balls may be found through their centres instead
-  /// (Rail::byCentre): a round's or a G2 blend's, off faces (not a cliff), not yet so.
+  //! Whether piece k's rail is one whose balls may be found through their centres instead
+  //! (Rail::byCentre): a round's or a G2 blend's, off faces (not a cliff), not yet so.
   bool mayCentre(int k) const;
-  /// The balls of piece k's chain (its tangent edges and split parts, which share sections at
-  /// their joints) found through their centres from now on: sheets() is made again.
+  //! The balls of piece k's chain (its tangent edges and split parts, which share sections at
+  //! their joints) found through their centres from now on: sheets() is made again.
   void centreChain(int k);
 
   const Request&       request;
@@ -1559,11 +1569,12 @@ struct Blend
   std::vector<TopoDS_Shape> edges; // asked and added
   TopoDS_Shape              reference;
   std::vector<Piece>        pieces;
-  /// Where a contact on a flat cap runs back but crosses itself nowhere within its piece: the
-  /// places, for the loop across a joint into the next piece (crossFolds).
+  //! Where a contact on a flat cap runs back but crosses itself nowhere within its piece: the
+  //! places, for the loop across a joint into the next piece (crossFolds).
   std::vector<std::pair<int, std::vector<Fold>>> open;
 
-  /// The refusal of a fold v2 finds no loop for, on piece k: its contact's fold, as checkFold says.
+  //! The refusal of a fold the blend finds no loop for, on piece k: its contact's fold, as
+  //! checkFold says.
   [[noreturn]] void refuseFold(int k, const char* why)
   {
     Dips dips{pieces[k].rail, pieces[k].fitted};
@@ -1597,10 +1608,10 @@ bool Blend::mayCentre(int k) const
          && !rail.s[1].cliffCurve;
 }
 
-/// A chain's last edge that a contact is off the whole way, past the edge of its face where the
-/// face that stops the chain begins (a short edge, a sphere's seam or a patch's edge just before
-/// the stop): no blend of its own, the one before runs on over it to that stop. It is made again
-/// so, the ball being the same whichever edge it is found along.
+//! A chain's last edge that a contact is off the whole way, past the edge of its face where the
+//! face that stops the chain begins (a short edge, a sphere's seam or a patch's edge just before
+//! the stop): no blend of its own, the one before runs on over it to that stop. It is made again
+//! so, the ball being the same whichever edge it is found along.
 void Blend::absorbEnds()
 {
   for (const auto& edge : ending)
@@ -1878,13 +1889,13 @@ void Blend::joints()
 
 // Where more than three blended edges meet: the rolling ball's corner, where the body is what the
 // balls inside it fill (its opening by the ball). Where one ball rests on all the faces round the
-
-// apex. Else, between planes, the corner parts as the region of the balls' centres does (the
-// faces' planes offset by the radius): each corner of that region is a ball resting on three
-// faces or more, faces next to each other round the vertex, and two such balls that rest on the
-// same two faces not next to each other are joined by the round between those faces, which meet
-// only at the vertex: along the line where their planes meet, from one ball to the other. Four
-// faces part so into two balls and a round between the faces across from each other, as
+// vertex, the corner is that ball's cap about its apex. Else, between planes, the corner parts as
+// the region of the balls' centres does (the faces' planes offset by the radius): each corner of
+// that region is a ball resting on three faces or more, faces next to each other round the vertex,
+// and two such balls that rest on the same two faces not next to each other are joined by the round
+// between those faces, which meet only at the vertex: along the line where their planes meet, from
+// one ball to the other. Four faces part so into two balls and a round between the faces across
+// from each other, as
 
 void Blend::vertexBlend(const TopoDS_Vertex&                    vertex,
                         const std::vector<std::pair<int, int>>& meeting)
@@ -2208,8 +2219,8 @@ void Blend::carries()
   }
 }
 
-/// A chordal blend whose ball keeps one size along the edge (between planes, or round a rim
-/// whose wedge does not change) is that round: made as one, exact where a round is.
+//! A chordal blend whose ball keeps one size along the edge (between planes, or round a rim
+//! whose wedge does not change) is that round: made as one, exact where a round is.
 static void roundOfChord(Rail& rail, Stations& stations)
 {
   constexpr int samples = 9;
@@ -2229,7 +2240,7 @@ static void roundOfChord(Rail& rail, Stations& stations)
   rail.s[0].distance = rail.s[1].distance = rail.scale = (least + most) / 2;
 }
 
-/// Whether a full round has the radius `r` all along (Request::meet).
+//! Whether a full round has the radius `r` all along (Request::meet).
 static void meetsAt(const Rail& rail, Stations& stations, double r)
 {
   constexpr int samples = 9;
@@ -2246,10 +2257,10 @@ static void meetsAt(const Rail& rail, Stations& stations, double r)
   }
 }
 
-/// Whether a contact may cross a seam of its face between its ends: a seam along a line of the
-/// face's parameters, at one of them, is crossed only where the contact's poles reach past its
-/// place in some period inside their range (a contact from seam to seam, round a hole, does not
-/// cross it between); any other seam may be.
+//! Whether a contact may cross a seam of its face between its ends: a seam along a line of the
+//! face's parameters, at one of them, is crossed only where the contact's poles reach past its
+//! place in some period inside their range (a contact from seam to seam, round a hole, does not
+//! cross it between); any other seam may be.
 static bool acrossSeam(const Handle(Geom2d_BSplineCurve)& contact,
                        const TopoDS_Edge&                 seam,
                        const TopoDS_Face&                 face,
@@ -2286,7 +2297,7 @@ void Blend::sheets()
   // Each piece's blend, exact where every piece of its chain can be; a chain's sections then
   // share one parameter at each joint.
   // Where a contact leaves its face across a smooth edge onto the next face, the piece is split
-  // there and its second part rolls on that face (the support sequence, design §2).
+  // there and its second part rolls on that face (the support sequence).
   seeds.assign(pieces.size(), std::nullopt);
   std::vector<std::pair<int, std::vector<Fold>>> folds;
   // Whether a contact that runs back is left to the caller: taken by neither a fold nor a loop
@@ -2471,7 +2482,7 @@ void Blend::sheets()
       bool          entering = false, notched = false;
       TopoDS_Edge   over;
       // A contact wholly off its face: on both, the blend rests on neither and does not fit;
-      // on one, the ball may roll over onto the next face, which v2 does not do yet.
+      // on one, the ball may roll over onto the next face, which the blend does not do yet.
       int off = 0, offSide = -1;
       for (int s2 = 0; s2 < 2; ++s2)
       {
@@ -3240,8 +3251,8 @@ std::vector<TopoDS_Shape> Blend::foldedJoints() const
   return edges;
 }
 
-/// The full round of meeting rounds (Request::meet) split where it touches the face between: the
-/// line of its sheet through the ball's foot there, between the face's boundary.
+//! The full round of meeting rounds (Request::meet) split where it touches the face between: the
+//! line of its sheet through the ball's foot there, between the face's boundary.
 void Blend::splitMeeting(Blended& out)
 {
   const Piece& piece = pieces.front();

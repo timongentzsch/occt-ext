@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 // Split blend pieces: inherited support breaks, compatible section frames and joined sheets.
 #include <BRepBlendExt_Internal.hxx>
@@ -654,11 +664,11 @@ static SplitRequirements splitFrames(const char*                                
   return requirements;
 }
 
-/// A G2 sheet's knot where the law itself kinks (a support's C2 knot, whose curvature's slope
-/// jumps; the section law changing form) is coupled as a split's join is: the sheet is cut there,
-/// its two parts' derivatives across brought together in a local window, and it is joined again. A
-/// kink within the G1 limit is left as it is, and so is one coupling cannot take: sheetJoins
-/// refuses it.
+//! A G2 sheet's knot where the law itself kinks (a support's C2 knot, whose curvature's slope
+//! jumps; the section law changing form) is coupled as a split's join is: the sheet is cut there,
+//! its two parts' derivatives across brought together in a local window, and it is joined again. A
+//! kink within the G1 limit is left as it is, and so is one coupling cannot take: sheetJoins
+//! refuses it.
 static bool coupleInnerKinks(const char* op, Piece& piece)
 {
   bool coupled = false;
@@ -750,10 +760,10 @@ static bool coupleInnerKinks(const char* op, Piece& piece)
   return coupled;
 }
 
-/// How much the G2 law's curvature along the rail jumps at a place of a sheet: the exact sections'
-/// one-sided second differences there. The law reads a support's curvature, so a support that is
-/// C^k gives a sheet of C^(k-2) at best (a cubic's knot, C2, gives a jump here), which no fit can
-/// take away. Physical steps, as sectionJetBreak's.
+//! How much the G2 law's curvature along the rail jumps at a place of a sheet: the exact sections'
+//! one-sided second differences there. The law reads a support's curvature, so a support that is
+//! C^k gives a sheet of C^(k-2) at best (a cubic's knot, C2, gives a jump here), which no fit can
+//! take away. Physical steps, as sectionJetBreak's.
 static double lawBreak(const Rail& a,
                        Stations&   atA,
                        double      ta,
@@ -809,11 +819,11 @@ static double lawBreak(const Rail& a,
   return bent;
 }
 
-/// Inside a G2 blend's face, each join of its sheet where its U derivatives may break (a knot below
-/// C2: where the parts of a split were joined, or a support's knot): held to what its edges are
-/// held to, past what the law itself breaks there (lawBreak). Over the G2 matrix a join's break is
-/// 0.1 to 6 times the law's, median 1, and the next is over 400 times: limit::lawShare, measured,
-/// not derived.
+//! Inside a G2 blend's face, each join of its sheet where its U derivatives may break (a knot below
+//! C2: where the parts of a split were joined, or a support's knot): held to what its edges are
+//! held to, past what the law itself breaks there (lawBreak). Over the G2 matrix a join's break is
+//! 0.1 to 6 times the law's, median 1, and the next is over 400 times: limit::lawShare, measured,
+//! not derived.
 static void sheetJoins(const char*                                op,
                        const std::vector<Piece>&                  pieces,
                        const std::vector<std::optional<Station>>& seeds)

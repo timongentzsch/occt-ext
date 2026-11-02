@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #pragma once
 #include <TopoDS_Shape.hxx>
@@ -43,13 +53,13 @@ enum class FailureKind
 const char* failureKindName(FailureKind kind);
 int         failurePriority(const struct Failure& failure);
 
-/// What `fail` throws. `what()` remains useful for native diagnostics; callers branch on fields.
+//! What `fail` throws. `what()` remains useful for native diagnostics; callers branch on fields.
 struct Failure : std::runtime_error
 {
   std::string      operation, reason, code, message;
   std::vector<int> at;
-  /// The sub-shapes `at` names, where `fail` was given them: for a caller that names others in
-  /// their place (a copy's by the input's) by shape, as the hashes are not unique.
+  //! The sub-shapes `at` names, where `fail` was given them: for a caller that names others in
+  //! their place (a copy's by the input's) by shape, as the hashes are not unique.
   std::vector<TopoDS_Shape> shapes;
   FailureKind               kind;
 
@@ -70,13 +80,13 @@ struct Failure : std::runtime_error
   }
 };
 
-/// The bound of the hashes in Failure::at: the largest, which is the one core asks with.
+//! The bound of the hashes in Failure::at: the largest, which is the one core asks with.
 inline constexpr int failureHashBound = 2147483647;
-/// A sub-shape's hash in Failure::at.
+//! A sub-shape's hash in Failure::at.
 int failureHash(const TopoDS_Shape& shape);
 
 [[noreturn]] void fail(const char* operation, const char* reason, const std::string& message);
-/// The same, at these sub-shapes of the input.
+//! The same, at these sub-shapes of the input.
 [[noreturn]] void fail(const char*                      operation,
                        const char*                      reason,
                        const std::string&               message,

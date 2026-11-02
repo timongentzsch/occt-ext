@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <BRepSurfaceExt_DeformUvn.hxx>
 #include <BRepToolsExt_GeomUtil.hxx>
@@ -41,13 +51,13 @@ namespace BRepExt
 {
 namespace
 {
-/// How many poles a target may have along each direction: what a cubic needs for its bends at the
-/// tolerance, or the 21 any target may have. A C2 cubic through points of spacing h is off by
-/// 5 h^4 max|f(4)| / 384 inside; ends that follow the cubic through four points have a slope off by
-/// h^3 max|f(4)| / 4, which moves the first span by 4/27 of h times that. Together about
-/// h^4 max|f(4)| / 20. On an arc of radius R and a turn of d apart that is R d^4 / 20, so a turn T
-/// over a length L needs T (L / (20 T tolerance))^(1/4) spans. A grid doubled until it fits may
-/// have twice as many, with three more poles.
+//! How many poles a target may have along each direction: what a cubic needs for its bends at the
+//! tolerance, or the 21 any target may have. A C2 cubic through points of spacing h is off by
+//! 5 h^4 max|f(4)| / 384 inside; ends that follow the cubic through four points have a slope off by
+//! h^3 max|f(4)| / 4, which moves the first span by 4/27 of h times that. Together about
+//! h^4 max|f(4)| / 20. On an arc of radius R and a turn of d apart that is R d^4 / 20, so a turn T
+//! over a length L needs T (L / (20 T tolerance))^(1/4) spans. A grid doubled until it fits may
+//! have twice as many, with three more poles.
 std::pair<int, int> targetBudget(const occ::handle<Geom_BSplineSurface>& s, double tolerance)
 {
   const auto along = [&](bool u) {

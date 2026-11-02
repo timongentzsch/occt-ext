@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 // Push-pull through changes of topology, after Zou and Feng (Push-pull direct modeling of
 // solid CAD models, 2019): the solid that the moved faces sweep is built by itself and joined
@@ -50,7 +60,7 @@ namespace BRepExt
 namespace
 {
 
-/// The outward normals of `face` at five places along `edge`.
+//! The outward normals of `face` at five places along `edge`.
 std::vector<gp_Dir> normalsAlong(const TopoDS_Edge& edge, const TopoDS_Face& face)
 {
   std::vector<gp_Dir> out;
@@ -68,7 +78,7 @@ std::vector<gp_Dir> normalsAlong(const TopoDS_Edge& edge, const TopoDS_Face& fac
   return out;
 }
 
-/// The least and the greatest of the face's outward normal along `direction`.
+//! The least and the greatest of the face's outward normal along `direction`.
 std::pair<double, double> leanOf(const TopoDS_Face& face, const gp_Dir& direction)
 {
   const BRepAdaptor_Surface surface(face);

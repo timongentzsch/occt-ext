@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <GeomAlgoExt_Phase.hxx>
 #include <GeomAlgoExt_PatchRim.hxx>
@@ -24,29 +34,29 @@ namespace BRepExt
 namespace
 {
 
-/// A span shorter than this share of the mean one is beside a knot of lower continuity, and
-/// says nothing of how finely the net follows a curve.
+//! A span shorter than this share of the mean one is beside a knot of lower continuity, and
+//! says nothing of how finely the net follows a curve.
 constexpr double sliver = 0.2;
 
-/// The solves on one net, the places looked for again on the surface between them: the first
-/// takes all that a linear step can, the next what moving the places left.
+//! The solves on one net, the places looked for again on the surface between them: the first
+//! takes all that a linear step can, the next what moving the places left.
 constexpr int solves = 3;
 
-/// What a pole's own movement counts for against a place it moves the surface at, whose
-/// basis functions sum to one: a pole with less than this share in every place along the curve
-/// is moved little, and where the curve is still missed the span there is halved instead.
-/// Without it a pole in a corner of a span that the curve only clips was moved far to bring
-/// the curve a little nearer, and z = sin 2a on a radius of 6 rippled to a bend of 0.43.
+//! What a pole's own movement counts for against a place it moves the surface at, whose
+//! basis functions sum to one: a pole with less than this share in every place along the curve
+//! is moved little, and where the curve is still missed the span there is halved instead.
+//! Without it a pole in a corner of a span that the curve only clips was moved far to bring
+//! the curve a little nearer, and z = sin 2a on a radius of 6 rippled to a bend of 0.43.
 constexpr double damping = 0.03;
 
-/// A solve that leaves more than this share of the miss before it has done what the net can.
+//! A solve that leaves more than this share of the miss before it has done what the net can.
 constexpr double stillFalling = 0.5;
 
-/// Where the surface stands more steeply than this against the direction its poles move
-/// in, as the cosine, a place is left as it is: 80 degrees, as for the net itself.
+//! Where the surface stands more steeply than this against the direction its poles move
+//! in, as the cosine, a place is left as it is: 80 degrees, as for the net itself.
 constexpr double steepest = 0.17;
 
-/// One thing asked of the movement, over the poles that it touches.
+//! One thing asked of the movement, over the poles that it touches.
 struct Row
 {
   std::vector<int>    index;
@@ -62,7 +72,7 @@ int spans(const std::vector<double>& knots)
   return count;
 }
 
-/// The knots on both sides of a parameter.
+//! The knots on both sides of a parameter.
 std::pair<double, double> spanAt(const std::vector<double>& knots, int degree, double t)
 {
   const auto last  = knots.end() - degree - 1;

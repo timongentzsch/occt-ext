@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #pragma once
 
@@ -12,7 +22,7 @@
 // cannot disagree with each other.
 //
 // Before anything is chosen the partition is checked against the ORIGINAL operands
-// (see `verify` in boolean_cells.cpp), and what cannot be verified is refused.
+// (see `verify` in BRepBooleanExt_Cells.cxx), and what cannot be verified is refused.
 
 #include <BRepTools_History.hxx>
 #include <NCollection_DataMap.hxx>
@@ -26,7 +36,7 @@
 namespace BRepExt
 {
 
-/// Which cells make the result. `sources` are what is worked on, `tools` what it is worked with.
+//! Which cells make the result. `sources` are what is worked on, `tools` what it is worked with.
 enum class Select
 {
   Union        = 0, // every cell
@@ -43,7 +53,7 @@ enum class Select
                     // share a face, else nothing: the choice Extrude makes from the clash
 };
 
-/// What one rung of the ladder did; the timing table of docs/kernel-booleans.md is made of these.
+//! What one rung of the ladder did; these make up the timing table of the ladder.
 struct Rung
 {
   std::string name;         // "plain", "fuzzy"
@@ -65,8 +75,8 @@ struct Rung
 struct BooleanResult
 {
   TopoDS_Shape shape;
-  /// What Auto chose: Difference, Union, or None when the tools neither reach into nor touch
-  /// the sources (then `shape` is null). Other selections are what was asked.
+  //! What Auto chose: Difference, Union, or None when the tools neither reach into nor touch
+  //! the sources (then `shape` is null). Other selections are what was asked.
   enum class Decided
   {
     Asked,
@@ -75,14 +85,14 @@ struct BooleanResult
     None
   } decided                         = Decided::Asked;
   Handle(BRepTools_History) history = new BRepTools_History;
-  /// For each face of an operand that is not in the result as it was: what it became. An
-  /// empty list is a face that is gone. A face that is not bound is in the result untouched.
+  //! For each face of an operand that is not in the result as it was: what it became. An
+  //! empty list is a face that is gone. A face that is not bound is in the result untouched.
   NCollection_DataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> faces;
   std::vector<Rung>                                                                          rungs;
-  /// Exact copies untouched by reunion, for display reuse; never geometry matching.
+  //! Exact copies untouched by reunion, for display reuse; never geometry matching.
   std::vector<std::pair<TopoDS_Shape, TopoDS_Shape>> displayCopies;
 
-  // What history.h's FaceHistory::collect asks of a maker.
+  // What BRepToolsExt_History.hxx's FaceHistory::collect asks of a maker.
   const NCollection_List<TopoDS_Shape>& Modified(const TopoDS_Shape& face) const
   {
     const auto* found = faces.Seek(face);
@@ -114,20 +124,20 @@ struct BooleanRequest
   double fuzzy       = 0; // the caller's own fuzzy value for the first rung; 0 for none
 };
 
-/// Run the ladder: plain, then at a fuzzy value; the first rung whose partition is verified
-/// gives the result. Fails with no_solution, saying why each rung was refused, when none is.
-/// `rungs`, if given, receives what every rung did, also when the call fails.
+//! Run the ladder: plain, then at a fuzzy value; the first rung whose partition is verified
+//! gives the result. Fails with no_solution, saying why each rung was refused, when none is.
+//! `rungs`, if given, receives what every rung did, also when the call fails.
 BooleanResult booleanCells(const BooleanRequest& request, std::vector<Rung>* rungs = nullptr);
 
-/// Copy and unite same-domain result faces, composing operand face history. Kept result
-/// edges/vertices retain intentional boundaries; invalid unification leaves result unchanged.
+//! Copy and unite same-domain result faces, composing operand face history. Kept result
+//! edges/vertices retain intentional boundaries; invalid unification leaves result unchanged.
 void simplifyBooleanResult(BooleanResult&                   result,
                            const BooleanRequest&            request,
                            double                           angle,
                            const std::vector<TopoDS_Shape>& kept = {});
 
-/// Run the reference and optimized check on each SAME partition, without building a result.
-/// Paired rungs (reference, optimized) retain every verdict and diagnostic.
+//! Run the reference and optimized check on each SAME partition, without building a result.
+//! Paired rungs (reference, optimized) retain every verdict and diagnostic.
 std::vector<Rung> compareBooleanChecks(const BooleanRequest& request);
 
 } // namespace BRepExt

@@ -13,8 +13,8 @@
 
 namespace GeomAlgoExt
 {
-/// The clamped, flat knot vector (each knot repeated by its multiplicity) of `spans` equal spans
-/// of degree `degree` over [from, to].
+//! The clamped, flat knot vector (each knot repeated by its multiplicity) of `spans` equal spans
+//! of degree `degree` over [from, to].
 inline std::vector<double> uniformKnots(int degree, int spans, double from = 0, double to = 1)
 {
   std::vector<double> knots(degree + 1, from);

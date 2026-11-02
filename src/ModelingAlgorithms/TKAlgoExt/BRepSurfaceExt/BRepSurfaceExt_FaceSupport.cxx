@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 // Give one face of a body a new support and let its neighbours meet it, as when the control
 // points of a face are moved:
@@ -76,8 +86,8 @@ occ::handle<Geom_Surface> worldSurface(const TopoDS_Face& face)
   return occ::down_cast<Geom_Surface>(surface->Transformed(location.Transformation()));
 }
 
-/// The curve an edge lies on, in world coordinates, and beyond its ends where its kind goes on:
-/// a line or a circle whole, a spline as far as it is defined.
+//! The curve an edge lies on, in world coordinates, and beyond its ends where its kind goes on:
+//! a line or a circle whole, a spline as far as it is defined.
 occ::handle<Geom_Curve> carrier(const TopoDS_Edge& edge, double& first, double& last)
 {
   TopLoc_Location location;
@@ -98,7 +108,7 @@ double distanceTo(const gp_Pnt& point, const occ::handle<Geom_Surface>& surface)
                                : std::numeric_limits<double>::infinity();
 }
 
-/// The largest distance from `count` points along a curve's range to `surface`.
+//! The largest distance from `count` points along a curve's range to `surface`.
 double offSurface(const occ::handle<Geom_Curve>&   curve,
                   double                           first,
                   double                           last,
@@ -111,8 +121,8 @@ double offSurface(const occ::handle<Geom_Curve>&   curve,
   return worst;
 }
 
-/// Where two surfaces meet near `near`, in the plane through it across `along` (a unit
-/// vector): Newton's method on both surfaces' parameters, from the nearest points of each.
+//! Where two surfaces meet near `near`, in the plane through it across `along` (a unit
+//! vector): Newton's method on both surfaces' parameters, from the nearest points of each.
 bool meetAt(const occ::handle<Geom_Surface>& a,
             const occ::handle<Geom_Surface>& b,
             const gp_Pnt&                    near,
@@ -161,9 +171,9 @@ bool meetAt(const occ::handle<Geom_Surface>& a,
   return false;
 }
 
-/// The curve where `a` and `b` meet, from `start` to `end` (once round, when `closed`), found
-/// across the old edge's curve point by point and interpolated. Points are added between two
-/// where the curve strays from either surface by more than half the tolerance.
+//! The curve where `a` and `b` meet, from `start` to `end` (once round, when `closed`), found
+//! across the old edge's curve point by point and interpolated. Points are added between two
+//! where the curve strays from either surface by more than half the tolerance.
 occ::handle<Geom_Curve> meetingCurve(const char*                      op,
                                      const occ::handle<Geom_Curve>&   old,
                                      double                           first,

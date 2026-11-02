@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #pragma once
 
@@ -18,8 +28,8 @@ class OcctKernel;
 namespace BRepExt
 {
 
-/// A result and what became of the tracked input faces: [inputFaceHash, count, resultFaceHash...]
-/// records in `modified` and `generated`, and the hashes of input faces in `deleted`.
+//! A result and what became of the tracked input faces: [inputFaceHash, count, resultFaceHash...]
+//! records in `modified` and `generated`, and the hashes of input faces in `deleted`.
 struct EvolutionData
 {
   uint32_t         resultId = 0;
@@ -28,16 +38,16 @@ struct EvolutionData
   std::vector<int> deleted;
 };
 
-/// Register a shape in the host's store and return its handle.
+//! Register a shape in the host's store and return its handle.
 uint32_t store(OcctKernel& kernel, const TopoDS_Shape& shape);
 
-/// The shape behind a handle. Throws a typed invalid_input failure with code INVALID_SHAPE_ID.
+//! The shape behind a handle. Throws a typed invalid_input failure with code INVALID_SHAPE_ID.
 const TopoDS_Shape& get(const OcctKernel& kernel, uint32_t id);
 
-/// Drop a handle the algorithm itself registered for a temporary.
+//! Drop a handle the algorithm itself registered for a temporary.
 void release(OcctKernel& kernel, uint32_t id);
 
-/// A result that is a new shape and no face history: `shape`, registered in the store.
+//! A result that is a new shape and no face history: `shape`, registered in the store.
 inline EvolutionData stored(OcctKernel& kernel, const TopoDS_Shape& shape)
 {
   EvolutionData out;

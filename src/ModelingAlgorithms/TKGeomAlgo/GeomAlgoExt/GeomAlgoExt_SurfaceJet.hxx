@@ -1,5 +1,15 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #pragma once
 
@@ -30,7 +40,7 @@ struct SurfaceJet
   gp_Pnt      p;
   gp_Vec      u, v, uu, vv, uv, n;
 
-  /// The second fundamental form of two tangent vectors given in space.
+  //! The second fundamental form of two tangent vectors given in space.
   double curvature(gp_Vec a, gp_Vec b) const
   {
     const double E = u.SquareMagnitude(), F = u.Dot(v), G = v.SquareMagnitude(),
@@ -57,9 +67,9 @@ struct SurfaceJet
   }
 };
 
-/// Read a one-sided U jet on adjacent distinct knot spans. Keep V in its actual
-/// containing span: a broad LocalD2 V range can select an extrapolated span.
-/// The caller checks regularity and orients the returned raw derivatives.
+//! Read a one-sided U jet on adjacent distinct knot spans. Keep V in its actual
+//! containing span: a broad LocalD2 V range can select an extrapolated span.
+//! The caller checks regularity and orients the returned raw derivatives.
 inline void surfaceD2OnUSpan(const Handle(Geom_BSplineSurface)& surface,
                              double                             u,
                              double                             v,
@@ -78,7 +88,7 @@ inline void surfaceD2OnUSpan(const Handle(Geom_BSplineSurface)& surface,
   surface->LocalD2(u, v, uFrom, uTo, vFrom, vFrom + 1, jet.p, jet.u, jet.v, jet.uu, jet.vv, jet.uv);
 }
 
-/// Cache the adaptor and pcurve once per boundary, including the face's placement.
+//! Cache the adaptor and pcurve once per boundary, including the face's placement.
 struct BoundaryJet
 {
   const char*          operation;
@@ -115,7 +125,7 @@ inline SurfaceJet surfaceJet(const char*        operation,
   return BoundaryJet(operation, edge, face).at(parameter);
 }
 
-/// The jet of a surface at a parameter pair.
+//! The jet of a surface at a parameter pair.
 inline SurfaceJet surfaceJet(const char*                      operation,
                              const occ::handle<Geom_Surface>& surface,
                              double                           u,
@@ -127,10 +137,10 @@ inline SurfaceJet surfaceJet(const char*                      operation,
   return j;
 }
 
-/// How differently two jets with one tangent plane bend, as Measure Continuity reads it: the
-/// largest difference of normal curvature over all directions, and that as a share of the
-/// largest curvature along and across `tangent` on either side. A `sign` of -1 reads `b` from
-/// the other side, for a surface whose normal is the opposite of its neighbour's.
+//! How differently two jets with one tangent plane bend, as Measure Continuity reads it: the
+//! largest difference of normal curvature over all directions, and that as a share of the
+//! largest curvature along and across `tangent` on either side. A `sign` of -1 reads `b` from
+//! the other side, for a surface whose normal is the opposite of its neighbour's.
 inline std::pair<double, double> bendDifference(const SurfaceJet& a,
                                                 const SurfaceJet& b,
                                                 gp_Vec            tangent,

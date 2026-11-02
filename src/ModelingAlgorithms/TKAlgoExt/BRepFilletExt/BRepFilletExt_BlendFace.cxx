@@ -1,10 +1,20 @@
 // Copyright (c) 2026 Timon Gentzsch
-// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
+//
+// This file is part of Open CASCADE Technology software library.
+//
+// This library is free software; you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License version 2.1 as published
+// by the Free Software Foundation, with special exception defined in the file
+// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
+// distribution for complete text of the license and disclaimer of any warranty.
+//
+// Alternatively, this file may be used under the terms of Open CASCADE
+// commercial license or contractual agreement.
 
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
 // The blend of the whole outline of a flat face against walls that stand square on it. See
-// blend_face.h for the surface that is built.
+// BRepFilletExt_BlendFace.cxx for the surface that is built.
 //
 // How:
 //
@@ -97,13 +107,13 @@ namespace BRepExt
 namespace
 {
 
-/// The normal of a plane as its parametrisation has it: d/du x d/dv.
+//! The normal of a plane as its parametrisation has it: d/du x d/dv.
 gp_Vec planeNormal(const gp_Pln& plane)
 {
   return gp_Vec(plane.XAxis().Direction()).Crossed(gp_Vec(plane.YAxis().Direction()));
 }
 
-/// The volume of a body as the kernel measures it: curved faces integrated to 1e-8.
+//! The volume of a body as the kernel measures it: curved faces integrated to 1e-8.
 double held(const TopoDS_Shape& shape, bool bracket = false)
 {
   Bnd_Box box;
@@ -121,24 +131,24 @@ double held(const TopoDS_Shape& shape, bool bracket = false)
 
 // ---- Tolerances and sizes, by name ---------------------------------------------------------
 
-/// The degree of the spline surfaces along the outline; each span is fitted by itself.
+//! The degree of the spline surfaces along the outline; each span is fitted by itself.
 constexpr int kDegree = 9;
-/// A span of a spline surface is halved until it is this near the outline and the outline moved in.
+//! A span of a spline surface is halved until it is this near the outline and the outline moved in.
 constexpr double kFit = 2e-10;
-/// Places along each edge at which its reach is first looked at.
+//! Places along each edge at which its reach is first looked at.
 constexpr int kScan = 96;
-/// A crease is refined until it is this near the true crease between its points.
+//! A crease is refined until it is this near the true crease between its points.
 constexpr double kCrease = 5e-8;
-/// Two places of the outline nearer than this share of the spacing of its polyline are not
-/// asked which stops which; and nothing is looked for within five times that of an end of an
-/// edge, where the edge that goes on is as near.
+//! Two places of the outline nearer than this share of the spacing of its polyline are not
+//! asked which stops which; and nothing is looked for within five times that of an end of an
+//! edge, where the edge that goes on is as near.
 constexpr double kNear = 1e-2;
 
 // Walls stand square on the face within tolerance::angle (radians): the blend is tangent to
 // them within it.
 
-/// What stops a place of the outline: nothing before the blend's whole distance (`by` -1), or
-/// the place `t` of the edge `by` (the edge itself at its own place: its own bend).
+//! What stops a place of the outline: nothing before the blend's whole distance (`by` -1), or
+//! the place `t` of the edge `by` (the edge itself at its own place: its own bend).
 struct Hit
 {
   double d  = 0;
@@ -192,7 +202,7 @@ struct Element
   }
 };
 
-/// The matrix that takes values at the fitting nodes of [0, 1] to Bezier poles of kDegree.
+//! The matrix that takes values at the fitting nodes of [0, 1] to Bezier poles of kDegree.
 struct Fit
 {
   std::array<double, kDegree + 1>                          nodes;
@@ -239,7 +249,7 @@ struct Blend
   double               scale = 1;
 
   // ---- The section ----
-  /// How far from the face's plane the blend is, over a place `d` from the outline.
+  //! How far from the face's plane the blend is, over a place `d` from the outline.
   double height(double d) const
   {
     if (bevel)
@@ -259,7 +269,7 @@ struct Blend
     return lift(f.p.Translated(f.n * d), height(d));
   }
 
-  /// The parameter across a spline face at the distance d from its edge.
+  //! The parameter across a spline face at the distance d from its edge.
   double across(double d) const
   {
     if (bevel)
@@ -270,7 +280,7 @@ struct Blend
     return 1 / (1 + std::sqrt(std::max(0.0, h) / d));
   }
 
-  /// The angle of the section's arc from the wall, at the distance d.
+  //! The angle of the section's arc from the wall, at the distance d.
   double angle(double d) const { return std::acos(std::clamp(1 - d / r, -1.0, 1.0)); }
 
   gp_Pnt2d uv(const Element& e, double t, double d) const
@@ -283,7 +293,7 @@ struct Blend
   }
 
   // ---- Reach ----
-  /// How far along its normal the place `f` gets before the place `x` of `o` is as near.
+  //! How far along its normal the place `f` gets before the place `x` of `o` is as near.
   double stopped(const Frame& f, const Element& o, double x) const
   {
     const gp_Vec2d to(f.p, o.curve.Value(x));
@@ -295,12 +305,12 @@ struct Blend
     return acrossIt > 1e-14 * scale ? to.SquareMagnitude() / (2 * acrossIt) : HUGE_VAL;
   }
 
-  /// The place of `other` that stops the place `f` (of the edge `own` at `t`) first, near a
-  /// guess, and how far out. It is where `stopped` is least: looked for as that, which holds
-  /// where the two places run together and the equations of the meeting normals do not, and
-  /// then made exact by those equations where they hold. A place does not stop itself: where
-  /// the least is at the place itself, it is the edge's own bend that stops it, and this
-  /// says no.
+  //! The place of `other` that stops the place `f` (of the edge `own` at `t`) first, near a
+  //! guess, and how far out. It is where `stopped` is least: looked for as that, which holds
+  //! where the two places run together and the equations of the meeting normals do not, and
+  //! then made exact by those equations where they hold. A place does not stop itself: where
+  //! the least is at the place itself, it is the edge's own bend that stops it, and this
+  //! says no.
   bool partner(const Frame& f, int own, double t, int other, double& tp, double& d) const
   {
     const Element& o     = elements[other];
@@ -399,7 +409,7 @@ struct Blend
     return true;
   }
 
-  /// The reach of the place `t` of the edge `own`, and what stops it.
+  //! The reach of the place `t` of the edge `own`, and what stops it.
   Hit reach(int own, double t) const
   {
     const Element& e = elements[own];
@@ -473,7 +483,7 @@ struct Blend
   }
 };
 
-/// A corner of the blend's faces.
+//! A corner of the blend's faces.
 struct Corners
 {
   struct Corner
@@ -505,7 +515,7 @@ struct Corners
   }
 };
 
-/// A piece of the top of an edge's face, between two places of the edge.
+//! A piece of the top of an edge's face, between two places of the edge.
 struct Piece
 {
   enum Kind
@@ -1142,8 +1152,8 @@ struct Maker : Blend
   }
 
   // ---- Step 3: edges ----
-  /// An edge on `curve` between two corners, whose tolerances are raised to cover how far
-  /// the curve's ends are from them: a corner is found from two sides, a little apart.
+  //! An edge on `curve` between two corners, whose tolerances are raised to cover how far
+  //! the curve's ends are from them: a corner is found from two sides, a little apart.
   TopoDS_Edge joined(const Handle(Geom_Curve)& curve,
                      const TopoDS_Vertex&      from,
                      const TopoDS_Vertex&      to,
@@ -1165,7 +1175,7 @@ struct Maker : Blend
     return edge;
   }
 
-  /// Give an edge the largest tolerance that its curve in a face asks for.
+  //! Give an edge the largest tolerance that its curve in a face asks for.
   void fitTolerance(const TopoDS_Edge&          edge,
                     const Handle(Geom2d_Curve)& onFace,
                     const Handle(Geom_Surface)& surface)
@@ -1244,8 +1254,8 @@ struct Maker : Blend
     return Handle(Geom2d_Curve)(curve);
   }
 
-  /// The section at an end of an edge, from the foot up to where the edge's face ends
-  /// there; shared with the edge that goes on from that end.
+  //! The section at an end of an edge, from the foot up to where the edge's face ends
+  //! there; shared with the edge that goes on from that end.
   int riseAt(int own, bool last)
   {
     const Element& e = elements[own];
@@ -1293,7 +1303,7 @@ struct Maker : Blend
     return int(rises.size()) - 1;
   }
 
-  /// The curve of a section in an edge's face.
+  //! The curve of a section in an edge's face.
   Handle(Geom2d_Curve) riseIn(const Element& e, double t, const Rise& rise) const
   {
     double a, b;
@@ -1318,7 +1328,7 @@ struct Maker : Blend
     return through(points, params);
   }
 
-  /// The crease that a piece of `own` shares with another edge's face: made once.
+  //! The crease that a piece of `own` shares with another edge's face: made once.
   Shared& creaseOf(int own, const Piece& piece)
   {
     const auto key   = std::make_tuple(std::min(own, piece.with),
@@ -1344,7 +1354,7 @@ struct Maker : Blend
     const Hit middle = reach(own, (piece.from + piece.to) / 2);
     if (middle.by != piece.with)
       refuse("a crease of the blend changes what it lies between", e.edge);
-    /// The places at these parameters, from the middle outwards, each from the one before.
+    //! The places at these parameters, from the middle outwards, each from the one before.
     const auto placesAt = [&](const std::vector<double>& ts) {
       const int          count = int(ts.size()) - 1;
       std::vector<Place> places(count + 1);
@@ -1482,11 +1492,11 @@ struct Maker : Blend
 
   std::map<std::tuple<int, int, int, int>, Handle(Geom2d_Curve)> creaseIn[2];
 
-  /// The faces of the blend over one edge of the outline: one, or where the edge's own bend
-  /// closes its face in a crease, one to each side of every such crease. A face cannot have
-  /// one edge twice running there and back from a corner that nothing else comes to, so the
-  /// face is divided from the end of the crease down to the corner at the edge's start; the
-  /// pieces lie in one surface and are smooth across the cut.
+  //! The faces of the blend over one edge of the outline: one, or where the edge's own bend
+  //! closes its face in a crease, one to each side of every such crease. A face cannot have
+  //! one edge twice running there and back from a corner that nothing else comes to, so the
+  //! face is divided from the end of the crease down to the corner at the edge's start; the
+  //! pieces lie in one surface and are smooth across the cut.
   std::vector<TopoDS_Face> facesOf(int own)
   {
     Element&            e     = elements[own];
@@ -1692,7 +1702,7 @@ struct Maker : Blend
 
   std::set<std::tuple<int, int, int, int>> closing;
 
-  /// What is left of the face: flat faces inside the pieces of the outline moved in.
+  //! What is left of the face: flat faces inside the pieces of the outline moved in.
   std::vector<TopoDS_Face> caps(const gp_Vec& outward)
   {
     struct Loop
@@ -1787,11 +1797,11 @@ struct Maker : Blend
   }
 };
 
-/// A closing concave round is a machining envelope, not the distance profile. The retained
-/// cap pieces are the trimmed inward offset: their projection bounds the valid ball centres.
-/// For a convex polygon of centres the envelope consists exactly of cylinders on its sides
-/// and spheres at its vertices. Above the centres it continues as the vertical tool. Without
-/// that continuation the unreachable corner would end in a sharp horizontal shelf at r.
+//! A closing concave round is a machining envelope, not the distance profile. The retained
+//! cap pieces are the trimmed inward offset: their projection bounds the valid ball centres.
+//! For a convex polygon of centres the envelope consists exactly of cylinders on its sides
+//! and spheres at its vertices. Above the centres it continues as the vertical tool. Without
+//! that continuation the unreachable corner would end in a sharp horizontal shelf at r.
 BooleanResult closingBall(Maker&              maker,
                           const TopoDS_Shape& shape,
                           const TopoDS_Face&  floor,
