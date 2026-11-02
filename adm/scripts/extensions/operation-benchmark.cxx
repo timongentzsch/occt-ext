@@ -18,6 +18,10 @@
 //           rolling-ball blend, see ballDefect.
 //   offset  a rectangle's outline moved outwards by d with arcs at the corners:
 //           BRepOffsetAPI_MakeOffset against offsetCurve. Quality: the length P + 2 pi d.
+//   skin    a solid through sections: BRepOffsetAPI_ThruSections against skinThrough. Quality:
+//           validity, the closed-form volume of ruled stacks of frusta, the half-width of the result
+//           (a smooth skin may overshoot the sections but not by a factor) and how far the sections
+//           lie from the result.
 
 #include <BRepToolsExt_Checks.hxx>
 #include <BRepToolsExt_Operations.hxx>
@@ -35,6 +39,8 @@
 #include <BRepGProp.hxx>
 #include <BRepOffsetAPI_MakeOffset.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
+#include <Geom_Circle.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
@@ -605,6 +611,86 @@ void junction(const char* name, const TopoDS_Shape& body, const Pick& pick, doub
   row("junction", name, "extension", ext, q);
 }
 
+
+// ---- skin -----------------------------------------------------------------------------------
+// A solid through sections: BRepOffsetAPI_ThruSections against skinThrough, ruled and smooth, with
+// the end sections capped. Ruled skins through coaxial circles are stacks of frusta, V = sum of
+// pi h (r0^2 + r0 r1 + r1^2) / 3; the smooth ones and the one from a square to a circle have no
+// closed form. Quality: validity, the volume (its difference from the closed form where there is one)
+// and how far the sections lie from the result, which a skin through them must not leave.
+TopoDS_Wire circleWire(double z, double radius) {
+  return BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(new Geom_Circle(gp_Ax2(gp_Pnt(0, 0, z), gp_Dir(0, 0, 1)), radius)).Edge()).Wire();
+}
+TopoDS_Wire squareWire(double z, double half) {
+  const gp_Pnt p[4] = {gp_Pnt(-half, -half, z), gp_Pnt(half, -half, z), gp_Pnt(half, half, z), gp_Pnt(-half, half, z)};
+  BRepBuilderAPI_MakeWire maker;
+  for (int i = 0; i < 4; ++i) maker.Add(BRepBuilderAPI_MakeEdge(p[i], p[(i + 1) % 4]).Edge());
+  return maker.Wire();
+}
+double frustumVolume(double h, double r0, double r1) { return M_PI * h / 3 * (r0 * r0 + r0 * r1 + r1 * r1); }
+
+double sectionGap(const TopoDS_Shape& result, const std::vector<TopoDS_Wire>& sections) {
+  Pause pause;
+  TopoDS_Compound skin;
+  BRep_Builder builder;
+  builder.MakeCompound(skin);
+  for (TopExp_Explorer f(result, TopAbs_FACE); f.More(); f.Next()) builder.Add(skin, f.Current());
+  double worst = 0;
+  for (const TopoDS_Wire& wire : sections)
+    for (TopExp_Explorer e(wire, TopAbs_EDGE); e.More(); e.Next()) {
+      BRepAdaptor_Curve curve(TopoDS::Edge(e.Current()));
+      for (int k = 0; k <= 16; ++k) {
+        const gp_Pnt p = curve.Value(curve.FirstParameter() + (curve.LastParameter() - curve.FirstParameter()) * k / 16.);
+        const BRepExtrema_DistShapeShape d(BRepBuilderAPI_MakeVertex(p).Vertex(), skin);
+        if (d.IsDone()) worst = std::max(worst, d.Value());
+      }
+    }
+  return worst;
+}
+
+void skin(const char* name, const std::vector<TopoDS_Wire>& sections, bool ruled, double expected) {
+  if (std::string(name).find(inputFilter) == std::string::npos) return;
+  TopoDS_Shape resultStock, resultExt;
+  const auto build = [&] {
+    BRepOffsetAPI_ThruSections gen(true, ruled, 1e-6);
+    for (const TopoDS_Wire& wire : sections) gen.AddWire(wire);
+    gen.Build();
+    return gen.IsDone() ? gen.Shape() : TopoDS_Shape();
+  };
+  const Stats stock = measure([&] {
+    resultStock = build();
+    return !resultStock.IsNull() && valid(resultStock);
+  });
+  const Stats checked = measure([&] {
+    const TopoDS_Shape made = build();
+    return !made.IsNull() && validTimed(made, TopoDS_Shape());
+  });
+  std::vector<uint32_t> ids;
+  for (const TopoDS_Wire& wire : sections) ids.push_back(BRepExt::store(session(), wire));
+  const Stats ext = measure([&] {
+    resultExt = BRepExt::get(session(), BRepExt::skinThrough(session(), ids, 0, 0, true, ruled).resultId);
+    return valid(resultExt);
+  });
+  char q[200];
+  const auto text = [&](const TopoDS_Shape& result) {
+    if (result.IsNull()) { std::snprintf(q, sizeof q, "INVALID"); return; }
+    const double v = volume(result);
+    if (expected > 0) std::snprintf(q, sizeof q, "%s, V %.6f, |dV| %.3e", valid(result) ? "valid" : "INVALID", v, std::abs(v - expected));
+    else std::snprintf(q, sizeof q, "%s, V %.6f", valid(result) ? "valid" : "INVALID", v);
+    Bnd_Box box;
+    BRepBndLib::AddOptimal(result, box, false, false);
+    double b[6];
+    box.Get(b[0], b[1], b[2], b[3], b[4], b[5]);
+    std::snprintf(q + std::strlen(q), sizeof q - std::strlen(q), ", half-width %.3f, sections %.2e off",
+                  0.5 * std::max(b[3] - b[0], b[4] - b[1]), sectionGap(result, sections));
+  };
+  text(resultStock);
+  row("skin", name, "stock", stock, q);
+  row("skin", name, "stock+check", checked, q);
+  text(resultExt);
+  row("skin", name, "extension", ext, q);
+}
+
 double steiner(double r) {
   const double x = 40 - 2 * r, y = 30 - 2 * r, z = 20 - 2 * r;
   return x * y * z + 2 * r * (x * y + y * z + z * x) + M_PI * r * r * (x + y + z) + 4. / 3 * M_PI * r * r * r;
@@ -613,7 +699,7 @@ double steiner(double r) {
 } // namespace
 
 int main(int argc, char** argv) {
-  // With an argument, only that group is run (for debugging one group: fillet, patch, rounds, junction, hollow or offset).
+  // With an argument, only that group is run (for debugging one group: fillet, patch, rounds, junction, hollow, offset or skin).
   const std::string only = argc > 1 ? argv[1] : "";
   inputFilter = argc > 2 ? argv[2] : "";
   const auto want = [&](const char* group) { return only.empty() || only == group; };
@@ -650,5 +736,20 @@ int main(int argc, char** argv) {
     hollow(3, 4);
   }
   if (want("offset")) for (double d : {2.0, 10.0}) offset(d);
+  if (want("skin")) {
+    skin("2 circles, ruled (frustum)", {circleWire(0, 12), circleWire(30, 5)}, true, frustumVolume(30, 12, 5));
+    const double z[6] = {0, 5, 12, 20, 26, 40}, r[6] = {10, 6, 8, 3, 7, 4};
+    std::vector<TopoDS_Wire> stack;
+    double stacked = 0;
+    for (int i = 0; i < 6; ++i) {
+      stack.push_back(circleWire(z[i], r[i]));
+      if (i) stacked += frustumVolume(z[i] - z[i - 1], r[i - 1], r[i]);
+    }
+    skin("6 circles, ruled stack", stack, true, stacked);
+    skin("6 circles, smooth", stack, false, 0);
+    skin("3 circles, smooth", {circleWire(0, 10), circleWire(15, 4), circleWire(30, 9)}, false, 0);
+    skin("square to circle, ruled", {squareWire(0, 10), circleWire(25, 7)}, true, 0);
+    skin("square, circle, square, smooth", {squareWire(0, 10), circleWire(20, 6), squareWire(40, 9)}, false, 0);
+  }
   return 0;
 }
