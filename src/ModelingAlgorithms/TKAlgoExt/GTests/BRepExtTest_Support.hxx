@@ -65,6 +65,19 @@ inline std::vector<TopoDS_Edge> edgesWhere(const TopoDS_Shape& shape, const std:
   return edges;
 }
 
+/// The faces of `shape` whose bounding box `pick` accepts (limits as for edgesWhere).
+inline std::vector<TopoDS_Face> facesWhere(const TopoDS_Shape& shape, const std::function<bool(const double*)>& pick) {
+  std::vector<TopoDS_Face> faces;
+  for (TopExp_Explorer it(shape, TopAbs_FACE); it.More(); it.Next()) {
+    Bnd_Box box;
+    BRepBndLib::Add(it.Current(), box);
+    double b[6];
+    box.Get(b[0], b[1], b[2], b[3], b[4], b[5]);
+    if (pick(b)) faces.push_back(TopoDS::Face(it.Current()));
+  }
+  return faces;
+}
+
 inline bool near(double a, double b) { return std::abs(a - b) < 1e-6; }
 
 struct Defect {
