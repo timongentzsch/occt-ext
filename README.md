@@ -22,9 +22,9 @@ upstream yet; it is written so that it can be proposed in pieces.
 | --- | --- | ---: |
 | `BRepBlendExt` | Rolling-ball blend solver: ball on two supports, spine marching, section fit, attachment to the body | 11 000 |
 | `BRepFilletExt` | Constant, variable, range and station fillets, chamfer, contour and prism support, blend validity checks | 3 400 |
-| `BRepPatchExt` | Patch: one face inside a closed loop of edges, with G0/G1/G2 to neighbouring faces and interior guides | 4 600 |
+| `BRepPatchExt` | Patch: one face inside a loop of edges (chained, with gaps closed, if the boundary does not close), with G0/G1/G2 to neighbouring faces and interior guides | 4 700 |
 | `BRepSurfaceExt` | Surface alignment, bridging, constraint jets, deformation, face support and rebuild, face separation proofs | 5 800 |
-| `BRepCurveExt` | Planar and 3D curve offset, outline, tangent circles, projection, rebuild, refinement, regions, spiral | 4 900 |
+| `BRepCurveExt` | Planar and 3D curve offset, outline, tangent circles, corner rounding of wires, G0 to G3 bridge curves, projection, rebuild, refinement, regions, spiral | 5 400 |
 | `BRepOffsetExt` | Solid offset, hollow, shell, thicken, push-pull, defeaturing, sewing history | 2 400 |
 | `BRepSkinExt` | Gordon and guided skins, framed sweeps, draft | 3 700 |
 | `BRepBooleanExt` | Cell-based Booleans with a ladder of fallbacks, checked solids, imprints | 2 900 |
@@ -41,12 +41,15 @@ keeps shapes in a `std::vector` is twenty lines; `adm/scripts/extensions/operati
 is one. Failures are thrown as `BRepExt::Failure`, which derives from `std::runtime_error` and
 carries a stable reason code; cancellation polls `sessionCancelled()`, defined by the host.
 
-Three things are deliberately **not** in this tree because they depend on measurements of a
-third-party product, or on routines whose provenance is not settled: the blend section law for
-curvature continuity (`BRepBlendExt_Policy.hxx` has a conic-section default, and refuses
-curvature-continuous requests until a host supplies a law), two routines of Patch for open
-boundaries (declared in `BRepPatchExt_Side.hxx`, defined by the host), and the numeric
-conventions of the application's curve-bridge and curve-alignment laws, which stay with it.
+What is deliberately **not** in this tree is what an application chose by measuring another product,
+as opposed to what follows from the mathematics: the blend section law for curvature continuity
+(`BRepBlendExt_Policy.hxx` has a conic-section default, and refuses curvature-continuous requests
+until a host supplies a law through `BREPBLENDEXT_POLICY_HEADER`, see [Building](#building)), how a
+bridge curve chooses the tensions it was not given, which control vertices a curve alignment keeps,
+how the shapes of a sheet extension follow, and how a curve deformation maps. Those stay with the
+application, and their declarations are not in this tree's headers. What *is* here for them is the
+derived part: the G0 to G3 bridge construction (`BRepCurveExt_Bridge.hxx`), which takes the tensions
+as arguments.
 
 ### Suggested order for upstream review
 
@@ -554,6 +557,28 @@ WebAssembly build is `emcmake cmake -S . -B build/wasm -G Ninja -DCMAKE_BUILD_TY
 `add_subdirectory()` the tree with the same variables set; the host seam described above is then
 defined by the application's own objects.
 
+Two options belong to the extension packages (`adm/cmake/occt_extensions.cmake`):
+`BUILD_EXT_KEEP_EXCEPTIONS` (on by default) compiles `TKAlgoExt`, `GeomAlgoExt` and `BRepAlgoExt` with
+C++ exceptions and assertions on whatever OCCT's own flags say (`-UNo_Exception -UNDEBUG`), because the
+operations report failures as exceptions and rely on their checks; and `BREPBLENDEXT_POLICY_HEADER`
+with `BREPBLENDEXT_POLICY_CLASS` name a header and class that replace the built-in section policy of
+the blend solver (force-included into the `BRepBlendExt` sources).
+
+### Native tests
+
+`-DBUILD_GTEST=ON` adds the target `OpenCascadeGTest`, which runs the tests of every built toolkit.
+The tests of this tree are `TKAlgoExt/GTests/BRep*Ext_Test.cxx` (one file per package: blend, fillet,
+patch, surface, curve, offset, skin, Boolean, checks) with a shared host and oracles in
+`BRepExtTest_Support.*`, `GeomAlgoExt_*` and `BRepAlgoExt_*` in their toolkits, and one test file each
+for the two core corrections that follow. For example
+`OpenCascadeGTest --gtest_filter='BRep*Ext*:CSLib_Class2d*:BRepTopAdaptor*:BndLib*'`. Every
+expected value in them comes from a closed form or a definition that does not use the code under
+test: Steiner's volume of a box rounded on every edge, the rolling-ball definition of a blend
+(distance of the ball's centre to the input minus the radius), Archimedes' volume of two crossed
+cylinders, the frustum and Pappus volumes of skins and sweeps, the circular segment of three arcs
+closed by a chord, the position of the touching circle between a line and an arc, and, for the bridge
+curves, the curvature, change of curvature and torsion of a circle and a helix at the ends.
+
 ## Applying modules separately
 
 These modules do not depend on the 17 corrections. The accepted utility commits
@@ -673,6 +698,35 @@ trace contains the patch. Rotation circles are boxed as before (by the circumscr
 boxed to R / cos(pi/8)); the degenerate torus (R < r) keeps its own routine. Tests: sampled surface points of tilted tori
 with reversed and long V ranges lie in the box (the test fails on the previous code), and the inner half of a torus does
 not reach the outer equator.
+
+### CSLib_Class2d-v-bucket-index
+
+Commit `341272613f`, made after the measurements above and not one of the 17. Upstream: not assessed.
+
+Problem: `CSLib_Class2d::SiDans` scans every vertex of the polygon for each query, and up to five times: once for the point
+and once for each corner of its tolerance box. `BRepTopAdaptor_FClass2d::Perform` calls it for every wire of a face, so
+classifying points against a face with a rounded boundary costs the number of boundary samples each time. A profile of a blend
+into earlier rounds spent a quarter of the call in it (68 000 queries, about 4 000 instructions each).
+
+Derivation: what an edge can contribute to a classification at height Y is a crossing of the ray (needs Y between its end
+heights), a vertex within the tolerance box (needs Y within the V tolerance of the vertex's height) or the interpolated edge
+passing within the V tolerance (the interpolated height lies between the end heights, so Y is within the tolerance of the
+edge's height range). So an edge matters only when Y lies in its V range widened by the tolerance. The edges of a polygon of
+32 vertices or more are listed once under every bucket (of about four edges each) that their widened range meets, and a query
+reads the one bucket of its Y. The same edges are examined in the same order with the same arithmetic, so every answer is the one
+the scan gives. Test: random wavy polygons of 12 to 4 096 vertices and a staircase whose vertices lie on bucket boundaries,
+queried at random points, at vertices, a fraction of the tolerance from vertices and at edge middles; the three answers (inside,
+outside, uncertain) are compared with a reference written from the definition, which itself is checked against the unchanged
+class. Effect: a blend into earlier rounds 7.96 to 7.16 ms, two crossed cylinders 12.9 / 15.4 to 8.4 / 10.3 ms.
+
+### BRepTopAdaptor_FClass2d-periods-read-once
+
+Commit `6e6ea43f94`. Upstream: not assessed.
+
+Problem: `Perform` and `TestOnRestriction` build a `BRepAdaptor_Surface` of the face on every call to ask whether the surface
+is periodic in U and V and by how much. The answer cannot change after construction (about 6 per cent of a blend into earlier
+rounds). The four numbers are now read in the constructor. Test: points a whole number of periods from a half cylinder's wall
+classify as the wall does, in and out, before and after the change.
 
 ### Approx_BSplComputeLine-local-endpoint-parameters
 
@@ -896,6 +950,15 @@ Proceedings 707, 381. DOI [10.1063/1.1751381](https://doi.org/10.1063/1.1751381)
 This supports the locality construction concept. The implemented two-dimensional
 quadrant rotation is not a claim to reproduce Skilling's global Gray-code algorithm;
 no speed theorem follows from the citation.
+
+[5] Michael E. Hohmeyer and Brian A. Barsky (1989), “Rational continuity: parametric, geometric, and Frenet
+frame continuity of rational curves”, ACM Transactions on Graphics 8(4), 335–359. The beta-constraints for G^n
+(equations 105 to 109) are the end conditions of `BRepCurveExt_Bridge`; the three free scalars at an end are its tensions.
+
+[6] Standard constructions, without a single source: a circle tangent to two curves has its centre on the intersection of
+their offsets by the radius (the offset curve, Newton's method with the exact derivative dO/du = C' + r (n x dT/du), here as in
+`ChFi2d_FilletAlgo`'s documentation by starts along the pieces); greedy nearest-end growth for chaining unordered curves;
+a straight segment between the surface parameters of two ends for closing a gap in a chart.
 
 ## License and contribution review
 
