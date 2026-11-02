@@ -52,29 +52,34 @@ inline double area(const TopoDS_Shape& shape) {
   return props.Mass();
 }
 
-/// The edges of `shape` whose bounding box `pick` accepts (the box limits as xmin ymin zmin xmax ymax zmax).
-inline std::vector<TopoDS_Edge> edgesWhere(const TopoDS_Shape& shape, const std::function<bool(const double*)>& pick) {
-  std::vector<TopoDS_Edge> edges;
-  for (TopExp_Explorer it(shape, TopAbs_EDGE); it.More(); it.Next()) {
+/// The sub-shapes of `shape` of one type, each once, whose bounding box `pick` accepts (the box
+/// limits as xmin ymin zmin xmax ymax zmax). An explorer meets an edge once for every face and
+/// wire that holds it.
+inline std::vector<TopoDS_Shape> subShapesWhere(const TopoDS_Shape& shape, TopAbs_ShapeEnum type,
+                                                const std::function<bool(const double*)>& pick) {
+  std::vector<TopoDS_Shape> found;
+  for (TopExp_Explorer it(shape, type); it.More(); it.Next()) {
+    bool seen = false;
+    for (const TopoDS_Shape& earlier : found) seen = seen || earlier.IsSame(it.Current());
+    if (seen) continue;
     Bnd_Box box;
     BRepBndLib::Add(it.Current(), box);
     double b[6];
     box.Get(b[0], b[1], b[2], b[3], b[4], b[5]);
-    if (pick(b)) edges.push_back(TopoDS::Edge(it.Current()));
+    if (pick(b)) found.push_back(it.Current());
   }
+  return found;
+}
+
+inline std::vector<TopoDS_Edge> edgesWhere(const TopoDS_Shape& shape, const std::function<bool(const double*)>& pick) {
+  std::vector<TopoDS_Edge> edges;
+  for (const TopoDS_Shape& edge : subShapesWhere(shape, TopAbs_EDGE, pick)) edges.push_back(TopoDS::Edge(edge));
   return edges;
 }
 
-/// The faces of `shape` whose bounding box `pick` accepts (limits as for edgesWhere).
 inline std::vector<TopoDS_Face> facesWhere(const TopoDS_Shape& shape, const std::function<bool(const double*)>& pick) {
   std::vector<TopoDS_Face> faces;
-  for (TopExp_Explorer it(shape, TopAbs_FACE); it.More(); it.Next()) {
-    Bnd_Box box;
-    BRepBndLib::Add(it.Current(), box);
-    double b[6];
-    box.Get(b[0], b[1], b[2], b[3], b[4], b[5]);
-    if (pick(b)) faces.push_back(TopoDS::Face(it.Current()));
-  }
+  for (const TopoDS_Shape& face : subShapesWhere(shape, TopAbs_FACE, pick)) faces.push_back(TopoDS::Face(face));
   return faces;
 }
 

@@ -9,6 +9,9 @@ set(OCCT_TKAlgoExt_GTests_FILES
   BRepExtTest_Support.hxx
   BRepFilletExt_Test.cxx
   BRepOffsetExt_Test.cxx
+  BRepPatchExt_Test.cxx
   BRepSkinExt_Test.cxx
+  BRepSurfaceExt_Test.cxx
+  BRepToolsExt_Checks_Test.cxx
   BRepToolsExt_Operations_Test.cxx
 )
