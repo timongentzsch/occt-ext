@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <BRepToolsExt_Operations.hxx>
 #include <Geom_Surface.hxx>
 #include <TopoDS_Face.hxx>
@@ -53,17 +54,17 @@ struct DeformResult
   int spans          = 0;
 };
 
-DeformResult deformBody(OcctKernel&,
-                        uint32_t,
-                        uint32_t,
-                        uint32_t,
-                        Vec3,
-                        Vec3,
-                        bool,
-                        bool,
-                        bool,
-                        bool,
-                        double,
-                        const std::vector<int>&,
-                        int);
+Standard_EXPORT DeformResult deformBody(OcctKernel&,
+                                        uint32_t,
+                                        uint32_t,
+                                        uint32_t,
+                                        Vec3,
+                                        Vec3,
+                                        bool,
+                                        bool,
+                                        bool,
+                                        bool,
+                                        double,
+                                        const std::vector<int>&,
+                                        int);
 } // namespace BRepExt

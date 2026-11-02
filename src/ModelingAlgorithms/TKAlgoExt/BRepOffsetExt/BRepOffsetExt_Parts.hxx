@@ -16,6 +16,7 @@
 // What shells, solid offsets and face moves share: which faces an offset cannot keep, what
 // became of each face through several stages, and the measurements a result is held to.
 
+#include <Standard_Macro.hxx>
 #include <BRepToolsExt_GeomUtil.hxx>
 #include <BRepToolsExt_History.hxx>
 
@@ -55,13 +56,13 @@ struct OffsetFate
   std::vector<TopoDS_Shape> vanish, partial;
 };
 
-OffsetFate classifyForOffset(const TopoDS_Shape& body, double distance);
+Standard_EXPORT OffsetFate classifyForOffset(const TopoDS_Shape& body, double distance);
 
 //! Whether faces of `shape` cross each other, which BRepCheck_Analyzer does not look for.
-bool intersectsItself(const TopoDS_Shape& shape);
+Standard_EXPORT bool intersectsItself(const TopoDS_Shape& shape);
 
 //! Points inside `face`, away from its boundary: up to `perSide` squared of them.
-std::vector<gp_Pnt> pointsInside(const TopoDS_Face& face, int perSide);
+Standard_EXPORT std::vector<gp_Pnt> pointsInside(const TopoDS_Face& face, int perSide);
 
 //! The minimum distance to the skin of `body`: samples inside `faces`, or whole trimmed
 //! faces for a reconstructed solid offset. With openings, exclude samples nearer than
@@ -78,7 +79,9 @@ double clearance(const std::vector<TopoDS_Shape>& faces,
 inline constexpr double alongSlack = 1e-7;
 
 //! Whether `a` and `b` are tangent along their common `edge`.
-bool tangentAlong(const TopoDS_Edge& edge, const TopoDS_Face& a, const TopoDS_Face& b);
+Standard_EXPORT bool tangentAlong(const TopoDS_Edge& edge,
+                                  const TopoDS_Face& a,
+                                  const TopoDS_Face& b);
 
 // --- What became of each face --------------------------------------------------------------
 
@@ -170,6 +173,6 @@ private:
 //! `body` with each face on a surface C0 in its parameters divided along those knots, as
 //! OpenCascade's offset refuses such a surface however smooth it is (BRepOffset_C0Geometry). The
 //! geometry is the same; `body` itself where it has no such face.
-TopoDS_Shape dividedAtC0(const TopoDS_Shape& body, Lineage& faces);
+Standard_EXPORT TopoDS_Shape dividedAtC0(const TopoDS_Shape& body, Lineage& faces);
 
 } // namespace BRepExt

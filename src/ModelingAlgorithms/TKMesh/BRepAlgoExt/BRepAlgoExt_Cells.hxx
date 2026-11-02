@@ -24,6 +24,7 @@
 // Before anything is chosen the partition is checked against the ORIGINAL operands
 // (see `verify` in BRepBooleanExt_Cells.cxx), and what cannot be verified is refused.
 
+#include <Standard_Macro.hxx>
 #include <BRepTools_History.hxx>
 #include <NCollection_DataMap.hxx>
 #include <NCollection_List.hxx>
@@ -127,7 +128,8 @@ struct BooleanRequest
 //! Run the ladder: plain, then at a fuzzy value; the first rung whose partition is verified
 //! gives the result. Fails with no_solution, saying why each rung was refused, when none is.
 //! `rungs`, if given, receives what every rung did, also when the call fails.
-BooleanResult booleanCells(const BooleanRequest& request, std::vector<Rung>* rungs = nullptr);
+Standard_EXPORT BooleanResult booleanCells(const BooleanRequest& request,
+                                           std::vector<Rung>*    rungs = nullptr);
 
 //! Copy and unite same-domain result faces, composing operand face history. Kept result
 //! edges/vertices retain intentional boundaries; invalid unification leaves result unchanged.
@@ -138,6 +140,6 @@ void simplifyBooleanResult(BooleanResult&                   result,
 
 //! Run the reference and optimized check on each SAME partition, without building a result.
 //! Paired rungs (reference, optimized) retain every verdict and diagnostic.
-std::vector<Rung> compareBooleanChecks(const BooleanRequest& request);
+Standard_EXPORT std::vector<Rung> compareBooleanChecks(const BooleanRequest& request);
 
 } // namespace BRepExt

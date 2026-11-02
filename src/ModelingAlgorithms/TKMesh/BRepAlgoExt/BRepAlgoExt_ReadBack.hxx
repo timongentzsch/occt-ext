@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <Standard_Macro.hxx>
 #include <Geom2d_Curve.hxx>
 #include <Geom_Curve.hxx>
 #include <Geom_Surface.hxx>
@@ -31,9 +32,9 @@ namespace BRepExt
 {
 
 //! A curve or surface without the trimming OpenCascade wraps it in.
-Handle(Geom_Curve)   basisOf(Handle(Geom_Curve) curve);
-Handle(Geom2d_Curve) basisOf(Handle(Geom2d_Curve) curve);
-Handle(Geom_Surface) basisOf(Handle(Geom_Surface) surface);
+Standard_EXPORT Handle(Geom_Curve)   basisOf(Handle(Geom_Curve) curve);
+Standard_EXPORT Handle(Geom2d_Curve) basisOf(Handle(Geom2d_Curve) curve);
+Standard_EXPORT Handle(Geom_Surface) basisOf(Handle(Geom_Surface) surface);
 
 //! A direction as a file gives it back: BRepTools and BinTools read its coordinates and normalise
 //! them again (SetCoord); this is that normalising's fixed point.
@@ -91,16 +92,16 @@ Dir readBack(Dir d)
 //! direction, read back, re-deriving y and x; this is a fixed point of that rebuilding, with x
 //! turned about the axis by at most a few 1e-13 where the frame itself is none, so that new
 //! surfaces read back bit for bit, as a file's own analytic surfaces do.
-gp_Ax3 fixedFrame(gp_Ax3 frame);
+Standard_EXPORT gp_Ax3 fixedFrame(gp_Ax3 frame);
 
 //! The same for a new edge's curves, in space and on its faces: lines' directions and conics'
 //! frames (a conic's y comes back re-derived from its x).
-void settle(const Handle(Geom_Curve)& stored);
+Standard_EXPORT void settle(const Handle(Geom_Curve)& stored);
 
-void settle(const Handle(Geom2d_Curve)& stored);
+Standard_EXPORT void settle(const Handle(Geom2d_Curve)& stored);
 
 //! Settles the geometry `result` has that `input` does not share: elementary surfaces' frames and
 //! the curves of its edges. Geometry the input holds is left as it is, so the input is untouched.
-void settleNew(const TopoDS_Shape& input, const TopoDS_Shape& result);
+Standard_EXPORT void settleNew(const TopoDS_Shape& input, const TopoDS_Shape& result);
 
 } // namespace BRepExt

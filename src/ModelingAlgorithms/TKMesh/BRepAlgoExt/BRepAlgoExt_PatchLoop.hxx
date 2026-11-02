@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <Standard_Macro.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 
@@ -33,6 +34,8 @@ struct PatchSide
 //! The face Patch makes inside the closed loop of `sides`, within `tolerance` and `g1Degrees`
 //! along them (Patch's own checks, its own choice of construction). Fails as Patch does where
 //! it makes none to keep.
-TopoDS_Face patchLoop(const std::vector<PatchSide>& sides, double tolerance, double g1Degrees);
+Standard_EXPORT TopoDS_Face patchLoop(const std::vector<PatchSide>& sides,
+                                      double                        tolerance,
+                                      double                        g1Degrees);
 
 } // namespace BRepExt

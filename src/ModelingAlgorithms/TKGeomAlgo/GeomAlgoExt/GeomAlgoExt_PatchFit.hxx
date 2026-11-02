@@ -18,6 +18,7 @@
 // the fairest surface, the one that bends least and whose bend changes least over its parameter
 // rectangle.
 
+#include <Standard_Macro.hxx>
 #include <GeomAlgoExt_Band.hxx>
 
 namespace BRepExt
@@ -57,10 +58,10 @@ struct SplineBasis
   double value[splineDerivatives + 1][splineOrder];
 };
 
-SplineBasis splineBasis(const char*                operation,
-                        const std::vector<double>& knots,
-                        int                        degree,
-                        double                     t);
+Standard_EXPORT SplineBasis splineBasis(const char*                operation,
+                                        const std::vector<double>& knots,
+                                        int                        degree,
+                                        double                     t);
 
 //! One scalar condition at (u, v): the sum over `count` terms of
 //! `direction . d^(du+dv) S / du^du dv^dv` is to be `value`. Derivatives up to the second.
@@ -140,6 +141,6 @@ std::vector<int> fitNet(const char*                                  operation,
                         bool                                         leastSquares = false,
                         FitEnergies*                                 again        = nullptr);
 
-occ::handle<Geom_BSplineSurface> surfaceOf(const SplineNet& net);
+Standard_EXPORT occ::handle<Geom_BSplineSurface> surfaceOf(const SplineNet& net);
 
 } // namespace BRepExt

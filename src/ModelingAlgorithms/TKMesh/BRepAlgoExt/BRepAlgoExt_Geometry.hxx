@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <GeomAlgoExt_Coordinates.hxx>
 
 // Small pieces of geometry and topology that several operations share, each kept in one place.
@@ -106,9 +107,9 @@ private:
 //! slot): the middle of every stretch inside the face of `lines` lines across the box each way,
 //! at the middles of its equal columns and rows, as OpenCascade's hatcher finds them. Empty only
 //! where the face has no bounded box or the hatcher fails.
-std::vector<gp_Pnt2d> parametersAcross(const TopoDS_Face&              face,
-                                       int                             lines,
-                                       const Handle(IntTools_Context)& context);
+Standard_EXPORT std::vector<gp_Pnt2d> parametersAcross(const TopoDS_Face&              face,
+                                                       int                             lines,
+                                                       const Handle(IntTools_Context)& context);
 
 //! The axis of a planar face's plane, turned round where the face is reversed.
 inline gp_Dir orientedPlaneAxis(const TopoDS_Face& face)

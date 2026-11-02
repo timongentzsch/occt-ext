@@ -12,18 +12,19 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <BRepToolsExt_Session.hxx>
 #include <BRepBlendExt_Request.hxx>
 
 namespace BRepExt::blend2
 {
-Blended blendStored(const OcctKernel&            kernel,
-                    const char*                  operation,
-                    uint32_t                     shape,
-                    const std::vector<uint32_t>& edges,
-                    double                       first,
-                    double                       second,
-                    int                          law,
-                    double                       rho,
-                    uint32_t                     reference);
+Standard_EXPORT Blended blendStored(const OcctKernel&            kernel,
+                                    const char*                  operation,
+                                    uint32_t                     shape,
+                                    const std::vector<uint32_t>& edges,
+                                    double                       first,
+                                    double                       second,
+                                    int                          law,
+                                    double                       rho,
+                                    uint32_t                     reference);
 }

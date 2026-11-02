@@ -16,6 +16,7 @@
 // The sides of a Patch loop, and the two routines of it for a boundary that does not close
 // (chaining its edges, and closing a gap between runs), defined in BRepPatchExt_Chain.cxx.
 
+#include <Standard_Macro.hxx>
 #include <GeomAlgoExt_SurfaceJet.hxx>
 #include <Geom2d_BSplineCurve.hxx>
 #include <Geom_Curve.hxx>
@@ -89,10 +90,10 @@ struct Rim
 
 //! The sides of an open boundary in turn, with a gap wherever one run ends and the next begins.
 //! All the edges are made one loop.
-void chain(std::vector<Side>& sides, double tolerance);
+Standard_EXPORT void chain(std::vector<Side>& sides, double tolerance);
 
 //! Each gap's curve in the surface's parameters; sides that are not gaps keep
 //! their rims.
-void closeGaps(const std::vector<Side>& sides, std::vector<Rim>& rims);
+Standard_EXPORT void closeGaps(const std::vector<Side>& sides, std::vector<Rim>& rims);
 
 } // namespace BRepExt::patch_side

@@ -16,6 +16,7 @@
 // A face that is a constant round: a cylinder or torus tangent to two supports along its edges,
 // as Measure's fillet dimension, Refillet and the blend's re-blending recognise it.
 
+#include <Standard_Macro.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Cylinder.hxx>
@@ -41,6 +42,8 @@ struct RoundFace
 //! `face` of `shape` as a round: valid where it is a cylinder (not closed round) or a torus that
 //! is tangent, to `tolerance`, along every edge it shares with exactly two neighbours, its
 //! supports.
-RoundFace recognizeRound(const TopoDS_Shape& shape, const TopoDS_Face& face, double tolerance);
+Standard_EXPORT RoundFace recognizeRound(const TopoDS_Shape& shape,
+                                         const TopoDS_Face&  face,
+                                         double              tolerance);
 
 } // namespace BRepExt

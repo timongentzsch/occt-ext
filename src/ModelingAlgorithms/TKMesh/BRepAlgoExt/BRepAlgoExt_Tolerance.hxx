@@ -12,11 +12,12 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <TopoDS_Shape.hxx>
 
 namespace BRepExt::tolerance
 {
 // Stored values, without a global application floor.
-double own(const TopoDS_Shape& shape);
-double largest(const TopoDS_Shape& shape);
+Standard_EXPORT double own(const TopoDS_Shape& shape);
+Standard_EXPORT double largest(const TopoDS_Shape& shape);
 } // namespace BRepExt::tolerance

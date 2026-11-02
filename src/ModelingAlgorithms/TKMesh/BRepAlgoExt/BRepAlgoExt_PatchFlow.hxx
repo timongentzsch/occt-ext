@@ -14,6 +14,7 @@
 #pragma once
 // A chart for UV flow that keeps right angles: a face laid flat conformally. Over such a chart
 // a surface's U and V meet at right angles wherever the surface follows the face.
+#include <Standard_Macro.hxx>
 #include <TopoDS_Face.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_XY.hxx>
@@ -51,6 +52,8 @@ struct ConformalChart
 //! Triangulate a face with edges no longer than `spacing` and within `deflection` of the face
 //! in space, and lay it flat. Fails with no_solution where the face is not one disc or the
 //! flattening folds a triangle over.
-ConformalChart conformalChart(const TopoDS_Face& face, double spacing, double deflection);
+Standard_EXPORT ConformalChart conformalChart(const TopoDS_Face& face,
+                                              double             spacing,
+                                              double             deflection);
 
 } // namespace BRepExt

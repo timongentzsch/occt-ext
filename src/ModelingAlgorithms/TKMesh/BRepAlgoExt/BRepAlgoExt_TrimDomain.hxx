@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <BRepTopAdaptor_FClass2d.hxx>
 #include <Bnd_Box2d.hxx>
 #include <Geom2d_BezierCurve.hxx>
@@ -26,7 +27,7 @@ namespace BRepExt
 {
 // Endpoints and stationary parameters of one rational Bezier coordinate, using the same
 // Bernstein root isolation as the trim's monotone pcurve pieces.
-std::vector<double> coordinateExtrema(const Handle(Geom_BezierCurve)&, int axis);
+Standard_EXPORT std::vector<double> coordinateExtrema(const Handle(Geom_BezierCurve)&, int axis);
 
 // The trimmed part of a face's parameter plane, from its pcurves: what trim-only area,
 // centroid and bounds integrate or refine over, never the rest of the support surface.
@@ -93,5 +94,6 @@ struct TrimProperties
 
 // Area and centroid integrated over the trim only; optionally the forward face's
 // signed volume contribution about an origin. Throws where the trim cannot be read.
-TrimProperties trimmedProperties(const TopoDS_Face&, const gp_Pnt* volumeOrigin = nullptr);
+Standard_EXPORT TrimProperties trimmedProperties(const TopoDS_Face&,
+                                                 const gp_Pnt* volumeOrigin = nullptr);
 } // namespace BRepExt

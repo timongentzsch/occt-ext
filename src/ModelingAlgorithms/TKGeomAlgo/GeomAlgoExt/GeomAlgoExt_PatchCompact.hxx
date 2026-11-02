@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <optional>
 
@@ -30,7 +31,7 @@ struct CompactPatchSurface
 //! or continuity acceptance is implied: the caller must rebuild the original rims and repeat all
 //! original physical gates. No certified removal returns nullopt. A work limit may return a
 //! certified partial reduction.
-std::optional<CompactPatchSurface> compactPatchSurface(
+Standard_EXPORT std::optional<CompactPatchSurface> compactPatchSurface(
   const char*                             operation,
   const occ::handle<Geom_BSplineSurface>& original,
   double                                  maximumDisplacement);

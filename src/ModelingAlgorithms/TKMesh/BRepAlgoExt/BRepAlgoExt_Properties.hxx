@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <TopoDS_Face.hxx>
@@ -22,21 +23,21 @@ namespace BRepExt
 {
 // Adaptive measurement. Each face has its own integration budget; callers needing
 // an accuracy certificate must inspect `converged` as well as the returned value.
-double faceMeasure(const TopoDS_Face&,
-                   bool          surface,
-                   const gp_Pnt& origin,
-                   bool*         converged,
-                   const double* areaEstimate = nullptr);
+Standard_EXPORT double faceMeasure(const TopoDS_Face&,
+                                   bool          surface,
+                                   const gp_Pnt& origin,
+                                   bool*         converged,
+                                   const double* areaEstimate = nullptr);
 // Closed forms for recognised analytic rectangles, otherwise fixed OCCT quadrature.
-double faceArea(const TopoDS_Face&);
+Standard_EXPORT double faceArea(const TopoDS_Face&);
 // Signed volume (surface false) or area of a whole shape by the adaptive face measurement above.
 // With `converged`, reports whether every face met its budget.
-double measure(const TopoDS_Shape&, bool surface, bool* converged = nullptr);
+Standard_EXPORT double measure(const TopoDS_Shape&, bool surface, bool* converged = nullptr);
 // The area centroid, integrated over each face's trim where the support is not an elementary
 // surface.
-std::vector<double> surfaceCentre(const TopoDS_Shape&);
+Standard_EXPORT std::vector<double> surfaceCentre(const TopoDS_Shape&);
 // Fixed boundary quadrature used only to bracket Boolean volume error.
-double faceMeasureBracket(const TopoDS_Face&, const gp_Pnt& origin);
+Standard_EXPORT double faceMeasureBracket(const TopoDS_Face&, const gp_Pnt& origin);
 
 // Fixed OCCT quadrature, with no error/convergence certificate. These estimates
 // retain the existing heuristic acceptance policy; use faceMeasure/volumeResult

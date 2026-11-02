@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <BRepToolsExt_Operations.hxx>
 #include <GeomAlgoExt_PatchFit.hxx>
 #include <GeomAlgoExt_SurfaceJet.hxx>
@@ -48,13 +49,16 @@ struct Constraint
   double skewAt(double f) const { return skewStart * (1 - f) - skewEnd * f; }
 };
 
-TopoDS_Face                      faceOf(OcctKernel&, const char*, uint32_t);
-Boundary                         boundaryOf(OcctKernel&, const char*, uint32_t edge, uint32_t face);
-occ::handle<Geom_BSplineSurface> editable(const char*, const TopoDS_Face&, bool fitting = true);
-SplineNet                        netOf(const occ::handle<Geom_BSplineSurface>&);
-gp_XY      boundaryUV(const char*, const TopoDS_Face&, const TopoDS_Edge&, bool end);
-int        boundarySide(const char*, const TopoDS_Face&, const TopoDS_Edge&);
-Constraint constraint(const char*, const TopoDS_Face&, const TopoDS_Edge&, Boundary, int);
+Standard_EXPORT TopoDS_Face faceOf(OcctKernel&, const char*, uint32_t);
+Standard_EXPORT Boundary    boundaryOf(OcctKernel&, const char*, uint32_t edge, uint32_t face);
+Standard_EXPORT occ::handle<Geom_BSplineSurface> editable(const char*,
+                                                          const TopoDS_Face&,
+                                                          bool fitting = true);
+Standard_EXPORT SplineNet                        netOf(const occ::handle<Geom_BSplineSurface>&);
+Standard_EXPORT gp_XY boundaryUV(const char*, const TopoDS_Face&, const TopoDS_Edge&, bool end);
+Standard_EXPORT int   boundarySide(const char*, const TopoDS_Face&, const TopoDS_Edge&);
+Standard_EXPORT Constraint
+  constraint(const char*, const TopoDS_Face&, const TopoDS_Edge&, Boundary, int);
 
 // Derivative constraints only. Values are equation tolerances, scaled by the
 // current metric; the defaults preserve the existing surface-tool contract.
@@ -64,91 +68,92 @@ struct JetFitSettings
   double curvatureWeight = 1e-6, curvatureWithin = 1e-9, metricFloor = 1;
 };
 
-void                      appendJetConditions(std::vector<FitCondition>&,
-                                              const gp_XY&,
-                                              const SurfaceJet& target,
-                                              const SurfaceJet& current,
-                                              int               order,
-                                              const JetFitSettings& = {});
-std::vector<FitCondition> conditions(const char*,
-                                     const std::vector<Constraint>&,
-                                     const occ::handle<Geom_BSplineSurface>&,
-                                     double tolerance,
-                                     bool   normalFlow = false);
-TopoDS_Face               makeFace(const char*,
-                                   const occ::handle<Geom_BSplineSurface>&,
-                                   double             tolerance,
-                                   TopAbs_Orientation orientation = TopAbs_FORWARD);
-void                      measure(const char*,
-                                  const TopoDS_Face&,
-                                  const std::vector<Constraint>&,
-                                  double tolerance,
-                                  bool   normalFlow = false);
+void            appendJetConditions(std::vector<FitCondition>&,
+                                    const gp_XY&,
+                                    const SurfaceJet& target,
+                                    const SurfaceJet& current,
+                                    int               order,
+                                    const JetFitSettings& = {});
+Standard_EXPORT std::vector<FitCondition> conditions(const char*,
+                                                     const std::vector<Constraint>&,
+                                                     const occ::handle<Geom_BSplineSurface>&,
+                                                     double tolerance,
+                                                     bool   normalFlow = false);
+Standard_EXPORT TopoDS_Face               makeFace(const char*,
+                                                   const occ::handle<Geom_BSplineSurface>&,
+                                                   double             tolerance,
+                                                   TopAbs_Orientation orientation = TopAbs_FORWARD);
+Standard_EXPORT void                      measure(const char*,
+                                                  const TopoDS_Face&,
+                                                  const std::vector<Constraint>&,
+                                                  double tolerance,
+                                                  bool   normalFlow = false);
 } // namespace surfacing
 
-EvolutionData       alignCollinear(OcctKernel&,
-                                   uint32_t,
-                                   uint32_t,
-                                   uint32_t,
-                                   uint32_t,
-                                   bool,
-                                   bool,
-                                   double,
-                                   double,
-                                   double,
-                                   double,
-                                   double);
-EvolutionData       alignSurface(OcctKernel&,
-                                 uint32_t,
-                                 uint32_t,
-                                 uint32_t,
-                                 uint32_t,
-                                 int,
-                                 double,
-                                 int    = 0,
-                                 int    = 0,
-                                 int    = 0,
-                                 int    = 0,
-                                 int    = 0,
-                                 bool   = false,
-                                 double = 0,
-                                 double = 1,
-                                 bool   = false,
-                                 double = 0,
-                                 double = 0);
-EvolutionData       bridgeSurface(OcctKernel&,
-                                  uint32_t,
-                                  uint32_t,
-                                  uint32_t,
-                                  uint32_t,
-                                  int,
-                                  int,
-                                  double,
-                                  double,
-                                  double,
-                                  int = 0);
-EvolutionData       squareSurface(OcctKernel&,
-                                  const std::vector<uint32_t>&,
-                                  const std::vector<uint32_t>&,
-                                  const std::vector<int>&,
-                                  int,
-                                  int,
-                                  int,
-                                  int,
-                                  double,
-                                  double = -1,
-                                  bool   = false);
-std::vector<double> surfacePoles(OcctKernel&, uint32_t);
-EvolutionData       moveSurfacePoles(OcctKernel&,
-                                     uint32_t,
-                                     const std::vector<int>&,
-                                     const std::vector<double>&,
-                                     const std::vector<uint32_t>&,
-                                     const std::vector<uint32_t>&,
-                                     const std::vector<uint32_t>&,
-                                     const std::vector<int>&,
-                                     double);
-EvolutionData       raiseSurfaceDegree(OcctKernel&, uint32_t, int, int, double);
+Standard_EXPORT EvolutionData alignCollinear(OcctKernel&,
+                                             uint32_t,
+                                             uint32_t,
+                                             uint32_t,
+                                             uint32_t,
+                                             bool,
+                                             bool,
+                                             double,
+                                             double,
+                                             double,
+                                             double,
+                                             double);
+Standard_EXPORT EvolutionData alignSurface(OcctKernel&,
+                                           uint32_t,
+                                           uint32_t,
+                                           uint32_t,
+                                           uint32_t,
+                                           int,
+                                           double,
+                                           int    = 0,
+                                           int    = 0,
+                                           int    = 0,
+                                           int    = 0,
+                                           int    = 0,
+                                           bool   = false,
+                                           double = 0,
+                                           double = 1,
+                                           bool   = false,
+                                           double = 0,
+                                           double = 0);
+Standard_EXPORT EvolutionData bridgeSurface(OcctKernel&,
+                                            uint32_t,
+                                            uint32_t,
+                                            uint32_t,
+                                            uint32_t,
+                                            int,
+                                            int,
+                                            double,
+                                            double,
+                                            double,
+                                            int = 0);
+Standard_EXPORT EvolutionData squareSurface(OcctKernel&,
+                                            const std::vector<uint32_t>&,
+                                            const std::vector<uint32_t>&,
+                                            const std::vector<int>&,
+                                            int,
+                                            int,
+                                            int,
+                                            int,
+                                            double,
+                                            double = -1,
+                                            bool   = false);
+Standard_EXPORT std::vector<double> surfacePoles(OcctKernel&, uint32_t);
+Standard_EXPORT EvolutionData       moveSurfacePoles(OcctKernel&,
+                                                     uint32_t,
+                                                     const std::vector<int>&,
+                                                     const std::vector<double>&,
+                                                     const std::vector<uint32_t>&,
+                                                     const std::vector<uint32_t>&,
+                                                     const std::vector<uint32_t>&,
+                                                     const std::vector<int>&,
+                                                     double);
+Standard_EXPORT EvolutionData       raiseSurfaceDegree(OcctKernel&, uint32_t, int, int, double);
 //! The B-spline that `faceSpline` data describes; fails naming `op` on malformed data.
-occ::handle<Geom_BSplineSurface> splineFromData(const char* op, const std::vector<double>&);
+Standard_EXPORT occ::handle<Geom_BSplineSurface> splineFromData(const char* op,
+                                                                const std::vector<double>&);
 } // namespace BRepExt

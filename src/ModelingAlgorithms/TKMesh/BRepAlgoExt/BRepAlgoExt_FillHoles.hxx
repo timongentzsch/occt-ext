@@ -17,6 +17,7 @@
 // a boss), taken off by dropping those loops: Delete Face's fast path, and how
 // the blend lifts off a feature its blend runs into (BRepBlendExt_Solver.cxx).
 
+#include <Standard_Macro.hxx>
 #include <BRepTools_History.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
@@ -28,11 +29,11 @@ namespace BRepExt
 
 //! Whether `wire` of `owner` (forward) is a hole of it: it winds against the outer bound in the
 //! face's parameters, as ShapeAnalysis::OuterWire tells them apart.
-bool holeOf(const TopoDS_Shape& wire, const TopoDS_Face& owner);
+Standard_EXPORT bool holeOf(const TopoDS_Shape& wire, const TopoDS_Face& owner);
 
 //! The face that fills a hole loop `wire` of `owner` (forward): on the owner's surface, the loop
 //! its outer bound (the owner's wire reversed).
-TopoDS_Face holeCap(const TopoDS_Face& owner, const TopoDS_Shape& wire);
+Standard_EXPORT TopoDS_Face holeCap(const TopoDS_Face& owner, const TopoDS_Shape& wire);
 
 //! What fillHoles made of a body: the body without the features it could take off, its
 //! history, and the requested faces it left.
@@ -55,12 +56,12 @@ struct Filled
 //! What the filled loops then span (holeCap) must be clear of the rest of the body; where one
 //! meets another face or another filled loop within their tolerances, the feature is left to
 //! BRepAlgoAPI_Defeaturing, which intersects them.
-Filled fillHoles(const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& faces);
+Standard_EXPORT Filled fillHoles(const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& faces);
 
 //! The features `faces` are of: they and the faces met across their edges, again from those,
 //! except across an edge on a hole loop of the face beyond, which holds the feature. A face of
 //! no such feature takes in what it is joined to, up to the whole body.
-std::vector<TopoDS_Shape> featuresOf(const TopoDS_Shape&              shape,
-                                     const std::vector<TopoDS_Shape>& faces);
+Standard_EXPORT std::vector<TopoDS_Shape> featuresOf(const TopoDS_Shape&              shape,
+                                                     const std::vector<TopoDS_Shape>& faces);
 
 } // namespace BRepExt

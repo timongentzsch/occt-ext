@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
@@ -22,15 +23,17 @@ namespace BRepExt
 {
 // A sufficient, conservative cap-collapse test for a right prism. Only used
 // after native construction failed; it cannot change a successful native blend.
-bool blendConsumesPrismCap(const TopoDS_Shape&, const std::vector<TopoDS_Shape>&, double);
-bool blendExceedsConvexRadius(const TopoDS_Shape&,
-                              const std::vector<TopoDS_Shape>&,
-                              double,
-                              const std::vector<TopoDS_Shape>* supports = nullptr);
+Standard_EXPORT bool blendConsumesPrismCap(const TopoDS_Shape&,
+                                           const std::vector<TopoDS_Shape>&,
+                                           double);
+Standard_EXPORT bool blendExceedsConvexRadius(const TopoDS_Shape&,
+                                              const std::vector<TopoDS_Shape>&,
+                                              double,
+                                              const std::vector<TopoDS_Shape>* supports = nullptr);
 // The way into `face` from the place `t` of its edge, across the edge and along the surface.
-bool supportInward(const TopoDS_Face& face,
-                   const TopoDS_Edge& edge,
-                   double             t,
-                   const gp_Vec&      tangent,
-                   gp_Vec&            inward);
+Standard_EXPORT bool supportInward(const TopoDS_Face& face,
+                                   const TopoDS_Edge& edge,
+                                   double             t,
+                                   const gp_Vec&      tangent,
+                                   gp_Vec&            inward);
 } // namespace BRepExt

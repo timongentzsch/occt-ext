@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <TopoDS_Shape.hxx>
 #include <stdexcept>
 #include <string>
@@ -50,8 +51,8 @@ enum class FailureKind
   RadiusLaw,
   MaterialBound
 };
-const char* failureKindName(FailureKind kind);
-int         failurePriority(const struct Failure& failure);
+Standard_EXPORT const char* failureKindName(FailureKind kind);
+Standard_EXPORT int         failurePriority(const struct Failure& failure);
 
 //! What `fail` throws. `what()` remains useful for native diagnostics; callers branch on fields.
 struct Failure : std::runtime_error
@@ -83,7 +84,7 @@ struct Failure : std::runtime_error
 //! The bound of the hashes in Failure::at: the largest, which is the one core asks with.
 inline constexpr int failureHashBound = 2147483647;
 //! A sub-shape's hash in Failure::at.
-int failureHash(const TopoDS_Shape& shape);
+Standard_EXPORT int failureHash(const TopoDS_Shape& shape);
 
 [[noreturn]] void fail(const char* operation, const char* reason, const std::string& message);
 //! The same, at these sub-shapes of the input.

@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <Standard_Macro.hxx>
 #include <TopoDS_Shape.hxx>
 #include <array>
 #include <vector>
@@ -51,7 +52,7 @@ struct SeparationCount
 // a face alone where only it is not proven clear of itself; `shape` itself where that is all
 // of its faces; nothing where all is proven. A face of few patches is left to the check to
 // meet with itself, which costs it little.
-std::vector<TopoDS_Shape> unprovenParts(const TopoDS_Shape& shape,
-                                        SeparationCount*    count = nullptr);
+Standard_EXPORT std::vector<TopoDS_Shape> unprovenParts(const TopoDS_Shape& shape,
+                                                        SeparationCount*    count = nullptr);
 
 } // namespace BRepExt

@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <BRepToolsExt_Session.hxx>
 #include <vector>
 
@@ -29,14 +30,14 @@ struct PolySplineResult
   std::vector<int> provenance;
 };
 
-PolySplineResult polySpline(OcctKernel&,
-                            const std::vector<double>&,
-                            const std::vector<int>&,
-                            double tolerance,
-                            int    refinement,
-                            bool   merge,
-                            bool   rounded,
-                            bool   boundaryExactly,
-                            bool   requireG1,
-                            double angularTolerance);
+Standard_EXPORT PolySplineResult polySpline(OcctKernel&,
+                                            const std::vector<double>&,
+                                            const std::vector<int>&,
+                                            double tolerance,
+                                            int    refinement,
+                                            bool   merge,
+                                            bool   rounded,
+                                            bool   boundaryExactly,
+                                            bool   requireG1,
+                                            double angularTolerance);
 } // namespace BRepExt

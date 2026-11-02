@@ -16,6 +16,7 @@
 // The round or bevel of the whole outline of a flat face against the walls that stand square
 // on it, past the tightest bend of that outline (BRepFilletExt_BlendFace.cxx).
 
+#include <Standard_Macro.hxx>
 #include <BRepAlgoExt_Cells.hxx>
 
 #include <vector>
@@ -37,10 +38,10 @@ namespace BRepExt
 //!
 //! Fails with "the planar cap: top face vanishes" in its text where nothing of the face is
 //! left, and otherwise with what it cannot build.
-BooleanResult faceBlend(const char*                      operation,
-                        const TopoDS_Shape&              shape,
-                        const std::vector<TopoDS_Shape>& edges,
-                        double                           distance,
-                        bool                             bevel);
+Standard_EXPORT BooleanResult faceBlend(const char*                      operation,
+                                        const TopoDS_Shape&              shape,
+                                        const std::vector<TopoDS_Shape>& edges,
+                                        double                           distance,
+                                        bool                             bevel);
 
 } // namespace BRepExt

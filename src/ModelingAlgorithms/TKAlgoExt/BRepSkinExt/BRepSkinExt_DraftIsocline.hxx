@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <Standard_Macro.hxx>
 #include <BRepOffsetExt_Parts.hxx>
 
 #include <gp_Pln.hxx>
@@ -24,12 +25,12 @@ namespace BRepExt
 //! `angle` with `pull` and passes through the wall where the neutral plane crosses it
 //! (BRepSkinExt_DraftIsocline.cxx). `lineage` is carried through. Fails, naming the face, where a
 //! face is no such wall, where the taper folds it, and where the draft would leave a step.
-TopoDS_Shape draftWalls(const TopoDS_Shape&              solid,
-                        const std::vector<TopoDS_Shape>& faces,
-                        double                           angle,
-                        const gp_Dir&                    pull,
-                        const gp_Pln&                    neutral,
-                        double                           tolerance,
-                        Lineage&                         lineage);
+Standard_EXPORT TopoDS_Shape draftWalls(const TopoDS_Shape&              solid,
+                                        const std::vector<TopoDS_Shape>& faces,
+                                        double                           angle,
+                                        const gp_Dir&                    pull,
+                                        const gp_Pln&                    neutral,
+                                        double                           tolerance,
+                                        Lineage&                         lineage);
 
 } // namespace BRepExt

@@ -20,6 +20,7 @@
 // the blend is attached by cutting the supports back to its contacts and the stopping faces
 // back to its ends.
 
+#include <Standard_Macro.hxx>
 #include <BRepTools_History.hxx>
 #include <TopoDS_Shape.hxx>
 
@@ -74,7 +75,7 @@ struct Blended
   int rails = 0, propagated = 0, analytic = 0, keptFaces = 0, keptEdges = 0;
 };
 
-Blended blend(const Request& request);
+Standard_EXPORT Blended blend(const Request& request);
 
 //! The kernel's stored body `shape` blended at its `edges` and checked valid: what the blend's
 //! two entry points, with a journal session and without, share. `law` is a Law's value and
@@ -82,10 +83,10 @@ Blended blend(const Request& request);
 //! A result the blend may return for this input: valid, closed where the input was, and every edge
 //! that claims it curvature continuous to within limit::seamBend of a blend of `size`. Refused by
 //! name otherwise.
-void accepted(const char*         operation,
-              const TopoDS_Shape& input,
-              const TopoDS_Shape& result,
-              double              size,
-              const Blended*      made = nullptr);
+Standard_EXPORT void accepted(const char*         operation,
+                              const TopoDS_Shape& input,
+                              const TopoDS_Shape& result,
+                              double              size,
+                              const Blended*      made = nullptr);
 
 } // namespace BRepExt::blend2

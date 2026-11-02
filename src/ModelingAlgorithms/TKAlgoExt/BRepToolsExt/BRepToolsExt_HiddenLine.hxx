@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <BRepToolsExt_Operations.hxx>
 
 namespace BRepExt
@@ -24,9 +25,9 @@ struct DrawingCurve
   std::vector<double> points;
 };
 
-std::vector<DrawingCurve> hiddenLine(OcctKernel&,
-                                     const std::vector<uint32_t>&,
-                                     Vec3                       normal,
-                                     Vec3                       x,
-                                     const std::vector<double>& options);
+Standard_EXPORT std::vector<DrawingCurve> hiddenLine(OcctKernel&,
+                                                     const std::vector<uint32_t>&,
+                                                     Vec3                       normal,
+                                                     Vec3                       x,
+                                                     const std::vector<double>& options);
 } // namespace BRepExt

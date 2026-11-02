@@ -22,6 +22,7 @@
 //   BRepBlendExt_Attach.cxx    the blends attached to the body (Attach)
 //   BRepBlendExt_Solver.cxx           the pieces of a request, their joints and splits (blend)
 
+#include <Standard_Macro.hxx>
 #include <BRepBlendExt_Request.hxx>
 #include <GeomAlgoExt_Timing.hxx>
 #include <GeomAlgoExt_Cancel.hxx>
@@ -285,30 +286,31 @@ struct Jet
   gp_Vec du, dv, duu, dvv, duv, n, ndu, ndv;
 };
 
-bool jetAt(const Side& side, double u, double v, Jet& j);
+Standard_EXPORT bool jetAt(const Side& side, double u, double v, Jet& j);
 
 //! Where a support's finite spline parameters end and run on along their boundary tangents:
 //! nonperiodic spline/Bezier surfaces, and spline profiles of extrusions and revolutions.
 //! This keeps carried contacts on a G1 extension instead of an unbounded last-span polynomial.
 //! Periodic parameters and other surface types continue on their original surfaces.
-std::array<std::optional<std::pair<double, double>>, 2> runsOn(const Handle(Geom_Surface)& surface);
+Standard_EXPORT std::array<std::optional<std::pair<double, double>>, 2> runsOn(
+  const Handle(Geom_Surface)& surface);
 
 //! The parameter v where a surface closes to a point (a sphere's pole, a cone's apex, a
 //! revolution's profile ending on its axis), where v lies past it: there (u, v) is the point (u +
 //! pi, 2 point - v), the surface's other side, its parameters running the other way round.
-std::optional<double> pastPoint(const Handle(Geom_Surface)& surface, double v);
+Standard_EXPORT std::optional<double> pastPoint(const Handle(Geom_Surface)& surface, double v);
 
 //! A support's surface and its derivatives at (u, v), run on past its ends (runsOn).
-void   supportD2(const Handle(Geom_Surface)& surface,
-                 double                      u,
-                 double                      v,
-                 gp_Pnt&                     p,
-                 gp_Vec&                     du,
-                 gp_Vec&                     dv,
-                 gp_Vec&                     duu,
-                 gp_Vec&                     dvv,
-                 gp_Vec&                     duv);
-gp_Pnt supportPoint(const Handle(Geom_Surface)& surface, double u, double v);
+Standard_EXPORT void   supportD2(const Handle(Geom_Surface)& surface,
+                                 double                      u,
+                                 double                      v,
+                                 gp_Pnt&                     p,
+                                 gp_Vec&                     du,
+                                 gp_Vec&                     dv,
+                                 gp_Vec&                     duu,
+                                 gp_Vec&                     dvv,
+                                 gp_Vec&                     duv);
+Standard_EXPORT gp_Pnt supportPoint(const Handle(Geom_Surface)& surface, double u, double v);
 
 //! A side's foot at its parameters: on its face's surface, or on a cliff's edge.
 inline gp_Pnt footAt(const Side& side, double u, double v)
@@ -317,7 +319,7 @@ inline gp_Pnt footAt(const Side& side, double u, double v)
 }
 
 //! The angle about a cliff's edge at `w` of the direction from it to `towards`.
-double cliffAngle(const Side& side, double w, const gp_Pnt& towards);
+Standard_EXPORT double cliffAngle(const Side& side, double w, const gp_Pnt& towards);
 
 //! An N x N system, its right-hand side in the last column, by elimination with partial pivoting;
 //! false where it is singular.
@@ -398,7 +400,7 @@ bool newton(std::array<double, N>& x, double tolerance, Residual residual)
 }
 
 //! The ball touching both supports whose section's plane passes through the edge's point at `t`.
-bool contactAt(const Rail& rail, double t, Station& s, double scale = 1);
+Standard_EXPORT bool contactAt(const Rail& rail, double t, Station& s, double scale = 1);
 
 //! The section at a station, from the foot on the first support to the foot on the second.
 struct Section
@@ -420,13 +422,13 @@ struct SectionFrame
   gp_Vec tangent;
 };
 
-Handle(Geom_BSplineCurve) sectionCurve(const Section& section);
+Standard_EXPORT Handle(Geom_BSplineCurve) sectionCurve(const Section& section);
 
-bool sectionAt(const Rail& rail, const Station& s, Section& out);
-bool sectionAt(const Rail&                      rail,
-               const Station&                   s,
-               Section&                         out,
-               const std::vector<SectionFrame>& frames);
+Standard_EXPORT bool sectionAt(const Rail& rail, const Station& s, Section& out);
+Standard_EXPORT bool sectionAt(const Rail&                      rail,
+                               const Station&                   s,
+                               Section&                         out,
+                               const std::vector<SectionFrame>& frames);
 
 //! A ball resting on several faces at once: its centre and its foot and outward normal on each.
 struct Ball
@@ -441,11 +443,11 @@ struct Ball
 //! signed distances from `seed`, whose gradients are the faces' normals at the feet; where more
 //! than three faces meet, on their least squares, so that a ball is found only where one rests
 //! on all of them (within the length resolution, tol::length). Empty where none does.
-std::optional<Ball> restingBall(const std::vector<Side>& faces,
-                                const gp_Pnt&            seed,
-                                double                   distance,
-                                double                   sigma,
-                                double                   scale);
+Standard_EXPORT std::optional<Ball> restingBall(const std::vector<Side>& faces,
+                                                const gp_Pnt&            seed,
+                                                double                   distance,
+                                                double                   sigma,
+                                                double                   scale);
 
 //! The stations of a rail, marched from the middle of the edge to both carried ends, and
 //! solved again at any parameter from the nearest one found.
@@ -798,27 +800,29 @@ struct Fitted
 
 constexpr int kDegree = 5;
 
-std::vector<double> flatten(const std::map<double, int>& knots);
+Standard_EXPORT std::vector<double> flatten(const std::map<double, int>& knots);
 
 //! The breaks of the data along the rail (de Boor): where a foot crosses a knot line of a spline
 //! support, and where the edge's own curve has a knot. A support C^c there leaves the section's
 //! poles C^(c - k), k being the order of the supports' derivatives the section uses (1 for the
 //! conic and the bevel, which follow the normals; 2 for G2, which follows the curvature too), so
 //! the fit takes a knot of multiplicity 5 - (c - k) at that place. Each as (u, multiplicity).
-std::map<double, int> breaksOf(const Rail& rail, Stations& stations, bool sought = false);
+Standard_EXPORT std::map<double, int> breaksOf(const Rail& rail,
+                                               Stations&   stations,
+                                               bool        sought = false);
 
 //! How closely a blend is fitted to its exact sections (and the sections of its parts meet).
-double fitTolerance(const Rail& rail);
+Standard_EXPORT double fitTolerance(const Rail& rail);
 
 // Contact discovery keeps the requested tolerance but uses circular pilot
 // sections; the caller must replace these with the requested law before
 // attachment.
-Fitted fit(const Rail& rail, Stations& stations, bool contactPilot = false);
-Fitted fit(const Rail&                      rail,
-           Stations&                        stations,
-           bool                             contactPilot,
-           const std::vector<SectionFrame>& frames,
-           const Fitted*                    terminalReference = nullptr);
+Standard_EXPORT Fitted fit(const Rail& rail, Stations& stations, bool contactPilot = false);
+Standard_EXPORT Fitted fit(const Rail&                      rail,
+                           Stations&                        stations,
+                           bool                             contactPilot,
+                           const std::vector<SectionFrame>& frames,
+                           const Fitted*                    terminalReference = nullptr);
 
 //! Where each contact's speed the way the ball rolls is least, (speed, u) at
 //! each place: worked out once for a fitted piece, for both checks below.
@@ -835,10 +839,10 @@ struct Dips
 //! or a flat cap has no room left. Its speed that way, from its own derivatives, is sampled, and
 //! each least speed found is refined by golden-section search to the true least, so that a fold
 //! shorter than the samples' spacing (a ball just past the bend) is found.
-void checkFold(Dips& dips);
+Standard_EXPORT void checkFold(Dips& dips);
 
 //! Whether a contact that checkFold reads (not a cliff's, nor a notch's) runs back anywhere.
-bool runsBack(Dips& dips);
+Standard_EXPORT bool runsBack(Dips& dips);
 
 //! Where a contact on a flat cap folds back over itself while the other rolls on (a swallowtail of
 //! the blend surface). For each fold, in order along the edge, the fit's u at either end of the
@@ -852,7 +856,7 @@ struct Fold
   double from = 0, to = 0;
 };
 
-std::vector<Fold> capFolds(Dips& dips, std::vector<Fold>* open = nullptr);
+Standard_EXPORT std::vector<Fold> capFolds(Dips& dips, std::vector<Fold>* open = nullptr);
 
 //! The blend face's surface, and where the rail and the contacts lie in its parameters: along
 //! the rail the parameter is `alpha + beta u`, u being the fit's, and each contact is the line
@@ -897,7 +901,7 @@ struct Sheet
 //! The blend's sheet as an exact cylinder or torus, where its spine is a line or a circle. The
 //! blend is then exact, not approximated. Empty where the spine is neither, or the feet stray from
 //! the surface's lines (limit::exactSheet).
-std::optional<Sheet> exactSheet(const Rail& rail, Stations& stations);
+Standard_EXPORT std::optional<Sheet> exactSheet(const Rail& rail, Stations& stations);
 
 //! A cylinder or a torus, whose meetings with another OpenCascade finds as exact conics; other
 //! sheets (fitted, extruded) that touch at a mitre's inner end are marched (marchedMeeting).
@@ -910,35 +914,39 @@ inline bool conical(const Sheet& sheet)
 //! Along a straight edge between planes every section is the middle one moved along the edge:
 //! the blend is that section's extrusion, whatever its law, its contacts exact lines. Empty
 //! elsewhere, and where the feet stray from it (limit::exactSheet).
-std::optional<Sheet> extrudedSheet(const Rail& rail, Stations& stations);
+Standard_EXPORT std::optional<Sheet> extrudedSheet(const Rail& rail, Stations& stations);
 
 //! On an exact sheet, the contacts on the supports from the sheet's own (no fit is needed): each
 //! laid on its support and carried to the fit's u, checked against the ball's feet. Empty where
 //! they cannot be laid exactly; the blend is fitted then.
-std::optional<Fitted> exactContacts(const Rail& rail, Stations& stations, const Sheet& sheet);
+Standard_EXPORT std::optional<Fitted> exactContacts(const Rail&  rail,
+                                                    Stations&    stations,
+                                                    const Sheet& sheet);
 
 //! A parameter curve through `at` over [first, last]: quintic, interpolated at its Schoenberg
 //! sites, its spans halved until it is within `tolerance` of `at` between them (empty past 1024).
-Handle(Geom2d_BSplineCurve) interpolated(const std::function<gp_Pnt2d(double)>& at,
-                                         double                                 first,
-                                         double                                 last,
-                                         double                                 tolerance);
+Standard_EXPORT Handle(Geom2d_BSplineCurve) interpolated(const std::function<gp_Pnt2d(double)>& at,
+                                                         double first,
+                                                         double last,
+                                                         double tolerance);
 
 //! A parameter curve of the fit's u carried to the sheet's rail parameter.
-Handle(Geom2d_BSplineCurve) alongRail(const Handle(Geom2d_BSplineCurve)& curve, const Sheet& sheet);
+Standard_EXPORT Handle(Geom2d_BSplineCurve) alongRail(const Handle(Geom2d_BSplineCurve)& curve,
+                                                      const Sheet&                       sheet);
 
 //! Curves of a split edge's parts, each over its own span of the sheet's rail parameter, end to
 //! end as one: their poles and knots as they are, so the parameter is kept (joining them to match
 //! speeds at the joints would move it off the edge's). Empty where they do not meet.
-Handle(Geom2d_BSplineCurve) endToEnd(std::vector<Handle(Geom2d_BSplineCurve)> parts,
-                                     double                                   tolerance);
-Handle(Geom_BSplineCurve) endToEnd(std::vector<Handle(Geom_BSplineCurve)> parts, double tolerance);
+Standard_EXPORT Handle(Geom2d_BSplineCurve) endToEnd(std::vector<Handle(Geom2d_BSplineCurve)> parts,
+                                                     double tolerance);
+Standard_EXPORT Handle(Geom_BSplineCurve)   endToEnd(std::vector<Handle(Geom_BSplineCurve)> parts,
+                                                     double tolerance);
 
 //! An edge of the body cut back to `at` on its curve, `to` taking the place of its vertex `from`.
-TopoDS_Edge trimmed(const TopoDS_Edge&   edge,
-                    const TopoDS_Vertex& from,
-                    const TopoDS_Vertex& to,
-                    double               at);
+Standard_EXPORT TopoDS_Edge trimmed(const TopoDS_Edge&   edge,
+                                    const TopoDS_Vertex& from,
+                                    const TopoDS_Vertex& to,
+                                    double               at);
 
 using EdgeMap = NCollection_DataMap<TopoDS_Shape, TopoDS_Shape, TopTools_ShapeMapHasher>;
 
@@ -946,24 +954,28 @@ using EdgeMap = NCollection_DataMap<TopoDS_Shape, TopoDS_Shape, TopTools_ShapeMa
 //! replaced by nothing), and with `bridges` closing the gaps that leaves where vertices were
 //! taken out.
 //! Several faces where the bridges leave islands of it, each with the holes inside it.
-std::vector<TopoDS_Face> rebuiltFaces(const TopoDS_Face&              face,
-                                      const EdgeMap&                  replace,
-                                      const std::vector<TopoDS_Edge>& bridges);
+Standard_EXPORT std::vector<TopoDS_Face> rebuiltFaces(const TopoDS_Face&              face,
+                                                      const EdgeMap&                  replace,
+                                                      const std::vector<TopoDS_Edge>& bridges);
 
 //! The face's surface without its placement, and the placement, as parameter curves are kept.
-std::pair<Handle(Geom_Surface), TopLoc_Location> surfaceOf(const TopoDS_Face& face);
+Standard_EXPORT std::pair<Handle(Geom_Surface), TopLoc_Location> surfaceOf(const TopoDS_Face& face);
 
 //! `p` moved by whole periods of `surface`'s parameters to lie nearest `target`.
-gp_Pnt2d nearPeriod(gp_Pnt2d p, const gp_Pnt2d& target, const Handle(Geom_Surface)& surface);
+Standard_EXPORT gp_Pnt2d nearPeriod(gp_Pnt2d                    p,
+                                    const gp_Pnt2d&             target,
+                                    const Handle(Geom_Surface)& surface);
 
 //! A parameter curve moved by whole periods of its surface so that it passes `expected` at `t`.
-Handle(Geom2d_Curve) aligned(const Handle(Geom2d_Curve)& curve,
-                             double                      t,
-                             const gp_Pnt2d&             expected,
-                             const Handle(Geom_Surface)& surface);
+Standard_EXPORT Handle(Geom2d_Curve) aligned(const Handle(Geom2d_Curve)& curve,
+                                             double                      t,
+                                             const gp_Pnt2d&             expected,
+                                             const Handle(Geom_Surface)& surface);
 
 //! A curve's piece between two of its parameters.
-Handle(Geom2d_Curve) between(const Handle(Geom2d_Curve)& curve, double from, double to);
+Standard_EXPORT Handle(Geom2d_Curve) between(const Handle(Geom2d_Curve)& curve,
+                                             double                      from,
+                                             double                      to);
 
 //! Where two curves in one surface's parameters meet: the parameter on each, and the whole
 //! periods the second was moved by to meet the first there.
@@ -975,12 +987,12 @@ struct Meeting
 
 //! Where `one` meets `two` in `surface`'s parameters, `two` taken also a whole period either way
 //! where the surface is periodic: a curve laid a period from another still meets it.
-std::vector<Meeting> meetings(const Handle(Geom2d_Curve)& one,
-                              const Handle(Geom2d_Curve)& two,
-                              const Handle(Geom_Surface)& surface);
+Standard_EXPORT std::vector<Meeting> meetings(const Handle(Geom2d_Curve)& one,
+                                              const Handle(Geom2d_Curve)& two,
+                                              const Handle(Geom_Surface)& surface);
 
 //! Of `found`, the one nearest `near` on the first curve.
-std::optional<Meeting> nearest(const std::vector<Meeting>& found, double near);
+Standard_EXPORT std::optional<Meeting> nearest(const std::vector<Meeting>& found, double near);
 
 //! The place of a curve nearest a point, and how far it is.
 struct OnCurve
@@ -990,7 +1002,7 @@ struct OnCurve
 
 //! Where `curve` comes nearest `p`, its ends included: projection finds only where the distance
 //! is stationary, which a meeting line need not be at its end (two surfaces touching there).
-std::optional<OnCurve> onCurve(const gp_Pnt& p, const Handle(Geom_Curve)& curve);
+Standard_EXPORT std::optional<OnCurve> onCurve(const gp_Pnt& p, const Handle(Geom_Curve)& curve);
 
 //! A curve of an edge on a surface, as the edge keeps it.
 struct OnSurface
@@ -1002,25 +1014,28 @@ struct OnSurface
 
 //! An edge along `curve` from `first` at `t0` to `second` at `t1`, either way along it, with its
 //! curves on surfaces over the same parameter: it runs the way the parameter rises.
-TopoDS_Edge edgeBetween(const Handle(Geom_Curve)&     curve,
-                        const TopoDS_Vertex&          first,
-                        double                        t0,
-                        const TopoDS_Vertex&          second,
-                        double                        t1,
-                        const std::vector<OnSurface>& on,
-                        double                        tolerance);
+Standard_EXPORT TopoDS_Edge edgeBetween(const Handle(Geom_Curve)&     curve,
+                                        const TopoDS_Vertex&          first,
+                                        double                        t0,
+                                        const TopoDS_Vertex&          second,
+                                        double                        t1,
+                                        const std::vector<OnSurface>& on,
+                                        double                        tolerance);
 
 //! A curve that lies on an elementary `surface` (a corner's ball), laid on it over [lo, hi] at its
 //! own parameter: its projection where that meets it exactly (a line of the surface's parameters),
 //! else through its points' own parameters, interpolated (the projection approximates it only to
 //! about the length tolerance), where that is nearer.
-Handle(Geom2d_Curve) laidOn(const Handle(Geom_Curve)&   curve,
-                            double                      lo,
-                            double                      hi,
-                            const Handle(Geom_Surface)& surface);
+Standard_EXPORT Handle(Geom2d_Curve) laidOn(const Handle(Geom_Curve)&   curve,
+                                            double                      lo,
+                                            double                      hi,
+                                            const Handle(Geom_Surface)& surface);
 
 //! The straight parameter curve from `a` at `t0` to `b` at `t1`.
-Handle(Geom2d_Curve) segment2d(const gp_Pnt2d& a, const gp_Pnt2d& b, double t0 = 0, double t1 = 1);
+Standard_EXPORT Handle(Geom2d_Curve) segment2d(const gp_Pnt2d& a,
+                                               const gp_Pnt2d& b,
+                                               double          t0 = 0,
+                                               double          t1 = 1);
 
 //! Where two surfaces meet (GeomInt_IntSS), each branch with its curve on each surface: where the
 //! meeting is analytic IntSS gives none, and the branch is laid on the surface over [lo, hi].
@@ -1073,12 +1088,12 @@ private:
 };
 
 //! Where a contact crosses an edge of its support: (u on the contact, parameter on the edge).
-std::optional<Meeting> crossing(const Handle(Geom2d_Curve)& contact,
-                                double                      from,
-                                double                      to,
-                                double                      near,
-                                const TopoDS_Edge&          edge,
-                                const TopoDS_Face&          support);
+Standard_EXPORT std::optional<Meeting> crossing(const Handle(Geom2d_Curve)& contact,
+                                                double                      from,
+                                                double                      to,
+                                                double                      near,
+                                                const TopoDS_Edge&          edge,
+                                                const TopoDS_Face&          support);
 
 //! Whether a point of a face's surface lies off the face, the point first taken by whole periods
 //! of the surface to the face's own parameters: a contact that crosses a sphere's or a
@@ -1134,15 +1149,15 @@ private:
 //! line or a circle on a line or circle of the support, which runs on exactly; the point found
 //! must lie on the stop face's surface too. (u on the contact, parameter on the edge beyond its
 //! range). It is looked for as far on as the contact itself lies from the vertex.
-std::optional<Meeting> beyond(const Handle(Geom2d_Curve)& contact,
-                              double                      from,
-                              double                      to,
-                              double                      near,
-                              const TopoDS_Edge&          edge,
-                              const TopoDS_Vertex&        vertex,
-                              const TopoDS_Face&          support,
-                              const TopoDS_Face&          stop,
-                              double                      tolerance);
+Standard_EXPORT std::optional<Meeting> beyond(const Handle(Geom2d_Curve)& contact,
+                                              double                      from,
+                                              double                      to,
+                                              double                      near,
+                                              const TopoDS_Edge&          edge,
+                                              const TopoDS_Vertex&        vertex,
+                                              const TopoDS_Face&          support,
+                                              const TopoDS_Face&          stop,
+                                              double                      tolerance);
 
 //! The same where the edge between the support and the stop face is not a line or circle: its
 //! continuation past `vertex` is where the two surfaces meet (GeomInt_IntSS's branch through the
@@ -1156,20 +1171,20 @@ struct Continuation
   Handle(Geom2d_Curve) onSupport, onStop;
 };
 
-std::optional<Continuation> continuation(const Handle(Geom2d_Curve)& contact,
-                                         double                      from,
-                                         double                      to,
-                                         double                      near,
-                                         const TopoDS_Edge&          edge,
-                                         const TopoDS_Vertex&        vertex,
-                                         const TopoDS_Face&          support,
-                                         const TopoDS_Face&          stop,
-                                         double                      tolerance);
+Standard_EXPORT std::optional<Continuation> continuation(const Handle(Geom2d_Curve)& contact,
+                                                         double                      from,
+                                                         double                      to,
+                                                         double                      near,
+                                                         const TopoDS_Edge&          edge,
+                                                         const TopoDS_Vertex&        vertex,
+                                                         const TopoDS_Face&          support,
+                                                         const TopoDS_Face&          stop,
+                                                         double                      tolerance);
 
 //! A body rebuilt around a solid that one blend changed.
-TopoDS_Shape withSolid(const TopoDS_Shape& body,
-                       const TopoDS_Shape& old,
-                       const TopoDS_Shape& solid);
+Standard_EXPORT TopoDS_Shape withSolid(const TopoDS_Shape& body,
+                                       const TopoDS_Shape& old,
+                                       const TopoDS_Shape& solid);
 
 //! How an end of a blended edge meets the rest: a face stops it, it runs on into another piece
 //! tangent to it, it is mitred against another piece at an angle, it ends in a corner patch with
@@ -1229,12 +1244,12 @@ struct Piece
 //! Whether the seam runs to a pole in the strip the blend replaces, on the edge's side of the
 //! contact: it goes with the strip (Attach::sweepToPole), and the contact, which passes the seam's
 //! place and comes back, stays in one run of the face's parameters.
-bool poleInStrip(const Piece& piece, int side, const TopoDS_Edge& seam);
+Standard_EXPORT bool poleInStrip(const Piece& piece, int side, const TopoDS_Edge& seam);
 
 //! Split parts expressed as one sheet, with inherited support breaks continued internally.
-void joinSplitPieces(const char*                                op,
-                     std::vector<Piece>&                        pieces,
-                     const std::vector<std::optional<Station>>& seeds);
+Standard_EXPORT void joinSplitPieces(const char*                                op,
+                                     std::vector<Piece>&                        pieces,
+                                     const std::vector<std::optional<Station>>& seeds);
 
 //! A face the blends change: its edges replaced only in it, and the edges that close its gaps.
 struct Edit
@@ -1248,7 +1263,7 @@ struct Edit
 //! adds the next face's edit, which a vector's growth would leave dangling.
 using Edits = std::deque<Edit>;
 
-Edit& editOf(Edits& edits, const TopoDS_Shape& face);
+Standard_EXPORT Edit& editOf(Edits& edits, const TopoDS_Shape& face);
 
 //! A surface as an edge's curve on it is kept: as placed in space for computing, and its basis
 //! and placement for storing.
@@ -1258,20 +1273,20 @@ struct Placed
   TopLoc_Location      location;
 };
 
-Placed placedSheet(const Sheet& sheet);
+Standard_EXPORT Placed placedSheet(const Sheet& sheet);
 
-Placed placedFace(const TopoDS_Face& face);
+Standard_EXPORT Placed placedFace(const TopoDS_Face& face);
 
 //! The edge where two surfaces meet between two corners, with its curve on each: the shorter way
 //! round on a closed curve, and each parameter curve moved by whole periods to pass where the
 //! first corner is on that surface. Empty where they do not meet through both corners.
-std::optional<TopoDS_Edge> meetingEdge(const Placed&        one,
-                                       const gp_Pnt2d&      firstOnOne,
-                                       const Placed&        two,
-                                       const gp_Pnt2d&      firstOnTwo,
-                                       const TopoDS_Vertex& first,
-                                       const TopoDS_Vertex& second,
-                                       double               scale);
+Standard_EXPORT std::optional<TopoDS_Edge> meetingEdge(const Placed&        one,
+                                                       const gp_Pnt2d&      firstOnOne,
+                                                       const Placed&        two,
+                                                       const gp_Pnt2d&      firstOnTwo,
+                                                       const TopoDS_Vertex& first,
+                                                       const TopoDS_Vertex& second,
+                                                       double               scale);
 
 //! Where two sheets meet between two corners where both are known in each sheet's parameters,
 //! marched along its length from the first corner, in even steps, each place on the plane across
@@ -1281,54 +1296,57 @@ std::optional<TopoDS_Edge> meetingEdge(const Placed&        one,
 //! same places at their chord lengths, the steps halved until, between the places, the curve
 //! opens no gap between the sheets beyond the length tolerance (its distance to the meeting times
 //! the sine of their angle) and its parameter curves lie on it.
-std::optional<TopoDS_Edge> marchedMeeting(const Sheet&         one,
-                                          const gp_Pnt2d&      oneFirst,
-                                          const gp_Pnt2d&      oneSecond,
-                                          const Sheet&         two,
-                                          const gp_Pnt2d&      twoFirst,
-                                          const gp_Pnt2d&      twoSecond,
-                                          const TopoDS_Vertex& first,
-                                          const TopoDS_Vertex& second);
+Standard_EXPORT std::optional<TopoDS_Edge> marchedMeeting(const Sheet&         one,
+                                                          const gp_Pnt2d&      oneFirst,
+                                                          const gp_Pnt2d&      oneSecond,
+                                                          const Sheet&         two,
+                                                          const gp_Pnt2d&      twoFirst,
+                                                          const gp_Pnt2d&      twoSecond,
+                                                          const TopoDS_Vertex& first,
+                                                          const TopoDS_Vertex& second);
 
 //! Where two sheets cross between two places where both meet (a crease, where the blends of two
 //! parts of an outline run into each other over a narrow neck of their cap), each place known in
 //! both sheets' parameters: marched along the chord between them, each place where the plane
 //! across the chord meets both sheets, interpolated as marchedMeeting does.
-std::optional<TopoDS_Edge> crossedMeeting(const Sheet&         one,
-                                          const gp_Pnt2d&      oneFirst,
-                                          const gp_Pnt2d&      oneSecond,
-                                          const Sheet&         two,
-                                          const gp_Pnt2d&      twoFirst,
-                                          const gp_Pnt2d&      twoSecond,
-                                          const TopoDS_Vertex& first,
-                                          const TopoDS_Vertex& second);
+Standard_EXPORT std::optional<TopoDS_Edge> crossedMeeting(const Sheet&         one,
+                                                          const gp_Pnt2d&      oneFirst,
+                                                          const gp_Pnt2d&      oneSecond,
+                                                          const Sheet&         two,
+                                                          const gp_Pnt2d&      twoFirst,
+                                                          const gp_Pnt2d&      twoSecond,
+                                                          const TopoDS_Vertex& first,
+                                                          const TopoDS_Vertex& second);
 
 //! The section of a sheet at a rail parameter between two corners, running the way its own
 //! across parameter does.
-TopoDS_Edge isoSection(const Sheet&         sheet,
-                       double               rail,
-                       const TopoDS_Vertex& first,
-                       const TopoDS_Vertex& second);
+Standard_EXPORT TopoDS_Edge isoSection(const Sheet&         sheet,
+                                       double               rail,
+                                       const TopoDS_Vertex& first,
+                                       const TopoDS_Vertex& second);
 
 //! An edge's unit direction away from a vertex of it, at its first end (0), its last (1) or
 //! whichever is there (-1); false where it does not end there or has no direction.
-bool leaving(const TopoDS_Edge& edge, const TopoDS_Vertex& vertex, gp_Vec& out, int end = -1);
+Standard_EXPORT bool leaving(const TopoDS_Edge&   edge,
+                             const TopoDS_Vertex& vertex,
+                             gp_Vec&              out,
+                             int                  end = -1);
 
 //! Two edges that go on from each other at a vertex, tangent within the blend tangency angle.
-bool tangent(const gp_Vec& a, const gp_Vec& b);
+Standard_EXPORT bool tangent(const gp_Vec& a, const gp_Vec& b);
 
 //! A face's outward unit normal at a vertex of an edge of it; false where it is singular there.
-bool normalAt(const TopoDS_Face&   face,
-              const TopoDS_Edge&   edge,
-              const TopoDS_Vertex& vertex,
-              gp_Vec&              out);
+Standard_EXPORT bool normalAt(const TopoDS_Face&   face,
+                              const TopoDS_Edge&   edge,
+                              const TopoDS_Vertex& vertex,
+                              gp_Vec&              out);
 
 //! Whether two faces of an edge go on smoothly into each other at a vertex of it: their outward
 //! normals there the same within the blend tangency angle (two faces of one wall).
-bool smoothAt(const TopoDS_Face&   a,
-              const TopoDS_Face&   b,
-              const TopoDS_Edge&   edge,
-              const TopoDS_Vertex& vertex);
+Standard_EXPORT bool smoothAt(const TopoDS_Face&   a,
+                              const TopoDS_Face&   b,
+                              const TopoDS_Edge&   edge,
+                              const TopoDS_Vertex& vertex);
 
 //! Where three or more blended edges meet: the vertex, and each piece's end there.
 struct Corner
@@ -1372,9 +1390,9 @@ struct ContinuationRequired : Failure
 };
 
 //! The blends of the pieces attached to the body (BRepBlendExt_Attach.cxx).
-TopoDS_Shape attach(TopoDS_Shape                     body,
-                    const std::vector<Piece>&        pieces,
-                    const std::vector<Corner>&       cornersAt,
-                    const Handle(BRepTools_History)& history);
+Standard_EXPORT TopoDS_Shape attach(TopoDS_Shape                     body,
+                                    const std::vector<Piece>&        pieces,
+                                    const std::vector<Corner>&       cornersAt,
+                                    const Handle(BRepTools_History)& history);
 
 } // namespace BRepExt::blend2::detail

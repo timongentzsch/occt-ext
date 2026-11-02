@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <Standard_Macro.hxx>
 #include <BRepAlgoExt_Cells.hxx>
 #include <BRepToolsExt_GeomUtil.hxx>
 #include <BRepToolsExt_Checks.hxx>
@@ -32,28 +33,28 @@ struct BlendBoundaryRoles
   std::vector<std::pair<TopoDS_Face, ShapeSet>> contacts;
 };
 
-bool               sameBlendSurface(const TopoDS_Face& a, const TopoDS_Face& b);
-bool               tangentBlendEdge(const TopoDS_Shape& shape, const TopoDS_Edge& edge);
-BlendBoundaryRoles blendBoundaryRoles(const TopoDS_Shape&              before,
-                                      const std::vector<TopoDS_Shape>& selected,
-                                      const TopoDS_Shape&              result,
-                                      const BooleanResult&             history,
-                                      const std::vector<TopoDS_Shape>& generated = {});
-void               markMiterBoundaries(const TopoDS_Shape&              before,
-                                       const std::vector<TopoDS_Shape>& selected,
-                                       const TopoDS_Shape&              result,
-                                       BlendBoundaryRoles&              roles);
-void               certifyBlendBoundaries(const char*               op,
-                                          const TopoDS_Shape&       result,
-                                          const BlendBoundaryRoles& roles,
-                                          double                    scale,
-                                          double                    angleDegrees = .5,
-                                          int                       samples      = 65);
+Standard_EXPORT bool sameBlendSurface(const TopoDS_Face& a, const TopoDS_Face& b);
+Standard_EXPORT bool tangentBlendEdge(const TopoDS_Shape& shape, const TopoDS_Edge& edge);
+BlendBoundaryRoles   blendBoundaryRoles(const TopoDS_Shape&              before,
+                                        const std::vector<TopoDS_Shape>& selected,
+                                        const TopoDS_Shape&              result,
+                                        const BooleanResult&             history,
+                                        const std::vector<TopoDS_Shape>& generated = {});
+Standard_EXPORT void markMiterBoundaries(const TopoDS_Shape&              before,
+                                         const std::vector<TopoDS_Shape>& selected,
+                                         const TopoDS_Shape&              result,
+                                         BlendBoundaryRoles&              roles);
+Standard_EXPORT void certifyBlendBoundaries(const char*               op,
+                                            const TopoDS_Shape&       result,
+                                            const BlendBoundaryRoles& roles,
+                                            double                    scale,
+                                            double                    angleDegrees = .5,
+                                            int                       samples      = 65);
 //! The faces a face of `before` became in `after`, as the algorithm that made it reports them.
 using BlendModified = std::function<const NCollection_List<TopoDS_Shape>&(const TopoDS_Shape&)>;
 //! Fails if a face the blend made runs into a face of the body that is not beside it.
-void checkBlendClear(const TopoDS_Shape&              before,
-                     const TopoDS_Shape&              after,
-                     const std::vector<TopoDS_Shape>& selected,
-                     const BlendModified&             modified);
+Standard_EXPORT void checkBlendClear(const TopoDS_Shape&              before,
+                                     const TopoDS_Shape&              after,
+                                     const std::vector<TopoDS_Shape>& selected,
+                                     const BlendModified&             modified);
 } // namespace BRepExt

@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #pragma once
+#include <Standard_Macro.hxx>
 #include <Geom_Surface.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_XYZ.hxx>
@@ -48,9 +49,9 @@ struct FitDiagnostics
 // integral of squared normalized-parametric second derivatives divided by modelScale^2.
 // The reference area vector sets both the orientation and the Jacobian's dimensionless scale.
 // Samples are an operational check, not a certified global error or intersection bound.
-FitDiagnostics measureSurfaceFit(const char*                      operation,
-                                 const occ::handle<Geom_Surface>& surface,
-                                 const std::vector<FitTarget>&    targets,
-                                 double                           modelScale,
-                                 gp_XYZ                           referenceArea);
+Standard_EXPORT FitDiagnostics measureSurfaceFit(const char*                      operation,
+                                                 const occ::handle<Geom_Surface>& surface,
+                                                 const std::vector<FitTarget>&    targets,
+                                                 double                           modelScale,
+                                                 gp_XYZ                           referenceArea);
 } // namespace BRepExt
