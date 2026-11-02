@@ -164,8 +164,8 @@ Two options belong to the extension packages (`adm/cmake/occt_extensions.cmake`)
 
 ## Tests
 
-`-DBUILD_GTEST=ON` adds the target `OpenCascadeGTest`, which runs the tests of every built toolkit; 165 tests
-belong to this tree. They live in `TKAlgoExt/GTests/BRep*Ext_Test.cxx` (one file per package) with a shared
+`-DBUILD_GTEST=ON` adds the target `OpenCascadeGTest`, which runs the tests of every built toolkit; 88 tests
+belong to this tree (74 for the operations, 9 for the utilities, 5 for the corrections to core classes). They live in `TKAlgoExt/GTests/BRep*Ext_Test.cxx` (one file per package) with a shared
 session and oracles in `BRepExtTest_Support.*`, in the `GeomAlgoExt` and `BRepAlgoExt` GTests, and in one test
 file for each of the corrections to `CSLib_Class2d`, `BRepTopAdaptor_FClass2d` and `BndLib`. For example:
 
@@ -180,8 +180,11 @@ volumes of skins and sweeps; the circular segment of three arcs closed by a chor
 touching a line and an arc; and, for bridge curves, the curvature, change of curvature and torsion of a circle
 and a helix at the ends. Each test names the defect it would catch.
 
-Operations without a test of their own yet: curve outline and regions, surface bridging, alignment, squaring and
-face separation, Gordon and guided skins, thickening, Boolean imprints, and the six-plate fills of the gallery.
+Operations without a test of their own yet: squaring of surfaces, face separation, guided skins,
+Boolean imprints along faces' normals, deformation, defeaturing by group, and the curvature-continuous fills
+between plates meeting at three or more edges. Of the tests that exist, the ones for regions, thickening,
+bridging and aligning were each shown to fail with the code or the continuity order broken; the others have
+not been mutation-checked.
 
 ## Repository layout
 
@@ -226,15 +229,18 @@ Known limits and what remains:
 4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
    offsetting solids whose blends meet the wall thickness exactly has no exactness proof.
 5. **Speed.** Measured against stock followed by the same check: a single circular edge 1.05 times, the curve
-   offset 1.65 times, the hollow 2.6 to 3.2 times, the smooth skin through square, circle and square 4.3 times
-   (not yet profiled). Everything else in the [table](dox/extensions/benchmarks.md) is level or faster.
+   offset 1.65 times, the hollow 2.6 to 3.2 times, the smooth skin through square, circle and square 4.3 times.
+   Everything else in the [table](dox/extensions/benchmarks.md) is level or faster. A profile of that skin
+   ([benchmarks.md](dox/extensions/benchmarks.md#smooth-skin-through-square-circle-square)) puts a third of
+   it in arc-length placement of points while a grid is refined, a quarter in sewing, a sixth each in face
+   construction and in orienting the solid.
 6. **Tests.** The list above.
 7. **Conventions.** Formatting is OCCT's (`clang-format` 18.1.8 with the repository's file), headers carry the
    repository's licence text, comments use `//!`, and files are named `Package_Class`. Not done: the packages
    use free functions in namespace `BRepExt`, the handle interface and `std::runtime_error` failures where OCCT
-   style would be classes with `IsDone` / `Shape`, `Standard_Failure` and `Message_ProgressRange`; public
-   declarations have no `Standard_EXPORT`, so a Windows DLL build would not export them (static and Linux
-   builds are unaffected); some messages still say "v2" for the blend solver.
+   style would be classes with `IsDone` / `Shape`, `Standard_Failure` and `Message_ProgressRange`. Public
+   free functions carry `Standard_EXPORT`; a Windows DLL build has not been tried. Some messages still say
+   "v2" for the blend solver.
 8. **Policy.** The choices listed under [Section policy](#section-policy) are not mathematics and are not
    included.
 

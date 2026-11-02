@@ -466,8 +466,8 @@ bool runAlike(const Handle(Geom_BSplineCurve)& a, const Handle(Geom_BSplineCurve
 //! parameters `given` among the grid's. Each is within 1e-8 of its length of its curve; the grid
 //! is refined for all together. Curves that are not made periodic keep their directions at their
 //! ends. Empty where 4096 points do not bring one there (a corner along it). The accuracy is set by
-//! the closed forms of rings on a cone or a cylinder, not by comparison with another product. Open
-//! speed finding: skin.net-seams-apart is 4.3 times its time, in these spans.
+//! the closed forms of rings on a cone or a cylinder. A grid found too coarse is doubled and every
+//! placement made again, so the cost is about twice that of the grid that is accepted.
 std::vector<Handle(Geom_BSplineCurve)> onOneGrid(
   const std::vector<Handle(Geom_BSplineCurve)>& curves,
   const std::vector<Monotone>&                  shares,
@@ -1372,15 +1372,13 @@ bool withoutUnlikeWeights(std::vector<Handle(Geom_BSplineCurve)>& curves, bool p
 //! Closed rings of one edge each, made fit to be joined point to point. Their seams go in one line,
 //! as a convention of this code: the first keeps its seam, each next has its seam at its point
 //! nearest to the seam before, carried over by the difference of the centres of the two rings'
-//! world boxes. This convention was chosen by comparison with another system (a skin of a spline,
-//! an ellipse and a circle rings, shifted and turned, to 2e-4 mm in place and 0.03 mm in a general
-//! pose), not a theorem: it is pose dependent and greedy from the first ring. The alternative with
-//! a proof is cyclic alignment, minimising the squared mismatch over shifts as a cyclic
-//! cross-correlation (Dogan, Bernal and Hagwood 2025), which is globally optimal pairwise but moves
-//! the seam elsewhere than this convention does. Rational rings that then do not run alike are made
-//! again with the share of their length as their parameter, so that the same share of each is
-//! joined and rings of one circle make a cylinder. Other sections are left to the skinning, which
-//! matches their vertices.
+//! world boxes. This convention is not a theorem: it is pose dependent and greedy from the first
+//! ring. The alternative with a proof is cyclic alignment, minimising the squared mismatch over
+//! shifts as a cyclic cross-correlation (Dogan, Bernal and Hagwood 2025), which is globally optimal
+//! pairwise but moves the seam elsewhere than this convention does. Rational rings that then do not
+//! run alike are made again with the share of their length as their parameter, so that the same
+//! share of each is joined and rings of one circle make a cylinder. Other sections are left to the
+//! skinning, which matches their vertices.
 std::vector<TopoDS_Wire> ringsInLine(std::vector<TopoDS_Wire> wires)
 {
   const auto soleEdge = [](const TopoDS_Wire& wire) {

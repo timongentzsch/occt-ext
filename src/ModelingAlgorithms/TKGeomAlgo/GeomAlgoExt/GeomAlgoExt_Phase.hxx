@@ -13,7 +13,7 @@
 
 #pragma once
 
-// Optional phase observer supplied by the application; native default is a no-op.
+// Optional phase observer supplied by the embedding program; native default is a no-op.
 extern "C" void BRepExt_PatchPhase(const char* name, int begin);
 
 namespace BRepExt

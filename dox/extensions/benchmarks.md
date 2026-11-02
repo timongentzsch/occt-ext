@@ -76,6 +76,26 @@ How to read it, without flattering it:
 A rigorous claim about speed or quality on general inputs needs a corpus rather than a dozen rows; the corpus used
 during development cannot be redistributed with this tree.
 
+### Smooth skin through square, circle, square
+
+Instruction counts (callgrind, native `-O3`, eleven calls, inclusive) of the extension's own call
+`BRepExt::skinThrough` for the 4.3-times row, excluding the quality survey and the stock calls of the
+benchmark:
+
+| Part | Share of the call |
+| --- | ---: |
+| Remaking the circle's rational arcs as cubics on one grid by length (`withoutUnlikeWeights`, almost all of it `GCPnts_AbscissaPoint`) | 34 % |
+| `BRepBuilderAPI_Sewing` of the faces | 24 % |
+| Building the faces of the skin | 17 % |
+| `BRepLib::OrientClosedSolid` | 16 % |
+| Making the sections compatible (`GeomAlgoExt::unify`, `BRepFill_CompatibleWires`) | 7 % |
+
+The arc-length placement doubles the grid until the placed curves agree with the originals to 1e-8 of
+their length, and makes every placement again at each doubling, so a grid found too coarse costs about as
+much as the grid that is accepted. Reusing the points of the coarser grid would change the last bits of
+the result, so it was not done without comparing the results bit for bit; sewing
+could be replaced by building the faces on shared edges. Neither is done.
+
 ## Corrections: aggregate fixtures
 
 Use Linux, CMake, Ninja, a C++17 compiler and static Release libraries.
