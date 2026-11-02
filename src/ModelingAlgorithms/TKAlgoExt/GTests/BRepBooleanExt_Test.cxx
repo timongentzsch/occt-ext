@@ -20,7 +20,10 @@
 #include <BRepToolsExt_Operations.hxx>
 #include <GeomAlgoExt_Failure.hxx>
 
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <GC_MakeCircle.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 
 #include <gtest/gtest.h>
@@ -98,4 +101,39 @@ TEST(BRepBooleanExt, UnionOfOverlappingBoxesRemovesTheOverlapOnce)
   const TopoDS_Shape made   = combine(Union, first, second);
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
   EXPECT_NEAR(volume(made), 2000 - 4 * 6 * 8, 1e-9 * 2000);
+}
+
+// A circle of radius 4 above the middle of the top face of a 20 x 20 x 10 box, projected down onto
+// it and imprinted, splits the face into the disc of area 16 pi and the ring around it; the solid
+// is the same body (volume 4000, area unchanged) with one more face. A projection along the
+// wrong direction, or a body re-made rather than imprinted, changes the volume or the areas of the
+// two faces at first order.
+TEST(BRepBooleanExt, ImprintOfACircleSplitsTheFaceIntoDiscAndRing)
+{
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(gp_Pnt(-10, -10, 0), 20, 20, 10).Shape();
+  const TopoDS_Wire  circle =
+    BRepBuilderAPI_MakeWire(
+      BRepBuilderAPI_MakeEdge(GC_MakeCircle(gp_Ax2(gp_Pnt(0, 0, 15), gp_Dir(0, 0, 1)), 4.0).Value())
+        .Edge())
+      .Wire();
+  const auto          result = BRepExt::imprintCurves(session(),
+                                             BRepExt::store(session(), box),
+                                                      {BRepExt::store(session(), circle)},
+                                             0,
+                                                      {0, 0, -1},
+                                             false,
+                                             false,
+                                             0,
+                                                      {},
+                                             BRepExt::failureHashBound);
+  const TopoDS_Shape& made   = BRepExt::get(session(), result.resultId);
+  EXPECT_NEAR(volume(made), 4000, 1e-6 * 4000);
+  EXPECT_NEAR(area(made), area(box), 1e-6 * area(box));
+  const auto top =
+    facesWhere(made, [](const double* l) { return near(l[2], 10) && near(l[5], 10); });
+  ASSERT_EQ(top.size(), 2u);
+  const double small = std::min(area(top[0]), area(top[1])),
+               large = std::max(area(top[0]), area(top[1]));
+  EXPECT_NEAR(small, 16 * M_PI, 1e-6 * 16 * M_PI);
+  EXPECT_NEAR(large, 400 - 16 * M_PI, 1e-6 * 400);
 }

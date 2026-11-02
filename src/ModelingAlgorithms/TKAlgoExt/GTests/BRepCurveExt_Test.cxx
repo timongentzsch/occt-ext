@@ -12,7 +12,8 @@
 // commercial license or contractual agreement.
 
 // Curve operations of BRepCurveExt against closed forms: location by arc length on a polyline and a
-// circle, and shape-preserving degree elevation.
+// circle, shape-preserving degree elevation, the cells of overlapping and nested loops, and the
+// outline of a sphere and a cylinder.
 
 #include "BRepExtTest_Support.hxx"
 
@@ -20,6 +21,8 @@
 #include <GeomAlgoExt_Failure.hxx>
 
 #include <BRepAdaptor_CompCurve.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <TopExp.hxx>
@@ -243,4 +246,114 @@ TEST(BRepCurveExt, DegreeElevationKeepsTheCurve)
                                         1e-10);
   };
   EXPECT_NEAR(arc(after), arc(before), 1e-8);
+}
+
+namespace
+{
+
+TopoDS_Wire rectangle(double x0, double y0, double x1, double y1)
+{
+  return polyline({gp_Pnt(x0, y0, 0), gp_Pnt(x1, y0, 0), gp_Pnt(x1, y1, 0), gp_Pnt(x0, y1, 0)},
+                  true);
+}
+
+std::vector<double> areasOfFaces(const TopoDS_Shape& shape)
+{
+  std::vector<double> areas;
+  for (TopExp_Explorer it(shape, TopAbs_FACE); it.More(); it.Next())
+    areas.push_back(area(it.Current()));
+  std::sort(areas.begin(), areas.end());
+  return areas;
+}
+
+} // namespace
+
+// Two overlapping rectangles, [0,6] x [0,4] and [4,10] x [2,6], cut the plane into three bounded
+// cells: A alone (24 - 4 = 20), B alone (20) and the overlap [4,6] x [2,4] (4). A cell lost at an
+// intersection, or one counted twice, changes the number or the areas at first order.
+TEST(BRepCurveExt, RegionsOfTwoOverlappingRectanglesAreTheThreeCells)
+{
+  const std::vector<uint32_t> curves = {BRepExt::store(session(), rectangle(0, 0, 6, 4)),
+                                        BRepExt::store(session(), rectangle(4, 2, 10, 6))};
+  const auto result = BRepExt::regions(session(), curves, {0, 0, 0}, {0, 0, 1}, 1e-7);
+  const auto areas  = areasOfFaces(BRepExt::get(session(), result.resultId));
+  ASSERT_EQ(areas.size(), 3u);
+  EXPECT_NEAR(areas[0], 4, 1e-9);
+  EXPECT_NEAR(areas[1], 20, 1e-9);
+  EXPECT_NEAR(areas[2], 20, 1e-9);
+}
+
+// A rectangle with a loop inside it that touches nothing gives two cells, the inner one and the
+// ring between: 3 x 2 and 10 x 8 - 3 x 2. Treating the inner loop as a hole of nothing, or
+// dropping the ring's hole, gives areas 6 and 80 or 6 and 6.
+TEST(BRepCurveExt, RegionsOfANestedLoopAreTheInnerCellAndTheRing)
+{
+  const std::vector<uint32_t> curves = {BRepExt::store(session(), rectangle(0, 0, 10, 8)),
+                                        BRepExt::store(session(), rectangle(3.5, 3, 6.5, 5))};
+  const auto result = BRepExt::regions(session(), curves, {0, 0, 0}, {0, 0, 1}, 1e-7);
+  const auto areas  = areasOfFaces(BRepExt::get(session(), result.resultId));
+  ASSERT_EQ(areas.size(), 2u);
+  EXPECT_NEAR(areas[0], 6, 1e-9);
+  EXPECT_NEAR(areas[1], 74, 1e-9);
+}
+
+// Curves that are not in the plane asked for are refused rather than projected.
+TEST(BRepCurveExt, RegionsRefuseCurvesOutsideThePlane)
+{
+  const std::vector<uint32_t> curves = {BRepExt::store(session(), rectangle(0, 0, 6, 4))};
+  EXPECT_THROW(BRepExt::regions(session(), curves, {0, 0, 1}, {0, 0, 1}, 1e-7), std::exception);
+}
+
+// The outline of a sphere of radius R seen from any direction is its great circle of radius R
+// about the centre, in the plane through the centre normal to the view: length 2 pi R, every
+// point at distance R from the centre.
+TEST(BRepCurveExt, OutlineOfASphereIsItsGreatCircle)
+{
+  const double       R = 5;
+  const gp_Pnt       centre(1, 2, 3);
+  const TopoDS_Shape sphere = BRepPrimAPI_MakeSphere(centre, R).Shape();
+  const uint32_t     id     = BRepExt::store(session(), sphere);
+  const auto result        = BRepExt::outline(session(), id, {0, 0, 3}, {0, 0, 1}, {1, 0, 0}, true);
+  const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
+  EXPECT_NEAR(length(made), 2 * M_PI * R, 1e-6 * 2 * M_PI * R);
+  for (TopExp_Explorer it(made, TopAbs_EDGE); it.More(); it.Next())
+  {
+    BRepAdaptor_Curve edge(TopoDS::Edge(it.Current()));
+    for (int k = 0; k <= 8; ++k)
+    {
+      const gp_Pnt p =
+        edge.Value(edge.FirstParameter() + (edge.LastParameter() - edge.FirstParameter()) * k / 8);
+      EXPECT_NEAR(p.Distance(centre), R, 1e-7);
+      EXPECT_NEAR(p.Z(), centre.Z(), 1e-7);
+    }
+  }
+}
+
+// A cylinder of radius 3 and length 10 along x, seen along z, has the outline of a rectangle
+// 10 x 6: the two generators at y = +-3 and the end circles seen edge on. Its box is
+// [0,10] x [-3,3] and the two long sides are 10 each.
+TEST(BRepCurveExt, OutlineOfACylinderSeenSideOnIsItsTwoGenerators)
+{
+  const TopoDS_Shape cylinder =
+    BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0)), 3, 10).Shape();
+  const auto          result = BRepExt::outline(session(),
+                                       BRepExt::store(session(), cylinder),
+                                                {0, 0, 0},
+                                                {0, 0, 1},
+                                                {1, 0, 0},
+                                       true);
+  const TopoDS_Shape& made   = BRepExt::get(session(), result.resultId);
+  Bnd_Box             box;
+  BRepBndLib::Add(made, box);
+  double b[6];
+  box.Get(b[0], b[1], b[2], b[3], b[4], b[5]);
+  EXPECT_NEAR(b[0], 0, 1e-6);
+  EXPECT_NEAR(b[3], 10, 1e-6);
+  EXPECT_NEAR(b[1], -3, 1e-6);
+  EXPECT_NEAR(b[4], 3, 1e-6);
+  int generators = 0;
+  for (TopExp_Explorer it(made, TopAbs_EDGE); it.More(); it.Next())
+    if (std::abs(length(it.Current()) - 10) < 1e-6)
+      ++generators;
+  EXPECT_EQ(generators, 2);
 }

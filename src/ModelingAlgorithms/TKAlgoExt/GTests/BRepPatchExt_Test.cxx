@@ -23,11 +23,14 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRep_Tool.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomLProp_SLProps.hxx>
 #include <Geom_Circle.hxx>
+#include <Geom_Plane.hxx>
 
 #include <gtest/gtest.h>
 
@@ -165,4 +168,154 @@ TEST(BRepPatchExt, OpenBoundaryOfThreeArcsIsClosedByTheChordOfTheGap)
   ASSERT_FALSE(face.IsNull());
   const double theta = 3 * M_PI / 2;
   EXPECT_NEAR(area(face), r * r * (theta - std::sin(theta)) / 2, 1e-3);
+}
+
+namespace
+{
+
+//! The six plates of a dish round a regular hexagon of circumradius 10: each rises from its edge
+//! outwards at 30 degrees. Returns the edges and the plates; `normals` gets each plate's normal.
+void dish(std::vector<uint32_t>& edges,
+          std::vector<uint32_t>& supports,
+          std::vector<gp_Dir>&   normals)
+{
+  const double rho = 10, rise = 30 * M_PI / 180, reach = 6;
+  gp_Pnt       vertex[6];
+  for (int k = 0; k < 6; ++k)
+    vertex[k] = gp_Pnt(rho * std::cos(k * M_PI / 3), rho * std::sin(k * M_PI / 3), 0);
+  for (int k = 0; k < 6; ++k)
+  {
+    const gp_Pnt &    a = vertex[k], &b = vertex[(k + 1) % 6];
+    const gp_Vec      along(a, b);
+    const gp_Vec      outward(gp_Pnt(0, 0, 0), gp_Pnt((a.X() + b.X()) / 2, (a.Y() + b.Y()) / 2, 0));
+    const gp_Vec      up = outward.Normalized() * std::cos(rise) + gp_Vec(0, 0, std::sin(rise));
+    const gp_Pnt      c = b.Translated(up * reach), d = a.Translated(up * reach);
+    const TopoDS_Face plate =
+      BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakePolygon(a, b, c, d, true).Wire()).Face();
+    const auto edge = edgesWhere(plate, [&](const double* l) {
+      return near(l[0], std::min(a.X(), b.X())) && near(l[3], std::max(a.X(), b.X()))
+             && near(l[1], std::min(a.Y(), b.Y())) && near(l[4], std::max(a.Y(), b.Y()))
+             && near(l[2], 0) && near(l[5], 0);
+    });
+    edges.push_back(BRepExt::store(session(), edge.at(0)));
+    supports.push_back(BRepExt::store(session(), plate));
+    normals.push_back(gp_Dir(along.Crossed(up)));
+  }
+}
+
+} // namespace
+
+// Two neighbouring plates of the dish are 29 degrees apart at the vertex they share, so no surface
+// can be tangent to both there (it has one tangent plane at the vertex). Asking G1 along all six is
+// refused with that reason; filling the loop on a wrong guess, or silently as G0, would break the
+// contract the caller asked for.
+TEST(BRepPatchExt, G1FillBetweenPlatesThatDisagreeAtACornerIsRefused)
+{
+  std::vector<uint32_t> edges, supports;
+  std::vector<gp_Dir>   normals;
+  dish(edges, supports, normals);
+  try
+  {
+    BRepExt::patch(session(), edges, supports, std::vector<int>(6, 1), {}, {}, 1e-4, 1.0, 0.1, 0);
+    FAIL() << "a G1 fill was returned";
+  }
+  catch (const BRepExt::Failure& failure)
+  {
+    EXPECT_NE(std::string(failure.what()).find("no surface is tangent to both"), std::string::npos)
+      << failure.what();
+  }
+}
+
+// The same loop asked only for G0 is filled: it passes through every hexagon vertex and, the six
+// plates being equal under a rotation of 60 degrees about the axis, has its middle on that axis.
+// A fill that loses a side, or is pulled to one plate, misses a vertex or the axis.
+TEST(BRepPatchExt, G0FillOfASixSidedLoopHoldsEveryVertexAndTheSymmetry)
+{
+  std::vector<uint32_t> edges, supports;
+  std::vector<gp_Dir>   normals;
+  dish(edges, supports, normals);
+  const auto result =
+    BRepExt::patch(session(), edges, supports, std::vector<int>(6, 0), {}, {}, 1e-4, 1.0, 0.1, 0);
+  const TopoDS_Face fill = onlyFace(BRepExt::get(session(), result.evolution.resultId));
+  ASSERT_FALSE(fill.IsNull());
+  const Handle(Geom_Surface) surface = BRep_Tool::Surface(fill);
+  for (int k = 0; k < 6; ++k)
+  {
+    const gp_Pnt               corner(10 * std::cos(k * M_PI / 3), 10 * std::sin(k * M_PI / 3), 0);
+    GeomAPI_ProjectPointOnSurf project(corner, surface);
+    ASSERT_GT(project.NbPoints(), 0);
+    EXPECT_LT(project.LowerDistance(), 1e-4) << "vertex " << k;
+  }
+  GeomAPI_ProjectPointOnSurf middle(gp_Pnt(0, 0, 3), surface);
+  ASSERT_GT(middle.NbPoints(), 0);
+  EXPECT_NEAR(middle.NearestPoint().X(), 0, 1e-3);
+  EXPECT_NEAR(middle.NearestPoint().Y(), 0, 1e-3);
+}
+
+// A six-sided hole in a sphere, its rim six arcs of the circle of latitude 40 degrees of a sphere
+// of radius 10 given in scrambled order and direction, filled for G1 with the sphere: the angle
+// between the sphere's and the fill's normals along every arc stays within g1Degrees. Chaining
+// six edges into the loop, and carrying the support of each, is what is tested beyond the one-edge
+// rim above.
+TEST(BRepPatchExt, SixArcRimOnASphereIsFilledTangentToItThroughEveryArc)
+{
+  const double       R = 10, latitude = 40 * M_PI / 180, g1Degrees = 1.0;
+  const TopoDS_Shape sphere =
+    BRepPrimAPI_MakeSphere(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), R, -M_PI / 2, latitude)
+      .Shape();
+  const TopoDS_Face   support = onlyFace(sphere);
+  const double        ringR = R * std::cos(latitude), ringZ = R * std::sin(latitude);
+  Handle(Geom_Circle) ring = new Geom_Circle(gp_Ax2(gp_Pnt(0, 0, ringZ), gp_Dir(0, 0, 1)), ringR);
+  std::vector<TopoDS_Edge> arcs;
+  for (const int k : {3, 0, 5, 1, 4, 2})
+  {
+    TopoDS_Edge arc = BRepBuilderAPI_MakeEdge(ring, k * M_PI / 3, (k + 1) * M_PI / 3).Edge();
+    arcs.push_back(k % 2 ? TopoDS::Edge(arc.Reversed()) : arc);
+  }
+  std::vector<uint32_t> edges, supports;
+  for (const TopoDS_Edge& arc : arcs)
+  {
+    edges.push_back(BRepExt::store(session(), arc));
+    supports.push_back(BRepExt::store(session(), support));
+  }
+  const auto        result = BRepExt::patch(session(),
+                                     edges,
+                                     supports,
+                                     std::vector<int>(6, 1),
+                                            {},
+                                            {},
+                                     1e-4,
+                                     g1Degrees,
+                                     0.1,
+                                     0);
+  const TopoDS_Face fill   = onlyFace(BRepExt::get(session(), result.evolution.resultId));
+  ASSERT_FALSE(fill.IsNull());
+  const Handle(Geom_Surface) sphereSurface = BRep_Tool::Surface(support),
+                             fillSurface   = BRep_Tool::Surface(fill);
+  double worst                             = 0;
+  for (const TopoDS_Edge& arc : arcs)
+  {
+    BRepAdaptor_Curve curve(arc);
+    for (int i = 1; i < 16; ++i)
+    {
+      const gp_Pnt               p = curve.Value(curve.FirstParameter()
+                                   + (curve.LastParameter() - curve.FirstParameter()) * i / 16);
+      gp_Dir                     normal[2];
+      const Handle(Geom_Surface) surfaces[2] = {sphereSurface, fillSurface};
+      for (int s = 0; s < 2; ++s)
+      {
+        GeomAPI_ProjectPointOnSurf project(p, surfaces[s]);
+        ASSERT_GT(project.NbPoints(), 0);
+        ASSERT_LT(project.LowerDistance(), 1e-4);
+        double u, v;
+        project.LowerDistanceParameters(u, v);
+        GeomLProp_SLProps props(surfaces[s], u, v, 1, 1e-9);
+        ASSERT_TRUE(props.IsNormalDefined());
+        normal[s] = props.Normal();
+      }
+      worst =
+        std::max(worst, std::acos(std::min(1., std::abs(normal[0].Dot(normal[1])))) * 180 / M_PI);
+    }
+  }
+  EXPECT_LE(worst, g1Degrees);
 }

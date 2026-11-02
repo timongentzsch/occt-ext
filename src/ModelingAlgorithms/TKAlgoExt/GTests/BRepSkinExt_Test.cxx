@@ -22,12 +22,14 @@
 #include <GeomAlgoExt_ModelTolerance.hxx>
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <GC_MakeArcOfCircle.hxx>
 #include <Geom_Circle.hxx>
 #include <Geom_TrimmedCurve.hxx>
 
@@ -164,4 +166,54 @@ TEST(BRepSkinExt, DiscSweptAlongAnArcFollowsPappus)
   EXPECT_NEAR(volume(BRepExt::get(session(), scaled.resultId)),
               base * (1 + s + s * s) / 3,
               1e-4 * base);
+}
+
+// A Gordon skin of three quarter circles of radius 4 at heights 0, 5 and 10 and the three
+// generators at 0, 45 and 90 degrees through their crossings is a patch of the cylinder x^2 + y^2
+// = 16: the profiles interpolated along the height are exact (equal arcs at equally spaced
+// heights), and the guides, being straight, add nothing the grid points do not already carry. Its
+// area is r (pi / 2) h = 20 pi and every sampled point is at radius 4 from the axis. A
+// profiles and generators are given out of order, which the skin puts in order. A
+// network that is crossed wrongly, a guide taken for a profile, or the correction term (the
+// tensor interpolation of the grid) left out, gives a surface off the cylinder at first order.
+TEST(BRepSkinExt, GordonSkinOfArcsAndGeneratorsIsAPatchOfTheCylinder)
+{
+  const double          r = 4;
+  std::vector<uint32_t> profiles, guides;
+  for (const double z : {5.0, 10.0, 0.0})
+  {
+    Handle(Geom_Circle) circle = new Geom_Circle(gp_Ax2(gp_Pnt(0, 0, z), gp_Dir(0, 0, 1)), r);
+    profiles.push_back(BRepExt::store(
+      session(),
+      BRepBuilderAPI_MakeWire(
+        BRepBuilderAPI_MakeEdge(GC_MakeArcOfCircle(circle->Circ(), 0, M_PI / 2, true).Value())
+          .Edge())
+        .Wire()));
+  }
+  for (const double angle : {M_PI / 2, 0.0, M_PI / 4})
+  {
+    const gp_Pnt a(r * std::cos(angle), r * std::sin(angle), 0), b(a.X(), a.Y(), 10);
+    guides.push_back(
+      BRepExt::store(session(),
+                     BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(a, b).Edge()).Wire()));
+  }
+  const auto          result = BRepExt::skinGordon(session(), profiles, guides, false, 1e-7);
+  const TopoDS_Shape& made   = BRepExt::get(session(), result.resultId);
+  EXPECT_NEAR(area(made), 20 * M_PI, 1e-6 * 20 * M_PI);
+  double worst = 0;
+  for (TopExp_Explorer it(made, TopAbs_FACE); it.More(); it.Next())
+  {
+    BRepAdaptor_Surface surface(TopoDS::Face(it.Current()));
+    for (int i = 0; i <= 8; ++i)
+      for (int j = 0; j <= 8; ++j)
+      {
+        const gp_Pnt p =
+          surface.Value(surface.FirstUParameter()
+                          + (surface.LastUParameter() - surface.FirstUParameter()) * i / 8,
+                        surface.FirstVParameter()
+                          + (surface.LastVParameter() - surface.FirstVParameter()) * j / 8);
+        worst = std::max(worst, std::abs(std::hypot(p.X(), p.Y()) - r));
+      }
+  }
+  EXPECT_LT(worst, 1e-7);
 }
