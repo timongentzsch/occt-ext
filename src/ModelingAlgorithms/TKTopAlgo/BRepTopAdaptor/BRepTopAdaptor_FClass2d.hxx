@@ -71,6 +71,10 @@ private:
   double                              Umax;
   double                              Vmin;
   double                              Vmax;
+  bool                                IsUPer   = false; //!< The face's surface is periodic in U
+  bool                                IsVPer   = false; //!< The face's surface is periodic in V
+  double                              UPeriod = 0.0;   //!< Its period in U, 0 when not periodic
+  double                              VPeriod = 0.0;   //!< Its period in V, 0 when not periodic
 };
 
 #endif // _BRepTopAdaptor_FClass2d_HeaderFile

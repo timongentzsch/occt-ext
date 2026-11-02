@@ -98,6 +98,11 @@ BRepTopAdaptor_FClass2d::BRepTopAdaptor_FClass2d(const TopoDS_Face& aFace, const
   Face.Orientation(TopAbs_FORWARD);
   occ::handle<BRepAdaptor_Surface> surf = new BRepAdaptor_Surface();
   surf->Initialize(aFace, false);
+  // Read once: every classification of a point needs them, and they cannot change.
+  IsUPer  = surf->IsUPeriodic();
+  IsVPer  = surf->IsVPeriodic();
+  UPeriod = IsUPer ? surf->UPeriod() : 0.0;
+  VPeriod = IsVPer ? surf->VPeriod() : 0.0;
 
   TopoDS_Edge            edge;
   TopAbs_Orientation     Or;
@@ -556,12 +561,8 @@ TopAbs_State BRepTopAdaptor_FClass2d::Perform(const gp_Pnt2d& _Puv,
   double v  = _Puv.Y();
   double uu = u, vv = v;
 
-  occ::handle<BRepAdaptor_Surface> surf = new BRepAdaptor_Surface();
-  surf->Initialize(Face, false);
-  const bool   IsUPer   = surf->IsUPeriodic();
-  const bool   IsVPer   = surf->IsVPeriodic();
-  const double uperiod  = IsUPer ? surf->UPeriod() : 0.0;
-  const double vperiod  = IsVPer ? surf->VPeriod() : 0.0;
+  const double uperiod  = UPeriod;
+  const double vperiod  = VPeriod;
   TopAbs_State aStatus  = TopAbs_UNKNOWN;
   bool         urecadre = false, vrecadre = false;
 
@@ -718,12 +719,8 @@ TopAbs_State BRepTopAdaptor_FClass2d::TestOnRestriction(const gp_Pnt2d& _Puv,
   double v  = _Puv.Y();
   double uu = u, vv = v;
 
-  occ::handle<BRepAdaptor_Surface> surf = new BRepAdaptor_Surface();
-  surf->Initialize(Face, false);
-  const bool   IsUPer   = surf->IsUPeriodic();
-  const bool   IsVPer   = surf->IsVPeriodic();
-  const double uperiod  = IsUPer ? surf->UPeriod() : 0.0;
-  const double vperiod  = IsVPer ? surf->VPeriod() : 0.0;
+  const double uperiod  = UPeriod;
+  const double vperiod  = VPeriod;
   TopAbs_State aStatus  = TopAbs_UNKNOWN;
   bool         urecadre = false, vrecadre = false;
 
