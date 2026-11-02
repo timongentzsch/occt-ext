@@ -488,10 +488,14 @@ const Pick cornerEdges = [](const Bnd_Box&, double* b) {
   return b[0] <= 1e-6 && b[1] <= 1e-6 && b[5] >= 20 - 1e-6 && (atX || atY || (near(b[0], b[3]) && near(b[1], b[4])));
 };
 
+// With a second argument, only inputs whose label contains it are run.
+std::string inputFilter;
+
 struct Step { Pick pick; double radius; };
 // With `ballOracle`, the last step's blend faces are also compared with the exact rolling-ball blend
 // (ballDefect); that step's ball does not roll where it would reach the bottom face z = 0.
 void rounds(const char* name, const std::vector<Step>& steps, double expected, bool ballOracle = false) {
+  if (std::string(name).find(inputFilter) == std::string::npos) return;
   const TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 20).Shape();
   double volumeStock = 0, volumeExt = 0;
   bool validStock = false, validExt = false;
@@ -556,8 +560,6 @@ void rounds(const char* name, const std::vector<Step>& steps, double expected, b
   text(validExt, volumeExt, resultExt, lastInputExt);
   row("round", name, "extension", ext, q);
 }
-// With a second argument, only inputs whose label contains it are run.
-std::string inputFilter;
 // Rounds along curved junctions: two crossing cylinders and a sphere standing on a box. The edges are
 // space curves where two curved surfaces meet, the case where a blend must follow a surface-surface
 // intersection and change its contact curves as it goes. No closed form: validity and volume only,
