@@ -36,5 +36,4 @@ set(OCCT_GeomAlgoExt_FILES
 # WebAssembly applications supply their own direct cancellation/observer hooks.
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
   list(APPEND OCCT_GeomAlgoExt_FILES GeomAlgoExt_Progress.cxx)
-endif(  GeomAlgoExt_Progress.cxx
-)
+endif()

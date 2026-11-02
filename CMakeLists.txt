@@ -1015,6 +1015,11 @@ file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/${INSTALL_DIR_INCLUDE}")
 
 # include <cmake binary folder>/inc
 include_directories (${CMAKE_BINARY_DIR}/${INSTALL_DIR_INCLUDE})
+# Standard_Version.hxx is configured relative to this project's binary directory, which differs
+# from CMAKE_BINARY_DIR when OCCT is added with add_subdirectory().
+if (NOT "${OCCT_BINARY_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")
+  include_directories (${OCCT_BINARY_DIR}/${INSTALL_DIR_INCLUDE})
+endif()
 
 # check all 3rdparty library paths
 string (REGEX REPLACE ";" " " 3RDPARTY_NO_LIBS "${3RDPARTY_NO_LIBS}")
