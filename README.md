@@ -408,15 +408,21 @@ difference between implementations and is not). Hatched bars are calls with no v
 
 | Operation | Input | Stock ms | Stock + check ms | Branch ms | Result |
 | --- | --- | ---: | ---: | ---: | --- |
-| Round | plate, hole r=1, edge r=0.2 / 0.5 | 0.24 / 0.23 | 0.35 / 0.35 | 0.37 / 0.37 | both exact to 5e-12 (closed form) |
-| Round | box, all 12 edges, r=6 / r=9 | 2.6 / 2.6 | 3.4 / 3.4 | 1.8 / 1.8 | both exact to 3e-11 (Steiner) |
-| Round | box, three edges at a corner, r=7 | 0.85 | 1.2 | 0.60 | same volume |
-| Round | box, top r=8 then uprights r=3 | 5.9 | 7.3 | 8.0 | ball defect: stock 7e-3 at most, branch 2e-9 |
-| Round | crossed cylinders R10/R6, r=1 / 2.5 | 10.4 / 11.4 | 12.5 / 13.8 | 12.9 / 15.4 | ball defect: stock 2e-4 / 3e-3, branch 2e-8 / 3e-8 |
-| Round | sphere R14 on a box, r=2 / 6 | 1.03 / 1.03 | 1.2 / 1.2 | 0.49 / 0.46 | volumes agree to 1e-7; ball defect: stock 4e-6, branch 1e-14 |
-| Fill | four cubic sides, a=0.5 / 2.0 | 2.6 / 13.4 | | 1.9 / 1.9 | stock 0.11 / 0.45 off the defining surface, branch 1e-12 |
-| Hollow | filleted box, wall 2 / 4 | 2.6 / 2.5 | | 6.7 / 7.9 | stock volume wrong by 3.3e4 / invalid; branch exact to 1e-11 |
-| Curve offset | rectangle, d=2 / 10 | 0.14 | | 0.23 | both exact |
+| Round | plate, hole r=1, edge r=0.2 / 0.5 | 0.24 / 0.24 | 0.35 / 0.35 | 0.37 / 0.37 | both exact to 5e-12 (closed form) |
+| Round | box, all 12 edges, r=6 / r=9 | 2.7 / 2.7 | 3.5 / 3.5 | 1.6 / 1.6 | both exact to 3e-11 (Steiner) |
+| Round | box, three edges at a corner, r=7 | 0.87 | 1.24 | 0.54 | same volume |
+| Round | box, top r=8 then uprights r=3 | 5.9 | 7.4 | 7.2 | ball defect: stock 7e-3 at most, branch 2e-9 |
+| Round | crossed cylinders R10/R6, r=1 / 2.5 | 10.2 / 11.1 | 12.5 / 13.7 | 8.3 / 10.2 | ball defect: stock 2e-4 / 3e-3, branch 2e-8 / 3e-8 |
+| Round | sphere R14 on a box, r=2 / 6 | 1.03 / 1.03 | 1.24 / 1.24 | 0.45 / 0.44 | volumes agree to 1e-7; ball defect: stock 4e-6, branch 1e-14 |
+| Fill | four cubic sides, a=0.5 / 2.0 | 2.6 / 13.7 | | 1.9 / 1.9 | stock 0.11 / 0.45 off the defining surface, branch 1e-12 |
+| Hollow | filleted box, wall 2 / 4 | 2.6 / 2.5 | | 6.8 / 8.0 | stock volume wrong by 3.3e4 / invalid; branch exact to 1e-11 |
+| Curve offset | rectangle, d=2 / 10 | 0.14 / 0.14 | | 0.23 / 0.23 | both exact |
+| Skin | two circles, ruled | 0.22 | 0.42 | 0.40 | frustum volume, both exact to 2e-11 |
+| Skin | six circles at unequal heights, ruled | 0.64 | 1.33 | 1.46 | stack of frusta, both exact to 1.3e-11 |
+| Skin | six circles, smooth | 1.08 | 1.26 | 1.00 | stock bulges to half-width 19.3 through sections of radius at most 10 (volume 13 000, more than any profile within the sections allows); branch 10.0 |
+| Skin | three circles, smooth | 0.56 | 0.72 | 0.80 | both valid; sections lie on the result to 1.5e-8 (stock) and 7e-15 (branch) |
+| Skin | square to circle, ruled | 1.15 | 1.79 | 1.50 | same volume |
+| Skin | square, circle, square, smooth | 1.58 | 2.18 | 9.3 | both valid (the branch's was an unconnected solid before [this correction](#brepskinext-section-vertices-exact)) |
 
 *Ball defect.* The exact blend of radius r on a body B is the envelope of the balls of radius r that lie on one side
 of the surface and touch B; so for a point P of it with unit normal N, the centre c = P -/+ rN is at distance exactly r
@@ -432,24 +438,27 @@ volumes; stock's blends are the approximations and the branch's are exact to the
 
 How to read it, without flattering it:
 
-* **Where the branch is faster than the checked stock bar:** twelve-edge and corner rounds (1.9 and 2.0 times), the
-  sphere on a box (2.5 and 2.7 times), and the fill, which is also exact where stock is not. Both agree with stock on
-  the volume to the tolerance of stock's blend.
-* **Where it is level:** a single circular edge is 1.05 times the checked stock bar (0.37 against 0.35 ms); the
-  remaining 0.02 ms is face history and the closedness test. Before the checks of the fillet wrappers were restricted to what
-  an operation made it was 1.7 times (the whole-body pass above).
-* **Where it is slower:** the round blended into earlier rounds (1.1 times), the crossed cylinders (1.03 and 1.12 times),
-  the curve offset (1.7 times) and the hollow (2.6 and 3.2 times, against a stock call that returns a wrong or invalid
-  body). For the crossed cylinders the profile is the construction itself (the spine march, the section fit and the
-  same-parameter pass), not a check: at r=2.5 the extension's exact blend costs about a third more instructions than
-  stock's approximation, which is what its smaller defect buys. The offset spends its extra on a self-crossing test of
-  the input, on finding the plane of the outline and on the polylines for the test (about an eighth each); the reblend
-  and the hollow have not been profiled.
-* **What changed:** a profile of the sphere on a block found 80 per cent of the call in an exact face-to-face distance
-  between the toroidal blend and the block's far sides. `BRepBndLib` boxes a face that is not planar by its whole surface,
-  so the box of the blend was that of the entire torus and reached the sides, and the torus box that `BndLib` gives for a
-  parameter range was itself smaller than the patch (see
-  [BndLib-torus-patch-box](#bndlib-torus-patch-box)). With both fixed the test is skipped where the box says it must be.
+* **Where the branch is faster than the checked stock bar:** twelve-edge and corner rounds (2.2 and 2.3 times), the sphere on a
+  box (2.8 times), the crossed cylinders (1.5 and 1.3 times), the fill (which is also exact where stock is not), the smooth skin
+  through six circles (which also stays within the radius of its sections where stock bulges to nearly twice it) and the ruled
+  skin from a square to a circle (1.2 times).
+* **Where it is level:** a single circular edge is 1.05 times the checked stock bar (0.37 against 0.35 ms; the remaining 0.02 ms is
+  face history and the closedness test), the round blended into earlier rounds is 0.97 times, the ruled skins are 1.0 to 1.1
+  times (they call the same `BRepOffsetAPI_ThruSections`; the extra is lining up the rings).
+* **Where it is slower:** the curve offset (1.65 times; it brings the curve to a working size so that offsets behave at any scale,
+  redraws it, builds the plane and polylines and tests the result for self-crossing, none of which stock does, and the offset
+  itself costs the same), the hollow (2.6 to 3.2 times, against a stock call that returns a wrong or invalid body; 22 per cent of it
+  is the check that the wall is nowhere thinner than asked, 12 per cent validity checks, the rest OCCT's offset, defeaturing and
+  Boolean), the smooth skin through three circles (1.1 times) and the smooth skin through a square, a circle and a square (4.3
+  times: the branch's own Gordon-type construction against stock's; not yet profiled).
+* **What changed:** a profile of the sphere on a block found 80 per cent of the call in an exact face-to-face distance between the
+  toroidal blend and the block's far sides. `BRepBndLib` boxes a face that is not planar by its whole surface, so the box of the
+  blend was that of the entire torus and reached the sides, and the torus box that `BndLib` gives for a parameter range was itself
+  smaller than the patch (see [BndLib-torus-patch-box](#bndlib-torus-patch-box)). With both fixed the test is skipped where the box
+  says it must be. A profile of the reblend and the crossed cylinders then found a quarter of the call in point-in-face
+  classification, which scanned every vertex of the face's boundary polygon up to five times per point
+  ([CSLib_Class2d-v-bucket-index](#cslib_class2d-v-bucket-index)), and 6 per cent in rebuilding a surface adaptor per query
+  ([BRepTopAdaptor_FClass2d-periods-read-once](#breptopadaptor_fclass2d-periods-read-once)).
 * **Fill and hollow** show the cases stock does not handle well, on inputs with closed forms; they say nothing about
   general loops.
 
@@ -524,19 +533,29 @@ Known limits and what remains, stated without reference to any application:
    chaining routine (`BRepPatchExt_Side.hxx`).
 4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
    offsetting solids whose blends meet the wall thickness exactly has no exactness proof.
-5. **Speed.** Every call verifies its result (table above). A single circular edge is within 0.02 ms of stock plus the
-   same check; the reblend and crossed cylinders are 3 to 12 per cent slower, the curve offset 1.7 times and the hollow 2.6
-   to 3.2 times. The crossed cylinders are construction cost (the exact blend against stock's approximation) and the offset's extra is its
-   self-crossing test and plane finding; neither has been reduced, and the reblend and the hollow have not been profiled.
-   Skinning has not been compared with stock at all.
-6. **Tests.** Native tests exist for the utilities, the chart, the fit and five whole operations. Most of
-   `TKAlgoExt` is exercised only through the embedding application's tests; closed-form native tests are
-   needed for each package before an upstream proposal.
-7. **Conventions.** The packages use free functions in namespace `BRepExt`, a host seam and `std::runtime_error`
-   failures. OCCT style would be classes with `IsDone`/`Shape`, `Standard_Failure` and `Message_ProgressRange`.
-   That is a behaviour-changing refactor and is deferred to review.
-8. **Provenance.** Four routines that were written against the observed behaviour of other software and two
-   Patch routines are deliberately not in this tree.
+5. **Speed.** Every call verifies its result (table above). Measured against stock followed by the same check: a single
+   circular edge is 1.05 times (0.02 ms), the curve offset 1.65 times (its working-size normalisation, plane finding and
+   self-crossing test are the extra; the offset itself is stock's), the hollow 2.6 to 3.2 times (the wall-thickness check and the
+   validity checks are a third of it, the rest is OCCT's offset, defeaturing and Boolean; stock returns a wrong or invalid body),
+   the smooth skin through a square, a circle and a square 4.3 times (unprofiled). Everything else in the table is level or
+   faster. The reblend and the crossed cylinders were profiled and their classification cost removed
+   ([CSLib_Class2d-v-bucket-index](#cslib_class2d-v-bucket-index)).
+6. **Tests.** Every package of `TKAlgoExt` has a native test file ([Native tests](#native-tests)). Operations without a test of
+   their own yet: curve outline and regions, surface bridging, alignment, squaring and face separation, the Gordon and guided
+   skins, thickening, the Boolean imprints, and the six-plate fills of the gallery. Each test names the bug it would catch
+   and uses an expected value from a definition; a mutation of the conic section weight was caught by the spline-path blend tests
+   (the analytic-path ones, box and sphere, do not exercise it).
+7. **Conventions.** Formatting is OCCT's (`clang-format` 18.1.8 with the repository's file), headers carry the repository's
+   license text, comments use `//!`, files are named `Package_Class`. Not done: the packages use free functions in namespace
+   `BRepExt`, a host seam and `std::runtime_error` failures where OCCT style would be classes with `IsDone`/`Shape`,
+   `Standard_Failure` and `Message_ProgressRange` (a behaviour-changing refactor, deferred to review); public declarations
+   have no `Standard_EXPORT`, so a Windows DLL build would not export them (static and Linux builds are unaffected); messages
+   of the blend solver still call it "v2" and the skin "skin". A few comments were cut in an earlier clean-up of references to
+   other software and have been completed from the code around them; they deserve a reviewer's eye.
+8. **Application-specific behaviour.** Not in this tree and not claimed to be mathematics: how a bridge curve chooses the tensions
+   it was not given, which control vertices an alignment keeps, the shapes of a sheet extension and the mapping of a curve
+   deformation. The bridge construction itself (G0 to G3, tensions as arguments) is here and tested; the corner rounding of wires
+   and the chaining of an open boundary were written from standard constructions and live here too.
 
 ## Building
 
@@ -727,6 +746,21 @@ Problem: `Perform` and `TestOnRestriction` build a `BRepAdaptor_Surface` of the 
 is periodic in U and V and by how much. The answer cannot change after construction (about 6 per cent of a blend into earlier
 rounds). The four numbers are now read in the constructor. Test: points a whole number of periods from a half cylinder's wall
 classify as the wall does, in and out, before and after the change.
+
+### BRepSkinExt-section-vertices-exact
+
+Commit `6efcd84dcc` (an extension package, not OCCT code). Found by the skin rows of the benchmark.
+
+Problem: a smooth skin through a square, a circle and a square was an unconnected solid (`BRepCheck_NotConnected`, three
+pairs of coincident unsewn edges at the square's corners) where stock `BRepOffsetAPI_ThruSections` made a valid one. The
+circle's arcs are rational and the square's edges are not, so the arcs are made again without weights to put every edge of every
+section on one basis; neighbouring arcs then ended 1.4e-6 apart, above the sewing tolerance of 1e-6, and the corner curves of the
+faces on either side did not coincide.
+
+Fix and limit: the end poles of a clamped curve are its end points, which are exact on the curve being replaced, so the
+replacement's end poles are set to them. The fit moves by at most the error it already had (1.4e-6 at the ends), and the
+sections stay on the result to 7e-15. Test: the skin is a valid solid and every sampled point of the three sections lies on its
+faces within the sewing tolerance (the test fails without the change).
 
 ### Approx_BSplComputeLine-local-endpoint-parameters
 
