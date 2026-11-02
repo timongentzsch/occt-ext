@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Timon Gentzsch
 // SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
-// Whole-operation checks of TKAlgoExt against closed forms, through a host that keeps shapes in
-// a vector (the seam of BRepToolsExt_Session.hxx). Every expected value below is derived from the
+// Whole-operation checks of TKAlgoExt against closed forms, through the host of BRepExtTest_Support.hxx. Every expected value below is derived from the
 // input alone; none is read from the code under test.
+
+#include "BRepExtTest_Support.hxx"
 
 #include <BRepToolsExt_Operations.hxx>
 #include <BRepPatchExt_Side.hxx>
@@ -29,41 +30,9 @@
 #include <ctime>
 #include <vector>
 
-namespace {
-std::vector<TopoDS_Shape> shapes;
-alignas(8) char token[8];
-OcctKernel& session() { return *reinterpret_cast<OcctKernel*>(token); }
-
-double volume(const TopoDS_Shape& shape) {
-  GProp_GProps props;
-  BRepGProp::VolumeProperties(shape, props);
-  return props.Mass();
-}
-double length(const TopoDS_Shape& shape) {
-  GProp_GProps props;
-  BRepGProp::LinearProperties(shape, props);
-  return props.Mass();
-}
-} // namespace
-
-namespace BRepExt {
-uint32_t store(OcctKernel&, const TopoDS_Shape& shape) {
-  shapes.push_back(shape);
-  return static_cast<uint32_t>(shapes.size());
-}
-const TopoDS_Shape& get(const OcctKernel&, uint32_t id) {
-  if (id == 0 || id > shapes.size()) fail("shape", invalid_input, "Invalid shape reference");
-  return shapes[id - 1];
-}
-void release(OcctKernel&, uint32_t) {}
-double booleanNow() { return 1000. * std::clock() / CLOCKS_PER_SEC; }
-bool booleanTimingEnabled() { return false; }
-void booleanPhase(const char*, double) {}
-namespace patch_host {
-void chain(std::vector<Side>&, double) { fail("patch", unsupported_geometry, "open boundaries need a host"); }
-void closeGaps(const std::vector<Side>&, std::vector<Rim>&) {}
-} // namespace patch_host
-} // namespace BRepExt
+using BRepExtTest::length;
+using BRepExtTest::session;
+using BRepExtTest::volume;
 
 // A fillet of radius r on a straight convex box edge of length L removes the prism whose
 // cross-section is the square r x r minus the quarter disc: area r^2 (1 - pi/4), so the volume
