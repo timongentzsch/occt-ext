@@ -11,42 +11,54 @@
 #include <IntTools_Context.hxx>
 #include <Standard_Failure.hxx>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
-std::vector<gp_Pnt2d> parametersAcross(const TopoDS_Face& face, int lines, const Handle(IntTools_Context)& context) {
-    std::vector<gp_Pnt2d> out;
-    try {
-        double u0, u1, v0, v1;
-        BRepTools::UVBounds(face, u0, u1, v0, v1);
-        if (Precision::IsInfinite(u0) || Precision::IsInfinite(u1) || Precision::IsInfinite(v0) ||
-            Precision::IsInfinite(v1))
-            return out;
-        Geom2dHatch_Hatcher& hatcher = context->Hatcher(face);
-        for (const bool alongV : {true, false})
-            for (int i = 0; i < lines; ++i) {
-                const double at = (i + 0.5) / lines;
-                const Handle(Geom2d_Line) line =
-                    alongV ? new Geom2d_Line(gp_Pnt2d(u0 + (u1 - u0) * at, v0), gp_Dir2d(0, 1))
-                           : new Geom2d_Line(gp_Pnt2d(u0, v0 + (v1 - v0) * at), gp_Dir2d(1, 0));
-                hatcher.ClrHatchings();
-                const int hatching = hatcher.AddHatching(Geom2dAdaptor_Curve(line));
-                hatcher.Trim();
-                if (hatcher.TrimDone(hatching)) {
-                    hatcher.ComputeDomains(hatching);
-                    if (hatcher.IsDone(hatching))
-                        for (int d = 1; d <= hatcher.NbDomains(hatching); ++d) {
-                            const HatchGen_Domain& domain = hatcher.Domain(hatching, d);
-                            if (!domain.HasFirstPoint() || !domain.HasSecondPoint()) continue;
-                            const gp_Pnt2d uv =
-                                line->Value((domain.FirstPoint().Parameter() + domain.SecondPoint().Parameter()) / 2);
-                            if (context->IsPointInFace(face, uv)) out.push_back(uv);
-                        }
-                }
-                hatcher.RemHatching(hatching);
+std::vector<gp_Pnt2d> parametersAcross(const TopoDS_Face&              face,
+                                       int                             lines,
+                                       const Handle(IntTools_Context)& context)
+{
+  std::vector<gp_Pnt2d> out;
+  try
+  {
+    double u0, u1, v0, v1;
+    BRepTools::UVBounds(face, u0, u1, v0, v1);
+    if (Precision::IsInfinite(u0) || Precision::IsInfinite(u1) || Precision::IsInfinite(v0)
+        || Precision::IsInfinite(v1))
+      return out;
+    Geom2dHatch_Hatcher& hatcher = context->Hatcher(face);
+    for (const bool alongV : {true, false})
+      for (int i = 0; i < lines; ++i)
+      {
+        const double              at = (i + 0.5) / lines;
+        const Handle(Geom2d_Line) line =
+          alongV ? new Geom2d_Line(gp_Pnt2d(u0 + (u1 - u0) * at, v0), gp_Dir2d(0, 1))
+                 : new Geom2d_Line(gp_Pnt2d(u0, v0 + (v1 - v0) * at), gp_Dir2d(1, 0));
+        hatcher.ClrHatchings();
+        const int hatching = hatcher.AddHatching(Geom2dAdaptor_Curve(line));
+        hatcher.Trim();
+        if (hatcher.TrimDone(hatching))
+        {
+          hatcher.ComputeDomains(hatching);
+          if (hatcher.IsDone(hatching))
+            for (int d = 1; d <= hatcher.NbDomains(hatching); ++d)
+            {
+              const HatchGen_Domain& domain = hatcher.Domain(hatching, d);
+              if (!domain.HasFirstPoint() || !domain.HasSecondPoint())
+                continue;
+              const gp_Pnt2d uv = line->Value(
+                (domain.FirstPoint().Parameter() + domain.SecondPoint().Parameter()) / 2);
+              if (context->IsPointInFace(face, uv))
+                out.push_back(uv);
             }
-    } catch (const Standard_Failure&) {
-    }
-    return out;
+        }
+        hatcher.RemHatching(hatching);
+      }
+  }
+  catch (const Standard_Failure&)
+  {
+  }
+  return out;
 }
 
 } // namespace BRepExt

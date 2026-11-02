@@ -4,11 +4,31 @@
 #include <GeomAlgoExt_Progress.hxx>
 #include <GeomAlgoExt_Cancel.hxx>
 #include <GeomAlgoExt_Phase.hxx>
-namespace { thread_local Message_ProgressRange current; }
-namespace BRepExt {
-ProgressScope::ProgressScope(const Message_ProgressRange& range) : previous(current) { current = range; }
-ProgressScope::~ProgressScope() { current = previous; }
-extern "C" int sessionCancelled() { return current.UserBreak(); }
+
+namespace
+{
+thread_local Message_ProgressRange current;
 }
+
+namespace BRepExt
+{
+ProgressScope::ProgressScope(const Message_ProgressRange& range)
+    : previous(current)
+{
+  current = range;
+}
+
+ProgressScope::~ProgressScope()
+{
+  current = previous;
+}
+
+extern "C" int sessionCancelled()
+{
+  return current.UserBreak();
+}
+} // namespace BRepExt
+
 extern "C" void BRepExt_PatchPhase(const char*, int) {}
+
 extern "C" void BRepExt_ReportProgress(const char*) {}

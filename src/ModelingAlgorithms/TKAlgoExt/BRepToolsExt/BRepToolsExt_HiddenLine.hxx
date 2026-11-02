@@ -4,13 +4,19 @@
 #pragma once
 #include <BRepToolsExt_Operations.hxx>
 
-namespace BRepExt {
+namespace BRepExt
+{
 // A projected curve retains its source body and line category. Coordinates are in the view's
 // plane; only their approximation to a polyline depends on the drawing tolerance.
-struct DrawingCurve {
-    int body, kind;
-    std::vector<double> points;
+struct DrawingCurve
+{
+  int                 body, kind;
+  std::vector<double> points;
 };
-std::vector<DrawingCurve> hiddenLine(OcctKernel &, const std::vector<uint32_t> &, Vec3 normal,
-                                    Vec3 x, const std::vector<double> &options);
-}
+
+std::vector<DrawingCurve> hiddenLine(OcctKernel&,
+                                     const std::vector<uint32_t>&,
+                                     Vec3                       normal,
+                                     Vec3                       x,
+                                     const std::vector<double>& options);
+} // namespace BRepExt

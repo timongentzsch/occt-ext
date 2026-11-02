@@ -8,14 +8,16 @@
 
 #include <vector>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
 /// One edge of a loop that Patch is to fill for another operation: the face it is to be smooth
 /// with to `order` (0, 1 or 2 for G0 to G2; a null face for G0).
-struct PatchSide {
-    TopoDS_Edge edge;
-    TopoDS_Face support;
-    int order = 0;
+struct PatchSide
+{
+  TopoDS_Edge edge;
+  TopoDS_Face support;
+  int         order = 0;
 };
 
 /// The face Patch makes inside the closed loop of `sides`, within `tolerance` and `g1Degrees`

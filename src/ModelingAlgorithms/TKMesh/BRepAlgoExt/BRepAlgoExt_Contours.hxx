@@ -12,21 +12,26 @@
 #include <TopoDS.hxx>
 #include <vector>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
 // Read an already seeded maker's own tangent contours without building a body.
 // Keep the explicit selection first, including any edge the maker did not adopt.
 // Both native construction and medial preflight use this same propagation census.
 template <typename Maker>
-std::vector<TopoDS_Shape> blendContourMembers(Maker& maker,
-                                             const std::vector<TopoDS_Shape>& selected) {
-    NCollection_IndexedMap<TopoDS_Shape,TopTools_ShapeMapHasher> runs;
-    for(const auto& edge:selected)runs.Add(edge);
-    for(int contour=1;contour<=maker.NbContours();++contour)
-        for(int i=1;i<=maker.NbEdges(contour);++i)runs.Add(maker.Edge(contour,i));
-    std::vector<TopoDS_Shape> result;
-    for(int i=1;i<=runs.Extent();++i)result.push_back(runs(i));
-    return result;
+std::vector<TopoDS_Shape> blendContourMembers(Maker&                           maker,
+                                              const std::vector<TopoDS_Shape>& selected)
+{
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> runs;
+  for (const auto& edge : selected)
+    runs.Add(edge);
+  for (int contour = 1; contour <= maker.NbContours(); ++contour)
+    for (int i = 1; i <= maker.NbEdges(contour); ++i)
+      runs.Add(maker.Edge(contour, i));
+  std::vector<TopoDS_Shape> result;
+  for (int i = 1; i <= runs.Extent(); ++i)
+    result.push_back(runs(i));
+  return result;
 }
 
 // GeomAPI_Interpolate's periodic spline is only C1 at its closing knot. OCCT's
@@ -36,40 +41,54 @@ std::vector<TopoDS_Shape> blendContourMembers(Maker& maker,
 // geometry nor topology, and also handles selecting only the other half.
 // Maker is MakeFillet or MakeChamfer; discovery uses their own tangent chaining.
 template <typename Maker>
-std::vector<TopoDS_Shape> blendContours(const TopoDS_Shape& shape,
-                                      const std::vector<TopoDS_Shape>& edges) {
-    bool periodic = false;
-    for (const auto& edge : edges) {
-        BRepAdaptor_Curve curve(TopoDS::Edge(edge));
-        periodic |= curve.GetType() == GeomAbs_BSplineCurve && curve.IsPeriodic();
-    }
-    if (!periodic) return edges;
+std::vector<TopoDS_Shape> blendContours(const TopoDS_Shape&              shape,
+                                        const std::vector<TopoDS_Shape>& edges)
+{
+  bool periodic = false;
+  for (const auto& edge : edges)
+  {
+    BRepAdaptor_Curve curve(TopoDS::Edge(edge));
+    periodic |= curve.GetType() == GeomAbs_BSplineCurve && curve.IsPeriodic();
+  }
+  if (!periodic)
+    return edges;
 
-    Maker contours(shape);
-    std::vector<TopoDS_Shape> seeds;
-    for (const auto& selected : edges) {
-        const auto edge = TopoDS::Edge(selected);
-        if (contours.Contour(edge)) continue;
-        try { contours.Add(edge); }
-        catch (const Standard_Failure&) { return edges; }
-        const int contour = contours.Contour(edge);
-        TopoDS_Shape seed = edge;
-        if (contour && contours.ClosedAndTangent(contour)) {
-            for (int i = 1; i <= contours.NbEdges(contour); ++i) {
-                const auto candidate = contours.Edge(contour, i);
-                BRepAdaptor_Curve curve(candidate);
-                if (curve.GetType() != GeomAbs_BSplineCurve || !curve.IsPeriodic()) continue;
-                const auto basis = curve.BSpline();
-                if (std::abs(curve.FirstParameter() - basis->FirstParameter()) <=
-                    Precision::PConfusion()) {
-                    seed = candidate;
-                    break;
-                }
-            }
-        }
-        seeds.push_back(seed);
+  Maker                     contours(shape);
+  std::vector<TopoDS_Shape> seeds;
+  for (const auto& selected : edges)
+  {
+    const auto edge = TopoDS::Edge(selected);
+    if (contours.Contour(edge))
+      continue;
+    try
+    {
+      contours.Add(edge);
     }
-    return seeds;
+    catch (const Standard_Failure&)
+    {
+      return edges;
+    }
+    const int    contour = contours.Contour(edge);
+    TopoDS_Shape seed    = edge;
+    if (contour && contours.ClosedAndTangent(contour))
+    {
+      for (int i = 1; i <= contours.NbEdges(contour); ++i)
+      {
+        const auto        candidate = contours.Edge(contour, i);
+        BRepAdaptor_Curve curve(candidate);
+        if (curve.GetType() != GeomAbs_BSplineCurve || !curve.IsPeriodic())
+          continue;
+        const auto basis = curve.BSpline();
+        if (std::abs(curve.FirstParameter() - basis->FirstParameter()) <= Precision::PConfusion())
+        {
+          seed = candidate;
+          break;
+        }
+      }
+    }
+    seeds.push_back(seed);
+  }
+  return seeds;
 }
 
 } // namespace BRepExt

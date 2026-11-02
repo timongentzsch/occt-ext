@@ -13,49 +13,70 @@
 #include <TopoDS.hxx>
 #include <cmath>
 
-namespace BRepExt {
-TopoDS_Shape sewn(const BRepBuilderAPI_Sewing& sewing, const TopoDS_Shape& added) {
-    if (sewing.IsModified(added)) return sewing.Modified(added);
-    if (sewing.IsModifiedSubShape(added)) return sewing.ModifiedSubShape(added);
-    return added;
+namespace BRepExt
+{
+TopoDS_Shape sewn(const BRepBuilderAPI_Sewing& sewing, const TopoDS_Shape& added)
+{
+  if (sewing.IsModified(added))
+    return sewing.Modified(added);
+  if (sewing.IsModifiedSubShape(added))
+    return sewing.ModifiedSubShape(added);
+  return added;
 }
 
 std::vector<TopoDS_Shape> sewingHistory(
-    const BRepBuilderAPI_Sewing& sewing, const std::vector<TopoDS_Shape>& sources,
-    const TopoDS_Shape& result, std::initializer_list<TopAbs_ShapeEnum> types,
-    BRepTools_History& history, const std::function<TopoDS_Shape(const TopoDS_Shape&)>& added) {
-    std::vector<TopoDS_Shape> missing;
-    for (auto type : types) {
-        ShapeSet delivered;
-        TopExp::MapShapes(result, type, delivered);
-        for (const auto& owner : sources) {
-            ShapeSet entities;
-            TopExp::MapShapes(owner, type, entities);
-            for (const auto& source : entities) {
-                const auto successor = sewn(sewing, added ? added(source) : source);
-                bool found = false;
-                if (!successor.IsNull()) {
-                    ShapeSet products;
-                    TopExp::MapShapes(successor, type, products);
-                    for (const auto& product : products) if (delivered.Contains(product)) {
-                        history.AddModified(source, product);
-                        found = true;
-                    }
-                }
-                if (!found) missing.push_back(source);
+  const BRepBuilderAPI_Sewing&                            sewing,
+  const std::vector<TopoDS_Shape>&                        sources,
+  const TopoDS_Shape&                                     result,
+  std::initializer_list<TopAbs_ShapeEnum>                 types,
+  BRepTools_History&                                      history,
+  const std::function<TopoDS_Shape(const TopoDS_Shape&)>& added)
+{
+  std::vector<TopoDS_Shape> missing;
+  for (auto type : types)
+  {
+    ShapeSet delivered;
+    TopExp::MapShapes(result, type, delivered);
+    for (const auto& owner : sources)
+    {
+      ShapeSet entities;
+      TopExp::MapShapes(owner, type, entities);
+      for (const auto& source : entities)
+      {
+        const auto successor = sewn(sewing, added ? added(source) : source);
+        bool       found     = false;
+        if (!successor.IsNull())
+        {
+          ShapeSet products;
+          TopExp::MapShapes(successor, type, products);
+          for (const auto& product : products)
+            if (delivered.Contains(product))
+            {
+              history.AddModified(source, product);
+              found = true;
             }
         }
+        if (!found)
+          missing.push_back(source);
+      }
     }
-    return missing;
+  }
+  return missing;
 }
 
-TopoDS_Shape closedSolid(const char* op, const BRepBuilderAPI_Sewing& sewing, const char* reason,
-                         double minimumVolume) {
-    const auto& shell = sewing.SewedShape();
-    if (shell.IsNull() || shell.ShapeType() != TopAbs_SHELL || sewing.NbFreeEdges() != 0) return {};
-    auto solid = BRepBuilderAPI_MakeSolid(TopoDS::Shell(shell)).Solid();
-    if (!BRepLib::OrientClosedSolid(solid)) fail(op, reason, "The closed shell could not be oriented.");
-    if (!(estimatedVolume(solid) > minimumVolume)) fail(op, reason, "The closed shell has no positive volume.");
-    return solid;
+TopoDS_Shape closedSolid(const char*                  op,
+                         const BRepBuilderAPI_Sewing& sewing,
+                         const char*                  reason,
+                         double                       minimumVolume)
+{
+  const auto& shell = sewing.SewedShape();
+  if (shell.IsNull() || shell.ShapeType() != TopAbs_SHELL || sewing.NbFreeEdges() != 0)
+    return {};
+  auto solid = BRepBuilderAPI_MakeSolid(TopoDS::Shell(shell)).Solid();
+  if (!BRepLib::OrientClosedSolid(solid))
+    fail(op, reason, "The closed shell could not be oriented.");
+  if (!(estimatedVolume(solid) > minimumVolume))
+    fail(op, reason, "The closed shell has no positive volume.");
+  return solid;
 }
-}
+} // namespace BRepExt

@@ -23,10 +23,10 @@
 
 #include <cmath>
 
-// The wall of a half cylinder is the face u in [0, pi], v in [0, 4] of a surface that is periodic in
-// u. With the periodic reframing on, a point is classified by its place within the period: u = pi/2
-// plus any whole number of periods is on the face, u = 3 pi/2 plus any is not, and v decides on its
-// own, since the surface is not periodic in v.
+// The wall of a half cylinder is the face u in [0, pi], v in [0, 4] of a surface that is periodic
+// in u. With the periodic reframing on, a point is classified by its place within the period: u =
+// pi/2 plus any whole number of periods is on the face, u = 3 pi/2 plus any is not, and v decides
+// on its own, since the surface is not periodic in v.
 TEST(BRepTopAdaptor_FClass2dTest, PeriodicReframingClassifiesByThePlaceWithinThePeriod)
 {
   const TopoDS_Shape aHalf = BRepPrimAPI_MakeCylinder(3.0, 4.0, M_PI).Shape();

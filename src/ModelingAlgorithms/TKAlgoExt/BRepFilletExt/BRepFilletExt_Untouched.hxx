@@ -8,16 +8,20 @@
 #include <NCollection_List.hxx>
 #include <TopoDS_Shape.hxx>
 
-namespace BRepExt {
-template <class Operation> struct Untouched : Operation {
-    Untouched(const TopoDS_Shape& object, const TopoDS_Shape& tool) {
-        NCollection_List<TopoDS_Shape> objects, tools;
-        objects.Append(object);
-        tools.Append(tool);
-        this->SetArguments(objects);
-        this->SetTools(tools);
-        this->SetNonDestructive(true);
-        this->Build();
-    }
+namespace BRepExt
+{
+template <class Operation>
+struct Untouched : Operation
+{
+  Untouched(const TopoDS_Shape& object, const TopoDS_Shape& tool)
+  {
+    NCollection_List<TopoDS_Shape> objects, tools;
+    objects.Append(object);
+    tools.Append(tool);
+    this->SetArguments(objects);
+    this->SetTools(tools);
+    this->SetNonDestructive(true);
+    this->Build();
+  }
 };
 } // namespace BRepExt

@@ -18,26 +18,28 @@
 
 #include <functional>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
 /// A place that the surface is to pass through. `uv` is where to look for the surface's point
 /// nearest to it, and is where that was found afterwards. With `across`, a direction of the
 /// parameters that leaves the curve the place is on, the surface's tangent plane is not to
 /// tilt that way; zero leaves it free. With `bend` as well, the surface's bend that way is not
 /// to change either.
-struct RimPlace {
-    gp_Pnt point;
-    gp_XY uv;
-    gp_XY across;
-    bool bend;
+struct RimPlace
+{
+  gp_Pnt point;
+  gp_XY  uv;
+  gp_XY  across;
+  bool   bend;
 };
 
 /// The parameters of the point of a surface nearest to `point`, looked for from `uv`: steps of
 /// Gauss and Newton, which for a point that is nearly on the surface are as good as exact.
-gp_XY nearest(const occ::handle<Geom_Surface> &surface, gp_XY uv, const gp_Pnt &point);
+gp_XY nearest(const occ::handle<Geom_Surface>& surface, gp_XY uv, const gp_Pnt& point);
 
 /// The net of a surface: the reverse of `surfaceOf`.
-SplineNet netOf(const occ::handle<Geom_BSplineSurface> &surface);
+SplineNet netOf(const occ::handle<Geom_BSplineSurface>& surface);
 
 /// `placesFor` gives the places for a net whose shortest span is `span`: some to every span
 /// that a curve passes through, and is asked again whenever the net is made finer.
@@ -46,8 +48,12 @@ SplineNet netOf(const occ::handle<Geom_BSplineSurface> &surface);
 /// where the net cannot, each span that a place still misses in is halved, up to `mostSpans`
 /// either way. A surface within `enough` of every place to begin with is left as it is.
 /// Returns the largest distance that is left.
-double correctRim(const char *operation, SplineNet &net,
-                  const std::function<std::vector<RimPlace>(double span)> &placesFor, const gp_XYZ &up,
-                  double within, double enough, int mostSpans);
+double correctRim(const char*                                              operation,
+                  SplineNet&                                               net,
+                  const std::function<std::vector<RimPlace>(double span)>& placesFor,
+                  const gp_XYZ&                                            up,
+                  double                                                   within,
+                  double                                                   enough,
+                  int                                                      mostSpans);
 
 } // namespace BRepExt

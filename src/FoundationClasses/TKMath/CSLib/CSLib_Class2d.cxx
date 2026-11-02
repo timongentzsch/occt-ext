@@ -179,7 +179,7 @@ void CSLib_Class2d::candidates(const double theY, const int*& theList, int& theC
   }
   const int aBucket = bucketOf(theY, myBucketCount);
   theCount          = myBucketStart.Value(aBucket + 1) - myBucketStart.Value(aBucket);
-  theList = theCount > 0 ? &myBucketEdges.Value(myBucketStart.Value(aBucket)) : nullptr;
+  theList           = theCount > 0 ? &myBucketEdges.Value(myBucketStart.Value(aBucket)) : nullptr;
 }
 
 //=================================================================================================

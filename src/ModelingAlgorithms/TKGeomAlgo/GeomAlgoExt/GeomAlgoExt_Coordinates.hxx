@@ -3,11 +3,14 @@
 
 #pragma once
 #include <cmath>
-namespace BRepExt {
+
+namespace BRepExt
+{
 /// Whether every coordinate of a point or vector is a number.
 template <typename Coordinates>
-bool finite(const Coordinates& p) {
-    return std::isfinite(p.X()) && std::isfinite(p.Y()) && std::isfinite(p.Z());
+bool finite(const Coordinates& p)
+{
+  return std::isfinite(p.X()) && std::isfinite(p.Y()) && std::isfinite(p.Z());
 }
 
-}
+} // namespace BRepExt

@@ -3,14 +3,18 @@
 
 #pragma once
 #include <Message_ProgressRange.hxx>
-namespace BRepExt {
+
+namespace BRepExt
+{
 // Scope a native entry call; existing algorithms poll the direct link-time hook.
-class ProgressScope {
-    Message_ProgressRange previous;
+class ProgressScope
+{
+  Message_ProgressRange previous;
+
 public:
-    ProgressScope(const Message_ProgressRange& range);
-    ~ProgressScope();
-    ProgressScope(const ProgressScope&) = delete;
-    ProgressScope& operator=(const ProgressScope&) = delete;
+  ProgressScope(const Message_ProgressRange& range);
+  ~ProgressScope();
+  ProgressScope(const ProgressScope&)            = delete;
+  ProgressScope& operator=(const ProgressScope&) = delete;
 };
-}
+} // namespace BRepExt

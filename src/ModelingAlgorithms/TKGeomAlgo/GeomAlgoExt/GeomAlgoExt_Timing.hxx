@@ -5,16 +5,29 @@
 
 // Opt-in host clock and phase sink. The host supplies executing-thread CPU milliseconds;
 // without the hook the existing rung timers keep their elapsed-time clock. No logging by default.
-namespace BRepExt {
+namespace BRepExt
+{
 double booleanNow();
-bool booleanTimingEnabled();
-void booleanPhase(const char* name, double milliseconds);
-struct BooleanPhase {
-    const char* name;
-    bool enabled;
-    double start;
-    explicit BooleanPhase(const char* phase)
-        : name(phase), enabled(booleanTimingEnabled()), start(enabled ? booleanNow() : 0) {}
-    ~BooleanPhase() { if (enabled) booleanPhase(name, booleanNow() - start); }
+bool   booleanTimingEnabled();
+void   booleanPhase(const char* name, double milliseconds);
+
+struct BooleanPhase
+{
+  const char* name;
+  bool        enabled;
+  double      start;
+
+  explicit BooleanPhase(const char* phase)
+      : name(phase),
+        enabled(booleanTimingEnabled()),
+        start(enabled ? booleanNow() : 0)
+  {
+  }
+
+  ~BooleanPhase()
+  {
+    if (enabled)
+      booleanPhase(name, booleanNow() - start);
+  }
 };
 } // namespace BRepExt

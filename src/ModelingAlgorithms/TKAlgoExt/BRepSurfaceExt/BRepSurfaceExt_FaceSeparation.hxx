@@ -7,7 +7,8 @@
 #include <array>
 #include <vector>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
 // What a self-interference check of a shape (BOPAlgo_ArgumentAnalyzer's SelfInterMode, OCCT's
 // CheckerSI) can leave out: a conservative pre-pass over the shape's faces, which proves pairs
@@ -28,16 +29,19 @@ namespace BRepExt {
 // not read as a rectangle of Bezier patches with straight parameter-line edges. What is not
 // proven within its budget (near-touching, tangent or shallow creases, singular or trimmed
 // faces, free edges) goes to the check, which then sees it as it saw it before.
-struct SeparationCount {
-    int pairs = 0, proven = 0;
-    // The pairs proven, as indices of the shape's faces in TopExp::MapShapes order (i, i for a
-    // face clear of itself).
-    std::vector<std::array<int, 2>> provenPairs;
+struct SeparationCount
+{
+  int pairs = 0, proven = 0;
+  // The pairs proven, as indices of the shape's faces in TopExp::MapShapes order (i, i for a
+  // face clear of itself).
+  std::vector<std::array<int, 2>> provenPairs;
 };
+
 // What the check still has to see: a part for each set of faces joined by pairs not proven,
 // a face alone where only it is not proven clear of itself; `shape` itself where that is all
 // of its faces; nothing where all is proven. A face of few patches is left to the check to
 // meet with itself, which costs it little.
-std::vector<TopoDS_Shape> unprovenParts(const TopoDS_Shape& shape, SeparationCount* count = nullptr);
+std::vector<TopoDS_Shape> unprovenParts(const TopoDS_Shape& shape,
+                                        SeparationCount*    count = nullptr);
 
 } // namespace BRepExt

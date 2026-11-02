@@ -17,45 +17,64 @@
 #include <cmath>
 #include <type_traits>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
 /// A curve or surface without the trimming OpenCascade wraps it in.
-Handle(Geom_Curve) basisOf(Handle(Geom_Curve) curve);
+Handle(Geom_Curve)   basisOf(Handle(Geom_Curve) curve);
 Handle(Geom2d_Curve) basisOf(Handle(Geom2d_Curve) curve);
 Handle(Geom_Surface) basisOf(Handle(Geom_Surface) surface);
 
 /// A direction as a file gives it back: BRepTools and BinTools read its coordinates and normalise
 /// them again (SetCoord); this is that normalising's fixed point.
-inline bool same(const gp_Dir& a, const gp_Dir& b) { return a.X() == b.X() && a.Y() == b.Y() && a.Z() == b.Z(); }
+inline bool same(const gp_Dir& a, const gp_Dir& b)
+{
+  return a.X() == b.X() && a.Y() == b.Y() && a.Z() == b.Z();
+}
 
-inline bool same(const gp_Dir2d& a, const gp_Dir2d& b) { return a.X() == b.X() && a.Y() == b.Y(); }
+inline bool same(const gp_Dir2d& a, const gp_Dir2d& b)
+{
+  return a.X() == b.X() && a.Y() == b.Y();
+}
 
-template <class Dir> Dir readBack(Dir d) {
-    const auto read = [](const Dir& from) {
-        Dir again = from;
-        if constexpr (std::is_same_v<Dir, gp_Dir>) again.SetCoord(from.X(), from.Y(), from.Z());
-        else again.SetCoord(from.X(), from.Y());
-        return again;
-    };
-    for (int i = 0; i < 8; ++i) {
-        const Dir again = read(d);
-        if (same(again, d)) return d;
-        d = again;
-    }
-    // Normalising can alternate between two neighbours: then the nearest coordinates, a few
-    // units in the last place away, that it keeps.
-    for (int ulps = 1; ulps <= 8; ++ulps)
-        for (int c = 0; c < (std::is_same_v<Dir, gp_Dir> ? 3 : 2); ++c)
-            for (const double towards : {HUGE_VAL, -HUGE_VAL}) {
-                double xyz[3] = {d.X(), d.Y(), 0};
-                if constexpr (std::is_same_v<Dir, gp_Dir>) xyz[2] = d.Z();
-                for (int i = 0; i < ulps; ++i) xyz[c] = std::nextafter(xyz[c], towards);
-                Dir nudged = d;
-                if constexpr (std::is_same_v<Dir, gp_Dir>) nudged.SetCoord(xyz[0], xyz[1], xyz[2]);
-                else nudged.SetCoord(xyz[0], xyz[1]);
-                if (same(read(nudged), nudged)) return nudged;
-            }
-    return d;
+template <class Dir>
+Dir readBack(Dir d)
+{
+  const auto read = [](const Dir& from) {
+    Dir again = from;
+    if constexpr (std::is_same_v<Dir, gp_Dir>)
+      again.SetCoord(from.X(), from.Y(), from.Z());
+    else
+      again.SetCoord(from.X(), from.Y());
+    return again;
+  };
+  for (int i = 0; i < 8; ++i)
+  {
+    const Dir again = read(d);
+    if (same(again, d))
+      return d;
+    d = again;
+  }
+  // Normalising can alternate between two neighbours: then the nearest coordinates, a few
+  // units in the last place away, that it keeps.
+  for (int ulps = 1; ulps <= 8; ++ulps)
+    for (int c = 0; c < (std::is_same_v<Dir, gp_Dir> ? 3 : 2); ++c)
+      for (const double towards : {HUGE_VAL, -HUGE_VAL})
+      {
+        double xyz[3] = {d.X(), d.Y(), 0};
+        if constexpr (std::is_same_v<Dir, gp_Dir>)
+          xyz[2] = d.Z();
+        for (int i = 0; i < ulps; ++i)
+          xyz[c] = std::nextafter(xyz[c], towards);
+        Dir nudged = d;
+        if constexpr (std::is_same_v<Dir, gp_Dir>)
+          nudged.SetCoord(xyz[0], xyz[1], xyz[2]);
+        else
+          nudged.SetCoord(xyz[0], xyz[1]);
+        if (same(read(nudged), nudged))
+          return nudged;
+      }
+  return d;
 }
 
 /// A frame as a file gives it back: OpenCascade rebuilds a surface's frame from its axis and x

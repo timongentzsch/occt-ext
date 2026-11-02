@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Timon Gentzsch
 // SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
-// Skins and sweeps of BRepSkinExt against closed forms: stacks of coaxial circles (frusta) and a disc
-// swept along a circular arc (Pappus).
+// Skins and sweeps of BRepSkinExt against closed forms: stacks of coaxial circles (frusta) and a
+// disc swept along a circular arc (Pappus).
 
 #include "BRepExtTest_Support.hxx"
 
@@ -25,44 +25,60 @@
 
 using namespace BRepExtTest;
 
-namespace {
+namespace
+{
 
-TopoDS_Wire circleAt(double z, double radius) {
+TopoDS_Wire circleAt(double z, double radius)
+{
   return BRepBuilderAPI_MakeWire(
-             BRepBuilderAPI_MakeEdge(new Geom_Circle(gp_Ax2(gp_Pnt(0, 0, z), gp_Dir(0, 0, 1)), radius)).Edge())
-      .Wire();
+           BRepBuilderAPI_MakeEdge(
+             new Geom_Circle(gp_Ax2(gp_Pnt(0, 0, z), gp_Dir(0, 0, 1)), radius))
+             .Edge())
+    .Wire();
 }
 
-TopoDS_Wire squareAt(double z, double half) {
-  const gp_Pnt p[4] = {gp_Pnt(-half, -half, z), gp_Pnt(half, -half, z), gp_Pnt(half, half, z), gp_Pnt(-half, half, z)};
+TopoDS_Wire squareAt(double z, double half)
+{
+  const gp_Pnt            p[4] = {gp_Pnt(-half, -half, z),
+                                  gp_Pnt(half, -half, z),
+                                  gp_Pnt(half, half, z),
+                                  gp_Pnt(-half, half, z)};
   BRepBuilderAPI_MakeWire maker;
-  for (int i = 0; i < 4; ++i) maker.Add(BRepBuilderAPI_MakeEdge(p[i], p[(i + 1) % 4]).Edge());
+  for (int i = 0; i < 4; ++i)
+    maker.Add(BRepBuilderAPI_MakeEdge(p[i], p[(i + 1) % 4]).Edge());
   return maker.Wire();
 }
 
-double frustum(double height, double r0, double r1) { return M_PI * height / 3 * (r0 * r0 + r0 * r1 + r1 * r1); }
+double frustum(double height, double r0, double r1)
+{
+  return M_PI * height / 3 * (r0 * r0 + r0 * r1 + r1 * r1);
+}
 
 } // namespace
 
 // A ruled skin through coaxial circles at unequal heights is a stack of frusta, each of volume
 // pi h (r0^2 + r0 r1 + r1^2) / 3. A section placed at the wrong height, a smooth blend where ruled
 // was asked, or caps missing change the volume at first order.
-TEST(BRepSkinExt, RuledSkinThroughCoaxialCirclesIsAStackOfFrusta) {
-  const double z[3] = {0, 4, 11}, r[3] = {6, 3, 5};
+TEST(BRepSkinExt, RuledSkinThroughCoaxialCirclesIsAStackOfFrusta)
+{
+  const double          z[3] = {0, 4, 11}, r[3] = {6, 3, 5};
   std::vector<uint32_t> sections;
-  for (int i = 0; i < 3; ++i) sections.push_back(BRepExt::store(session(), circleAt(z[i], r[i])));
-  const auto result = BRepExt::skinThrough(session(), sections, 0, 0, true, true);
-  const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
+  for (int i = 0; i < 3; ++i)
+    sections.push_back(BRepExt::store(session(), circleAt(z[i], r[i])));
+  const auto          result = BRepExt::skinThrough(session(), sections, 0, 0, true, true);
+  const TopoDS_Shape& made   = BRepExt::get(session(), result.resultId);
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
   const double expected = frustum(z[1] - z[0], r[0], r[1]) + frustum(z[2] - z[1], r[1], r[2]);
   EXPECT_NEAR(volume(made), expected, 1e-6 * expected);
 }
 
 // Through two sections a smooth skin has nothing to bend about and is the ruled one.
-TEST(BRepSkinExt, SmoothSkinThroughTwoCirclesIsTheFrustum) {
-  std::vector<uint32_t> sections = {BRepExt::store(session(), circleAt(0, 6)), BRepExt::store(session(), circleAt(9, 2))};
-  const auto result = BRepExt::skinThrough(session(), sections, 0, 0, true, false);
-  const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
+TEST(BRepSkinExt, SmoothSkinThroughTwoCirclesIsTheFrustum)
+{
+  std::vector<uint32_t> sections = {BRepExt::store(session(), circleAt(0, 6)),
+                                    BRepExt::store(session(), circleAt(9, 2))};
+  const auto            result   = BRepExt::skinThrough(session(), sections, 0, 0, true, false);
+  const TopoDS_Shape&   made     = BRepExt::get(session(), result.resultId);
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
   EXPECT_NEAR(volume(made), frustum(9, 6, 2), 1e-6 * frustum(9, 6, 2));
 }
@@ -70,25 +86,31 @@ TEST(BRepSkinExt, SmoothSkinThroughTwoCirclesIsTheFrustum) {
 // A smooth skin through a square, a circle and a square. The circle's arcs are rational and the
 // square's edges are not, so the arcs are made again without weights, and neighbouring arcs must
 // still meet at the section's vertices: ends that miss each other by the size of the fit's error
-// (1.4e-6 here) leave three pairs of coincident, unsewn edges and a solid that is not connected. The
-// sections are exact on the result: every sampled point of them lies on its faces.
-TEST(BRepSkinExt, SmoothSkinThroughSquareCircleSquareIsAClosedSolidThroughTheSections) {
+// (1.4e-6 here) leave three pairs of coincident, unsewn edges and a solid that is not connected.
+// The sections are exact on the result: every sampled point of them lies on its faces.
+TEST(BRepSkinExt, SmoothSkinThroughSquareCircleSquareIsAClosedSolidThroughTheSections)
+{
   const std::vector<TopoDS_Wire> wires = {squareAt(0, 10), circleAt(20, 6), squareAt(40, 9)};
-  std::vector<uint32_t> sections;
-  for (const TopoDS_Wire& wire : wires) sections.push_back(BRepExt::store(session(), wire));
-  const auto result = BRepExt::skinThrough(session(), sections, 0, 0, true, false);
-  const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
+  std::vector<uint32_t>          sections;
+  for (const TopoDS_Wire& wire : wires)
+    sections.push_back(BRepExt::store(session(), wire));
+  const auto          result = BRepExt::skinThrough(session(), sections, 0, 0, true, false);
+  const TopoDS_Shape& made   = BRepExt::get(session(), result.resultId);
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
   EXPECT_GT(volume(made), 0);
   TopoDS_Compound skin;
-  BRep_Builder builder;
+  BRep_Builder    builder;
   builder.MakeCompound(skin);
-  for (TopExp_Explorer f(made, TopAbs_FACE); f.More(); f.Next()) builder.Add(skin, f.Current());
+  for (TopExp_Explorer f(made, TopAbs_FACE); f.More(); f.Next())
+    builder.Add(skin, f.Current());
   for (const TopoDS_Wire& wire : wires)
-    for (TopExp_Explorer e(wire, TopAbs_EDGE); e.More(); e.Next()) {
+    for (TopExp_Explorer e(wire, TopAbs_EDGE); e.More(); e.Next())
+    {
       BRepAdaptor_Curve curve(TopoDS::Edge(e.Current()));
-      for (int k = 0; k <= 8; ++k) {
-        const gp_Pnt p = curve.Value(curve.FirstParameter() + (curve.LastParameter() - curve.FirstParameter()) * k / 8);
+      for (int k = 0; k <= 8; ++k)
+      {
+        const gp_Pnt                     p = curve.Value(curve.FirstParameter()
+                                     + (curve.LastParameter() - curve.FirstParameter()) * k / 8);
         const BRepExtrema_DistShapeShape d(BRepBuilderAPI_MakeVertex(p).Vertex(), skin);
         ASSERT_TRUE(d.IsDone());
         EXPECT_LE(d.Value(), BRepExt::tolerance::sewing);
@@ -96,28 +118,40 @@ TEST(BRepSkinExt, SmoothSkinThroughSquareCircleSquareIsAClosedSolidThroughTheSec
     }
 }
 
-// A disc of radius r swept along a circular arc of radius rho through angle theta, square to the path
-// all along, has the volume pi r^2 rho theta (Pappus: area times the path of its centroid). A twist
-// turns the disc about its own axis and changes nothing; a scale s at the far end, linear along the
-// path, makes the area pi r^2 (1 + (s - 1) t)^2 at fraction t, so the volume is pi r^2 rho theta
-// (1 + s + s^2) / 3.
-TEST(BRepSkinExt, DiscSweptAlongAnArcFollowsPappus) {
-  const double rho = 30, r = 4, theta = M_PI / 2;
-  const TopoDS_Wire path = BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(
-                               new Geom_TrimmedCurve(new Geom_Circle(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), rho), 0, theta)).Edge())
-                               .Wire();
-  const TopoDS_Wire disc = BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(
-                               new Geom_Circle(gp_Ax2(gp_Pnt(rho, 0, 0), gp_Dir(0, 1, 0)), r)).Edge())
-                               .Wire();
+// A disc of radius r swept along a circular arc of radius rho through angle theta, square to the
+// path all along, has the volume pi r^2 rho theta (Pappus: area times the path of its centroid). A
+// twist turns the disc about its own axis and changes nothing; a scale s at the far end, linear
+// along the path, makes the area pi r^2 (1 + (s - 1) t)^2 at fraction t, so the volume is pi r^2
+// rho theta (1 + s + s^2) / 3.
+TEST(BRepSkinExt, DiscSweptAlongAnArcFollowsPappus)
+{
+  const double      rho = 30, r = 4, theta = M_PI / 2;
+  const TopoDS_Wire path =
+    BRepBuilderAPI_MakeWire(
+      BRepBuilderAPI_MakeEdge(
+        new Geom_TrimmedCurve(new Geom_Circle(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), rho),
+                              0,
+                              theta))
+        .Edge())
+      .Wire();
+  const TopoDS_Wire disc =
+    BRepBuilderAPI_MakeWire(
+      BRepBuilderAPI_MakeEdge(new Geom_Circle(gp_Ax2(gp_Pnt(rho, 0, 0), gp_Dir(0, 1, 0)), r))
+        .Edge())
+      .Wire();
   const uint32_t profile = BRepExt::store(session(), disc), along = BRepExt::store(session(), path);
-  const double base = M_PI * r * r * rho * theta;
-  for (const double twist : {0.0, 0.7}) {
-    const auto result = BRepExt::sweepFramed(session(), profile, along, twist, 1, {}, 0, 1e-6, true);
+  const double   base = M_PI * r * r * rho * theta;
+  for (const double twist : {0.0, 0.7})
+  {
+    const auto result =
+      BRepExt::sweepFramed(session(), profile, along, twist, 1, {}, 0, 1e-6, true);
     const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
     EXPECT_TRUE(BRepExt::invalidity(made).empty());
     EXPECT_NEAR(volume(made), base, 1e-5 * base) << "twist " << twist;
   }
-  const double s = 1.5;
-  const auto scaled = BRepExt::sweepFramed(session(), profile, along, 0, s, {}, 0, 1e-6, true);
-  EXPECT_NEAR(volume(BRepExt::get(session(), scaled.resultId)), base * (1 + s + s * s) / 3, 1e-4 * base);
+  const double s      = 1.5;
+  const auto   scaled = BRepExt::sweepFramed(session(), profile, along, 0, s, {}, 0, 1e-6, true);
+  EXPECT_NEAR(volume(BRepExt::get(session(), scaled.resultId)),
+              base * (1 + s + s * s) / 3,
+              1e-4 * base);
 }

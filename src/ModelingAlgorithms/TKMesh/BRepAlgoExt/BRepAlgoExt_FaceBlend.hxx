@@ -10,7 +10,8 @@
 
 #include <vector>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
 /// `shape` with every edge of one flat face blended by `distance`: a round (the ball's arc) or,
 /// with `bevel`, a chamfer of that setback on both sides. `edges` must be all the edges of one
@@ -26,7 +27,10 @@ namespace BRepExt {
 ///
 /// Fails with "the planar cap: top face vanishes" in its text where nothing of the face is
 /// left, and otherwise with what it cannot build.
-BooleanResult faceBlend(const char* operation, const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& edges,
-                        double distance, bool bevel);
+BooleanResult faceBlend(const char*                      operation,
+                        const TopoDS_Shape&              shape,
+                        const std::vector<TopoDS_Shape>& edges,
+                        double                           distance,
+                        bool                             bevel);
 
 } // namespace BRepExt

@@ -8,23 +8,55 @@
 
 #pragma once
 #if defined(__wasm_simd128__) && !defined(OCCT_GEOMALGOEXT_SCALAR)
-#include <wasm_simd128.h>
+  #include <wasm_simd128.h>
 #else
-#include <cstring>
-namespace GeomAlgoExt {
-struct v128_t { double lane[2]; };
-inline v128_t wasm_f64x2_splat(double a) { return {{a, a}}; }
-inline v128_t wasm_v128_load(const void* p) { v128_t a; std::memcpy(&a, p, sizeof(a)); return a; }
-inline void wasm_v128_store(void* p, v128_t a) { std::memcpy(p, &a, sizeof(a)); }
-inline v128_t wasm_f64x2_add(v128_t a, v128_t b) {
-  volatile double x = a.lane[0] + b.lane[0], y = a.lane[1] + b.lane[1]; return {{x, y}};
+  #include <cstring>
+
+namespace GeomAlgoExt
+{
+struct v128_t
+{
+  double lane[2];
+};
+
+inline v128_t wasm_f64x2_splat(double a)
+{
+  return {{a, a}};
 }
-inline v128_t wasm_f64x2_sub(v128_t a, v128_t b) {
-  volatile double x = a.lane[0] - b.lane[0], y = a.lane[1] - b.lane[1]; return {{x, y}};
+
+inline v128_t wasm_v128_load(const void* p)
+{
+  v128_t a;
+  std::memcpy(&a, p, sizeof(a));
+  return a;
 }
-inline v128_t wasm_f64x2_mul(v128_t a, v128_t b) {
-  volatile double x = a.lane[0] * b.lane[0], y = a.lane[1] * b.lane[1]; return {{x, y}};
+
+inline void wasm_v128_store(void* p, v128_t a)
+{
+  std::memcpy(p, &a, sizeof(a));
 }
-inline double wasm_f64x2_extract_lane(v128_t a, int lane) { return a.lane[lane]; }
+
+inline v128_t wasm_f64x2_add(v128_t a, v128_t b)
+{
+  volatile double x = a.lane[0] + b.lane[0], y = a.lane[1] + b.lane[1];
+  return {{x, y}};
 }
+
+inline v128_t wasm_f64x2_sub(v128_t a, v128_t b)
+{
+  volatile double x = a.lane[0] - b.lane[0], y = a.lane[1] - b.lane[1];
+  return {{x, y}};
+}
+
+inline v128_t wasm_f64x2_mul(v128_t a, v128_t b)
+{
+  volatile double x = a.lane[0] * b.lane[0], y = a.lane[1] * b.lane[1];
+  return {{x, y}};
+}
+
+inline double wasm_f64x2_extract_lane(v128_t a, int lane)
+{
+  return a.lane[lane];
+}
+} // namespace GeomAlgoExt
 #endif

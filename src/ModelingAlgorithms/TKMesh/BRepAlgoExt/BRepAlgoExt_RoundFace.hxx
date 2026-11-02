@@ -13,20 +13,24 @@
 
 #include <vector>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
-struct RoundFace {
-    bool valid = false;
-    gp_Cylinder cylinder;
-    gp_Torus torus;
-    bool toroidal = false;
-    std::vector<TopoDS_Face> supports;
-    /// The round's radius: the cylinder's, or the torus's minor one.
-    double radius() const { return toroidal ? torus.MinorRadius() : cylinder.Radius(); }
+struct RoundFace
+{
+  bool                     valid = false;
+  gp_Cylinder              cylinder;
+  gp_Torus                 torus;
+  bool                     toroidal = false;
+  std::vector<TopoDS_Face> supports;
+
+  /// The round's radius: the cylinder's, or the torus's minor one.
+  double radius() const { return toroidal ? torus.MinorRadius() : cylinder.Radius(); }
 };
 
 /// `face` of `shape` as a round: valid where it is a cylinder (not closed round) or a torus that
-/// is tangent, to `tolerance`, along every edge it shares with exactly two neighbours, its supports.
+/// is tangent, to `tolerance`, along every edge it shares with exactly two neighbours, its
+/// supports.
 RoundFace recognizeRound(const TopoDS_Shape& shape, const TopoDS_Face& face, double tolerance);
 
 } // namespace BRepExt

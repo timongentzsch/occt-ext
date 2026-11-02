@@ -13,7 +13,8 @@
 
 #include <vector>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
 /// Whether `wire` of `owner` (forward) is a hole of it: it winds against the outer bound in the
 /// face's parameters, as ShapeAnalysis::OuterWire tells them apart.
@@ -25,10 +26,11 @@ TopoDS_Face holeCap(const TopoDS_Face& owner, const TopoDS_Shape& wire);
 
 /// What fillHoles made of a body: the body without the features it could take off, its
 /// history, and the requested faces it left.
-struct Filled {
-    TopoDS_Shape shape;
-    Handle(BRepTools_History) history;
-    std::vector<TopoDS_Shape> rest;
+struct Filled
+{
+  TopoDS_Shape              shape;
+  Handle(BRepTools_History) history;
+  std::vector<TopoDS_Shape> rest;
 };
 
 /// Removes those features among `faces` that border the rest of `shape` only along whole hole
@@ -48,6 +50,7 @@ Filled fillHoles(const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& fac
 /// The features `faces` are of: they and the faces met across their edges, again from those,
 /// except across an edge on a hole loop of the face beyond, which holds the feature. A face of
 /// no such feature takes in what it is joined to, up to the whole body.
-std::vector<TopoDS_Shape> featuresOf(const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& faces);
+std::vector<TopoDS_Shape> featuresOf(const TopoDS_Shape&              shape,
+                                     const std::vector<TopoDS_Shape>& faces);
 
 } // namespace BRepExt

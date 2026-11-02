@@ -12,139 +12,206 @@
 #include <cmath>
 
 // A wrong basis offset or derivative row fails this closed-form Bernstein oracle.
-TEST(GeomAlgoExtSplineFit, CubicBasisJets) {
- const std::vector<double> knots{0,0,0,0,1,1,1,1};
- for (double u : {0.0, .125, .5, .875, 1.0}) {
-  const auto b = BRepExt::splineBasis("basis", knots, 3, u);
-  const double v = 1-u;
-  const double value[4]{v*v*v,3*u*v*v,3*u*u*v,u*u*u};
-  const double first[4]{-3*v*v,3*v*v-6*u*v,6*u*v-3*u*u,3*u*u};
-  const double second[4]{6*v,18*u-12,6-18*u,6*u};
-  const double third[4]{-6,18,-18,6};
-  EXPECT_EQ(b.first,0);
-  for (int i=0;i<4;++i) {
-   EXPECT_NEAR(b.value[0][i],value[i],Precision::PConfusion());
-   EXPECT_NEAR(b.value[1][i],first[i],Precision::PConfusion());
-   EXPECT_NEAR(b.value[2][i],second[i],Precision::PConfusion());
-   EXPECT_NEAR(b.value[3][i],third[i],Precision::PConfusion());
+TEST(GeomAlgoExtSplineFit, CubicBasisJets)
+{
+  const std::vector<double> knots{0, 0, 0, 0, 1, 1, 1, 1};
+  for (double u : {0.0, .125, .5, .875, 1.0})
+  {
+    const auto   b = BRepExt::splineBasis("basis", knots, 3, u);
+    const double v = 1 - u;
+    const double value[4]{v * v * v, 3 * u * v * v, 3 * u * u * v, u * u * u};
+    const double first[4]{-3 * v * v, 3 * v * v - 6 * u * v, 6 * u * v - 3 * u * u, 3 * u * u};
+    const double second[4]{6 * v, 18 * u - 12, 6 - 18 * u, 6 * u};
+    const double third[4]{-6, 18, -18, 6};
+    EXPECT_EQ(b.first, 0);
+    for (int i = 0; i < 4; ++i)
+    {
+      EXPECT_NEAR(b.value[0][i], value[i], Precision::PConfusion());
+      EXPECT_NEAR(b.value[1][i], first[i], Precision::PConfusion());
+      EXPECT_NEAR(b.value[2][i], second[i], Precision::PConfusion());
+      EXPECT_NEAR(b.value[3][i], third[i], Precision::PConfusion());
+    }
   }
- }
-}
-// Tridiagonal SPD matrices: the expected x is independent of the factor/solve.
-TEST(GeomAlgoExtSplineFit, BandedCholeskyResidual) {
- for (bool paired : {false,true}) for (int n : {4,17,65}) {
-  GeomAlgoExt::Band a(n,1,paired);
-  std::vector<double> x(n), expected(n);
-  for (int i=0;i<n;++i) expected[i]=std::sin(double(i));
-  for (int i=0;i<n;++i) {
-   a.add(i,i,2);
-   if(i) a.add(i,i-1,-.25);
-   x[i]=2*expected[i]-(i?.25*expected[i-1]:0)-(i+1<n?.25*expected[i+1]:0);
-  }
-  ASSERT_TRUE(a.factor());a.solve(x);
-  for(int i=0;i<n;++i) EXPECT_NEAR(x[i],expected[i],Precision::PConfusion());
- }
-}
-// A cubic tensor polynomial is uniquely determined by its 4x4 values.
-// Crossed U/V strides, incorrect fixed-pole elimination or non-finite results fail.
-TEST(GeomAlgoExtSplineFit, TensorPolynomialInterpolation) {
- for (double scale : {.01,1.,100.}) {
-  BRepExt::SplineNet net;
-  net.degreeU=net.degreeV=3;
-  net.knotsU=net.knotsV={0,0,0,0,1,1,1,1};net.poles.resize(16,gp_XYZ(0,0,0));
-  auto exact=[&](double u,double v) {return gp_Pnt(scale*(u+v*v),scale*(v-u*u),scale*(u*u*u-2*u*v+v*v*v));};
-  std::vector<BRepExt::FitCondition> conditions;
-  for(int i=0;i<4;++i) for(int j=0;j<4;++j) {
-   const double u=i/3.,v=j/3.;const auto p=exact(u,v);
-   for(int c=0;c<3;++c) {
-    BRepExt::FitCondition row{}; row.u=u;row.v=v;row.count=1;
-    row.terms[0]={0,0,gp_XYZ(c==0,c==1,c==2)};
-    row.value=p.Coord(c+1);row.weight=1;row.within=Precision::Confusion()*scale;
-    conditions.push_back(row);
-   }
-  }
-  BRepExt::fitNet("interpolation",net,std::vector<char>(16,0),conditions,{0,0},{});
-  auto surface=BRepExt::surfaceOf(net);
-  for(int i=0;i<=16;++i) for(int j=0;j<=16;++j)
-   EXPECT_LE(surface->Value(i/16.,j/16.).Distance(exact(i/16.,j/16.)),Precision::Confusion()*scale);
- }
 }
 
-namespace {
-BRepExt::SplineNet planeNet(double height) {
- BRepExt::SplineNet net;net.degreeU=net.degreeV=3;
- net.knotsU=net.knotsV={0,0,0,0,1,1,1,1};
- for(int i=0;i<4;++i)for(int j=0;j<4;++j)net.poles.emplace_back(i/3.,j/3.,height);
- return net;
+// Tridiagonal SPD matrices: the expected x is independent of the factor/solve.
+TEST(GeomAlgoExtSplineFit, BandedCholeskyResidual)
+{
+  for (bool paired : {false, true})
+    for (int n : {4, 17, 65})
+    {
+      GeomAlgoExt::Band   a(n, 1, paired);
+      std::vector<double> x(n), expected(n);
+      for (int i = 0; i < n; ++i)
+        expected[i] = std::sin(double(i));
+      for (int i = 0; i < n; ++i)
+      {
+        a.add(i, i, 2);
+        if (i)
+          a.add(i, i - 1, -.25);
+        x[i] = 2 * expected[i] - (i ? .25 * expected[i - 1] : 0)
+               - (i + 1 < n ? .25 * expected[i + 1] : 0);
+      }
+      ASSERT_TRUE(a.factor());
+      a.solve(x);
+      for (int i = 0; i < n; ++i)
+        EXPECT_NEAR(x[i], expected[i], Precision::PConfusion());
+    }
 }
-class StopIndicator : public Message_ProgressIndicator {
- bool UserBreak() override { return true; }
- void Show(const Message_ProgressScope&,const bool) override {}
+
+// A cubic tensor polynomial is uniquely determined by its 4x4 values.
+// Crossed U/V strides, incorrect fixed-pole elimination or non-finite results fail.
+TEST(GeomAlgoExtSplineFit, TensorPolynomialInterpolation)
+{
+  for (double scale : {.01, 1., 100.})
+  {
+    BRepExt::SplineNet net;
+    net.degreeU = net.degreeV = 3;
+    net.knotsU = net.knotsV = {0, 0, 0, 0, 1, 1, 1, 1};
+    net.poles.resize(16, gp_XYZ(0, 0, 0));
+    auto exact = [&](double u, double v) {
+      return gp_Pnt(scale * (u + v * v),
+                    scale * (v - u * u),
+                    scale * (u * u * u - 2 * u * v + v * v * v));
+    };
+    std::vector<BRepExt::FitCondition> conditions;
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 4; ++j)
+      {
+        const double u = i / 3., v = j / 3.;
+        const auto   p = exact(u, v);
+        for (int c = 0; c < 3; ++c)
+        {
+          BRepExt::FitCondition row{};
+          row.u        = u;
+          row.v        = v;
+          row.count    = 1;
+          row.terms[0] = {0, 0, gp_XYZ(c == 0, c == 1, c == 2)};
+          row.value    = p.Coord(c + 1);
+          row.weight   = 1;
+          row.within   = Precision::Confusion() * scale;
+          conditions.push_back(row);
+        }
+      }
+    BRepExt::fitNet("interpolation", net, std::vector<char>(16, 0), conditions, {0, 0}, {});
+    auto surface = BRepExt::surfaceOf(net);
+    for (int i = 0; i <= 16; ++i)
+      for (int j = 0; j <= 16; ++j)
+        EXPECT_LE(surface->Value(i / 16., j / 16.).Distance(exact(i / 16., j / 16.)),
+                  Precision::Confusion() * scale);
+  }
+}
+
+namespace
+{
+BRepExt::SplineNet planeNet(double height)
+{
+  BRepExt::SplineNet net;
+  net.degreeU = net.degreeV = 3;
+  net.knotsU = net.knotsV = {0, 0, 0, 0, 1, 1, 1, 1};
+  for (int i = 0; i < 4; ++i)
+    for (int j = 0; j < 4; ++j)
+      net.poles.emplace_back(i / 3., j / 3., height);
+  return net;
+}
+
+class StopIndicator : public Message_ProgressIndicator
+{
+  bool UserBreak() override { return true; }
+
+  void Show(const Message_ProgressScope&, const bool) override {}
 };
-}
+} // namespace
+
 // A wrong normal-system RHS or pole update fails the defining plane distances.
-TEST(GeomAlgoExtSplineFit, RimCorrectionToParallelPlane) {
- auto net=planeNet(0);
- const auto places=[](double) {
-  std::vector<BRepExt::RimPlace> out;
-  for(int i=0;i<=8;++i)for(int j=0;j<=8;++j)
-   out.push_back({gp_Pnt(i/8.,j/8.,.125),gp_XY(i/8.,j/8.),gp_XY(0,0),false});
-  return out;
- };
- const double error=BRepExt::correctRim("rim",net,places,gp_XYZ(0,0,1),Precision::Confusion(),0,16);
- EXPECT_LE(error,Precision::Confusion());
- auto surface=BRepExt::surfaceOf(net);
- for(int i=0;i<=16;++i)for(int j=0;j<=16;++j)
-  EXPECT_NEAR(surface->Value(i/16.,j/16.).Z(),.125,Precision::Confusion());
+TEST(GeomAlgoExtSplineFit, RimCorrectionToParallelPlane)
+{
+  auto       net    = planeNet(0);
+  const auto places = [](double) {
+    std::vector<BRepExt::RimPlace> out;
+    for (int i = 0; i <= 8; ++i)
+      for (int j = 0; j <= 8; ++j)
+        out.push_back({gp_Pnt(i / 8., j / 8., .125), gp_XY(i / 8., j / 8.), gp_XY(0, 0), false});
+    return out;
+  };
+  const double error =
+    BRepExt::correctRim("rim", net, places, gp_XYZ(0, 0, 1), Precision::Confusion(), 0, 16);
+  EXPECT_LE(error, Precision::Confusion());
+  auto surface = BRepExt::surfaceOf(net);
+  for (int i = 0; i <= 16; ++i)
+    for (int j = 0; j <= 16; ++j)
+      EXPECT_NEAR(surface->Value(i / 16., j / 16.).Z(), .125, Precision::Confusion());
 }
+
 // A false interval certificate would accept displacement greater than its bound.
-TEST(GeomAlgoExtSplineFit, KnotRemovalBoundOnAffineSurface) {
- auto surface=BRepExt::surfaceOf(planeNet(.125));
- surface->InsertUKnot(.5,1,Precision::PConfusion());
- surface->InsertVKnot(.5,1,Precision::PConfusion());
- auto reduced=BRepExt::compactPatchSurface("compact",surface,Precision::Confusion());
- ASSERT_TRUE(reduced.has_value());
- for(int i=0;i<=32;++i)for(int j=0;j<=32;++j) {
-  const auto point=reduced->surface->Value(i/32.,j/32.);
-  EXPECT_LE(point.Distance(gp_Pnt(i/32.,j/32.,.125)),Precision::Confusion());
-  EXPECT_LE(point.Distance(surface->Value(i/32.,j/32.)),reduced->displacement);
- }
+TEST(GeomAlgoExtSplineFit, KnotRemovalBoundOnAffineSurface)
+{
+  auto surface = BRepExt::surfaceOf(planeNet(.125));
+  surface->InsertUKnot(.5, 1, Precision::PConfusion());
+  surface->InsertVKnot(.5, 1, Precision::PConfusion());
+  auto reduced = BRepExt::compactPatchSurface("compact", surface, Precision::Confusion());
+  ASSERT_TRUE(reduced.has_value());
+  for (int i = 0; i <= 32; ++i)
+    for (int j = 0; j <= 32; ++j)
+    {
+      const auto point = reduced->surface->Value(i / 32., j / 32.);
+      EXPECT_LE(point.Distance(gp_Pnt(i / 32., j / 32., .125)), Precision::Confusion());
+      EXPECT_LE(point.Distance(surface->Value(i / 32., j / 32.)), reduced->displacement);
+    }
 }
+
 // Optional optimization catches OCCT builder failures, but must never swallow a stop.
-TEST(GeomAlgoExtSplineFit, CompactCancellationEscapesOptionalFailureCatch) {
- auto surface=BRepExt::surfaceOf(planeNet(0));
- surface->InsertUKnot(.5,1,Precision::PConfusion());
- Handle(Message_ProgressIndicator) stop=new StopIndicator;
- const auto range=stop->Start();
- BRepExt::ProgressScope progress(range);
- try { BRepExt::compactPatchSurface("compact",surface,Precision::Confusion()); FAIL()<<"cancel did not escape"; }
- catch(const BRepExt::Failure& failure) { EXPECT_EQ(failure.reason,"cancelled"); EXPECT_EQ(failure.message,"Operation cancelled"); }
- for(int i=0;i<=8;++i)for(int j=0;j<=8;++j)
-  EXPECT_LE(surface->Value(i/8.,j/8.).Distance(gp_Pnt(i/8.,j/8.,0)),Precision::Confusion());
+TEST(GeomAlgoExtSplineFit, CompactCancellationEscapesOptionalFailureCatch)
+{
+  auto surface = BRepExt::surfaceOf(planeNet(0));
+  surface->InsertUKnot(.5, 1, Precision::PConfusion());
+  Handle(Message_ProgressIndicator) stop  = new StopIndicator;
+  const auto                        range = stop->Start();
+  BRepExt::ProgressScope            progress(range);
+  try
+  {
+    BRepExt::compactPatchSurface("compact", surface, Precision::Confusion());
+    FAIL() << "cancel did not escape";
+  }
+  catch (const BRepExt::Failure& failure)
+  {
+    EXPECT_EQ(failure.reason, "cancelled");
+    EXPECT_EQ(failure.message, "Operation cancelled");
+  }
+  for (int i = 0; i <= 8; ++i)
+    for (int j = 0; j <= 8; ++j)
+      EXPECT_LE(surface->Value(i / 8., j / 8.).Distance(gp_Pnt(i / 8., j / 8., 0)),
+                Precision::Confusion());
 }
 
 // A leaked or unrestored thread-local progress range either cancels the inner
 // certificate or lets the outer cancelled call complete. Exercise real proposals.
-TEST(GeomAlgoExtSplineFit, NestedNativeProgressRestoresCancellation) {
- for (double height : {-.125, 0., .25}) {
-  const auto make=[](double z) {
-   auto result=BRepExt::surfaceOf(planeNet(z));
-   result->InsertUKnot(.5,1,Precision::PConfusion());
-   return result;
-  };
-  Handle(Message_ProgressIndicator) stop=new StopIndicator;
+TEST(GeomAlgoExtSplineFit, NestedNativeProgressRestoresCancellation)
+{
+  for (double height : {-.125, 0., .25})
   {
-   BRepExt::ProgressScope outer(stop->Start());
-   {
-    BRepExt::ProgressScope inner(Message_ProgressRange{});
-    auto input=make(height);
-    auto reduced=BRepExt::compactPatchSurface("nested",input,Precision::Confusion());
-    ASSERT_TRUE(reduced.has_value());
-    for(int i=0;i<=16;++i)for(int j=0;j<=16;++j)
-     EXPECT_LE(reduced->surface->Value(i/16.,j/16.).Distance(input->Value(i/16.,j/16.)),reduced->displacement);
-   }
-   EXPECT_THROW(BRepExt::compactPatchSurface("outer",make(height),Precision::Confusion()),BRepExt::Failure);
+    const auto make = [](double z) {
+      auto result = BRepExt::surfaceOf(planeNet(z));
+      result->InsertUKnot(.5, 1, Precision::PConfusion());
+      return result;
+    };
+    Handle(Message_ProgressIndicator) stop = new StopIndicator;
+    {
+      BRepExt::ProgressScope outer(stop->Start());
+      {
+        BRepExt::ProgressScope inner(Message_ProgressRange{});
+        auto                   input = make(height);
+        auto reduced = BRepExt::compactPatchSurface("nested", input, Precision::Confusion());
+        ASSERT_TRUE(reduced.has_value());
+        for (int i = 0; i <= 16; ++i)
+          for (int j = 0; j <= 16; ++j)
+            EXPECT_LE(
+              reduced->surface->Value(i / 16., j / 16.).Distance(input->Value(i / 16., j / 16.)),
+              reduced->displacement);
+      }
+      EXPECT_THROW(BRepExt::compactPatchSurface("outer", make(height), Precision::Confusion()),
+                   BRepExt::Failure);
+    }
+    EXPECT_NO_THROW(BRepExt::compactPatchSurface("restored", make(height), Precision::Confusion()));
   }
-  EXPECT_NO_THROW(BRepExt::compactPatchSurface("restored",make(height),Precision::Confusion()));
- }
 }

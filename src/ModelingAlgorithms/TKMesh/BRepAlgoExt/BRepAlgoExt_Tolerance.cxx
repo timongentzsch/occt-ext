@@ -13,27 +13,37 @@
 #include <cmath>
 #include <limits>
 
-namespace BRepExt::tolerance {
+namespace BRepExt::tolerance
+{
 
-double own(const TopoDS_Shape& shape) {
-    switch (shape.ShapeType()) {
-    case TopAbs_VERTEX: return BRep_Tool::Tolerance(TopoDS::Vertex(shape));
-    case TopAbs_EDGE: return BRep_Tool::Tolerance(TopoDS::Edge(shape));
-    case TopAbs_FACE: return BRep_Tool::Tolerance(TopoDS::Face(shape));
-    default: return 0;
-    }
+double own(const TopoDS_Shape& shape)
+{
+  switch (shape.ShapeType())
+  {
+    case TopAbs_VERTEX:
+      return BRep_Tool::Tolerance(TopoDS::Vertex(shape));
+    case TopAbs_EDGE:
+      return BRep_Tool::Tolerance(TopoDS::Edge(shape));
+    case TopAbs_FACE:
+      return BRep_Tool::Tolerance(TopoDS::Face(shape));
+    default:
+      return 0;
+  }
 }
 
-double largest(const TopoDS_Shape& shape) {
-    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> seen;
-    TopExp::MapShapes(shape, seen);
-    double value = 0;
-    for (int i = 1; i <= seen.Extent(); ++i) {
-        const double local = own(seen(i));
-        if (!std::isfinite(local)) return std::numeric_limits<double>::infinity();
-        value = std::max(value, local);
-    }
-    return value;
+double largest(const TopoDS_Shape& shape)
+{
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> seen;
+  TopExp::MapShapes(shape, seen);
+  double value = 0;
+  for (int i = 1; i <= seen.Extent(); ++i)
+  {
+    const double local = own(seen(i));
+    if (!std::isfinite(local))
+      return std::numeric_limits<double>::infinity();
+    value = std::max(value, local);
+  }
+  return value;
 }
 
 } // namespace BRepExt::tolerance

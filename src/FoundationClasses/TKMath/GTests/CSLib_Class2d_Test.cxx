@@ -37,12 +37,12 @@ using Pnt = std::pair<double, double>;
 
 bool crossings(const std::vector<Pnt>& thePolygon, const double thePx, const double thePy)
 {
-  int aCount = 0;
-  const size_t aN = thePolygon.size();
+  int          aCount = 0;
+  const size_t aN     = thePolygon.size();
   for (size_t i = 0; i < aN; ++i)
   {
-    const Pnt& aA = thePolygon[i];
-    const Pnt& aB = thePolygon[(i + 1) % aN];
+    const Pnt&   aA  = thePolygon[i];
+    const Pnt&   aB  = thePolygon[(i + 1) % aN];
     const double aAx = aA.first - thePx, aAy = aA.second - thePy;
     const double aBx = aB.first - thePx, aBy = aB.second - thePy;
     if ((aAy < 0.0) == (aBy < 0.0))
@@ -73,8 +73,8 @@ CSLib_Class2d::Result reference(const std::vector<Pnt>& thePolygon,
   const size_t aN = thePolygon.size();
   for (size_t i = 0; i < aN; ++i)
   {
-    const Pnt& aA = thePolygon[i];
-    const Pnt& aB = thePolygon[(i + 1) % aN];
+    const Pnt&   aA  = thePolygon[i];
+    const Pnt&   aB  = thePolygon[(i + 1) % aN];
     const double aBx = aB.first - thePx, aBy = aB.second - thePy;
     if (aBx < theTolU && aBx > -theTolU && aBy < theTolV && aBy > -theTolV)
     {
@@ -109,10 +109,13 @@ CSLib_Class2d::Result reference(const std::vector<Pnt>& thePolygon,
 
 // A closed curve r(t) around (0.5, 0.5) with n vertices, rough enough to have many edges per
 // height and several crossings of a horizontal line.
-std::vector<Pnt> wavyLoop(std::mt19937& theRandom, const int theN, const double theWaves, const double theAmplitude)
+std::vector<Pnt> wavyLoop(std::mt19937& theRandom,
+                          const int     theN,
+                          const double  theWaves,
+                          const double  theAmplitude)
 {
   std::uniform_real_distribution<double> aNoise(-0.002, 0.002);
-  std::vector<Pnt> aPolygon;
+  std::vector<Pnt>                       aPolygon;
   for (int i = 0; i < theN; ++i)
   {
     const double aT = 2.0 * M_PI * i / theN;
@@ -169,7 +172,8 @@ TEST(CSLib_Class2dTest, IndexedAnswersEqualTheScanOfTheWholePolygon)
       {
         const CSLib_Class2d::Result aGot = aClass.SiDans(gp_Pnt2d(aQ.first, aQ.second));
         CSLib_Class2d::Result       aWant;
-        if (aQ.first < -aTol || aQ.first > 1.0 + aTol || aQ.second < -aTol || aQ.second > 1.0 + aTol)
+        if (aQ.first < -aTol || aQ.first > 1.0 + aTol || aQ.second < -aTol
+            || aQ.second > 1.0 + aTol)
         {
           aWant = CSLib_Class2d::Result_Outside;
         }
@@ -177,7 +181,8 @@ TEST(CSLib_Class2dTest, IndexedAnswersEqualTheScanOfTheWholePolygon)
         {
           aWant = reference(aPolygon, aTol, aTol, aQ.first, aQ.second);
         }
-        ASSERT_EQ(aGot, aWant) << "n=" << aN << " tol=" << aTol << " at " << aQ.first << "," << aQ.second;
+        ASSERT_EQ(aGot, aWant) << "n=" << aN << " tol=" << aTol << " at " << aQ.first << ","
+                               << aQ.second;
         aUncertain += aGot == CSLib_Class2d::Result_Uncertain;
         aInside += aGot == CSLib_Class2d::Result_Inside;
         aOutside += aGot == CSLib_Class2d::Result_Outside;
@@ -213,7 +218,8 @@ TEST(CSLib_Class2dTest, IndexedAnswersEqualTheScanOnAStaircaseOnBucketBoundaries
       const double aX = double(i) / (4 * aSteps), aY = double(j) / (4 * aSteps);
       for (const double aShift : {0.0, 1e-7, -1e-7, 2e-6})
       {
-        ASSERT_EQ(aClass.SiDans(gp_Pnt2d(aX + aShift, aY)), reference(aPolygon, aTol, aTol, aX + aShift, aY))
+        ASSERT_EQ(aClass.SiDans(gp_Pnt2d(aX + aShift, aY)),
+                  reference(aPolygon, aTol, aTol, aX + aShift, aY))
           << aX << "," << aY << " shift " << aShift;
       }
     }

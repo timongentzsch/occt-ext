@@ -12,11 +12,13 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
 /// Whether two faces that have `shared` in common (edges and vertices) meet only there and
 /// come within their tolerances of each other only beside it. False where this cannot tell.
-bool analyticBeside(const TopoDS_Face& a, const TopoDS_Face& b,
+bool analyticBeside(const TopoDS_Face&                                                   a,
+                    const TopoDS_Face&                                                   b,
                     const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& shared);
 
 /// Whether `shape` has two faces beside each other that analyticBeside is for.

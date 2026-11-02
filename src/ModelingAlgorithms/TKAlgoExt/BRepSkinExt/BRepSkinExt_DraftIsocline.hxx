@@ -7,13 +7,19 @@
 
 #include <gp_Pln.hxx>
 
-namespace BRepExt {
+namespace BRepExt
+{
 
 /// `faces` of `solid`, walls along `pull`, each replaced by the ruled surface that makes
 /// `angle` with `pull` and passes through the wall where the neutral plane crosses it
 /// (draft_isocline.cpp). `lineage` is carried through. Fails, naming the face, where a face is
 /// no such wall, where the taper folds it, and where the draft would leave a step.
-TopoDS_Shape draftWalls(const TopoDS_Shape &solid, const std::vector<TopoDS_Shape> &faces, double angle,
-                        const gp_Dir &pull, const gp_Pln &neutral, double tolerance, Lineage &lineage);
+TopoDS_Shape draftWalls(const TopoDS_Shape&              solid,
+                        const std::vector<TopoDS_Shape>& faces,
+                        double                           angle,
+                        const gp_Dir&                    pull,
+                        const gp_Pln&                    neutral,
+                        double                           tolerance,
+                        Lineage&                         lineage);
 
 } // namespace BRepExt

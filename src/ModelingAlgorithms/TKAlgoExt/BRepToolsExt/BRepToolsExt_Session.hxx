@@ -15,15 +15,17 @@
 
 class OcctKernel;
 
-namespace BRepExt {
+namespace BRepExt
+{
 
 /// A result and what became of the tracked input faces: [inputFaceHash, count, resultFaceHash...]
 /// records in `modified` and `generated`, and the hashes of input faces in `deleted`.
-struct EvolutionData {
-    uint32_t resultId = 0;
-    std::vector<int> modified;
-    std::vector<int> generated;
-    std::vector<int> deleted;
+struct EvolutionData
+{
+  uint32_t         resultId = 0;
+  std::vector<int> modified;
+  std::vector<int> generated;
+  std::vector<int> deleted;
 };
 
 /// Register a shape in the host's store and return its handle.
@@ -36,10 +38,11 @@ const TopoDS_Shape& get(const OcctKernel& kernel, uint32_t id);
 void release(OcctKernel& kernel, uint32_t id);
 
 /// A result that is a new shape and no face history: `shape`, registered in the store.
-inline EvolutionData stored(OcctKernel& kernel, const TopoDS_Shape& shape) {
-    EvolutionData out;
-    out.resultId = store(kernel, shape);
-    return out;
+inline EvolutionData stored(OcctKernel& kernel, const TopoDS_Shape& shape)
+{
+  EvolutionData out;
+  out.resultId = store(kernel, shape);
+  return out;
 }
 
 } // namespace BRepExt

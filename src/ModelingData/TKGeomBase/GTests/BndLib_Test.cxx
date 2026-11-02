@@ -679,7 +679,7 @@ TEST(BndLibTest, Torus_PatchBoxContainsTheSurface)
   // samples, so a box built from sampled section points alone misses surface points: up to
   // r * (1 - cos(pi / 8)) outside for a tilted torus. Every surface point of a patch must be in
   // its box, whatever the axis and the parameter ranges, including reversed and long V ranges.
-  const double aAxes[][3] = {{0., 0., 1.}, {1., 0., 0.}, {0.3, -0.5, 0.8}, {-1., 2., 0.5}};
+  const double aAxes[][3]   = {{0., 0., 1.}, {1., 0., 0.}, {0.3, -0.5, 0.8}, {-1., 2., 0.5}};
   const double aRanges[][4] = {{0., 2. * M_PI, 0., 2. * M_PI},
                                {0.4, 1.9, 0.3, 1.1},
                                {1., 5., -2.8, -1.5},
