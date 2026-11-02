@@ -229,7 +229,10 @@ Known limits and what remains:
 2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published
    bound for a curvature-continuous conic or quintic section as a function of the support's curvature is
    missing.
-3. **Fill.** The interior acceptance gate and the flat-support curvature limit have no derivation. The fit's
+3. **Fill.** The interior acceptance gate and the flat-support curvature limit have no derivation; across two
+   rims of an open boundary the gate's reference is the Hermite bridge between them, which is reasoned, but
+   the factor it allows over it is the same judgement, and gentle bulges where an elbow turns pass more often
+   than against the rims alone. The fit's
    stopping decisions depend on rounding and therefore weakly on pose (sampled, not bounded). Fills through
    three profiles with curvature continuity can miss the curvature-share limit. Open boundaries are chained by
    `BRepPatchExt_Chain` (nearest-end growth, gaps closed with straight segments); a general theory of which

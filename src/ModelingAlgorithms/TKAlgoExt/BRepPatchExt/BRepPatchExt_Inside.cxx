@@ -32,6 +32,8 @@
 #include <BRepTopAdaptor_FClass2d.hxx>
 #include <GeomLProp_SLProps.hxx>
 #include <Geom_BSplineSurface.hxx>
+#include <NCollection_Array2.hxx>
+#include <PLib.hxx>
 #include <BRep_Tool.hxx>
 #include <algorithm>
 #include <cmath>
@@ -50,6 +52,116 @@ constexpr int grid = 40;
 //! its face at three and a half); the spikes and bulges that this is to catch bend seven to
 //! a hundred times more. Between the two, four is a judgement.
 constexpr double tightest = 4;
+
+// A face that crosses from one rim to another over the gaps of an open boundary must turn from
+// the tangent plane of the one to that of the other, and may have to bend far more tightly than
+// either rim to do so: an elbow from the end of a tube onto the end of a plate does. What the
+// rims ask of it there is read from the bridge between them: along each crossing of the face, the
+// Hermite curve from the one rim to the other that leaves and meets each square to it in its
+// tangent plane, at the speed of the chord between them, and with each face's bend that way
+// where the face is to be met to G2 (a curve of degree first + last + 1, a straight line between
+// two G0 rims). It holds nothing but what the rims ask (their places, tangent planes and bends,
+// which the face has been measured to meet within the limits) and is the same curve in any pose
+// and at any scale. It knows nothing of the face's inside, so a bulge, a ripple or a spike that
+// leaves the rims as they are leaves it as it is. That the face may bend four times as tightly as
+// the bridge does near the same share of the crossing is the judgement above, not a theorem:
+// over 76 tube-to-plate and wall-to-plate elbows of three heights, tilts and widths, at rest and
+// turned, that met their rims, the face bent at most 2.1 times as tightly as the bridge or its
+// rims (against the rims alone, up to 18 times).
+
+//! How much earlier or later along a crossing, as a share of its length, the face may turn than
+//! its bridge does. Measured over the same elbows: a face at most 5.7 times as tight as the bridge
+//! at the same share, 3.1 times within 0.05 and 2.1 times within this. A judgement.
+constexpr double bridgeSlack = 0.1;
+
+//! The places a crossing and its bridge are read at.
+constexpr int crossingPlaces = 400;
+
+//! The bridge along the crossing of `surface` at `along`, from the rim at `from` to that at `to`
+//! (across parameters): its curvature at shares of its length, in turn.
+std::vector<std::pair<double, double>> bridgeBends(const occ::handle<Geom_Surface>& surface,
+                                                   const Crossing&                  crossing,
+                                                   double                           along,
+                                                   double                           from,
+                                                   double                           to)
+{
+  // At each end: the place, the way square to the rim in the tangent plane that the face
+  // crosses by, the normal and the face's normal curvature that way.
+  struct End
+  {
+    gp_Pnt place;
+    gp_Vec way, normal;
+    double bend;
+  };
+
+  const auto end = [&](double across) -> std::optional<End> {
+    const double u = crossing.acrossV ? along : across, v = crossing.acrossV ? across : along;
+    gp_Pnt       place;
+    gp_Vec       su, sv, suu, svv, suv;
+    surface->D2(u, v, place, su, sv, suu, svv, suv);
+    // No bridge from a rim where the face has no tangent plane: the rims alone judge there.
+    if (su.Crossed(sv).Magnitude() <= 1e-12 * su.Magnitude() * sv.Magnitude())
+      return std::nullopt;
+    const gp_Vec normal = su.Crossed(sv).Normalized();
+    gp_Vec       way    = normal.Crossed(crossing.acrossV ? su : sv).Normalized();
+    if (way.Dot(crossing.acrossV ? sv : su) < 0)
+      way.Reverse();
+    // The way in the parameters, x su + y sv, for the second fundamental form.
+    const double e = su.Dot(su), f = su.Dot(sv), g = sv.Dot(sv), det = e * g - f * f,
+                 a = way.Dot(su), b = way.Dot(sv), x = (g * a - f * b) / det,
+                 y = (e * b - f * a) / det;
+    return End{place,
+               way,
+               normal,
+               x * x * suu.Dot(normal) + 2 * x * y * suv.Dot(normal) + y * y * svv.Dot(normal)};
+  };
+  const auto start = end(from), finish = end(to);
+  if (!start || !finish)
+    return {};
+  const End    ends[2]   = {*start, *finish};
+  const int    orders[2] = {std::clamp(crossing.first, 0, 2), std::clamp(crossing.last, 0, 2)};
+  const double chord     = ends[0].place.Distance(ends[1].place);
+  NCollection_Array2<double> first(1, 3, 0, orders[0]), last(1, 3, 0, orders[1]);
+  for (int side = 0; side < 2; ++side)
+  {
+    NCollection_Array2<double>& asked  = side ? last : first;
+    const End&                  at     = ends[side];
+    const gp_XYZ                jet[3] = {at.place.XYZ(),
+                                          at.way.XYZ() * chord,
+                                          at.normal.XYZ() * (at.bend * chord * chord)};
+    for (int k = 0; k <= orders[side]; ++k)
+      for (int axis = 1; axis <= 3; ++axis)
+        asked(axis, k) = jet[k].Coord(axis);
+  }
+  const int                              degree = orders[0] + orders[1] + 1;
+  NCollection_Array1<double>             coefficients(0, 3 * (degree + 1) - 1);
+  std::vector<std::pair<double, double>> out;
+  if (!PLib::HermiteInterpolate(3, 0, 1, orders[0], orders[1], first, last, coefficients))
+    return out;
+  double length = 0, before = 0;
+  for (int k = 0; k <= crossingPlaces; ++k)
+  {
+    double values[9];
+    PLib::EvalPolynomial(static_cast<double>(k) / crossingPlaces,
+                         2,
+                         degree,
+                         3,
+                         coefficients(0),
+                         values[0]);
+    const gp_Vec tangent(values[3], values[4], values[5]), second(values[6], values[7], values[8]);
+    const double speed = tangent.Magnitude();
+    if (k)
+      length += (speed + before) / 2 / crossingPlaces;
+    before = speed;
+    out.push_back(
+      {length, speed > 0 ? tangent.Crossed(second).Magnitude() / (speed * speed * speed) : 0});
+  }
+  if (!(length > 0))
+    return {};
+  for (auto& place : out)
+    place.first /= length;
+  return out;
+}
 
 // An inexpensive trim for choosing a second fitted net. The final acceptance still uses
 // the actual trim in insideFault. Patch has one wire, but parity also handles inner wires.
@@ -386,7 +498,9 @@ double tightestInside(const TopoDS_Face& face)
   return bend;
 }
 
-std::optional<std::string> insideFault(const TopoDS_Face& face, double rimBend)
+std::optional<std::string> insideFault(const TopoDS_Face&             face,
+                                       double                         rimBend,
+                                       const std::optional<Crossing>& crossing)
 {
   PatchPhase phase("interior-check");
   const auto surface = BRep_Tool::Surface(face);
@@ -395,7 +509,39 @@ std::optional<std::string> insideFault(const TopoDS_Face& face, double rimBend)
   FinalTrim           inside(face);
   std::vector<gp_Vec> normals(grid * grid);
   std::vector<char>   seen(grid * grid, 0);
-  double              bend = 0;
+  // Across a crossing, the bend the bridge has near the same share of the crossing at each place
+  // looked at, crossing by crossing (see bridgeBends).
+  std::vector<double> bridged(grid * grid, 0);
+  for (int c = 0; crossing && rimBend > 0 && c < grid; ++c)
+  {
+    const double along = crossing->acrossV ? u0 + (u1 - u0) * (c + .5) / grid
+                                           : v0 + (v1 - v0) * (c + .5) / grid,
+                 from = crossing->acrossV ? v0 : u0, to = crossing->acrossV ? v1 : u1;
+    const auto bridge = bridgeBends(surface, *crossing, along, from, to);
+    if (bridge.empty())
+      continue;
+    // The face's own crossing, by its length.
+    std::vector<double> share(crossingPlaces + 1, 0);
+    gp_Pnt              before;
+    for (int k = 0; k <= crossingPlaces; ++k)
+    {
+      const double across = from + (to - from) * k / crossingPlaces;
+      const gp_Pnt place =
+        surface->Value(crossing->acrossV ? along : across, crossing->acrossV ? across : along);
+      share[k] = k ? share[k - 1] + place.Distance(before) : 0;
+      before   = place;
+    }
+    for (int k = 0; k < grid; ++k)
+    {
+      const double at   = share[(2 * k + 1) * crossingPlaces / (2 * grid)] / share.back();
+      double       most = 0;
+      for (const auto& [where, bend] : bridge)
+        if (std::abs(where - at) <= bridgeSlack)
+          most = std::max(most, bend);
+      bridged[crossing->acrossV ? c * grid + k : k * grid + c] = most;
+    }
+  }
+  double tighter = 0;
   for (int i = 0; i < grid; ++i)
     for (int j = 0; j < grid; ++j)
     {
@@ -408,7 +554,10 @@ std::optional<std::string> insideFault(const TopoDS_Face& face, double rimBend)
       normals[i * grid + j] = gp_Vec(at.Normal());
       seen[i * grid + j]    = 1;
       if (at.IsCurvatureDefined())
-        bend = std::max({bend, std::abs(at.MaxCurvature()), std::abs(at.MinCurvature())});
+      {
+        const double here = std::max(std::abs(at.MaxCurvature()), std::abs(at.MinCurvature()));
+        tighter           = std::max(tighter, here / std::max(rimBend, bridged[i * grid + j]));
+      }
     }
   // Folded over: two places side by side that face opposite ways.
   for (int i = 0; i < grid; ++i)
@@ -424,13 +573,17 @@ std::optional<std::string> insideFault(const TopoDS_Face& face, double rimBend)
           return "it folds over inside the loop";
       }
     }
-  if (rimBend > 0 && bend > tightest * rimBend)
+  if (rimBend > 0 && tighter > tightest)
   {
     char text[160];
     std::snprintf(text,
                   sizeof text,
-                  "it bends %.0f times more tightly inside the loop than anything on its rim does",
-                  bend / rimBend);
+                  crossing
+                    ? "it bends %.0f times more tightly inside the loop than its rims and the "
+                      "bridge between them do"
+                    : "it bends %.0f times more tightly inside the loop than anything on its "
+                      "rim does",
+                  tighter);
     return text;
   }
   return std::nullopt;

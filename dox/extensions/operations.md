@@ -58,9 +58,30 @@ Weber and Zorin], which is why the result is looked at inside its loop before it
 corner compatibility at a vertex where several patches meet follows the vertex-enclosure condition
 [Hermann, Peters, Strotman 2009, all five pages read].
 
+An open boundary asked for Quad sided whose runs and gaps make four sides with corners is filled by the
+four-sided surface untrimmed: the poles of a gap side are free like the inner ones, and nothing is asked
+along it (a side with more poles at degree 5 than a fitted net may have is first brought down to degree 5
+within a tenth of the tolerance, as an arc is). Where that quad is not a face to keep, the boundary is
+filled as any open one is, as before. Where the two rims face each other across two gaps, the fill must turn
+from the tangent plane of the one to that of the other, often far more tightly than either rim bends (an
+elbow from the end of a tube onto the end of a plate). The inside is then judged against the *bridge*
+between the rims as well: along each crossing, the Hermite curve that leaves and meets each rim square to it
+in its tangent plane, at the speed of the chord, with the face's bend that way where G2 is asked. It is
+built from the rims' places, tangent planes and bends only, so it is pose- and scale-covariant and a bulge,
+ripple or spike that leaves the rims unchanged leaves it unchanged; the fill may bend four times as tightly
+as the rim or as the bridge within a tenth of the crossing's length of the same place. With no gap, or gaps
+that are not opposite, the rule is the previous one.
+
 *Unproven.* The interior acceptance gate (a fault when the interior bends more than 4 times the rim's
 bend, with a floor of 2/size) has no derivation; a bound of the form K sqrt(2D) in the energy gap D was
-tried and rejected. The flat G2 limit, the stopping rules of the outer iteration (which depend on rounding
+tried and rejected. The bridge only replaces the reference that the 4 multiplies; the 4 and the tenth are
+judgements. Over 76 tube-to-plate and wall-to-plate elbows (three heights, tilts and widths, at rest and
+turned) that met their rims, fills bent at most 2.1 times their reference (up to 18 times the rims'
+bend, the old reference, which refuses 36 of them). On the same elbows with injected defects that leave the
+rims unchanged, every ripple of a hundredth of the size (6 or 12 waves) and 80 % of bulges of a twentieth
+are refused, but gentler defects where the elbow turns pass more often than against the rims alone: on the
+40 elbows the old rule keeps, bulges of a twentieth are refused 108 times in 120 instead of 120, spikes of a
+fiftieth 104 instead of 120. The flat G2 limit, the stopping rules of the outer iteration (which depend on rounding
 and therefore on pose), the span and budget constants of the net, and the 0.17 slope limit are unproven.
 Pose dependence is measured, not removed: 47 sampled breaches over 154 rigid-motion variants, none changing
 whether a case is refused.

@@ -1499,6 +1499,8 @@ struct Built
   std::vector<SpatialRim> spatialBoundary = {};
   //! Per side, the curve of a gap in the surface's parameters; null for every other side.
   std::vector<occ::handle<Geom2d_Curve>> gaps = {};
+  //! For a quad of two rims across two gaps, how it crosses from rim to rim (see insideFault).
+  std::optional<Crossing> crossing = {};
 };
 
 // The local construction keeps fraction direction; canonical restoration may reverse it.
@@ -2133,10 +2135,16 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
   if (!found)
     return {};
   std::vector<Run> runs = *found;
+  // A side made only of gaps of an open boundary: nothing is asked along it.
+  bool gap[4];
+  for (size_t s = 0; s < 4; ++s)
+    gap[s] = std::all_of(runs[s].parts.begin(), runs[s].parts.end(), [](const Side* part) {
+      return part->free;
+    });
   for (int pair = 0; pair < 2; ++pair)
     for (const Side* a : runs[pair].parts)
       for (const Side* b : runs[pair + 2].parts)
-        if (!apart(a->edge, b->edge, asked.limits.g0)
+        if (!a->free && !b->free && !apart(a->edge, b->edge, asked.limits.g0)
             && BRepExtrema_DistShapeShape(a->edge, b->edge).Value() <= asked.limits.g0)
           fail(op, invalid_input, "the boundary crosses itself");
   int order = 0;
@@ -2200,10 +2208,18 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
   for (int i = 0; i < 2; ++i)
   {
     auto &a = curves[i], &b = curves[i + 2];
-    // Asked for a quad, a side above the net's highest degree is brought down to it as an
-    // arc is, within the same share of the tolerance and over the same parameters.
+    // Asked for a quad, a side above the net's highest degree, or one with more poles at the
+    // net's degree than a fitted net may have, is brought down to it as an arc is, within the
+    // same share of the tolerance and over the same parameters.
+    const int least = !fitting ? 1 : order < 2 ? 3 : 5;
     for (auto* curve : {&a, &b})
-      if (asked.controls.quad == 1 && (*curve)->Degree() > 5)
+      if (asked.controls.quad == 1
+          && ((*curve)->Degree() > 5
+              || (fitting
+                  && (*curve)->NbPoles()
+                         + (std::max(least, (*curve)->Degree()) - (*curve)->Degree())
+                             * ((*curve)->NbKnots() - 1)
+                       > mostFittedPoles)))
       {
         GeomConvert_ApproxCurve lower(*curve,
                                       asked.limits.g0 * plainShare,
@@ -2214,7 +2230,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
           return {};
         *curve = lower.Curve();
       }
-    const int degree = std::max({a->Degree(), b->Degree(), !fitting ? 1 : order < 2 ? 3 : 5});
+    const int degree = std::max({a->Degree(), b->Degree(), least});
     if (degree > 5)
       return {};
     a->IncreaseDegree(degree);
@@ -2259,16 +2275,27 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
     if (asked.controls.flow == 1)
       return part->tangent(g);
     const gp_Vec tangent = part->tangent(g).Normalized();
-    const gp_Vec before  = -runs[(s + 3) % 4].tangent(1).Normalized(),
-                 after   = runs[(s + 1) % 4].tangent(0).Normalized();
-    gp_Vec way           = before * (1 - f) + after * f;
+    gp_Vec       before  = -runs[(s + 3) % 4].tangent(1).Normalized(),
+           after         = runs[(s + 1) % 4].tangent(0).Normalized();
+    const auto chord     = [&](double t) {
+      return gp_Vec(runs[s].point(t), runs[(s + 2) % 4].point(1 - t)).Normalized();
+    };
+    // A gap is no side to turn to: next to one the isocurves leave as for Normal, square to
+    // the side, for Adjacent, and along the chord for Next.
+    const bool fromGap = gap[(s + 3) % 4], toGap = gap[(s + 1) % 4];
+    if (asked.controls.flow == 3 && fromGap && toGap)
+      return part->tangent(g);
+    const auto square = [&](const gp_Vec& way, double t) {
+      const gp_Vec along = runs[s].tangent(t).Normalized(), out = way - along * way.Dot(along);
+      return out.Magnitude() > 1e-12 ? out.Normalized() : out;
+    };
+    if (fromGap)
+      before = asked.controls.flow == 2 ? chord(0) : square(after, 0);
+    if (toGap)
+      after = asked.controls.flow == 2 ? chord(1) : square(before, 1);
+    gp_Vec way = before * (1 - f) + after * f;
     if (asked.controls.flow == 2)
-    {
-      const auto chord = [&](double t) {
-        return gp_Vec(runs[s].point(t), runs[(s + 2) % 4].point(1 - t)).Normalized();
-      };
       way = chord(f) + (before - chord(0)) * (1 - f) + (after - chord(1)) * f;
-    }
     if (part->order > 0)
     {
       const gp_Vec n = part->jet(g).n;
@@ -2293,10 +2320,13 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
     occ::handle<Geom_BSplineSurface> surface = surfaceOf(net);
     if (fitting)
     {
+      // The poles of a side that is a gap are free like the inner ones, but for the corners.
       std::vector<char> fixed(net.poles.size(), 0);
       for (int i = 0; i < nu; ++i)
         for (int j = 0; j < nv; ++j)
-          fixed[static_cast<size_t>(i) * nv + j] = i == 0 || j == 0 || i == nu - 1 || j == nv - 1;
+          fixed[static_cast<size_t>(i) * nv + j] =
+            ((i == 0 || i == nu - 1) && (j == 0 || j == nv - 1)) || (j == 0 && !gap[0])
+            || (i == nu - 1 && !gap[1]) || (j == nv - 1 && !gap[2]) || (i == 0 && !gap[3]);
       std::vector<Target> targets;
       for (size_t s = 0; s < 4; ++s)
       {
@@ -2305,7 +2335,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
         {
           const double f       = (k + 0.5) / count;
           const auto [part, g] = runs[s].at(f);
-          if (part->order < 1 && !asked.controls.flow)
+          if (part->free || (part->order < 1 && !asked.controls.flow))
             continue;
           Target target{part->at(g),
                         along(s, f),
@@ -2533,7 +2563,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
                                       : std::nullopt;
                            })};
     for (size_t side = 0; asked.controls.flow && side < 4; ++side)
-      for (int k = 0; k < places; ++k)
+      for (int k = 0; k < places && !gap[side]; ++k)
       {
         const double     f      = (k + .5) / places;
         const gp_XY      uv     = along(side, f);
@@ -2549,7 +2579,18 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
           built.measured.worst  = "boundary UV flow is missed by " + number(angle) + " degrees";
         }
       }
-    built.face          = BRepBuilderAPI_MakeFace(surface, Precision::Confusion()).Face();
+    built.face = BRepBuilderAPI_MakeFace(surface, Precision::Confusion()).Face();
+    // The orders a rim asks along all of it.
+    const auto least = [&](size_t s) {
+      int order = 2;
+      for (const Side* part : runs[s].parts)
+        order = std::min(order, part->order);
+      return order;
+    };
+    if (gap[1] && gap[3] && !gap[0] && !gap[2])
+      built.crossing = Crossing{true, least(0), least(2)};
+    else if (gap[0] && gap[2] && !gap[1] && !gap[3])
+      built.crossing = Crossing{false, least(3), least(1)};
     const double before = best ? best->measured.excess : HUGE_VAL;
     if (built.measured.excess < before)
       best = built;
@@ -4956,20 +4997,11 @@ Built plate(const Asked& asked)
   return {4, fill.Face(), measureAll(BRep_Tool::Surface(fill.Face()), asked)};
 }
 
-//! The face of the loop `asked` holds, held to every check Patch makes; fails with what it
-//! misses otherwise.
-Built patchFace(Asked asked, int method, double flatness, PatchControls controls)
+//! The face of the loop `asked` holds once its sides are in turn, held to every check Patch
+//! makes; fails with what it misses otherwise.
+Built fillFace(Asked asked, int method, double flatness, const PatchControls& controls)
 {
-  if (!arrange(asked.sides, asked.limits.g0, controls.open && method != 2))
-    chain(asked.sides, asked.limits.g0);
-  const bool gapped = hasGaps(asked);
-  // What `open` changes is for a boundary that does not close. One that does is the fill it
-  // always was, whoever asks for it.
-  controls.open = gapped;
-  // An open boundary has no four sides to make an untrimmed quad of, and every flow but
-  // Natural is the refit over the conformal chart.
-  if (gapped)
-    controls.quad = 0;
+  const bool gapped          = hasGaps(asked);
   asked.controls             = controls;
   const Asked input          = asked;
   bool        copyBudgetMiss = false;
@@ -5173,8 +5205,9 @@ Built patchFace(Asked asked, int method, double flatness, PatchControls controls
   // that four curves have between them with nothing fitted, bends as its edges make it: there only
   // a fold is a fault.
   const bool fitted = built->construction >= 2;
-  if (const auto fault =
-        insideFault(built->face, fitted && asked.points.empty() ? rimBend(asked) : 0))
+  if (const auto fault = insideFault(built->face,
+                                     fitted && asked.points.empty() ? rimBend(asked) : 0,
+                                     built->crossing))
     fail(op, no_solution, "the surface that meets the edges is not one to keep: " + *fault);
 
   if (method != 2)
@@ -5185,13 +5218,43 @@ Built patchFace(Asked asked, int method, double flatness, PatchControls controls
     if (occ::down_cast<Geom_BSplineSurface>(surface).IsNull())
       fail(op, unsupported_geometry, "Untrimmed output requires a bounded spline surface");
     built->face = BRepBuilderAPI_MakeFace(surface, Precision::Confusion()).Face();
-    if (const auto fault =
-          insideFault(built->face, fitted && asked.points.empty() ? rimBend(asked) : 0))
+    if (const auto fault = insideFault(built->face,
+                                       fitted && asked.points.empty() ? rimBend(asked) : 0,
+                                       built->crossing))
       fail(op, no_solution, "the untrimmed rectangle is not one to keep: " + *fault);
   }
   if (!BRepCheck_Analyzer(built->face).IsValid())
     fail(op, no_solution, "the untrimmed result is not a valid face");
   return *built;
+}
+
+//! The face of the loop `asked` holds, held to every check Patch makes; fails with what it
+//! misses otherwise.
+Built patchFace(Asked asked, int method, double flatness, PatchControls controls)
+{
+  if (!arrange(asked.sides, asked.limits.g0, controls.open && method != 2))
+    chain(asked.sides, asked.limits.g0);
+  const bool gapped = hasGaps(asked);
+  // What `open` changes is for a boundary that does not close. One that does is the fill it
+  // always was, whoever asks for it.
+  controls.open = gapped;
+  // An open boundary asked to be a quad, whose runs and gaps are four sides with corners, is the
+  // untrimmed quad with the gaps' poles free (see foursided). Where that is not a face to keep,
+  // it is filled as any open boundary is: every flow but Natural is then the refit over the
+  // conformal chart.
+  if (gapped && controls.quad == 1 && quadRuns(asked.sides, asked.limits.g1))
+    try
+    {
+      return fillFace(asked, method, flatness, controls);
+    }
+    catch (const Failure& failure)
+    {
+      if (failure.reason == "cancelled")
+        throw;
+    }
+  if (gapped)
+    controls.quad = 0;
+  return fillFace(asked, method, flatness, controls);
 }
 
 PatchResult patchAsAsked(OcctKernel&                  kernel,

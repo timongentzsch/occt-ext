@@ -18,6 +18,7 @@
 #include "BRepExtTest_Support.hxx"
 
 #include <BRepToolsExt_Operations.hxx>
+#include <BRepPatchExt_Inside.hxx>
 #include <BRepPatchExt_Side.hxx>
 #include <GeomAlgoExt_Failure.hxx>
 
@@ -27,9 +28,12 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRep_Tool.hxx>
+#include <GeomAPI_PointsToBSplineSurface.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomLProp_SLProps.hxx>
+#include <Geom_BSplineSurface.hxx>
 #include <Geom_Circle.hxx>
+#include <Geom_CylindricalSurface.hxx>
 #include <Geom_Plane.hxx>
 
 #include <gtest/gtest.h>
@@ -318,4 +322,195 @@ TEST(BRepPatchExt, SixArcRimOnASphereIsFilledTangentToItThroughEveryArc)
     }
   }
   EXPECT_LE(worst, g1Degrees);
+}
+
+namespace
+{
+
+//! The end of a half tube of radius 20 below z = 0, on the side y <= 0, and the end of a plate 26
+//! wide at height 50 that leaves the edge y = 0 along +y: two edges, a gap of about 50 between
+//! them on either side. A fill from the one to the other is an elbow, turning from upright to
+//! level. The tube is a cylinder, or with `sheet` the cubic spline through 25 by 5 of its points,
+//! whose rim has more poles at degree 5 than a fitted quad may have.
+struct Elbow
+{
+  TopoDS_Face           tube, plate;
+  std::vector<uint32_t> edges, supports;
+
+  explicit Elbow(bool sheet = false)
+  {
+    const Handle(Geom_CylindricalSurface) cylinder =
+      new Geom_CylindricalSurface(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 0, -1), gp_Dir(1, 0, 0)), 20);
+    tube = BRepBuilderAPI_MakeFace(cylinder, 0, M_PI, 0, 20, 1e-7).Face();
+    if (sheet)
+    {
+      NCollection_Array2<gp_Pnt> points(1, 25, 1, 5);
+      for (int i = 1; i <= 25; ++i)
+        for (int j = 1; j <= 5; ++j)
+          points(i, j) = cylinder->Value(M_PI * (i - 1) / 24, 5.0 * (j - 1));
+      GeomAPI_PointsToBSplineSurface through;
+      through.Interpolate(points, Approx_IsoParametric);
+      tube = BRepBuilderAPI_MakeFace(through.Surface(), 1e-7).Face();
+    }
+    plate = BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakePolygon(gp_Pnt(-13, 0, 50),
+                                                               gp_Pnt(13, 0, 50),
+                                                               gp_Pnt(13, 22, 50),
+                                                               gp_Pnt(-13, 22, 50),
+                                                               true)
+                                      .Wire())
+              .Face();
+    for (const TopoDS_Face& face : {tube, plate})
+    {
+      const double height = face.IsSame(tube) ? 0 : 50;
+      for (const TopoDS_Edge& edge : edgesWhere(face, [&](const double* b) {
+             return near(b[2], height) && near(b[5], height) && b[4] < 1e-6;
+           }))
+      {
+        edges.push_back(BRepExt::store(session(), edge));
+        supports.push_back(BRepExt::store(session(), face));
+      }
+    }
+  }
+
+  TopoDS_Face fill(int flow) const
+  {
+    BRepExt::PatchControls controls;
+    controls.quad = 1;
+    controls.flow = flow;
+    controls.open = true;
+    const auto result =
+      BRepExt::patch(session(), edges, supports, {2, 2}, {}, {}, 1e-3, 0.1, 0.05, 0, -1, controls);
+    return onlyFace(BRepExt::get(session(), result.evolution.resultId));
+  }
+};
+
+//! The principal curvatures of `surface` at the point nearest `p`, least first, signed for its
+//! normal turned to the side of `normal`, which then becomes that normal.
+std::pair<double, double> bends(const Handle(Geom_Surface)& surface,
+                                const gp_Pnt&               p,
+                                gp_Dir&                     normal)
+{
+  GeomAPI_ProjectPointOnSurf project(p, surface);
+  double                     u, v;
+  project.LowerDistanceParameters(u, v);
+  GeomLProp_SLProps props(surface, u, v, 2, 1e-9);
+  EXPECT_TRUE(props.IsCurvatureDefined());
+  const gp_Dir own   = props.Normal();
+  const double sign  = own.Dot(normal) < 0 ? -1 : 1;
+  const double least = sign * props.MinCurvature(), most = sign * props.MaxCurvature();
+  normal = sign < 0 ? own.Reversed() : own;
+  return {std::min(least, most), std::max(least, most)};
+}
+
+} // namespace
+
+// The elbow asked G2 with both faces and Quad sided, the open boundary bridged across its gaps
+// untrimmed: for Natural and Adjacent flow (with no side next to either rim, Adjacent leaves both
+// rims square), and for the cylinder and the spline through its points, the fill keeps each face's
+// tangent plane within the 0.1 degrees asked and its two principal curvatures within the 5 % asked
+// (the plate's, which are none, within the flat share of a thousandth of that over 50, less than
+// the loop's size), all found by projecting points of the rims onto both surfaces; and it is its
+// own mirror image in x = 0, as the elbow is. A fill that missed a face, leant to one side or was
+// refused fails.
+TEST(BRepPatchExt, OpenElbowBetweenATubeAndAPlateIsFilledG2AcrossItsGaps)
+{
+  for (const bool sheet : {false, true})
+    for (const int flow : {0, 3})
+    {
+      const Elbow elbow(sheet);
+      ASSERT_EQ(elbow.edges.size(), 2u);
+      const TopoDS_Face fill = elbow.fill(flow);
+      ASSERT_FALSE(fill.IsNull());
+      const Handle(Geom_Surface) surface = BRep_Tool::Surface(fill);
+      for (const TopoDS_Face& face : {elbow.tube, elbow.plate})
+      {
+        const Handle(Geom_Surface) support = BRep_Tool::Surface(face);
+        const bool                 tube    = face.IsSame(elbow.tube);
+        const double               scale   = tube ? 1.0 / 20 : 1e-3 / 50;
+        for (int k = 1; k < 32; ++k)
+        {
+          const double angle  = M_PI * k / 32;
+          const gp_Pnt p      = tube ? gp_Pnt(20 * std::cos(angle), -20 * std::sin(angle), 0)
+                                     : gp_Pnt(-13 + 26.0 * k / 32, 0, 50);
+          gp_Dir       normal = tube ? gp_Dir(p.X(), p.Y(), 0) : gp_Dir(0, 0, 1);
+          const auto   theirs = bends(support, p, normal);
+          gp_Dir       own    = normal;
+          const auto   mine   = bends(surface, p, own);
+          const double tilt   = std::acos(std::min(1.0, own.Dot(normal))) * 180 / M_PI;
+          EXPECT_LE(tilt, 0.1) << "flow " << flow << " at " << k;
+          EXPECT_LE(std::abs(mine.first - theirs.first), 0.05 * scale)
+            << "flow " << flow << " " << k;
+          EXPECT_LE(std::abs(mine.second - theirs.second), 0.05 * scale)
+            << "flow " << flow << " " << k;
+        }
+      }
+      double u0, u1, v0, v1, skew = 0;
+      BRepTools::UVBounds(fill, u0, u1, v0, v1);
+      for (int i = 0; i <= 12; ++i)
+        for (int j = 0; j <= 12; ++j)
+        {
+          const gp_Pnt p = surface->Value(u0 + (u1 - u0) * i / 12, v0 + (v1 - v0) * j / 12);
+          skew           = std::max(
+            skew,
+            GeomAPI_ProjectPointOnSurf(gp_Pnt(-p.X(), p.Y(), p.Z()), surface).LowerDistance());
+        }
+      EXPECT_LE(skew, 0.2) << "flow " << flow << " sheet " << sheet;
+    }
+}
+
+// What Patch's inside check makes of the elbow, asked directly. The elbow bends about five times
+// as tightly where it turns as the tube does, the tightest thing on its rims, so against the rims
+// alone it is refused; across its crossing from rim to rim it is held to the bridge between them
+// and kept. The same face with a ripple of a hundredth of its size laid over its inside, six times
+// across, by moving only poles three or more rows from either rim (the rims are checked to be
+// unchanged to their second derivatives), is refused across the crossing all the same.
+TEST(BRepPatchExt, InsideCheckKeepsTheElbowAcrossItsCrossingAndRefusesARippledOne)
+{
+  const Elbow                       elbow;
+  const TopoDS_Face                 fill = elbow.fill(0);
+  const Handle(Geom_BSplineSurface) surface =
+    Handle(Geom_BSplineSurface)::DownCast(BRep_Tool::Surface(fill));
+  ASSERT_FALSE(surface.IsNull());
+  double u0, u1, v0, v1;
+  surface->Bounds(u0, u1, v0, v1);
+  // Which way the face crosses from the tube (z = 0) to the plate (z = 50).
+  const bool acrossV = std::abs(surface->Value((u0 + u1) / 2, v0).Z()) < 1e-3;
+  ASSERT_TRUE(acrossV || std::abs(surface->Value(u0, (v0 + v1) / 2).Z()) < 1e-3);
+  const BRepExt::Crossing crossing{acrossV, 2, 2};
+  const double            tube = 1.0 / 20;
+  EXPECT_TRUE(BRepExt::insideFault(fill, tube).has_value());
+  EXPECT_FALSE(BRepExt::insideFault(fill, tube, crossing).has_value());
+
+  auto rippled = Handle(Geom_BSplineSurface)::DownCast(surface->Copy());
+  for (int k = 1; k < 24; ++k)
+  {
+    rippled->InsertUKnot(u0 + (u1 - u0) * k / 24, 1, 1e-9, false);
+    rippled->InsertVKnot(v0 + (v1 - v0) * k / 24, 1, 1e-9, false);
+  }
+  const int nu = rippled->NbUPoles(), nv = rippled->NbVPoles();
+  for (int i = 1; i <= nu; ++i)
+    for (int j = 1; j <= nv; ++j)
+    {
+      if ((acrossV ? std::min(j - 1, nv - j) : std::min(i - 1, nu - i)) < 3)
+        continue;
+      const double a = acrossV ? (i - 1.0) / (nu - 1) : (j - 1.0) / (nv - 1),
+                   b = acrossV ? (j - 1.0) / (nv - 1) : (i - 1.0) / (nu - 1);
+      const gp_Vec lift(0, 0, 0.64 * std::sin(2 * M_PI * 6 * a) * std::sin(M_PI * b));
+      rippled->SetPole(i, j, rippled->Pole(i, j).Translated(lift));
+    }
+  for (int k = 0; k <= 16; ++k)
+    for (const double rim : {acrossV ? v0 : u0, acrossV ? v1 : u1})
+    {
+      const double along = (acrossV ? u0 : v0) + (acrossV ? u1 - u0 : v1 - v0) * k / 16;
+      const double u = acrossV ? along : rim, v = acrossV ? rim : along;
+      gp_Pnt       p, q;
+      gp_Vec       a[5], b[5];
+      surface->D2(u, v, p, a[0], a[1], a[2], a[3], a[4]);
+      rippled->D2(u, v, q, b[0], b[1], b[2], b[3], b[4]);
+      ASSERT_LT(p.Distance(q), 1e-9);
+      for (int d = 0; d < 5; ++d)
+        ASSERT_LT((a[d] - b[d]).Magnitude(), 1e-6 * (1 + a[d].Magnitude()));
+    }
+  EXPECT_TRUE(BRepExt::insideFault(BRepBuilderAPI_MakeFace(rippled, 1e-7).Face(), tube, crossing)
+                .has_value());
 }

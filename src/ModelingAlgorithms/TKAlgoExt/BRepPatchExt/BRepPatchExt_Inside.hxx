@@ -21,10 +21,23 @@
 
 namespace BRepExt
 {
+//! A four-sided face of which two opposite sides are rims and the other two gaps of an open
+//! boundary: it crosses from the rim at its lowest V (U, if not `acrossV`) to the rim at its
+//! highest, asked to meet their faces to the orders `first` and `last` (0 to 2).
+struct Crossing
+{
+  bool acrossV;
+  int  first, last;
+};
+
 //! What is wrong with the inside of a face, if anything is: that it folds over, or that it
 //! bends many times more tightly than anything on its rim does (`rimBend`, a curvature; zero
-//! or less leaves that unjudged).
-Standard_EXPORT std::optional<std::string> insideFault(const TopoDS_Face& face, double rimBend);
+//! or less leaves that unjudged). Across a `crossing` it may bend as tightly as the bridge
+//! between its rims does as well (see BRepPatchExt_Inside.cxx).
+Standard_EXPORT std::optional<std::string> insideFault(
+  const TopoDS_Face&             face,
+  double                         rimBend,
+  const std::optional<Crossing>& crossing = std::nullopt);
 
 struct InsideCurvature
 {
