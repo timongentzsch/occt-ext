@@ -119,6 +119,21 @@ constexpr double flatShare = 1e-3;
 //! What the fairness of a trimmed surface counts for outside its loop.
 constexpr double outsideWeight = 1e-3;
 
+//! The steps to the unit of the grid that a fit in a loop's frame rounds its coordinates, in
+//! units of the loop's size, and its normals to: about the square root of the rounding of a
+//! double (2.2e-16), far above what a rotation rounds differently and far below any tolerance.
+constexpr double frameSteps = 1e8;
+
+//! Where a surface goes over into planes and other faces at once (or into a cone alone), it is
+//! moved onto its curves, and its edges' curves in its parameters are made, to a tenth of
+//! OpenCascade's least distance, Precision::Confusion(), when the tolerance asks less: its
+//! edges then keep that least distance as their tolerance (see `trimmed`), as the faces they
+//! are sewn to do, and STEP gives the joint back as it was (at half of 1e-6 the cap of a cone
+//! read 2.0e-7 before STEP and 2.8e-3 after, the corner 2 / 3 / 5 5.4e-7 and 1.7e-6). It is
+//! OpenCascade's precision, which is absolute, and not a share of the model's size. A surface
+//! within twice that is left as it is.
+constexpr double exchangeWithin = Precision::Confusion() / 10;
+
 //! The steepest a trimmed surface may stand against the loop's mean plane, as the cosine: 80
 //! degrees. A surface over a plane is a height above it, and the slope of that height is the
 //! tangent of this angle; at 80 degrees it is 5.7 and the net's spans, even across the plane,
@@ -740,7 +755,11 @@ occ::handle<Geom_BSplineSurface> fit(SplineNet&                                 
     const auto vector = [&](const gp_Vec& v) {
       return gp_Vec(v.Dot(frame->x), v.Dot(frame->y), v.Dot(frame->z));
     };
-    const double quantum    = std::min(1e-8, 0.1 * limits.g0 / size);
+    // Coordinates in units of the size are rounded to a grid: what rotating them into the frame
+    // rounds differently (a few ulps) then rounds to the same point, except within that much of
+    // the grid's halfway points. The grid is of the size, never of the model's units, and finer
+    // than a tenth of the relative tolerance.
+    const double quantum    = std::min(1 / frameSteps, 0.1 * limits.g0 / size);
     const auto   coordinate = [&](double v) { return std::round(v / (size * quantum)) * quantum; };
     const auto   scaled     = [&](const gp_Vec& v) {
       const gp_Vec q = vector(v);
@@ -765,7 +784,7 @@ occ::handle<Geom_BSplineSurface> fit(SplineNet&                                 
           *v = scaled(*v);
         j.n = vector(j.n);
         for (int c = 1; c <= 3; ++c)
-          j.n.SetCoord(c, std::round(j.n.Coord(c) * 1e8) / 1e8);
+          j.n.SetCoord(c, std::round(j.n.Coord(c) * frameSteps) / frameSteps);
         j.n.Normalize();
       }
     }
@@ -3112,10 +3131,15 @@ std::optional<Built> continued(const occ::handle<Geom_BSplineSurface>&    surfac
   std::vector<gp_XY> loop;
   for (const gp_Pnt& point : polygon(asked.sides))
     loop.push_back(layout(point));
+  // The surface is exact: its edges' curves are made as near as for an exchange.
   std::vector<Rim> rims;
   for (const Side& side : asked.sides)
-    rims.push_back(
-      preimage(surface, side, frame, std::min(asked.limits.g0, 1e-8), asked.size, layout));
+    rims.push_back(preimage(surface,
+                            side,
+                            frame,
+                            std::min(asked.limits.g0, exchangeWithin),
+                            asked.size,
+                            layout));
   Built built{
     3,
     {},
@@ -4134,9 +4158,13 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
                         return std::optional<Place>(Place{frame.project(point), false});
                       })
              .within;
+      // What the correction leaves at its own places where it had no room to make the net
+      // finer, the net being as fine as it may make it already.
+      double left = 0;
       if (moved)
       {
-        const auto onto = [&](double span) {
+        const size_t knots = net.knotsU.size() + net.knotsV.size();
+        const auto   onto  = [&](double span) {
           std::vector<RimPlace> onto;
           for (const auto* curves : {&asked.sides, &asked.guides})
             for (const Side& side : *curves)
@@ -4164,24 +4192,27 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
             onto.push_back({point, frame.project(point), gp_XY(0, 0), false});
           return onto;
         };
-        correctRim(
+        const double worst = correctRim(
           op,
           net,
           onto,
           up,
-          std::min(rimShare * asked.limits.g0, exchange ? 1e-8 : HUGE_VAL),
-          std::min(enoughShare * asked.limits.g0, exchange ? 2e-8 : HUGE_VAL),
+          std::min(rimShare * asked.limits.g0, exchange ? exchangeWithin : HUGE_VAL),
+          std::min(enoughShare * asked.limits.g0, exchange ? 2 * exchangeWithin : HUGE_VAL),
           std::min(mostRimSpans, (order > 0 ? rimFiner : rimFinerMet) * std::max(spansU, spansV)));
+        if (net.knotsU.size() + net.knotsV.size() == knots)
+          left = worst;
         surface = surfaceOf(net);
       }
       std::vector<Rim> rims;
       for (const Side& side : asked.sides)
-        rims.push_back(side.free ? Rim{}
-                                 : preimage(surface,
-                                            side,
-                                            frame,
-                                            std::min(asked.limits.g0, exchange ? 1e-8 : HUGE_VAL),
-                                            asked.size));
+        rims.push_back(side.free
+                         ? Rim{}
+                         : preimage(surface,
+                                    side,
+                                    frame,
+                                    std::min(asked.limits.g0, exchange ? exchangeWithin : HUGE_VAL),
+                                    asked.size));
       closeGaps(asked.sides, rims);
       // A side is read where the face holds it; a guide and a point at the surface's nearest.
       Built built{3,
@@ -4253,14 +4284,20 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
         continue;
       }
       // A net that the fit left within its tangent planes and bends, and that was moved
-      // onto its curves and still misses them, misses by what the finer nets of the ladder
-      // follow no better unless they come nearer: the corner of rounds 2 / 3 / 5 at a hundred
-      // times its size misses by 1.1 to 1.2 millionths on every one of them (20 s for all),
-      // the window over the top of a torus at G2 is met on the fourth.
-      if (!fairRim && moved && asked.limits.g0 / asked.size < 1e-9 && !built.measured.within)
+      // onto its curves, is read at the places it was moved onto, and between them. Where
+      // the fitted net was already as fine as the correction may make it, and the
+      // correction's solve still leaves its own places further off than the tolerance, what
+      // is left is what the fit left and the solve could not take, a share of the size that
+      // finer nets of the ladder, fitted finer than their correction may go as well, do not
+      // bring below it: the corner of rounds 2 / 3 / 5 at a hundred times its size (nets of
+      // 25 x 20 and 31 x 26 spans for corrections bounded at 12 and 20) is left 3.7e-6 off by
+      // the first and 6.0e-6 by the second (the limit 1e-6). Where the correction could make
+      // the net finer, a finer net may meet them (a guide across a hole in a plate is met on
+      // the third, at 32 x 40 spans).
+      if (!fairRim && moved && left > asked.limits.g0)
       {
         best->measured.worst +=
-          ". The bounded rim correction cannot resolve this absolute tolerance";
+          ". The bounded rim correction leaves the curves further off than the tolerance";
         break;
       }
       if (moved)

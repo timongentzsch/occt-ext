@@ -129,6 +129,24 @@ generated surface's tangent plane and curvature at that point, which may not agr
 surfaces'"; "disconnecting the boundary curves is a solution for enforcing G2"), and its examples
 deliver with such corners marked as conflicting.
 
+*Size.* Lengths are shares of the loop's size or of the tolerance, with one exception by design: where a
+fill goes over into planes and other faces at once (or into a cone alone) its rim and its edges' parameter
+curves are made to a tenth of `Precision::Confusion()`, OpenCascade's absolute least distance, so that its
+edges keep that as their tolerance and STEP gives the joint back (a G1 cap over a circle on a cone, tolerance
+1e-4 in step with the size, is then made on 11 x 11 poles at 1e-3 and on 17 x 17 at 1 and 1e3). A fitted net moved onto its curves ends
+its ladder when the bounded rim correction leaves its own places further off than the tolerance (the
+correction's own residual, no constant). The fills of the tests, with every length and the tolerance
+scaled by 1e3, are made or refused alike with the same nets; at 1e-3 so are a disc, a cap, an open loop of
+arcs, the dish at G1 and the elbow. Open: at 1e-3 the dish at G0 (its tolerance then
+`Precision::Confusion()`) is refused as folding over, the corner of three rounds (its tolerance below it)
+is made, the square on rounds misses G2 by a share of 0.109 by its quad and is trimmed instead, the
+pentagon and the split side take other nets; the teddy takes another net at 1e-3 and is refused at 1e3. A
+G1 cap over a circle on a cone is refused as too steep from the same tilt on (between 80 and 80.4
+degrees) at rest, turned and at 1e-3 and 1e3, with the same nets below it; but the switch from the height
+graph to the spatial net at a support normal of 0.8 against the mean plane changes the cap's area by 2.1 %
+between 36.8 and 36.95 degrees (a cone as a spline), and the analytic cone's cap changes between two shapes
+from 70 to 74 degrees (area 2.45, 1.23, 1.22, 1.22, 2.56 of the disc's).
+
 *Stock.* `BRepFill_Filling` and `GeomPlate_BuildPlateSurface`: a plate fit that accepts G0, G1 and G2 point
 and curve constraints and minimises a different energy. See the table below.
 

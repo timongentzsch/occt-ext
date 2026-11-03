@@ -34,12 +34,17 @@
 #include <GeomAPI_PointsToBSplineSurface.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomLProp_SLProps.hxx>
+#include <GeomConvert.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <Geom_Circle.hxx>
+#include <Geom_ConicalSurface.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <Geom_Plane.hxx>
+#include <Geom_RectangularTrimmedSurface.hxx>
 
 #include <gtest/gtest.h>
+
+#include <regex>
 
 using namespace BRepExtTest;
 
@@ -810,11 +815,12 @@ TEST(BRepPatchExt, ASideSplitBetweenTwoRoundsTakesTheMeanOfTheirBendsAcrossItWhe
   }
 }
 
-// The corner of a box with its three edges rounded by 4, filled G2 with the three rounds at a
-// tolerance of a millionth: no fill that eases at the corners meets the rounds beyond them that
-// near, and the refusal names the corner where the rounds bend differently, not a miss of the
-// net, and says that G1 can be had.
-TEST(BRepPatchExt, ThreeRoundsAtAMillionthAreRefusedWithTheCornerWhereTheyBendDifferently)
+namespace
+{
+
+//! The rim of the corner of a box of 20 with its three edges at that corner rounded by 4: the
+//! edges of the ball's eighth, each with the round it shares.
+void cornerOfRounds(std::vector<uint32_t>& edges, std::vector<uint32_t>& supports)
 {
   const TopoDS_Shape       box = BRepPrimAPI_MakeBox(20, 20, 20).Shape();
   BRepFilletAPI_MakeFillet rounds(box);
@@ -827,7 +833,6 @@ TEST(BRepPatchExt, ThreeRoundsAtAMillionthAreRefusedWithTheCornerWhereTheyBendDi
   const auto         sphere =
     facesWhere(body, [](const double* b) { return b[0] > 15.9 && b[1] > 15.9 && b[2] > 15.9; });
   ASSERT_EQ(sphere.size(), 1u);
-  std::vector<uint32_t> edges, supports;
   for (TopExp_Explorer edge(sphere.front(), TopAbs_EDGE); edge.More(); edge.Next())
     for (const TopoDS_Face& face : facesWhere(body, [](const double*) { return true; }))
       if (!face.IsSame(sphere.front()))
@@ -837,6 +842,18 @@ TEST(BRepPatchExt, ThreeRoundsAtAMillionthAreRefusedWithTheCornerWhereTheyBendDi
             edges.push_back(BRepExt::store(session(), edge.Current()));
             supports.push_back(BRepExt::store(session(), face));
           }
+}
+
+} // namespace
+
+// The corner of a box with its three edges rounded by 4, filled G2 with the three rounds at a
+// tolerance of a millionth: no fill that eases at the corners meets the rounds beyond them that
+// near, and the refusal names the corner where the rounds bend differently, not a miss of the
+// net, and says that G1 can be had.
+TEST(BRepPatchExt, ThreeRoundsAtAMillionthAreRefusedWithTheCornerWhereTheyBendDifferently)
+{
+  std::vector<uint32_t> edges, supports;
+  cornerOfRounds(edges, supports);
   ASSERT_EQ(edges.size(), 3u);
   try
   {
@@ -960,4 +977,248 @@ TEST(BRepPatchExt, HeldOutStripsOnDomesAndSaddlesAreEasedAtAnyScaleAndPose)
     EXPECT_NE(std::string(failure.what()).find("bend differently"), std::string::npos)
       << failure.what();
   }
+}
+
+namespace
+{
+
+//! A fill as it is asked of Patch: edges and the faces they are smooth with by their ids in the
+//! session (0 for none), the order of each, the limits and how it is to be made.
+struct Asking
+{
+  std::vector<uint32_t>  edges, supports;
+  std::vector<int>       orders;
+  double                 tolerance, g1Degrees, g2Share;
+  int                    method   = 0;
+  BRepExt::PatchControls controls = {};
+};
+
+//! `loop` asked as `Rounds::fill` asks it.
+Asking asking(const Rounds& loop)
+{
+  Asking out{{}, {}, std::vector<int>(loop.edges.size(), 2), 1e-3, 0.1, 0.05};
+  for (size_t i = 0; i < loop.edges.size(); ++i)
+  {
+    out.edges.push_back(BRepExt::store(session(), loop.edges[i]));
+    out.supports.push_back(BRepExt::store(session(), loop.faces[i]));
+  }
+  return out;
+}
+
+//! What Patch makes of `asked` placed by `pose`, its tolerance scaled with it: whether it is
+//! made, and why not with every number left out; what it made, its degrees and its poles.
+struct Outcome
+{
+  bool                made = false;
+  std::string         why;
+  std::vector<double> built;
+};
+
+Outcome placed(const Asking& asked, const gp_Trsf& pose)
+{
+  BRep_Builder    builder;
+  TopoDS_Compound all;
+  builder.MakeCompound(all);
+  for (const auto* ids : {&asked.edges, &asked.supports})
+    for (const uint32_t id : *ids)
+      if (id)
+        builder.Add(all, BRepExt::get(session(), id));
+  // Placed together, an edge stays the edge of its face.
+  BRepBuilderAPI_Transform moved(all, pose, true);
+  const auto               ids = [&](const std::vector<uint32_t>& given) {
+    std::vector<uint32_t> out;
+    for (const uint32_t id : given)
+      out.push_back(id ? BRepExt::store(session(), moved.ModifiedShape(BRepExt::get(session(), id)))
+                       : 0);
+    return out;
+  };
+  Outcome out;
+  try
+  {
+    const auto made = BRepExt::patch(session(),
+                                     ids(asked.edges),
+                                     ids(asked.supports),
+                                     asked.orders,
+                                     {},
+                                     {},
+                                     asked.tolerance * pose.ScaleFactor(),
+                                     asked.g1Degrees,
+                                     asked.g2Share,
+                                     asked.method,
+                                     -1,
+                                     asked.controls);
+    out.made        = true;
+    out.built       = {made.values.begin(), made.values.begin() + 5};
+  }
+  catch (const BRepExt::Failure& failure)
+  {
+    out.why = std::regex_replace(failure.what(), std::regex("[0-9][0-9.]*(e[-+]?[0-9]+)?"), "#");
+  }
+  return out;
+}
+
+//! `at` is what `base` is: made or refused alike and for the same reason, by the same
+//! construction of the same degrees with as many poles.
+void expectSame(const Outcome& at, const Outcome& base)
+{
+  EXPECT_EQ(at.made, base.made) << (at.made ? base.why : at.why);
+  EXPECT_EQ(at.why, base.why);
+  EXPECT_EQ(at.built, base.built);
+}
+
+} // namespace
+
+// The fills above, with every length and the tolerance a thousandth and a thousand times as
+// large: Patch measures what it asks in the loop's size, so each is made or refused alike, by the
+// same construction with as many poles. A length that is not a share of the size or of the
+// tolerance shows as another net or another answer at one of the sizes. Not yet so, and asked at
+// a thousand times only: at a thousandth the dish at G0 (its tolerance then OpenCascade's least
+// distance) is refused as folding over, the corner of rounds (its tolerance below that) is made,
+// the square on rounds misses G2 by its quad (a share of 0.109) and is trimmed instead, and the
+// pentagon and the split side take other nets. The teddy is left out: it takes another net at a
+// thousandth and is refused at a thousand times.
+TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
+{
+  struct Case
+  {
+    std::string         name;
+    Asking              asked;
+    std::vector<double> scales = {1e-3, 1e3};
+  };
+
+  std::vector<Case> cases;
+  const uint32_t    circle = BRepExt::store(
+    session(),
+    BRepBuilderAPI_MakeEdge(new Geom_Circle(gp_Ax2(gp_Pnt(3, -2, 5), gp_Dir(0, 0, 1)), 12)).Edge());
+  for (const int method : {0, 1})
+    cases.push_back({"circle", {{circle}, {0}, {0}, 1e-6, 1, 0.1, method}});
+  {
+    const double       R = 10, latitude = 40 * M_PI / 180;
+    const TopoDS_Shape sphere =
+      BRepPrimAPI_MakeSphere(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), R, -M_PI / 2, latitude)
+        .Shape();
+    Asking cap{{}, {}, {}, 1e-4, 1, 0.1};
+    for (const TopoDS_Edge& e : edgesWhere(sphere, [&](const double* b) {
+           return near(b[2], R * std::sin(latitude)) && near(b[5], R * std::sin(latitude));
+         }))
+    {
+      cap.edges.push_back(BRepExt::store(session(), e));
+      cap.supports.push_back(BRepExt::store(session(), onlyFace(sphere)));
+      cap.orders.push_back(1);
+    }
+    cases.push_back({"cap of a sphere", cap});
+  }
+  {
+    Asking arcs{{}, {0, 0, 0}, {0, 0, 0}, 1e-6, 1, 0.1};
+    for (const int k : {2, 1, 0})
+    {
+      const TopoDS_Edge arc =
+        BRepBuilderAPI_MakeEdge(new Geom_Circle(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 9),
+                                k * M_PI / 2,
+                                (k + 1) * M_PI / 2)
+          .Edge();
+      arcs.edges.push_back(BRepExt::store(session(), k == 1 ? arc.Reversed() : TopoDS_Shape(arc)));
+    }
+    arcs.controls.open = true;
+    cases.push_back({"three arcs", arcs});
+  }
+  for (const int order : {1, 0})
+  {
+    Asking              plates{{}, {}, std::vector<int>(6, order), 1e-4, 1, 0.1};
+    std::vector<gp_Dir> normals;
+    dish(plates.edges, plates.supports, normals);
+    if (order)
+      cases.push_back({"dish at G1", plates});
+    else
+      cases.push_back({"dish at G0", plates, {1e3}});
+  }
+  {
+    const Elbow elbow;
+    Asking      bend{elbow.edges, elbow.supports, {2, 2}, 1e-3, 0.1, 0.05};
+    bend.controls.quad = 1;
+    bend.controls.open = true;
+    cases.push_back({"elbow", bend});
+  }
+  cases.push_back({"square on rounds", asking(pillow(4, {30}, {1}, gp_Trsf())), {1e3}});
+  cases.push_back(
+    {"pentagon on rounds", asking(pillow(5, {25, 40, 80}, {1, -1}, turned(1))), {1e3}});
+  cases.push_back({"split side", asking(pillow(4, {30}, {1}, gp_Trsf(), true)), {1e3}});
+  {
+    Asking corner{{}, {}, {2, 2, 2}, 1e-6, 0.1, 0.05};
+    cornerOfRounds(corner.edges, corner.supports);
+    cases.push_back({"corner of rounds", corner, {1e3}});
+  }
+  for (const Case& c : cases)
+  {
+    SCOPED_TRACE(c.name);
+    const Outcome base = placed(c.asked, gp_Trsf());
+    for (const double scale : c.scales)
+    {
+      SCOPED_TRACE(scale);
+      gp_Trsf pose;
+      pose.SetScale(gp_Pnt(0, 0, 0), scale);
+      expectSame(placed(c.asked, pose), base);
+    }
+  }
+}
+
+namespace
+{
+
+//! A circle of radius 10 in z = 0 on a cone that stands at `tilt` degrees against that plane
+//! below it, narrowing upward, given as the rational spline it is.
+Asking coneRim(double tilt)
+{
+  const occ::handle<Geom_ConicalSurface> cone =
+    new Geom_ConicalSurface(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 0, -1), gp_Dir(1, 0, 0)),
+                            (90 - tilt) * M_PI / 180,
+                            10);
+  const TopoDS_Face face =
+    BRepBuilderAPI_MakeFace(GeomConvert::SurfaceToBSplineSurface(
+                              new Geom_RectangularTrimmedSurface(cone, 0.0, 2 * M_PI, 0.0, 4.0)),
+                            1e-7)
+      .Face();
+  const auto rim = edgesWhere(face, [](const double* b) { return near(b[2], 0) && near(b[5], 0); });
+  Asking     out{{BRepExt::store(session(), rim.at(0))},
+                 {BRepExt::store(session(), face)},
+                 {1},
+             1e-4,
+             0.1,
+             0.05,
+             1};
+  out.controls.quad = 0;
+  return out;
+}
+
+} // namespace
+
+// The cap over a circle on a cone, G1 with it, the cone standing from 60 to 85 degrees against
+// the circle's plane, at rest and turned at a thousandth, one and a thousand times the size,
+// fitted over the plane. Above some tilt a face to be smooth with stands too steeply and the cap
+// is refused at once: at every pose from the same tilt on and at none below it. Below it each
+// tilt is made or refused alike at every pose, by the same net.
+TEST(BRepPatchExt, TheCapOfASteepConeIsRefusedFromOneTiltOnAtEveryPoseAndSize)
+{
+  const double         tilts[] = {60, 66, 72, 76, 78, 80, 80.4, 82, 85};
+  const gp_Trsf        poses[] = {gp_Trsf(), turned(1), turned(1e-3), turned(1e3)};
+  std::vector<Asking>  rims;
+  std::vector<Outcome> base;
+  for (const double tilt : tilts)
+  {
+    rims.push_back(coneRim(tilt));
+    base.push_back(placed(rims.back(), poses[0]));
+  }
+  const auto steep = [](const Outcome& outcome) {
+    return outcome.why.find("stands too steeply") != std::string::npos;
+  };
+  ASSERT_FALSE(steep(base.front()));
+  ASSERT_TRUE(steep(base.back()));
+  for (size_t i = 1; i < base.size(); ++i)
+    EXPECT_TRUE(!steep(base[i - 1]) || steep(base[i])) << tilts[i];
+  for (size_t p = 1; p < std::size(poses); ++p)
+    for (size_t i = 0; i < std::size(tilts); ++i)
+    {
+      SCOPED_TRACE(testing::Message() << "pose " << p << ", tilt " << tilts[i]);
+      expectSame(placed(rims[i], poses[p]), base[i]);
+    }
 }
