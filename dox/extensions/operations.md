@@ -63,47 +63,42 @@ not fold there (their speed along the path is s'^2 + R (R + r) |u'|^2 over |c'|,
 refused, as before, until the blend is trimmed where it crosses itself; the reference modeller trims it from
 75 degrees.
 
-*A size that changes along the edge* (`Request::radii`, `blendRange`). The size r(t) is given at places
-along the edge and interpolated by the cubic through them that OpenCascade's variable fillet takes
-(`Law_Interpol`, periodic round a closed edge, whose size must then end as it begins); past the edge's ends
-it goes on as its last span's polynomial (as smooth as inside), and the ball is carried there only while
-its size stays within half and twice its size at the end (a judgement: a cubic's continuation can fall to
-nothing within twice the blend's size, where the fit then stalls on vanishing balls); the carry is twice
-the size at that end. The law's knots are breaks of the fit, one order less smooth than the law, as the
-sections follow its rate. The ball at t is chosen as with one size (its section's plane
-through the edge's point), with radius r(t). The blend is the envelope of those balls: differentiating
-|x - c(t)|^2 = r(t)^2 gives the characteristic circle in the plane (x - c).c' = -r r', of centre
-c - (r r' / |c'|^2) c' [the standard canal-surface envelope; derived here]. The feet lie on it: c = p + r n
-with n.p' = 0 gives n.c' = r', so (p - c).c' = -r r'. The section of every law is therefore laid in that
-plane: the round is the arc of the characteristic circle between the feet, a conic or G2 section takes its
-end tangents there (each normal to its foot's radius of that circle, so tangent to the face, G1), and the
-G2 law reads its turn towards the circle's centre: by Meusnier the section's curvature is the face's
-normal curvature in the section's direction over the cosine between the face's normal and the section's
-principal normal, here sqrt(1 - r'^2 / |c'|^2), which is what the law's kappa = bend / cosine already
-computes when given that centre; by the Linkage Curve Theorem that is G2 across the contact. c' is the
-station's own rate: its equations R(x, t) = 0 (the offsets' difference and the plane through the edge's
-point) give R_x dx/dt = -R_t, with R_t = (n0 r0' - n1 r1', (n0 r0' - E').a), solved with the Newton
-matrix at the solution (exact), E' the edge's speed, or where the balls are found through their centres
-the rate of that centre by central differences of its closed form (step 1e-5 of the edge, a judgement).
-A chamfer's setbacks follow the same law; at an angle off a reference face the other setback is
+*A size that changes along the edge* (`Request::radii`, `blendRange`). As the reference modeller makes it,
+measured on its own results (its exported bodies of variable rounds, conics and G2 blends, sectioned across
+the edge): the size r(t) is the cubic spline through the given places with no curvature at its ends
+(the natural spline: the reference modeller's peak 1, 3, 1 on a box edge is r = 1 + 6 s - 8 s^3 on its first half
+to the last digit), periodic round an edge that closes; and every section is the section of one size,
+r(t), in the ball's own plane across the edge, the ball of that size resting on both faces with its
+feet there (the reference modeller's rounds are circles there to 1e-12). The blend is G1 to both faces: at a foot
+its tangent plane holds the section's tangent, normal to the face's normal in that plane, and the
+contact's tangent, which lies in the face. Past the edge's ends the spline goes on along its end
+tangents (its second derivative is zero there, so it stays twice differentiable), and the ball is
+carried there only while its size stays within half and twice its size at the end (a judgement: a
+steep law reaches nothing within twice the blend's size); the carry is twice the size at that end. The
+places are breaks of the fit (the spline is C2 there and the stations follow its value). Not taken: the
+rolling-ball envelope of balls of radius r(t), whose characteristic circle lies in the plane
+(x - c).c' = -r r' (the derivative of |x - c|^2 = r^2; the feet lie on it since n.c' = r'); it was built
+first and differs from the reference modeller by 0.06 mm^3 on a box edge with a linear law, and with the cubic of
+`Law_Interpol` (OpenCascade's variable fillet's interpolation, the application's variable round's) by up to
+2.4 mm^3 on a peak. A chamfer's setbacks follow the same law (the reference modeller has no variable chamfer: it
+keeps the base distance or refuses); at an angle off a reference face the other setback is
 d sin a / sin(theta + a), theta the opening between the faces' tangent planes at the edge's point (the
-triangle of the edge's point and the feet). Distances off the two faces of a round, conic or G2 blend must
-be equal where the size changes (refused by name otherwise); such edges add no tangent edges and take the
-plain construction (no island, re-blend or mixed-convexity routes). A range keeps the change the blend of
-the edge alone makes between the planes square to the edge at its limits, as `filletRange` does for the
-round.
+triangle of the edge's point and the feet). Distances off the two faces of a round, conic or G2 blend
+must be equal where the size changes (refused by name otherwise); such edges add no tangent edges and
+take the plain construction (no island, re-blend or mixed-convexity routes). A range keeps the change
+the blend of the edge alone makes between the planes square to the edge at its limits, as
+`filletRange` does for the round.
 
-Measured (`BRepBlendExt_Test`, `BRepFilletExt_Test`): rounds on a cube's edge for a linear law, a cubic
-through four places and one that falls and rises again, round a cylinder's rim (periodic), and held out round
-the ring of a sphere on a plane, lie on the envelope of their balls to 1e-6 (each point's least distance
-to the balls' spheres over the whole family, independent of the construction), with invariance under
-rotation and scale 1e-3 and 1e3 within the sewing tolerance over the blend's area; a conic of rho 0.7 has
-its feet r(z) from the edge and meets the faces to 1e-10 in the normal; chamfers of a growing setback,
-also at 30 degrees off a reference face and within a range, remove the integral of their sections to
-1e-9 of the body. Mutations: the great circle in place of the characteristic one moves the round off the
-envelope by up to 0.022, a centre rate without its r' term by up to 0.06. G2 is checked in the application
-(the audit's variable and range rows): seams G1 to 0.01 degrees and G2 to
-1e-4 / r.
+Measured: against the reference modeller's results (box edge and the flat-to-curved edge of a half cylinder, laws
+linear, falling, peak and valley, Round and Conic rho 0.3) v2's lie within 1e-12 to 1.1e-6 mm both ways;
+round a closed rim the alternating law within 8e-6, but a law of three uneven places (1, 2, 1.5) 0.04 off,
+the reference modeller's closed interpolation being neither the periodic nor the natural spline (open). Native
+(`BRepBlendExt_Test`): rounds on a box edge (linear, steep, peak, valley) lie on their circles to 1e-6
+and remove (1 - pi / 4) times the integral of r^2 to 1e-9 of the body, at rest, turned and at scale 1e-3
+and 1e3; a cylinder's rim (periodic) and, held out, the ring of a sphere on a plane on their circles to
+1e-6; chamfers of a growing setback, also at 30 degrees off a reference face and within a range, remove
+the integral of their sections to 1e-9. G2 in the application (the audit's variable
+and range rows): seams G1 to 0.01 degrees and G2 to 1e-4 / r.
 
 *Unproven.* Every marching limit (step counts, stall windows, Newton tolerances), the carry's stray bound
 (4 r, or 4 / sqrt 2 times the ball's distance at the end in a sharper wedge), the radius/curvature

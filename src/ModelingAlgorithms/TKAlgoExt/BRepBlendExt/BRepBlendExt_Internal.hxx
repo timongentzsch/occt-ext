@@ -31,8 +31,9 @@
 #include <Geom_RectangularTrimmedSurface.hxx>
 #include <BRepAlgoExt_ReadBack.hxx>
 #include <GeomAlgoExt_SurfaceJet.hxx>
-#include <Law_BSpFunc.hxx>
-#include <Law_BSpline.hxx>
+#include <math_Gauss.hxx>
+#include <math_Matrix.hxx>
+#include <math_Vector.hxx>
 #include <GeomAlgoExt_Failure.hxx>
 #ifndef BREPBLENDEXT_POLICY
   #include <BRepBlendExt_Policy.hxx>
@@ -210,6 +211,75 @@ struct Side
   TopoDS_Edge trimEdge;
 };
 
+//! A size along an edge (Request::radii): the cubic spline through the places, natural (no
+//! curvature at its ends, as the reference modeller's variable blends are, measured) or round an edge that
+//! closes periodic. Past the ends the natural one goes on along its end tangents, which keeps it
+//! twice differentiable there (its second derivative is zero at the ends).
+struct SizeLaw
+{
+  std::vector<double> places, values, bends; // t_i, f_i and the second derivatives there
+  bool                periodic = false;
+
+  //! The spline through (places[i], values[i]): its second derivatives from the continuity of the
+  //! first, h_{i-1} m_{i-1} + 2 (h_{i-1} + h_i) m_i + h_i m_{i+1} = 6 (s_i - s_{i-1}), s_i the
+  //! chords' slopes, with m = 0 at the ends or, periodic, the conditions wrapped round (values
+  //! ending as they begin).
+  void solve()
+  {
+    const int n = int(places.size()), unknowns = periodic ? n - 1 : n;
+    bends.assign(n, 0);
+    if (n < 3)
+      return;
+    math_Matrix A(1, unknowns, 1, unknowns, 0);
+    math_Vector b(1, unknowns, 0);
+    const auto  h     = [&](int i) { return places[i + 1] - places[i]; };
+    const auto  slope = [&](int i) { return (values[i + 1] - values[i]) / h(i); };
+    for (int i = 0; i < unknowns; ++i)
+    {
+      if (!periodic && (i == 0 || i == n - 1))
+      {
+        A(i + 1, i + 1) = 1;
+        continue;
+      }
+      const int before = i == 0 ? n - 2 : i - 1, after = (i + 1) % unknowns;
+      A(i + 1, before + 1) += h(before);
+      A(i + 1, i + 1) += 2 * (h(before) + h(i));
+      A(i + 1, after + 1) += h(i);
+      b(i + 1) = 6 * (slope(i) - slope(before));
+    }
+    math_Gauss  gauss(A);
+    math_Vector m(1, unknowns);
+    gauss.Solve(b, m);
+    for (int i = 0; i < unknowns; ++i)
+      bends[i] = m(i + 1);
+    if (periodic)
+      bends[n - 1] = bends[0];
+  }
+
+  double value(double t) const
+  {
+    const int    n     = int(places.size());
+    const double first = places.front(), last = places.back();
+    if (periodic)
+      t = first + std::fmod(std::fmod(t - first, last - first) + (last - first), last - first);
+    else if (t < first || t > last)
+    {
+      // Along the end's tangent: the spline's slope there, its second derivative being zero.
+      const int    i  = t < first ? 0 : n - 2;
+      const double at = t < first ? first : last, hi = places[i + 1] - places[i];
+      const double slope =
+        (values[i + 1] - values[i]) / hi
+        + (t < first ? -(2 * bends[i] + bends[i + 1]) : bends[i] + 2 * bends[i + 1]) * hi / 6;
+      return (t < first ? values.front() : values.back()) + slope * (t - at);
+    }
+    int i           = int(std::upper_bound(places.begin(), places.end(), t) - places.begin()) - 1;
+    i               = std::clamp(i, 0, n - 2);
+    const double hi = places[i + 1] - places[i], a = (places[i + 1] - t) / hi, b = 1 - a;
+    return a * values[i] + b * values[i + 1]
+           + ((a * a * a - a) * bends[i] + (b * b * b - b) * bends[i + 1]) * hi * hi / 6;
+  }
+};
+
 //! A full round (Law::Full) is a notch of its face between the two edges, `s[1]`, whose face beyond
 //! is the second support: that side's surface is the face beyond's, where the ball's foot is, and
 //! the ball touches the face between too (`Rail::middle`).
@@ -244,21 +314,12 @@ struct Rail
   bool byCentre = false;
   //! A split changes the rolling supports, not the original edge's parameter frame.
   std::optional<std::array<Side, 2>> parameterSupports;
-  //! The factor on the distances along the edge, by its parameter (Request::radii); null where they
-  //! keep one size.
-  Handle(Law_BSpFunc) sizes;
+  //! The factor on the distances along the edge, by its parameter (Request::radii); empty where
+  //! they keep one size.
+  SizeLaw sizes;
 
-  //! The factor on the distances at `t`, and its rate along t: the law's, past the edge's ends its
-  //! last span's own polynomial, which goes on as smoothly as inside, as the rail does.
-  double factor(double t, double* rate = nullptr) const
-  {
-    double value = 1, slope = 0;
-    if (!sizes.IsNull())
-      sizes->D1(t, value, slope);
-    if (rate)
-      *rate = slope;
-    return value;
-  }
+  //! The factor on the distances at `t`: 1 where they keep one size.
+  double factor(double t) const { return sizes.places.empty() ? 1 : sizes.value(t); }
 
   //! An end where the faces are tangent to each other (two crossing cylinders of one radius): the
   //! ball rests on both at the edge's vertex, and the blend closes to that point [at first, last].
@@ -300,7 +361,6 @@ struct Station
   gp_Vec normal[2], along;
   double uvMiddle[2] = {0, 0}; // a full round's foot on the face between (Rail::middle)
   gp_Pnt middle;
-  gp_Vec rate; // the centre's rate along the edge's parameter where the size changes (ballAt)
 };
 
 //! A surface at one place, with its outward unit normal and that normal's derivatives.
@@ -729,7 +789,7 @@ private:
       // Where its size changes along the edge, it goes on past the end as the law's last span
       // (Rail::factor), and the ball only while its size stays within half and twice its size at
       // the end (a judgement): not into the nothing or the bulge a cubic's continuation reaches.
-      if (carried && !rail_.sizes.IsNull())
+      if (carried && !rail_.sizes.places.empty())
       {
         const double atEnd = rail_.factor(t < rail_.first ? rail_.first : rail_.last),
                      here  = rail_.factor(t);

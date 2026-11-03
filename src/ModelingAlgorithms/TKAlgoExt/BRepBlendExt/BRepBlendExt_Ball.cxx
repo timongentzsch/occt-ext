@@ -267,15 +267,8 @@ static std::optional<gp_Pnt> centreAcross(const Rail&   rail,
 }
 
 //! The ball of signed radii r0 and r1 off the supports whose section's plane passes through the
-//! edge's point at `t` (or the centre across it there, Rail::byCentre). Where the radii change
-//! along the edge at the rates r0' and r1', also the centre's rate (Station::rate).
-static bool ballAt(const Rail& rail,
-                   double      t,
-                   Station&    s,
-                   double      r0,
-                   double      r1,
-                   double      rate0 = 0,
-                   double      rate1 = 0)
+//! edge's point at `t` (or the centre across it there, Rail::byCentre).
+static bool ballAt(const Rail& rail, double t, Station& s, double r0, double r1)
 {
   gp_Pnt E;
   gp_Vec d;
@@ -357,44 +350,6 @@ static bool ballAt(const Rail& rail,
     };
   if (!newton(x, rail.resolved(limit::solved), residual))
     return false;
-  s.rate = gp_Vec();
-  if (rate0 != 0 || rate1 != 0)
-  {
-    // The station moves with t as its equations R(x, t) = 0 say: R_x dx/dt = -R_t, the offsets'
-    // difference f changing by n0 r0' - n1 r1' and the plane's condition g by (n0 r0' - E').along,
-    // E' the edge's speed (byCentre: the rate of the centre across it, by central differences of
-    // that closed form, its radii changing at their rates). The centre then moves at
-    // (S0_u + r0 n0_u) du0 + (S0_v + r0 n0_v) dv0 + n0 r0'.
-    gp_Vec Erate = d;
-    if (rail.byCentre)
-    {
-      const double h  = 1e-5 * std::max(rail.last - rail.first, limit::degenerate);
-      const auto   at = [&](double sign) {
-        return centreAcross(rail,
-                            t + sign * h,
-                            rail.curve.Value(t + sign * h),
-                            r0 + sign * h * rate0,
-                            r1 + sign * h * rate1);
-      };
-      const auto ahead = at(1), behind = at(-1);
-      if (!ahead || !behind)
-        return false;
-      Erate = gp_Vec(*behind, *ahead) / (2 * h);
-    }
-    std::array<std::array<double, 5>, 4> m{};
-    double                               norm = 0;
-    if (!residual(x, m, norm))
-      return false;
-    const gp_XYZ ft = a.n.XYZ() * rate0 - b.n.XYZ() * rate1;
-    for (int i = 0; i < 3; ++i)
-      m[i][4] = -ft.Coord(i + 1);
-    m[3][4] = -(a.n.XYZ() * rate0 - Erate.XYZ()).Dot(along);
-    std::array<double, 4> dx{};
-    if (!solve<4>(m, dx))
-      return false;
-    s.rate = gp_Vec((a.du + a.ndu * r0).XYZ() * dx[0] + (a.dv + a.ndv * r0).XYZ() * dx[1]
-                    + a.n.XYZ() * rate0);
-  }
   s.t         = t;
   s.uv[0][0]  = x[0];
   s.uv[0][1]  = x[1];
@@ -636,8 +591,7 @@ bool contactAt(const Rail& rail, double t, Station& s, double scale)
 {
   const Station seed = s;
   // A size that changes along the edge (Rail::sizes) scales both distances.
-  double       rate = 0;
-  const double f    = rail.factor(t, &rate);
+  const double f = rail.factor(t);
   if (!(f > 0))
     return false; // no ball where the size has fallen to nothing (past an end, Rail::factor)
   if (!(rail.law == Law::Full      ? fullAt(rail, t, s)
@@ -648,9 +602,7 @@ bool contactAt(const Rail& rail, double t, Station& s, double scale)
                    t,
                    s,
                    rail.sigma * rail.s[0].distance * scale * f,
-                   rail.sigma * rail.s[1].distance * scale * f,
-                   rail.sigma * rail.s[0].distance * scale * rate,
-                   rail.sigma * rail.s[1].distance * scale * rate)))
+                   rail.sigma * rail.s[1].distance * scale * f)))
     return false;
   // Near the point a surface closes to Newton's steps in u are long, over the point and on by whole
   // turns; the feet stay parameters a fit can follow: this side of it, in the turn they were sought
@@ -676,22 +628,6 @@ bool contactAt(const Rail& rail, double t, Station& s, double scale)
 //! chordal round the radius barely changes, and the circle is within 5e-5 of the great circle.)
 static std::optional<gp_Pnt> sectionCentre(const Rail& rail, const Station& s)
 {
-  // A ball whose radius r changes along its path c touches the blend in its characteristic circle,
-  // in the plane (x - c).c' = -r r': the envelope's condition, the derivative of |x - c|^2 = r^2.
-  // The feet lie in it (c = p + r n with n.p' = 0 gives n.c' = r'), so the section is the arc of
-  // that circle between them, about c - (r r' / |c'|^2) c'. Distances equal (Rail::sizes).
-  if (!rail.sizes.IsNull() && rail.law != Law::Chamfer)
-  {
-    double       rate = 0;
-    const double r = rail.s[0].distance * rail.factor(s.t, &rate), dr = rail.s[0].distance * rate;
-    if (dr == 0)
-      return s.centre; // where the size stands still the circle is the ball's great circle
-    const double speed = s.rate.SquareMagnitude();
-    if (!(speed > limit::degenerate * rail.scale * rail.scale)
-        || !(std::abs(dr) < std::sqrt(speed)))
-      return {};
-    return s.centre.Translated(s.rate * (-r * dr / speed));
-  }
   if (rail.law != Law::Full)
     return s.centre;
   const gp_Vec a(s.middle, s.foot[0]), b(s.middle, s.foot[1]);
@@ -846,12 +782,7 @@ bool sectionAt(const Rail&                      rail,
       return true;
     case Law::G2: {
 
-      // curved supports its section as measured (curvedG2). Where the size changes the section
-      // lies in the characteristic circle's plane, and the law reads its places and its turn
-      // towards the circle's centre: the support's normal curvature over the cosine between its
-      // normal and that turn is the section's (Meusnier), the cosine sqrt(1 - r'^2 / |c'|^2).
-      Station circle    = s;
-      circle.centre     = centre;
+      // curved supports its section as measured (curvedG2).
       gp_Vec tangent[2] = {t0, t1};
       bool   framed[2]  = {false, false};
       if (!frameTangents(rail, s, frames, tangent, framed))
@@ -895,13 +826,7 @@ bool sectionAt(const Rail&                      rail,
         const gp_Vec natural[2]  = {t0, t1};
         const double flatBend[2] = {0, 0};
         int          flatRegime  = 0;
-        if (!SectionPolicy::curvedG2(rail.rho,
-                                     circle,
-                                     apex,
-                                     natural,
-                                     flatBend,
-                                     flatLimit,
-                                     flatRegime))
+        if (!SectionPolicy::curvedG2(rail.rho, s, apex, natural, flatBend, flatLimit, flatRegime))
           return false;
         for (size_t j = 0; j < flatLimit.size(); ++j)
           if (!(flatLimit[j].Distance(out.poles[j]) <= fitTolerance(rail)))
@@ -912,7 +837,7 @@ bool sectionAt(const Rail&                      rail,
                  FailureKind::Curvature);
       }
       if ((activeFrame || bend[0] != 0 || bend[1] != 0)
-          && !SectionPolicy::curvedG2(rail.rho, circle, apex, tangent, bend, out.poles, out.regime))
+          && !SectionPolicy::curvedG2(rail.rho, s, apex, tangent, bend, out.poles, out.regime))
         return false;
       out.weights.assign(8, 1);
       out.knots.assign(rho::g2Knots.begin(), rho::g2Knots.end());

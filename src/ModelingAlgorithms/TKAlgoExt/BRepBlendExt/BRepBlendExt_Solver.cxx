@@ -30,7 +30,6 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <ElCLib.hxx>
-#include <Law_Interpol.hxx>
 
 namespace BRepExt::blend2
 {
@@ -1719,9 +1718,8 @@ Inside& Blend::inside(const TopoDS_Face& face)
 }
 
 //! The rail's size law (Rail::sizes) from the (place, size) pairs asked for its edge: the factor on
-//! its distances by the edge's parameter, the cubic through them (Law_Interpol, periodic round an
-//! edge that closes, whose size must then end as it begins), positive all along; its scale the
-//! largest.
+//! its distances by the edge's parameter, positive all along; round an edge that closes, the size
+//! must end as it begins. Its scale is the largest.
 static void sizesOf(Rail& rail, const std::vector<std::pair<double, double>>& points, double first)
 {
   const char* op = rail.op;
@@ -1731,19 +1729,20 @@ static void sizesOf(Rail& rail, const std::vector<std::pair<double, double>>& po
          invalid_input,
          "a size law runs from the edge's start (0) to its end (1)",
          {rail.edge});
-  NCollection_Array1<gp_Pnt2d> at(1, n);
   for (int i = 0; i < n; ++i)
   {
     const auto [place, size] = points[i];
     if (!std::isfinite(place) || !std::isfinite(size) || !(size > 0)
         || (i > 0 && !(place > points[i - 1].first)))
       fail(op, invalid_input, "a size law takes rising places and positive sizes", {rail.edge});
-    at(i + 1) = gp_Pnt2d(rail.first + (rail.last - rail.first) * place, size / first);
+    rail.sizes.places.push_back(rail.first + (rail.last - rail.first) * place);
+    rail.sizes.values.push_back(size / first);
   }
   TopoDS_Vertex a, b;
   TopExp::Vertices(rail.edge, a, b);
-  const bool closed = !a.IsNull() && a.IsSame(b);
-  if (closed && std::abs(points.front().second - points.back().second) > limit::equal * first)
+  rail.sizes.periodic = !a.IsNull() && a.IsSame(b);
+  if (rail.sizes.periodic
+      && std::abs(points.front().second - points.back().second) > limit::equal * first)
     fail(op,
          invalid_input,
          "the size round a closed edge ends where it begins: "
@@ -1751,9 +1750,7 @@ static void sizesOf(Rail& rail, const std::vector<std::pair<double, double>>& po
            + " are at one point",
          {rail.edge},
          FailureKind::RadiusEndpoints);
-  Handle(Law_Interpol) law = new Law_Interpol;
-  law->Set(at, closed && n > 2);
-  rail.sizes            = law;
+  rail.sizes.solve();
   constexpr int samples = 64;
   double        most    = 0;
   for (int k = 0; k <= samples; ++k)
@@ -2226,9 +2223,10 @@ void Blend::carries()
       gp_Vec d;
       rail.curve.D1(end == 0 ? rail.first : rail.last, p, d);
       // The blend's size at this end, where it changes along the edge (Rail::sizes).
-      const double size = rail.sizes.IsNull() ? rail.scale
-                                               : std::max(rail.s[0].distance, rail.s[1].distance)
-                                                  * rail.factor(end == 0 ? rail.first : rail.last);
+      const double size = rail.sizes.places.empty()
+                             ? rail.scale
+                             : std::max(rail.s[0].distance, rail.s[1].distance)
+                                * rail.factor(end == 0 ? rail.first : rail.last);
       // Twice the blend's size on, so that it reaches a face that leans away; a mitre's
       // blends may meet a leaning face further beyond the vertex: twice as far there.
       double length = (piece.joint[end].meets == Meets::Miter ? 4 : 2) * size;

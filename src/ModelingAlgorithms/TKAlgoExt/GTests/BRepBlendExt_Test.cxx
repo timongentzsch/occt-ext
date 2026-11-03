@@ -32,8 +32,6 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAlgoExt_Failure.hxx>
-#include <Law_Interpol.hxx>
-#include <NCollection_Array1.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -117,40 +115,70 @@ TopoDS_Shape blended(const BRepExt::blend2::Request& request)
   }
 }
 
-//! A size law (Request::radii) as the cubic through its places that OpenCascade's variable fillet
-//! takes, by the place's fraction of [first, last].
+//! A size law (Request::radii) as the reference modeller's variable blends take it, measured: the cubic spline
+//! through the places with no curvature at its ends (periodic round a closed edge), by the
+//! place's fraction of [first, last]. Built here by eliminating the slopes' continuity conditions
+//! in turn (the Thomas algorithm), apart from the kernel's own solve; periodic by repeating the
+//! period five times on each side, natural at the far ends, whose effect falls by 2 - sqrt 3 a
+//! place: the periodic spline to rounding over the middle period.
 std::function<double(double)> sizeLaw(const std::vector<std::pair<double, double>>& points,
                                       double                                        first,
                                       double                                        last,
                                       bool periodic = false)
 {
-  NCollection_Array1<gp_Pnt2d> at(1, int(points.size()));
-  for (size_t i = 0; i < points.size(); ++i)
-    at(int(i) + 1) = gp_Pnt2d(first + (last - first) * points[i].first, points[i].second);
-  Handle(Law_Interpol) law = new Law_Interpol;
-  law->Set(at, periodic);
-  return [law](double t) { return law->Value(t); };
+  std::vector<double> x, y;
+  const int           copies = periodic ? 11 : 1;
+  for (int c = 0; c < copies; ++c)
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+      if (c > 0 && i == 0)
+        continue;
+      x.push_back(points[i].first + c - (periodic ? 5 : 0));
+      y.push_back(points[i].second);
+    }
+  const size_t        n = x.size();
+  std::vector<double> m(n, 0), c(n, 0), d(n, 0);
+  // h_{i-1} m_{i-1} + 2 (h_{i-1} + h_i) m_i + h_i m_{i+1} = 6 (slope_i - slope_{i-1}), m = 0 at
+  // ends.
+  for (size_t i = 1; i + 1 < n; ++i)
+  {
+    const double h0 = x[i] - x[i - 1], h1 = x[i + 1] - x[i];
+    const double rhs  = 6 * ((y[i + 1] - y[i]) / h1 - (y[i] - y[i - 1]) / h0);
+    const double diag = 2 * (h0 + h1) - h0 * c[i - 1];
+    c[i]              = h1 / diag;
+    d[i]              = (rhs - h0 * d[i - 1]) / diag;
+  }
+  for (size_t i = n - 2; i >= 1; --i)
+    m[i] = d[i] - c[i] * m[i + 1];
+  return [=](double t) {
+    double s = (t - first) / (last - first);
+    if (periodic)
+      s -= std::floor(s);
+    size_t i = 0;
+    while (i + 2 < n && s > x[i + 1])
+      ++i;
+    const double h = x[i + 1] - x[i], a = (x[i + 1] - s) / h, b = 1 - a;
+    return a * y[i] + b * y[i + 1]
+           + ((a * a * a - a) * m[i] + (b * b * b - b) * m[i + 1]) * h * h / 6;
+  };
 }
 
-//! How far the faces of `made` that are not on `input` are from the envelope of the balls of
-//! radius radius(t) centred at centre(t), t in [t0, t1]: for each sample P, min over t of
-//! |P - centre(t)| - radius(t), which is zero on the envelope and negative inside a ball. The
-//! largest by magnitude, and the number of samples.
-std::pair<double, int> envelopeDefect(const TopoDS_Shape&                  made,
-                                      const TopoDS_Shape&                  input,
-                                      const std::function<gp_Pnt(double)>& centre,
-                                      const std::function<double(double)>& radius,
-                                      double                               t0,
-                                      double                               t1)
+//! How far the faces of `made` that are not on `input` are from their discs: each sample P lies
+//! in the section of the station station(P), on the circle about centre(t) of radius radius(t).
+//! The largest |P - centre(t)| - radius(t), and the number of samples.
+std::pair<double, int> discDefect(const TopoDS_Shape&                  made,
+                                  const TopoDS_Shape&                  input,
+                                  const std::function<double(gp_Pnt)>& station,
+                                  const std::function<gp_Pnt(double)>& centre,
+                                  const std::function<double(double)>& radius)
 {
   TopoDS_Compound skin;
   BRep_Builder    builder;
   builder.MakeCompound(skin);
   for (TopExp_Explorer f(input, TopAbs_FACE); f.More(); f.Next())
     builder.Add(skin, f.Current());
-  const auto gap   = [&](const gp_Pnt& p, double t) { return p.Distance(centre(t)) - radius(t); };
-  double     worst = 0;
-  int        count = 0;
+  double worst = 0;
+  int    count = 0;
   for (TopExp_Explorer f(made, TopAbs_FACE); f.More(); f.Next())
   {
     const TopoDS_Face face = TopoDS::Face(f.Current());
@@ -170,31 +198,16 @@ std::pair<double, int> envelopeDefect(const TopoDS_Shape&                  made,
     }
     if (onInput)
       continue;
-    constexpr int N = 12;
+    constexpr int N = 16;
     for (int i = 1; i < N; ++i)
       for (int j = 1; j < N; ++j)
       {
         const double u = u0 + (u1 - u0) * i / N, v = v0 + (v1 - v0) * j / N;
         if (BRepClass_FaceClassifier(face, gp_Pnt2d(u, v), 1e-7).State() != TopAbs_IN)
           continue;
-        const gp_Pnt p = surface.Value(u, v);
-        // The nearest ball: a scan, then golden sections about the least.
-        constexpr int samples = 400;
-        int           best    = 0;
-        for (int k = 1; k <= samples; ++k)
-          if (gap(p, t0 + (t1 - t0) * k / samples) < gap(p, t0 + (t1 - t0) * best / samples))
-            best = k;
-        double lo = t0 + (t1 - t0) * std::max(0, best - 1) / samples,
-               hi = t0 + (t1 - t0) * std::min(samples, best + 1) / samples;
-        for (int k = 0; k < 100; ++k)
-        {
-          const double a = lo + (hi - lo) / 3, b = hi - (hi - lo) / 3;
-          if (gap(p, a) < gap(p, b))
-            hi = b;
-          else
-            lo = a;
-        }
-        const double defect = gap(p, (lo + hi) / 2);
+        const gp_Pnt p      = surface.Value(u, v);
+        const double t      = station(p);
+        const double defect = p.Distance(centre(t)) - radius(t);
         if (std::abs(defect) > std::abs(worst))
           worst = defect;
         ++count;
@@ -399,49 +412,62 @@ TEST(BRepBlendExt, RoundInAWedgeOfACylinderRollsAtDistanceR)
       }
 }
 
-// A ball whose radius r(z) changes along a box's edge (planes x = a, y = b, the edge along z): the
-// ball at z has its centre at (a - r, b - r, z), and the blend is the envelope of those balls,
-// whose characteristic circle lies in the plane (x - c).c' = -r r', off the plane across the edge.
-// Every point of the round is on that envelope: its least distance to a ball's sphere is zero, and
-// no ball holds it. Laws held out from the design: linear, a cubic through four places, one that
-// falls and rises again. At rest and turned, moved and scaled by a thousandth and a thousand, the
-// volume the same to rounding.
-TEST(BRepBlendExt, RoundWhoseSizeChangesIsTheEnvelopeOfItsBalls)
+// A size that changes along a box's edge (planes x = a, y = b, the edge along z), as the reference modeller
+// makes it (its exported bodies, sectioned): each section across the edge is the circle of radius r(z)
+// tangent to both faces, about (a - r, b - r, z), and r(z) the natural cubic spline through the
+// places. The section removed is r^2 (1 - pi / 4), so the volume is (1 - pi / 4) times the integral
+// of r^2, here in closed form: linear, and the natural splines through a peak and a valley, which
+// are r = 1 + 6 s - 8 s^3 and 2 - 3.6 s + 4.8 s^3 on the first half and mirrored. At rest and
+// turned, moved and scaled by a thousandth and a thousand, with the tolerances scaled.
+TEST(BRepBlendExt, RoundWhoseSizeChangesHasCircularSectionsAcrossTheEdge)
 {
   const double       a = 20, b = 20, c = 20;
   const TopoDS_Shape box = BRepPrimAPI_MakeBox(a, b, c).Shape();
   const auto         up  = [&](const double* l) {
     return near(l[0], a) && near(l[1], b) && near(l[3], a) && near(l[4], b);
   };
-  const std::vector<std::vector<std::pair<double, double>>> laws = {
-    {{0, 1}, {1, 3}},
-    {{0, 0.5}, {1, 2.5}},
-    {{0, 1}, {0.3, 2.5}, {0.7, 1.5}, {1, 2}},
-    {{0, 2}, {0.5, 0.8}, {1, 2}}};
-  for (const auto& points : laws)
+  const auto half = [](double s, double r0, double k1, double k3) {
+    const double x = s <= 0.5 ? s : 1 - s;
+    return r0 + k1 * x + k3 * x * x * x;
+  };
+  const std::vector<
+    std::pair<std::vector<std::pair<double, double>>, std::function<double(double)>>>
+    laws = {{{{0, 1}, {1, 3}}, [](double s) { return 1 + 2 * s; }},
+            {{{0, 0.5}, {1, 2.5}}, [](double s) { return 0.5 + 2 * s; }},
+            {{{0, 1}, {0.5, 3}, {1, 1}}, [&](double s) { return half(s, 1, 6, -8); }},
+            {{{0, 2}, {0.5, 0.8}, {1, 2}}, [&](double s) { return half(s, 2, -3.6, 4.8); }}};
+  for (const auto& [points, law] : laws)
   {
     SCOPED_TRACE(points.size());
     const auto edges = edgesWhere(box, up);
     ASSERT_EQ(edges.size(), 1u);
     const BRepAdaptor_Curve curve(edges[0]);
-    const auto              r = sizeLaw(points, curve.FirstParameter(), curve.LastParameter());
-    // The edge's parameter is z.
+    // The edge runs up z with its parameter.
+    ASSERT_NEAR(curve.Value(curve.FirstParameter()).Z(), 0, 1e-12);
+    const auto               r       = [&](double z) { return law(z / c); };
     BRepExt::blend2::Request request = roundOf(box, edges, 1);
     request.radii                    = {points};
     const TopoDS_Shape made          = blended(request);
     if (made.IsNull())
       continue;
     EXPECT_TRUE(BRepExt::invalidity(made).empty());
-    const auto [worst, count] = envelopeDefect(
+    const auto [worst, count] = discDefect(
       made,
       box,
+      [](const gp_Pnt& p) { return p.Z(); },
       [&](double z) { return gp_Pnt(a - r(z), b - r(z), z); },
-      r,
-      curve.FirstParameter(),
-      curve.LastParameter());
+      r);
     EXPECT_GT(count, 50);
-    EXPECT_LE(std::abs(worst), BRepExt::tolerance::sewing) << points.size() << " places";
-    const double before = volume(made);
+    EXPECT_LE(std::abs(worst), BRepExt::tolerance::sewing);
+    // (1 - pi / 4) times the integral of r^2: Simpson's rule on 2000 spans, exact to rounding for
+    // these polynomials of degree 6 at most on each half.
+    double        integral = 0;
+    constexpr int spans    = 2000;
+    for (int k = 0; k <= spans; ++k)
+      integral += (k == 0 || k == spans ? 1 : k % 2 ? 4 : 2) * std::pow(r(c * k / spans), 2);
+    integral *= c / spans / 3;
+    const double before = a * b * c - (1 - M_PI / 4) * integral;
+    EXPECT_NEAR(volume(made), before, 1e-9 * a * b * c);
     for (const double s : {1.0, 1e-3, 1e3})
     {
       SCOPED_TRACE(s);
@@ -462,23 +488,17 @@ TEST(BRepBlendExt, RoundWhoseSizeChangesIsTheEnvelopeOfItsBalls)
       }
       BRepExt::blend2::Request again = roundOf(moved, {turned}, s);
       again.radii                    = {mine};
-      // Each fitted surface within the sewing tolerance of the envelope at its own scale: the
-      // volumes within that over the blend's area.
-      const TopoDS_Shape other = blended(again);
+      const TopoDS_Shape other       = blended(again);
       if (other.IsNull())
         continue;
-      EXPECT_NEAR(volume(other) / (s * s * s),
-                  before,
-                  2 * BRepExt::tolerance::sewing * (area(made) - area(box) + 2 * a * c))
-        << "scale " << s;
+      EXPECT_NEAR(volume(other) / (s * s * s), before, 1e-9 * a * b * c);
     }
   }
 }
 
-// A chamfer whose setback d(z) changes along the box's edge: each section across the edge is the
-// line between the feet d(z) from the edge on both faces, so every point of it has
-// (a - x) + (b - y) = d(z). A conic of rho 0.7 has its contacts where the balls touch the faces,
-// r(z) from the edge, and its surface tangent to the faces there.
+// The chamfer of the peak law keeps its feet r(z) from the edge on both faces, every section the
+// line between them, (a - x) + (b - y) = r(z); a conic of rho 0.7 of the same law has its feet
+// there too and meets the faces in their normals.
 TEST(BRepBlendExt, ChamferAndConicWhoseSizeChangesKeepTheirFeet)
 {
   const double       a = 20, b = 20, c = 20;
@@ -487,16 +507,19 @@ TEST(BRepBlendExt, ChamferAndConicWhoseSizeChangesKeepTheirFeet)
     return near(l[0], a) && near(l[1], b) && near(l[3], a) && near(l[4], b);
   });
   ASSERT_EQ(edges.size(), 1u);
-  const std::vector<std::pair<double, double>> points = {{0, 1}, {0.4, 2.5}, {1, 1.5}};
-  const BRepAdaptor_Curve                      curve(edges[0]);
-  const auto r = sizeLaw(points, curve.FirstParameter(), curve.LastParameter());
+  const std::vector<std::pair<double, double>> points = {{0, 1}, {0.5, 3}, {1, 1}};
+  const auto                                   r      = [&](double z) {
+    const double x = std::min(z / c, 1 - z / c);
+    return 1 + 6 * x - 8 * x * x * x;
+  };
   for (const auto law : {BRepExt::blend2::Law::Chamfer, BRepExt::blend2::Law::Conic})
   {
     BRepExt::blend2::Request request = roundOf(box, edges, 1);
     request.law                      = law;
     request.rho                      = 0.7;
     request.radii                    = {points};
-    const TopoDS_Shape made          = BRepExt::blend2::blend(request).shape;
+    const TopoDS_Shape made          = blended(request);
+    ASSERT_FALSE(made.IsNull());
     ASSERT_TRUE(BRepExt::invalidity(made).empty());
     double worst = 0, turn = 0;
     int    count = 0;
@@ -515,8 +538,7 @@ TEST(BRepBlendExt, ChamferAndConicWhoseSizeChangesKeepTheirFeet)
             worst          = std::max(worst, std::abs((a - p.X()) + (b - p.Y()) - r(p.Z())));
             ++count;
           }
-      // Along the contacts: on x = a the foot is r from the edge, (a, b - r, z), and the blend's
-      // normal is the face's, x; on y = b likewise.
+      // Along the contacts: on x = a the foot is (a, b - r, z), and the blend's normal x there.
       for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
       {
         const BRepAdaptor_Curve on(TopoDS::Edge(e.Current()));
@@ -547,10 +569,10 @@ TEST(BRepBlendExt, ChamferAndConicWhoseSizeChangesKeepTheirFeet)
 }
 
 // Round a cylinder's top rim with a size that changes round it and ends as it begins (periodic):
-// the ball at the rim's angle t, of radius r(t), has its centre at ((R - r) cos t, (R - r) sin t,
-// H - r), and the round is the envelope of those balls. A rim whose size does not end as it begins
-// is refused by name.
-TEST(BRepBlendExt, RoundOfARimWhoseSizeChangesIsTheEnvelopeOfItsBalls)
+// the section at the rim's angle t, in the half-plane through the axis, is the circle of radius
+// r(t) about ((R - r) cos t, (R - r) sin t, H - r). A rim whose size does not end as it begins is
+// refused by name.
+TEST(BRepBlendExt, RoundOfARimWhoseSizeChangesHasCircularSections)
 {
   const double       R = 10, H = 20;
   const TopoDS_Shape cylinder = BRepPrimAPI_MakeCylinder(R, H).Shape();
@@ -562,15 +584,19 @@ TEST(BRepBlendExt, RoundOfARimWhoseSizeChangesIsTheEnvelopeOfItsBalls)
   const auto               r = sizeLaw(points, curve.FirstParameter(), curve.LastParameter(), true);
   BRepExt::blend2::Request request = roundOf(cylinder, rim, 1);
   request.radii                    = {points};
-  const TopoDS_Shape made          = BRepExt::blend2::blend(request).shape;
+  const TopoDS_Shape made          = blended(request);
+  ASSERT_FALSE(made.IsNull());
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
-  const auto [worst, count] = envelopeDefect(
+  const auto angle = [&](const gp_Pnt& p) {
+    const double t = std::atan2(p.Y(), p.X());
+    return t < curve.FirstParameter() ? t + 2 * M_PI : t;
+  };
+  const auto [worst, count] = discDefect(
     made,
     cylinder,
+    angle,
     [&](double t) { return gp_Pnt((R - r(t)) * std::cos(t), (R - r(t)) * std::sin(t), H - r(t)); },
-    r,
-    curve.FirstParameter(),
-    curve.LastParameter());
+    r);
   EXPECT_GT(count, 50);
   EXPECT_LE(std::abs(worst), BRepExt::tolerance::sewing);
   request.radii = {{{0, 1}, {1, 3}}};
@@ -578,10 +604,10 @@ TEST(BRepBlendExt, RoundOfARimWhoseSizeChangesIsTheEnvelopeOfItsBalls)
 }
 
 // Held out: a size that changes round the ring where a sphere of radius R stands on a plane, a
-// concave edge between two curved... a plane and a sphere. The ball at the ring's point E(t) has
-// its centre r above the plane, R + r from the sphere's centre, in the half-plane through the axis
-// and E(t): at sqrt((R + r)^2 - r^2) from the axis.
-TEST(BRepBlendExt, RoundOfASphereOnAPlaneWhoseSizeChangesIsTheEnvelopeOfItsBalls)
+// concave edge between a plane and a sphere. The section at the ring's point E(t) lies in the
+// half-plane through the axis and E(t): the circle of radius r about the point r above the plane
+// and R + r from the sphere's centre, sqrt((R + r)^2 - r^2) from the axis.
+TEST(BRepBlendExt, RoundOfASphereOnAPlaneWhoseSizeChangesHasCircularSections)
 {
   const double       R = 14;
   const TopoDS_Shape standing =
@@ -600,18 +626,48 @@ TEST(BRepBlendExt, RoundOfASphereOnAPlaneWhoseSizeChangesIsTheEnvelopeOfItsBalls
   const TopoDS_Shape made          = blended(request);
   ASSERT_FALSE(made.IsNull());
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
-  const auto [worst, count] = envelopeDefect(
+  // The ring's parameter at the angle of a point: the ring's point at that angle, found along it.
+  const auto at = [&](const gp_Pnt& p) {
+    const double want = std::atan2(p.Y(), p.X());
+    double       best = curve.FirstParameter(), off = 1e9;
+    for (int k = 0; k <= 3600; ++k)
+    {
+      const double t =
+        curve.FirstParameter() + (curve.LastParameter() - curve.FirstParameter()) * k / 3600;
+      const gp_Pnt E = curve.Value(t);
+      const double d = std::abs(std::remainder(std::atan2(E.Y(), E.X()) - want, 2 * M_PI));
+      if (d < off)
+      {
+        off  = d;
+        best = t;
+      }
+    }
+    // Refined by halving about it.
+    double step = (curve.LastParameter() - curve.FirstParameter()) / 3600;
+    for (int k = 0; k < 60; ++k, step /= 2)
+      for (const double t : {best - step, best + step})
+      {
+        const gp_Pnt E = curve.Value(t);
+        const double d = std::abs(std::remainder(std::atan2(E.Y(), E.X()) - want, 2 * M_PI));
+        if (d < off)
+        {
+          off  = d;
+          best = t;
+        }
+      }
+    return best;
+  };
+  const auto [worst, count] = discDefect(
     made,
     standing,
+    at,
     [&](double t) {
       const gp_Pnt E = curve.Value(t);
       const double a = std::atan2(E.Y(), E.X()), size = r(t);
       const double d = std::sqrt((R + size) * (R + size) - size * size);
       return gp_Pnt(d * std::cos(a), d * std::sin(a), size);
     },
-    r,
-    curve.FirstParameter(),
-    curve.LastParameter());
+    r);
   EXPECT_GT(count, 50);
   EXPECT_LE(std::abs(worst), BRepExt::tolerance::sewing);
 }
