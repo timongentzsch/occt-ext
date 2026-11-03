@@ -224,8 +224,12 @@ Known limits and what remains:
 1. **Blend solver.** Some configurations where several blends meet are refused although a valid result exists:
    trimming a blend group needs an owner for every retained region and contact before chain ends are cut, and
    the centre path must be parametrised by arc length along the marched curve, not by the edge's parameter.
-   Steep dihedral angles (above about 75 degrees) and curvature-continuous sections at five-sided corners are
-   also refused.
+   Curvature-continuous sections at five-sided corners are also refused. An edge whose faces meet at a
+   steady angle is blended at any opening from 5 to 175 degrees, convex or concave (measured on planes,
+   plane and cylinder, two cylinders). Where the angle turns along the edge so far that the balls' centre
+   path bends more tightly than the ball (the rim of a hole leaning a with r >= (R + r) cos a: from about
+   70 degrees), the rolling-ball surface crosses itself and is refused until it is trimmed there, as
+   the reference modeller trims it; just short of that the fit can miss its tolerance (lean 75 for r = R / 4).
 2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published
    bound for a curvature-continuous conic or quintic section as a function of the support's curvature is
    missing.

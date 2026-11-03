@@ -33,7 +33,38 @@ results; Hermann 1995 and Lukacs 1998 are cited second-hand there); Salvi and VÃ
 surfaces with curvature continuity" (2014; statement of the Linkage Curve Theorem, appendix proof not
 read); Zang, Liu, Lai, GMP 2008, sections 1-3 (Hu's extension; Hu 2002 not obtained); de Boor 1972.
 
-*Unproven.* Every marching limit (step counts, stall windows, Newton tolerances), the radius/curvature
+*Steep and flat wedges.* In a wedge of opening psi between two planes the ball's centre lies
+r / sin(psi / 2) from the edge (the centre is r from both planes, on the bisector), and its contacts
+r cot(psi / 2) from it. Past an edge's end the blend is carried on while the ball goes on with the rail;
+the carry stopped where the centre was more than 4 r from the rail, which a ball in a wedge sharper than
+2 asin(1/4) = 29 degrees is already at the end, so its contacts stopped short of the faces that stop the
+edge. The bound is now that many times the ball's own distance at the end over sqrt 2 where the faces
+meet more sharply than at a right angle (unchanged at a right angle and wider), so it no longer depends
+on the opening. Measured over straight edges between two planes, a plane and a cylinder, and two
+cylinders, convex and concave, openings 5 to 175 degrees in steps of 5, rest, turned and scaled by 1e-3
+and 1e3 (5040 blends, Round, Conic 0.7 and Chamfer; the plane-plane family used to find the cause, the
+cylinder families held out): 516 refused before, at openings below 30 degrees, now 12, all of them
+chamfers of setback 1 at a concave opening of 170 or 175 degrees beside a cylinder of radius 10, whose
+chord between the feet runs through the cylinder (refused by name, as before). The planes' removed or
+added volume equals r^2 (cot(psi / 2) - (pi - psi) / 2) per unit length (Round) and d^2 sin(psi) / 2
+(Chamfer) to 3e-12 of the body.
+
+Where the opening turns along the edge (the rim of a hole of radius R leaning a from upright through a
+plate) the centres lie on an ellipse of semi-axes R + r and (R + r) / cos a, whose radius of curvature at
+the acute end is (R + r) cos a. The rolling-ball surface (the envelope of the balls, a canal surface)
+is regular where 1 - kappa r cos(alpha) is non-zero, alpha the angle of a point of the section from the
+path's principal normal (derived here: along the path the surface c + r (cos alpha N + sin alpha B)
+moves by |c'| (1 - kappa r cos alpha) along the path's tangent, its other terms lie along the section;
+it is the regularity condition of a pipe surface in Maekawa, Patrikalakis, Sakkalis and Yu, CAGD 15,
+1998, not read here); on the rim the arc between the
+contacts passes through that normal at the acute end, so the surface crosses itself once
+r >= (R + r) cos a: from a = 70.5 degrees for r = R / 2, 78.5 for r = R / 4. The contacts themselves do
+not fold there (their speed along the path is s'^2 + R (R + r) |u'|^2 over |c'|, positive). Such rims are
+refused, as before, until the blend is trimmed where it crosses itself; the reference modeller trims it from
+75 degrees.
+
+*Unproven.* Every marching limit (step counts, stall windows, Newton tolerances), the carry's stray bound
+(4 r, or 4 / sqrt 2 times the ball's distance at the end in a sharper wedge), the radius/curvature
 refusal margins, the choice between arcs and spline sections at corners, and the number of fit
 refinements. There is no published bound for a G2 conic or quintic section as a function of the support's
 curvature [searched; none found]; curvature-continuous requests therefore refuse in this tree until a caller

@@ -148,7 +148,10 @@ constexpr double equal      = 1e-15; // relative: distances and laws taken as gi
 constexpr double knotMerge  = 1e-6;  // the fit's u: a break this near a uniform knot replaces it
 constexpr double marched =
   1e-10; // where two sheets meet, each place solved to this length (or its rounding)
-constexpr double strayed = 4; // x size: past an edge's end, how far a ball may be from its rail
+// x size: past an edge's end, how far a ball may be from its rail where the faces meet at a right
+// angle or wider; where they meet more sharply, that many times the ball's own distance from the
+// rail at the end over sqrt 2 (Stations::walk). A judgement.
+constexpr double strayed = 4;
 constexpr double bend =
   4e-6; // x 1/size: a G2 fit's normal curvature along a contact against its support's
 constexpr double seamBend =
@@ -689,6 +692,13 @@ private:
     double       step     = span / 16 * (end > current.t ? 1 : -1);
     const int    towards  = end > current.t ? 1 : 0;
     Station      previous = current;
+    // How far the ball may stray from the rail past the end: at a right angle between the faces
+    // its centre is sqrt 2 times its size from the edge, and limit::strayed times its size away
+    // it has left the rail. In a wedge of angle psi the centre is r / sin(psi / 2) from the edge,
+    // beyond that bound already below 29 degrees, so where the faces meet more sharply than at a
+    // right angle the bound keeps its ratio to the ball's own distance at the end (from the last
+    // station on the edge).
+    double strayed = -1;
     while ((end - current.t) * step > 0)
     {
       checkCancelled(rail_.op);
@@ -712,7 +722,11 @@ private:
           if (!rail_.s[i].cliffCurve && rail_.s[i].surface->IsUPeriodic())
             next.uv[i][0] =
               BRepExt::nearPeriod(next.uv[i][0], current.uv[i][0], rail_.s[i].surface->UPeriod());
-        if (carried && next.centre.Distance(rail_.curve.Value(t)) > limit::strayed * rail_.scale)
+        if (carried && strayed < 0)
+          strayed = limit::strayed
+                    * std::max(rail_.scale,
+                               current.centre.Distance(rail_.curve.Value(current.t)) * M_SQRT1_2);
+        if (carried && next.centre.Distance(rail_.curve.Value(t)) > strayed)
         {
           reached_[towards] = current.t;
           return;
