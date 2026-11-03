@@ -129,6 +129,11 @@ A hole tangent to a face beside the edge pinches the body: the hole meets the fa
 which four faces meet. No blend passes it and v2 refuses it by name, as the reference modeller does; with a gap of
 0.25 to 2 every round, chamfer and G2 lies within 1.3e-6 mm (G2 1e-4) of the reference modeller's mesh.
 
+*Beyond the reference.* Three constructions go past what the reference modeller makes, and stay: a chamfer whose
+distances vary along the edge (the reference modeller keeps the base distance or refuses), G2 where a narrow side is
+lower than the ball (h < r; the reference modeller refuses it), and a chamfer larger than a round it runs over
+(the reference modeller does not make it). Each is held to the same definitions and checks as the shared cases.
+
 *Unproven.* Every marching limit (step counts, stall windows, Newton tolerances), the carry's stray bound
 (4 r, or 4 / sqrt 2 times the ball's distance at the end in a sharper wedge), the radius/curvature
 refusal margins, the choice between arcs and spline sections at corners, and the number of fit
@@ -339,9 +344,33 @@ plane). A vertex that is then not on every face around it means the move changes
 planes of an apex; a face that shrinks away), and the construction declines. *Certificate,* apart from
 the construction: a valid solid; points inside every face and along every edge at the moved distance from
 their sources' unbounded surfaces, on the side moved to (foot point by Newton, Gauss–Newton where the
-Hessian is not positive definite); faces clear of each other; volume grown by an outward move and shrunk
+Hessian is not positive definite); faces clear of each other (below); volume grown by an outward move and shrunk
 by an inward one; and where every face moves, nothing nearer the body than the distance. A failure of any
 of these falls back to the routes below. Judgement: the refinement of an edge stops at 16 halvings of the first spacing or 4096 samples (a curve a cubic cannot follow there has a kink).
+
+*Faces clear of each other.* Always the general self-interference check (`BOPAlgo_ArgumentAnalyzer`) on
+the exact faces, on what the separation pre-pass (`BRepSurfaceExt_FaceSeparation.hxx`, pole hulls and
+Bernstein bounds) cannot prove clear. The pre-pass does not read offset surfaces, so it runs on proxies: a
+copy whose offset faces are splines within ε = a hundredth of the tolerance of them, each face's tolerance
+grown by ε. Two proxies it proves further apart than their tolerances have their exact faces apart too;
+that a proxy is one to one says nothing of its exact face, so each offset face also goes to the check by
+itself unless the pre-pass leaves it in a part that is checked. The result keeps its exact faces. Tried and
+dropped: skipping the check by the reach [Federer 1959, Thm 4.8] (|d| κ_max < 1 per face, faces that share
+no vertex further apart than both moved faces reach). A rigorous κ bound per rational Bezier patch was
+sound on the matrix's bodies but three orders above the sampled curvature on blend sheets, and the reach
+leaves faces that share a vertex unproven.
+
+*Offsets that load again.* The binary BREP reader builds an offset surface with OpenCascade's continuity
+check (`BinTools_SurfaceSet`), which refuses a basis that is C0 at a knot unless it finds it G1 there; a
+blend's sheet whose parts are joined C0 in their parameters is refused, and a body holding such an offset
+cannot be loaded from a saved file. Such a face's offset is built unchecked for the construction and, once
+the face's extent is known, replaced by a spline over its box within a tenth of the tolerance
+(`GeomConvert_ApproxSurface`), its edges' curves, vertices' points and continuity records moved onto it
+and their tolerances grown by the error; every result loads again (checked on the matrix's bodies). An edge
+whose old curve is a line or a circle keeps one: the offset of a line on a plane or cylinder is a line, of a
+circle round a surface of revolution's axis a coaxial circle, with the parameter kept (checked at 17
+points). At a pole, where S_u × S_v vanishes against the derivatives' size, the certificate checks the
+distance alone (judgement: below a millionth of |S_u|² + |S_v|²), as the normal's sign is not defined there.
 
 *Skins and sweeps.* Frames along a path are rotation-minimising by the double reflection method [Wang,
 Jüttler, Zheng, Liu 2008], with a fourth-order error in the step; stock `BRepOffsetAPI_MakePipeShell`

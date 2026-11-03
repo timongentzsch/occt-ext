@@ -51,11 +51,27 @@
 #include <BRepAlgoExt_Properties.hxx>
 #include <GeomAlgoExt_Cancel.hxx>
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <Geom_OffsetSurface.hxx>
+#include <NCollection_IndexedMap.hxx>
+#include <TopoDS_Compound.hxx>
+#include <BRepSurfaceExt_FaceSeparation.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
+#include <BOPAlgo_ArgumentAnalyzer.hxx>
+#include <BRepTopAdaptor_FClass2d.hxx>
+#include <BRepTools.hxx>
+#include <GeomConvert_ApproxSurface.hxx>
+#include <Geom_BSplineSurface.hxx>
+#include <NCollection_Map.hxx>
 #include <BRepOffset.hxx>
 #include <BRepTools_Modification.hxx>
 #include <BRepTools_Modifier.hxx>
 #include <BRep_Builder.hxx>
+#include <BRep_CurveRepresentation.hxx>
+#include <BRep_PointRepresentation.hxx>
+#include <BRep_TEdge.hxx>
+#include <BRep_TVertex.hxx>
 #include <BRep_Tool.hxx>
 #include <Geom2dAPI_Interpolate.hxx>
 #include <Geom2d_BSplineCurve.hxx>
@@ -65,7 +81,9 @@
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomProjLib.hxx>
 #include <Geom_Conic.hxx>
+#include <Geom_Circle.hxx>
 #include <Geom_Line.hxx>
+#include <Geom_RectangularTrimmedSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <Geom2dAdaptor_Curve.hxx>
 #include <GeomAdaptor_Curve.hxx>
@@ -74,6 +92,7 @@
 #include <Geom_Surface.hxx>
 #include <NCollection_DataMap.hxx>
 #include <Precision.hxx>
+#include <Standard_ConstructionError.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
@@ -219,7 +238,8 @@ bool nearest(const Handle(Geom_Surface)& surface, const gp_Pnt& p, double& u, do
 struct Moved
 {
   Handle(Geom_Surface) surface;
-  double               by = 0.0;
+  double               by          = 0.0;
+  bool                 approximate = false;
 };
 
 //! An edge of the result: its curve over [first, last] of the old edge's parameter, and its
@@ -303,6 +323,9 @@ public:
     const Handle(Geom2d_Curve)* onFace = made->onFace.Seek(face);
     double                      first, last;
     curve     = onFace ? *onFace : BRep_Tool::CurveOnSurface(edge, face, first, last);
+    // Not shared with the input's edge: the result's geometry is its own.
+    if (!curve.IsNull() && !onFace)
+      curve = Handle(Geom2d_Curve)::DownCast(curve->Copy());
     tolerance = made->tolerance;
     return !curve.IsNull();
   }
@@ -765,6 +788,250 @@ bool exactCrossing(const Handle(Geom_Surface)& s1,
   return false;
 }
 
+//! The curve of points q(t) in closed form where the old edge's curve c is a line or a circle and
+//! q is c moved with its parameter kept: a line translated, or a circle about the same axis with
+//! another radius and height (an edge along a plane, cylinder, cone, sphere or torus round its
+//! axis moves so). Null unless q is that curve within `accuracy` at 17 parameters of
+//! [first, last]. Display meshes and Booleans then see the same line or circle the input had, not
+//! a spline through it.
+Handle(Geom_Curve) movedLineOrCircle(const TopoDS_Edge&                     edge,
+                                     const std::function<gp_Pnt(double)>& q,
+                                     double                               first,
+                                     double                               last,
+                                     double                               accuracy)
+{
+  double             f, l;
+  Handle(Geom_Curve) old = BRep_Tool::Curve(edge, f, l);
+  while (!old.IsNull() && old->IsKind(STANDARD_TYPE(Geom_TrimmedCurve)))
+    old = Handle(Geom_TrimmedCurve)::DownCast(old)->BasisCurve();
+  Handle(Geom_Curve) moved;
+  if (const Handle(Geom_Line) line = Handle(Geom_Line)::DownCast(old))
+    moved = Handle(Geom_Curve)::DownCast(
+      line->Translated(gp_Vec(line->Value(first), q(first))));
+  else if (const Handle(Geom_Circle) circle = Handle(Geom_Circle)::DownCast(old))
+  {
+    const gp_Ax2 axes   = circle->Position();
+    const gp_Vec offset(axes.Location(), q(first));
+    const double height = offset.Dot(gp_Vec(axes.Direction()));
+    const double radius = (offset - gp_Vec(axes.Direction()) * height).Magnitude();
+    if (radius <= gp::Resolution())
+      return {};
+    gp_Ax2 moved2 = axes;
+    moved2.SetLocation(axes.Location().Translated(gp_Vec(axes.Direction()) * height));
+    moved = new Geom_Circle(moved2, radius);
+  }
+  if (moved.IsNull())
+    return {};
+  for (int k = 0; k <= 16; ++k)
+  {
+    const double t = first + (last - first) * k / 16;
+    if (moved->Value(t).Distance(q(t)) > accuracy)
+      return {};
+  }
+  return moved;
+}
+
+//! `made`, a face of `shape` on `exact`, put on a spline over its box in its parameters within
+//! `bound` of `exact` (GeomConvert_ApproxSurface), so that its edges' curves on it stay: they, the
+//! vertices' points on them and the edges' records of how smoothly two faces meet across them are
+//! moved onto the spline, and the edges' and vertices' tolerances grow by the error. False, the face
+//! untouched, where no spline is within `bound`.
+bool asSpline(const TopoDS_Shape&         shape,
+              const TopoDS_Face&          made,
+              const Handle(Geom_Surface)& exact,
+              double                      bound)
+{
+  BRep_Builder builder;
+  double       u0, u1, v0, v1;
+  BRepTools::UVBounds(made, u0, u1, v0, v1);
+  Handle(Geom_BSplineSurface) spline;
+  double                      error = HUGE_VAL;
+  try
+  {
+    // Judgement: degree 9 and 1000 segments each way at most (AdvApp2Var's own scale).
+    GeomConvert_ApproxSurface approx(new Geom_RectangularTrimmedSurface(exact, u0, u1, v0, v1),
+                                     bound,
+                                     GeomAbs_C0,
+                                     GeomAbs_C0,
+                                     9,
+                                     9,
+                                     1000,
+                                     0);
+    if (approx.IsDone() && approx.HasResult())
+    {
+      spline = approx.Surface();
+      error  = approx.MaxError();
+    }
+  }
+  catch (const Standard_Failure&)
+  {
+  }
+  if (spline.IsNull() || !(error <= bound))
+    return false;
+  // The edges' curves on the face are kept by its surface: read them off before the surface
+  // changes, and put them back on the new one (a seam's two).
+  struct OnFace
+  {
+    TopoDS_Edge          edge;
+    Handle(Geom2d_Curve) one, two;
+    double               first, last;
+  };
+  std::vector<OnFace> curves;
+  for (TopExp_Explorer e(made, TopAbs_EDGE); e.More(); e.Next())
+  {
+    const TopoDS_Edge edge = TopoDS::Edge(e.Current());
+    OnFace            on{edge, {}, {}, 0.0, 0.0};
+    on.one = BRep_Tool::CurveOnSurface(TopoDS::Edge(edge.Oriented(TopAbs_FORWARD)),
+                                       made,
+                                       on.first,
+                                       on.last);
+    if (BRep_Tool::IsClosed(edge, made))
+      on.two = BRep_Tool::CurveOnSurface(TopoDS::Edge(edge.Oriented(TopAbs_REVERSED)),
+                                         made,
+                                         on.first,
+                                         on.last);
+    if (std::none_of(curves.begin(), curves.end(), [&](const OnFace& o) {
+          return o.edge.IsSame(edge);
+        }))
+      curves.push_back(on);
+  }
+  // The old curves go with the old surface, which a saved file would otherwise still carry.
+  for (const OnFace& on : curves)
+    if (on.two.IsNull())
+      builder.UpdateEdge(on.edge, Handle(Geom2d_Curve)(), made, BRep_Tool::Tolerance(on.edge));
+    else
+      builder.UpdateEdge(on.edge,
+                         Handle(Geom2d_Curve)(),
+                         Handle(Geom2d_Curve)(),
+                         made,
+                         BRep_Tool::Tolerance(on.edge));
+  // So do the vertices' points on its curves (where an edge has no curve of its own, a pole),
+  // and the edges' records of how smoothly two faces meet across them.
+  const Handle(Geom_Surface) old = BRep_Tool::Surface(made);
+  struct Smooth
+  {
+    TopoDS_Edge   edge;
+    GeomAbs_Shape continuity;
+  };
+  std::vector<Smooth> smooth;
+  for (const OnFace& on : curves)
+  {
+    auto& reps = Handle(BRep_TEdge)::DownCast(on.edge.TShape())->ChangeCurves();
+    for (NCollection_List<Handle(BRep_CurveRepresentation)>::Iterator it(reps); it.More();)
+      if (it.Value()->IsRegularity()
+          && (it.Value()->Surface() == old || it.Value()->Surface2() == old))
+      {
+        smooth.push_back({on.edge, it.Value()->Continuity()});
+        reps.Remove(it);
+      }
+      else
+        it.Next();
+  }
+  for (TopExp_Explorer v(made, TopAbs_VERTEX); v.More(); v.Next())
+  {
+    auto& points = Handle(BRep_TVertex)::DownCast(v.Current().TShape())->ChangePoints();
+    for (NCollection_List<Handle(BRep_PointRepresentation)>::Iterator it(points); it.More();)
+      if ((it.Value()->IsPointOnCurveOnSurface() || it.Value()->IsPointOnSurface())
+          && it.Value()->Surface() == old)
+        points.Remove(it);
+      else
+        it.Next();
+  }
+  builder.UpdateFace(made, spline, TopLoc_Location(), BRep_Tool::Tolerance(made));
+  for (const OnFace& on : curves)
+  {
+    const double edgeTolerance = BRep_Tool::Tolerance(on.edge) + error;
+    if (on.two.IsNull())
+      builder.UpdateEdge(on.edge, on.one, made, edgeTolerance);
+    else
+      builder.UpdateEdge(on.edge, on.one, on.two, made, edgeTolerance);
+    builder.Range(on.edge, made, on.first, on.last);
+    if (BRep_Tool::Degenerated(on.edge))
+      for (TopExp_Explorer v(on.edge, TopAbs_VERTEX); v.More(); v.Next())
+        builder.UpdateVertex(TopoDS::Vertex(v.Current()),
+                             v.Current().Orientation() == TopAbs_FORWARD ? on.first : on.last,
+                             on.edge,
+                             made,
+                             BRep_Tool::Tolerance(TopoDS::Vertex(v.Current())));
+  }
+  for (TopExp_Explorer v(made, TopAbs_VERTEX); v.More(); v.Next())
+    builder.UpdateVertex(TopoDS::Vertex(v.Current()),
+                         BRep_Tool::Tolerance(TopoDS::Vertex(v.Current())) + error);
+  for (const Smooth& at : smooth)
+  {
+    // The face across the edge, as the result now has it.
+    TopoDS_Face across = made;
+    for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next())
+      if (!f.Current().IsSame(made))
+        for (TopExp_Explorer e(f.Current(), TopAbs_EDGE); e.More(); e.Next())
+          if (e.Current().IsSame(at.edge))
+            across = TopoDS::Face(f.Current());
+    builder.Continuity(at.edge, made, across, at.continuity);
+  }
+  return true;
+}
+
+//! Whether the faces of `result` cross each other: BOPAlgo's self-interference check on what the
+//! separation pre-pass (BRepSurfaceExt_FaceSeparation.hxx) cannot prove clear, the pre-pass run on
+//! proxies. An offset surface, which the pre-pass does not read, has a spline proxy within `eps` of
+//! it (asSpline) on a copy, its face's tolerance grown by `eps`: two proxies proven further apart
+//! than their tolerances have their exact faces apart too. That a proxy is one to one says nothing
+//! of its exact face, so an offset face goes to the check by itself as well where the pre-pass
+//! has nothing else of it to check. The result keeps its exact faces.
+bool crossesItself(const TopoDS_Shape& result, double eps)
+{
+  const TopoDS_Shape proxy = BRepBuilderAPI_Copy(result, true, false).Shape();
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> exact, proxies;
+  TopExp::MapShapes(result, TopAbs_FACE, exact);
+  TopExp::MapShapes(proxy, TopAbs_FACE, proxies);
+  if (exact.Extent() != proxies.Extent())
+    return intersectsItself(result);
+  BRep_Builder      builder;
+  std::vector<bool> offset(exact.Extent() + 1, false);
+  for (int i = 1; i <= proxies.Extent(); ++i)
+  {
+    const TopoDS_Face    face    = TopoDS::Face(proxies(i));
+    Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+    while (surface->IsKind(STANDARD_TYPE(Geom_RectangularTrimmedSurface)))
+      surface = Handle(Geom_RectangularTrimmedSurface)::DownCast(surface)->BasisSurface();
+    if (!surface->IsKind(STANDARD_TYPE(Geom_OffsetSurface)))
+      continue;
+    if (!asSpline(proxy, face, BRep_Tool::Surface(face), eps))
+      return intersectsItself(result);
+    builder.UpdateFace(face, BRep_Tool::Tolerance(face) + eps);
+    offset[i] = true;
+  }
+  const auto check = [](const TopoDS_Shape& part) {
+    BOPAlgo_ArgumentAnalyzer analyzer;
+    analyzer.SetShape1(part);
+    analyzer.ArgumentTypeMode() = false;
+    analyzer.SmallEdgeMode()    = false;
+    analyzer.SelfInterMode()    = true;
+    analyzer.Perform();
+    return analyzer.HasFaulty();
+  };
+  std::vector<bool> checked(exact.Extent() + 1, false);
+  for (const TopoDS_Shape& part : unprovenParts(proxy))
+  {
+    TopoDS_Compound counterpart;
+    builder.MakeCompound(counterpart);
+    for (TopExp_Explorer f(part, TopAbs_FACE); f.More(); f.Next())
+    {
+      const int i = proxies.FindIndex(f.Current());
+      if (i == 0)
+        return intersectsItself(result);
+      builder.Add(counterpart, exact(i));
+      checked[i] = true;
+    }
+    if (check(part.ShapeType() == TopAbs_FACE ? exact(proxies.FindIndex(part)) : counterpart))
+      return true;
+  }
+  for (int i = 1; i <= exact.Extent(); ++i)
+    if (offset[i] && !checked[i] && check(exact(i)))
+      return true;
+  return false;
+}
+
 } // namespace
 
 TopoDS_Shape keptOffset(const TopoDS_Shape& body,
@@ -789,11 +1056,23 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
     {
       m.by = distance;
       BRepOffset_Status status;
-      m.surface = BRepOffset::Surface(
-        BRepOffset::CollapseSingularities(m.surface, face, Precision::Confusion()),
-        face.Orientation() == TopAbs_REVERSED ? -distance : distance,
-        status,
-        true);
+      // Checked for continuity (allowC0 false) as the binary BREP reader builds an offset surface
+      // (BinTools_SurfaceSet), so that what is saved loads again. A basis that the check finds
+      // not G1 at a knot (a blend's sheet joined parametrically C0 where its parts meet) has its
+      // offset built unchecked and, once the face's extent is known, replaced by a spline within
+      // a tenth of the tolerance (below), which loads.
+      const Handle(Geom_Surface) basis =
+        BRepOffset::CollapseSingularities(m.surface, face, Precision::Confusion());
+      const double along = face.Orientation() == TopAbs_REVERSED ? -distance : distance;
+      try
+      {
+        m.surface = BRepOffset::Surface(basis, along, status, false);
+      }
+      catch (const Standard_ConstructionError&)
+      {
+        m.surface     = BRepOffset::Surface(basis, along, status, true);
+        m.approximate = true;
+      }
       if (status != BRepOffset_Good || m.surface.IsNull())
       {
         why = "a face is bent more tightly than the distance; its offset surface turns inside out";
@@ -1132,7 +1411,20 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       std::sort(breaks.begin(), breaks.end());
       std::vector<Handle(Geom2d_Curve)> curves;
       double                            error = 0.0, gap = 0.0;
-      const bool                        fitted = interpolate(
+      if (!refit)
+        made.curve = movedLineOrCircle(
+          edge,
+          [&](double t) { return along(*plan, edge, one, t, nullptr); },
+          made.first,
+          made.last,
+          accuracy);
+      if (!made.curve.IsNull())
+        for (int k = 0; k <= 16; ++k)
+        {
+          const double t = made.first + (made.last - made.first) * k / 16;
+          gap = std::max(gap, made.curve->Value(t).Distance(along(*plan, edge, other, t, nullptr)));
+        }
+      const bool fitted = !made.curve.IsNull() || interpolate(
         made.first,
         made.last,
         breaks,
@@ -1337,6 +1629,18 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
     builder.SameRange(edge, true);
     builder.SameParameter(edge, true);
   }
+  // Faces whose offset surface would not load again: a spline over the face's own box.
+  for (TopExp_Explorer all(body, TopAbs_FACE); all.More(); all.Next())
+    if (plan->faces.Find(all.Current()).approximate
+        && !asSpline(result,
+                     TopoDS::Face(modifier.ModifiedShape(all.Current())),
+                     plan->faces.Find(all.Current()).surface,
+                     0.1 * tolerance))
+    {
+      why = "the offset of a face joined at a crease could not be made a spline within the "
+            "tolerance";
+      return {};
+    }
   for (TopExp_Explorer all(body, TopAbs_FACE); all.More(); all.Next())
     lineage.set(all.Current(), {modifier.ModifiedShape(all.Current())});
   lineage.within(result);
@@ -1361,28 +1665,37 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
     gp_Vec normal = su.Crossed(sv);
     if (source.Orientation() == TopAbs_REVERSED)
       normal.Reverse();
-    // At a pole the side is not defined; the distance alone is checked there.
-    const double signed_ = normal.Magnitude() > gp::Resolution()
-                             ? gp_Vec(at, p).Dot(normal.Normalized())
-                             : std::copysign(at.Distance(p), m.by);
+    // At a pole S_u x S_v vanishes against the derivatives' own size and its direction is
+    // rounding (GeomLProp's limit there can point either way): the distance alone is checked.
+    // Judgement: a millionth of |S_u|^2 + |S_v|^2 counts as vanished.
+    const bool   pole    = normal.Magnitude() <= 1e-6 * (su.SquareMagnitude() + sv.SquareMagnitude());
+    const double signed_ = pole ? std::copysign(at.Distance(p), m.by)
+                                : gp_Vec(at, p).Dot(normal.Normalized());
     return std::abs(signed_ - m.by) <= tolerance && std::abs(at.Distance(p) - std::abs(m.by)) <= tolerance;
   };
   for (TopExp_Explorer all(body, TopAbs_FACE); all.More(); all.Next())
   {
     const TopoDS_Face source = TopoDS::Face(all.Current());
     const TopoDS_Face made   = TopoDS::Face(modifier.ModifiedShape(source));
-    for (const gp_Pnt& p : pointsInside(made, 5))
-    {
-      GeomAPI_ProjectPointOnSurf near(p, BRep_Tool::Surface(made));
-      double                     u = 0.0, v = 0.0;
-      if (near.NbPoints() > 0)
-        near.LowerDistanceParameters(u, v);
-      if (near.NbPoints() == 0 || !atDistance(source, p, u, v))
+    // Points inside the face on a 5 x 5 grid of its parameter box: a point (u, v) of the moved
+    // surface, from whose (u, v) the foot on the source is found.
+    const BRepAdaptor_Surface  box(made, false);
+    BRepTopAdaptor_FClass2d    inside(made, Precision::PConfusion());
+    const Handle(Geom_Surface) movedSurface = BRep_Tool::Surface(made);
+    const double u0 = box.FirstUParameter(), u1 = box.LastUParameter(),
+                 v0 = box.FirstVParameter(), v1 = box.LastVParameter();
+    for (int i = 0; i < 5; ++i)
+      for (int j = 0; j < 5; ++j)
       {
-        why = "a face of the result is not at the distance from its source";
-        return {};
+        const double u = u0 + (u1 - u0) * (i + 0.5) / 5, v = v0 + (v1 - v0) * (j + 0.5) / 5;
+        if (inside.Perform(gp_Pnt2d(u, v)) != TopAbs_IN)
+          continue;
+        if (!atDistance(source, movedSurface->Value(u, v), u, v))
+        {
+          why = "a face of the result is not at the distance from its source";
+          return {};
+        }
       }
-    }
   }
   for (int i = 1; i <= facesOfEdge.Extent(); ++i)
   {
@@ -1410,7 +1723,7 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       }
     }
   }
-  if (intersectsItself(result))
+  if (crossesItself(result, 0.01 * tolerance))
   {
     why = "the faces moved with their topology kept cross each other";
     return {};
