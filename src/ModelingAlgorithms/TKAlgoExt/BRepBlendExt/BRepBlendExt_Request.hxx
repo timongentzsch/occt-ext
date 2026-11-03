@@ -60,12 +60,12 @@ struct Request
   //! kept whatever it holds).
   std::vector<TopoDS_Shape> mayAdd;
   //! A size that changes along an edge: for edges[i], where radii[i] is not empty, (place, size)
-  //! pairs, the place a fraction of the edge's parameter range from its first parameter to its last,
-  //! the size that of `first` there (`second` keeps its ratio to it), interpolated by the cubic
-  //! spline with no curvature at its ends (periodic round an edge that closes), as the reference modeller's
-  //! variable blends are. Each section is the one of that size in the ball's plane across the edge.
-  //! For a round, a conic or a G2 blend of equal distances, or a chamfer; such edges add no tangent
-  //! edges.
+  //! pairs, the place a fraction of the edge's parameter range from its first parameter to its
+  //! last, the size that of `first` there (`second` keeps its ratio to it), interpolated by the
+  //! cubic spline with no curvature at its ends (periodic round an edge that closes), as
+  //! The reference modeller's variable blends are. Each section is the one of that size in the ball's plane
+  //! across the edge. For a round, a conic or a G2 blend of equal distances, or a chamfer; such
+  //! edges add no tangent edges.
   std::vector<std::vector<std::pair<double, double>>> radii;
   //! For a full round, the radius it must have all along: the two rounds of this radius whose
   //! contacts meet on the face between, made as two faces meeting where they touch it.

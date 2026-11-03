@@ -671,3 +671,224 @@ TEST(BRepBlendExt, RoundOfASphereOnAPlaneWhoseSizeChangesHasCircularSections)
   EXPECT_GT(count, 50);
   EXPECT_LE(std::abs(worst), BRepExt::tolerance::sewing);
 }
+
+// A hole of radius 3 beside the top edge x = 0 of a block, a gap g from the face x = 0. Tangent
+// (g = 0) the body is pinched: the hole meets the face in a line of four faces, which no blend
+// passes; it is refused by name, as the reference modeller refuses it. With a gap the round is made and rolls
+// at distance r from both faces where its ball stays clear of the hole and of the faces that stop
+// the edge.
+TEST(BRepBlendExt, RoundBesideAHoleTangentToItsFaceIsRefusedByName)
+{
+  for (const double gap : {0.0, 0.25, 1.0})
+  {
+    const TopoDS_Shape body =
+      BRepAlgoAPI_Cut(
+        BRepPrimAPI_MakeBox(20, 20, 20).Shape(),
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(3 + gap, 10, -5), gp::DZ()), 3, 30).Shape())
+        .Shape();
+    const auto edges = edgesWhere(body, [](const double* b) {
+      return near(b[2], 20) && near(b[5], 20) && b[3] < 1e-6;
+    });
+    ASSERT_FALSE(edges.empty());
+    const double r = 2;
+    if (gap == 0)
+    {
+      try
+      {
+        BRepExt::blend2::blend(roundOf(body, edges, r));
+        ADD_FAILURE() << "a pinched body was blended";
+      }
+      catch (const BRepExt::Failure& refused)
+      {
+        EXPECT_NE(std::string(refused.what()).find("pinched"), std::string::npos) << refused.what();
+      }
+      continue;
+    }
+    const TopoDS_Shape made = BRepExt::blend2::blend(roundOf(body, edges, r)).shape;
+    EXPECT_TRUE(BRepExt::invalidity(made).empty()) << gap;
+    const Defect defect = ballDefect(made, body, r, [&](const gp_Pnt& c) {
+      return std::hypot(c.X() - 3 - gap, c.Y() - 10) > 3 + r && c.Y() > r && c.Y() < 20 - r;
+    });
+    ASSERT_GT(defect.samples, 0);
+    EXPECT_LE(std::abs(defect.worst), BRepExt::tolerance::sewing) << gap;
+  }
+}
+
+// The top rim of a cylinder of radius R whose side is h high, rounded or chamfered by r >= h: the
+// side is used up (the reference modeller makes these, one face of the blend between the two caps). The round's
+// ball rests on the top and on the bottom rim, its centre (R - sqrt(r^2 - (r - h)^2), h - r) in the
+// plane through the axis, and the chamfer's bevel from the top's foot at 45 degrees runs on to the
+// bottom, which cuts it. Each removes pi times the integral over z of R^2 - x(z)^2, x(z) the
+// section's distance from the axis: in closed form for the bevel, and for the arc by its angle (z =
+// c + r sin t), where the integrand is smooth. h = r is the side exactly as high as the ball is
+// wide.
+TEST(BRepBlendExt, BlendOfARimOverASideNarrowerThanItUsesTheSideUp)
+{
+  const double R = 10;
+  for (const auto& [h, r] :
+       std::vector<std::pair<double, double>>{{1, 1}, {1, 3}, {2, 3}, {0.5, 1}})
+    for (const bool chamfer : {false, true})
+    {
+      const TopoDS_Shape cylinder = BRepPrimAPI_MakeCylinder(R, h).Shape();
+      const auto         rim =
+        edgesWhere(cylinder, [&](const double* b) { return near(b[2], h) && near(b[5], h); });
+      ASSERT_EQ(rim.size(), 1u);
+      BRepExt::blend2::Request request = roundOf(cylinder, rim, r);
+      if (chamfer)
+        request.law = BRepExt::blend2::Law::Chamfer;
+      const TopoDS_Shape made = blended(request);
+      if (made.IsNull())
+        continue;
+      EXPECT_TRUE(BRepExt::invalidity(made).empty()) << h << " " << r << " " << chamfer;
+      int faces = 0;
+      for (TopExp_Explorer f(made, TopAbs_FACE); f.More(); f.Next())
+        ++faces;
+      EXPECT_EQ(faces, 3) << h << " " << r << " " << chamfer;
+      double removed = 0;
+      if (chamfer)
+      {
+        // x(z) = R - r + (h - z) for z down to 0: pi times the integral of R^2 - x^2.
+        const auto F = [&](double z) {
+          const double x = R - r + h - z;
+          return R * R * z + x * x * x / 3;
+        };
+        removed = M_PI * (F(h) - F(0));
+      }
+      else
+      {
+        const double  cz = h - r, cx = R - std::sqrt(r * r - cz * cz);
+        const double  t0    = std::asin(-cz / r);
+        constexpr int spans = 2000;
+        for (int i = 0; i <= spans; ++i)
+        {
+          const double t = t0 + (M_PI / 2 - t0) * i / spans, x = cx + r * std::cos(t);
+          removed += (i == 0 || i == spans ? 1 : i % 2 ? 4 : 2) * (R * R - x * x) * r * std::cos(t);
+        }
+        removed *= M_PI * (M_PI / 2 - t0) / spans / 3;
+      }
+      // The round's sheet is exact (a torus); the bevel's edge on the bottom is interpolated
+      // through its crossings with the cone to the length tolerance, so the volume is within that
+      // over the bevel's area (at most the cone's from the top's foot to the side's).
+      EXPECT_NEAR(volume(made),
+                  M_PI * R * R * h - removed,
+                  chamfer ? BRepExt::tolerance::length * M_PI * (2 * R - r) * r * M_SQRT2
+                          : 1e-9 * M_PI * R * R * h)
+        << h << " " << r << " " << chamfer;
+    }
+}
+
+// The rim of a hole of radius R leaning a through a plate t thick (the slanted-rim family of the application's
+// tests), rounded by r. The balls' centres lie r below the top and R + r from the hole's axis: on
+// an ellipse of semi-axes R + r and (R + r) / cos a, whose radius of curvature at its acute end is
+// (R + r) cos a. Below that the round is the balls' envelope, every point r from the ellipse (at 75
+// degrees its sections turn by up to 165 degrees and are made of two spans); past it (r / (R + r)
+// >= cos a) the envelope crosses itself, and v2 refuses it by name, as the reference modeller trims it there:
+// these are exactly the members the reference modeller splits into 11 faces.
+TEST(BRepBlendExt, RoundOfASteepRimIsTheBallsWhereItDoesNotCrossItself)
+{
+  struct Member
+  {
+    double t, R, r;
+  };
+
+  for (const double degrees : {70.0, 75.0, 80.0})
+    for (const Member& m :
+         {Member{4, 1, 0.5}, Member{4, 2, 0.5}, Member{8, 1, 0.3}, Member{8, 2, 1}})
+    {
+      const double a = degrees * M_PI / 180;
+      const double size =
+        std::max(20.0, 2 * std::ceil(m.t / 2 * std::tan(a) + m.R / std::cos(a) + 3));
+      const double height = std::max(4 * m.t + 8 * m.R, 2 * m.t / std::cos(a) + 8 * m.R);
+      gp_Trsf      tilt;
+      tilt.SetRotation(gp_Ax1(gp_Pnt(size / 2, size / 2, m.t / 2), gp::DX()), a);
+      const TopoDS_Shape hole =
+        BRepBuilderAPI_Transform(
+          BRepPrimAPI_MakeCylinder(
+            gp_Ax2(gp_Pnt(size / 2, size / 2, m.t / 2 - height / 2), gp::DZ()),
+            m.R,
+            height)
+            .Shape(),
+          tilt,
+          true)
+          .Shape();
+      const TopoDS_Shape plate =
+        BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(size, size, m.t).Shape(), hole).Shape();
+      std::vector<TopoDS_Edge> rim;
+      for (const TopoDS_Edge& e :
+           edgesWhere(plate, [&](const double* b) { return b[5] > m.t - 1e-6; }))
+      {
+        const BRepAdaptor_Curve c(e);
+        bool                    top = c.GetType() != GeomAbs_Line;
+        for (const double s : {0.1, 0.5, 0.9})
+          top = top
+                && c.Value(c.FirstParameter() + (c.LastParameter() - c.FirstParameter()) * s).Z()
+                     > m.t - 1e-6;
+        if (top)
+          rim.push_back(e);
+      }
+      ASSERT_FALSE(rim.empty());
+      const bool crosses = m.r / (m.R + m.r) >= std::cos(a);
+      SCOPED_TRACE(std::to_string(degrees) + " t" + std::to_string(m.t) + " R"
+                   + std::to_string(m.R));
+      try
+      {
+        const TopoDS_Shape made = BRepExt::blend2::blend(roundOf(plate, rim, m.r)).shape;
+        EXPECT_FALSE(crosses) << "a crossing envelope was delivered";
+        EXPECT_TRUE(BRepExt::invalidity(made).empty());
+        // Every point of the blend r from the centres' ellipse: about the axis through (size/2,
+        // size/2, t/2) along (0, -sin a, cos a), the circle of radius R + r in the plane z = t - r.
+        const gp_Pnt O(size / 2, size / 2, m.t / 2);
+        const gp_Dir d(0, -std::sin(a), std::cos(a));
+        const gp_Dir e1 = gp::DX(), e2 = d.Crossed(e1);
+        const auto   centre = [&](double q) {
+          const gp_Vec radial =
+            gp_Vec(e1) * std::cos(q) * (m.R + m.r) + gp_Vec(e2) * std::sin(q) * (m.R + m.r);
+          const double along = (m.t - m.r - O.Z() - radial.Z()) / d.Z();
+          return O.Translated(gp_Vec(d) * along + radial);
+        };
+        double worst = 0;
+        int    count = 0;
+        for (const TopoDS_Face& face : facesWhere(made, [](const double*) { return true; }))
+        {
+          const BRepAdaptor_Surface surface(face);
+          if (surface.GetType() == GeomAbs_Plane || surface.GetType() == GeomAbs_Cylinder)
+            continue;
+          double u0, u1, v0, v1;
+          BRepTools::UVBounds(face, u0, u1, v0, v1);
+          for (int i = 1; i < 16; ++i)
+            for (int j = 1; j < 16; ++j)
+            {
+              const double u = u0 + (u1 - u0) * i / 16, v = v0 + (v1 - v0) * j / 16;
+              if (BRepClass_FaceClassifier(face, gp_Pnt2d(u, v), 1e-7).State() != TopAbs_IN)
+                continue;
+              const gp_Pnt p    = surface.Value(u, v);
+              const auto   gap  = [&](double q) { return p.Distance(centre(q)); };
+              int          best = 0;
+              for (int k = 1; k < 720; ++k)
+                if (gap(k * M_PI / 360) < gap(best * M_PI / 360))
+                  best = k;
+              double lo = (best - 1) * M_PI / 360, hi = (best + 1) * M_PI / 360;
+              for (int k = 0; k < 100; ++k)
+              {
+                const double x = lo + (hi - lo) / 3, y = hi - (hi - lo) / 3;
+                if (gap(x) < gap(y))
+                  hi = y;
+                else
+                  lo = x;
+              }
+              worst = std::max(worst, std::abs(gap((lo + hi) / 2) - m.r));
+              ++count;
+            }
+        }
+        EXPECT_GT(count, 50);
+        EXPECT_LE(worst, 1e-6 * std::max(1.0, m.r));
+      }
+      catch (const BRepExt::Failure& refused)
+      {
+        EXPECT_TRUE(crosses) << refused.what();
+        if (crosses && degrees < 80)
+          EXPECT_NE(std::string(refused.what()).find("crosses itself"), std::string::npos)
+            << refused.what();
+      }
+    }
+}

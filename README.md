@@ -228,8 +228,8 @@ Known limits and what remains:
    steady angle is blended at any opening from 5 to 175 degrees, convex or concave (measured on planes,
    plane and cylinder, two cylinders). Where the angle turns along the edge so far that the balls' centre
    path bends more tightly than the ball (the rim of a hole leaning a with r >= (R + r) cos a: from about
-   70 degrees), the rolling-ball surface crosses itself and is refused until it is trimmed there, as
-   the reference modeller trims it; just short of that the fit can miss its tolerance (lean 75 for r = R / 4).
+   70 degrees), the rolling-ball surface crosses itself and is refused by name until it is trimmed there,
+   as the reference modeller trims it (it splits exactly those rims); short of that the rim is the balls' envelope.
 2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published
    bound for a curvature-continuous conic or quintic section as a function of the support's curvature is
    missing.

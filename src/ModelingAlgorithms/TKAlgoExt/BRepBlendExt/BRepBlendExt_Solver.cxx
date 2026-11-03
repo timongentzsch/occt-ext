@@ -30,6 +30,7 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <ElCLib.hxx>
+#include <Extrema_ExtPC.hxx>
 
 namespace BRepExt::blend2
 {
@@ -1717,6 +1718,73 @@ Inside& Blend::inside(const TopoDS_Face& face)
   return insides.emplace_back(face);
 }
 
+//! Refused where the fitted blend crosses itself between its contacts: the envelope of the balls
+//! along a path that bends more tightly than the ball (a pipe surface c + r (cos a N + sin a B)
+//! moves along the path at |c'| (1 - kappa r cos a), which changes sign there), so its sections
+//! run back against the way the balls roll. Read off the sheet: S_u against the station's rolling
+//! direction, at 65 x 7 places; where it turns against it, the surface has folded. The reference modeller trims
+//! the blend there, which v2 does not yet.
+static void checkCrossing(const Rail& rail, Stations& stations, const Fitted& fitted)
+{
+  if (fitted.blend.IsNull())
+    return;
+  // Where a contact runs back, its loop is patched or refused as a fold of the contact
+  // (capFolds, checkFold): this is the crossing between contacts that both roll on.
+  Dips dips{rail, fitted};
+  if (runsBack(dips))
+    return;
+  constexpr int along = 64, across = 8;
+  for (int i = 0; i <= along; ++i)
+  {
+    const double u = double(i) / along;
+    Station      s;
+    if (!stations.at(rail.t(u), s))
+      continue;
+    for (int j = 1; j < across; ++j)
+    {
+      gp_Pnt p;
+      gp_Vec du, dv;
+      fitted.blend->D1(u, double(j) / across, p, du, dv);
+      if (du.Dot(s.along) < -limit::agree * du.Magnitude() - 1e-3 * du.Magnitude())
+        fail(rail.op,
+             unsupported_geometry,
+             "the blend crosses itself between its contacts, where the balls' path bends more "
+             "tightly than the ball, which v2 does not trim yet",
+             {rail.edge},
+             FailureKind::Curvature);
+    }
+  }
+}
+
+//! Whether a conic section of the rail turns by more than 120 degrees somewhere along its edge
+//! (Rail::halves): the angle between the faces' normals at the edge's points, which the section
+//! turns by. Sampled at 17 places.
+static bool turnsWide(const Rail& rail)
+{
+  if (rail.law != Law::Conic && rail.law != Law::Chordal)
+    return false;
+  constexpr int samples = 16;
+  for (int k = 0; k <= samples; ++k)
+  {
+    const double t = rail.first + (rail.last - rail.first) * k / samples;
+    gp_Vec       n[2];
+    bool         found = true;
+    for (int i = 0; i < 2 && found; ++i)
+    {
+      double     f, l;
+      const auto pcurve = BRep_Tool::CurveOnSurface(rail.edge, rail.s[i].face, f, l);
+      Jet        j;
+      found = !pcurve.IsNull() && !rail.s[i].cliffCurve
+              && jetAt(rail.s[i], pcurve->Value(t).X(), pcurve->Value(t).Y(), j);
+      if (found)
+        n[i] = j.n;
+    }
+    if (found && n[0].Angle(n[1]) > 2 * M_PI / 3)
+      return true;
+  }
+  return false;
+}
+
 //! The rail's size law (Rail::sizes) from the (place, size) pairs asked for its edge: the factor on
 //! its distances by the edge's parameter, positive all along; round an edge that closes, the size
 //! must end as it begins. Its scale is the largest.
@@ -1828,7 +1896,8 @@ void Blend::rails()
       pieces.pop_back();
       continue;
     }
-    rail.sigma = kind;
+    rail.sigma  = kind;
+    rail.halves = turnsWide(rail);
     TopoDS_Vertex start, end;
     TopExp::Vertices(edge, start, end);
     rail.closed   = !start.IsNull() && start.IsSame(end);
@@ -2382,6 +2451,20 @@ static bool acrossSeam(const Handle(Geom2d_BSplineCurve)& contact,
 
 void Blend::sheets()
 {
+  // Sections in two spans along a whole chain, or along none of it: its sections share their
+  // form at its joints.
+  for (bool changed = true; changed;)
+  {
+    changed = false;
+    for (auto& piece : pieces)
+      for (const auto& joint : piece.joint)
+        if ((joint.meets == Meets::Joint || joint.meets == Meets::Split)
+            && pieces[joint.piece].rail.halves != piece.rail.halves)
+        {
+          pieces[joint.piece].rail.halves = piece.rail.halves = true;
+          changed                                             = true;
+        }
+  }
   // Each piece's blend, exact where every piece of its chain can be; a chain's sections then
   // share one parameter at each joint.
   // Where a contact leaves its face across a smooth edge onto the next face, the piece is split
@@ -2540,6 +2623,8 @@ void Blend::sheets()
           return;
         }
         piece.sheet = exact ? *exact : Sheet{piece.fitted.blend};
+        if (!exact)
+          checkCrossing(piece.rail, stations, piece.fitted);
       }
       const bool onCliff = piece.rail.s[0].cliffCurve || piece.rail.s[1].cliffCurve
                            || !piece.rail.s[0].trim.IsNull() || !piece.rail.s[1].trim.IsNull();
@@ -2574,12 +2659,35 @@ void Blend::sheets()
       int off = 0, offSide = -1;
       for (int s2 = 0; s2 < 2; ++s2)
       {
-        Inside&    onFace = inside(piece.rail.s[s2].face);
+        Inside& onFace = inside(piece.rail.s[s2].face);
+        // On the face's far edge all along counts as off it: the ball rests on the face and that
+        // edge at once (a side exactly as high as the ball is wide), and the blend uses the face
+        // up as where the side is narrower.
+        const auto        far = farEdge(piece.rail, s2);
+        BRepAdaptor_Curve farCurve;
+        if (far)
+          farCurve.Initialize(far->edge);
+        const auto onFar = [&](double u) {
+          if (!far)
+            return false;
+          const gp_Pnt2d      uv = piece.fitted.contact[s2]->Value(u);
+          const gp_Pnt        p  = footAt(piece.rail.s[s2], uv.X(), uv.Y());
+          const Extrema_ExtPC to(p, farCurve);
+          if (!to.IsDone() || to.NbExt() == 0)
+            return false;
+          double nearest = HUGE_VAL;
+          for (int i = 1; i <= to.NbExt(); ++i)
+            nearest = std::min(nearest, to.SquareDistance(i));
+          return std::sqrt(nearest) <= piece.rail.resolved(limit::together);
+        };
         const auto out = [&](double u) { return onFace.out(piece.fitted.contact[s2]->Value(u)); };
-        bool       wholly = true;
-        for (int i = 0; i <= samples && wholly; i += samples / 16)
-          wholly = out(u0 + (u1 - u0) * i / samples);
-        if (!wholly)
+        bool       wholly = true, along = true;
+        for (int i = 0; i <= samples && (wholly || along); i += samples / 16)
+        {
+          wholly = wholly && out(u0 + (u1 - u0) * i / samples);
+          along  = along && onFar(u0 + (u1 - u0) * i / samples);
+        }
+        if (!wholly && !along)
           continue;
         ++off;
         offSide = s2;
@@ -2623,8 +2731,9 @@ void Blend::sheets()
           --attempt;
           continue;
         }
-        // Else the face beyond the far edge trims the blend (a notch), between stops.
-        if (far && !blended(far->edge) && stopped)
+        // Else the face beyond the far edge trims the blend (a notch), between stops or round a
+        // closed edge.
+        if (far && !blended(far->edge) && (stopped || piece.rail.closed))
         {
           TopoDS_Face beyond;
           for (const auto& face : facesOfEdge.FindFromKey(far->edge))

@@ -678,10 +678,15 @@ void Attach::chainEnds()
         // One corner on each side, where both pieces' contacts end.
         for (int side = 0; side < 2; ++side)
         {
-          const int    to    = side ^ int(joint.swapped);
-          const gp_Pnt point = sheet.contact(side)->Value(sheet.rail(here));
+          const int to = side ^ int(joint.swapped);
+          // Round a closed edge whose narrow face the blend uses up (a notch), the corner is on
+          // the blend's edge on the face beyond.
+          const bool   notched = joint.piece == k && !rail.s[side].trim.IsNull();
+          const gp_Pnt point   = notched ? trimOf(k, side).curve->Value(sheet.rail(here))
+                                         : sheet.contact(side)->Value(sheet.rail(here));
           const double gap =
-            point.Distance(other.sheet.contact(to)->Value(other.sheet.rail(there)));
+            point.Distance(notched ? trimOf(k, side).curve->Value(sheet.rail(there))
+                                   : other.sheet.contact(to)->Value(other.sheet.rail(there)));
           if (gap > rail.resolved(limit::together))
             fail(op,
                  unsupported_geometry,
@@ -837,6 +842,15 @@ void Attach::chainEnds()
             {
               if (sweepToPole(TopoDS::Edge(shape), ends[end]))
                 continue;
+              // A body pinched at the joint (a hole tangent to a support there, which meets it in
+              // a line of four faces): no blend passes it (the reference modeller refuses it too).
+              for (const auto& near : edgesOfVertex.FindFromKey(ends[end]))
+                if (facesOfEdge.Contains(near) && facesOfEdge.FindFromKey(near).Extent() > 2)
+                  fail(op,
+                       invalid_input,
+                       "the body is pinched where the edge's blend would pass: more than two faces "
+                       "meet along an edge at its vertex (a hole tangent to a face beside it)",
+                       {rail.edge, near});
               fail(op,
                    unsupported_geometry,
                    "the contact of a chain's blend leaves the edge between its faces there, which "
@@ -851,9 +865,23 @@ void Attach::chainEnds()
         // A split's parts are one face: no section between them.
         if (joint.meets == Meets::Split)
           continue;
-        const TopoDS_Edge x =
-          isoSection(sheet, sheet.rail(here), corner[k][0][end], corner[k][1][end]);
-        double lo, hi;
+        // Where a closed blend's side is a notch, its section ends on the face beyond.
+        double reach[2] = {sheet.across[0], sheet.across[1]};
+        if (joint.piece == k)
+          for (int side = 0; side < 2; ++side)
+            if (!rail.s[side].trim.IsNull())
+            {
+              const gp_Pnt2d at = trimOf(k, side).onSheet->Value(sheet.rail(here));
+              reach[side]       = sheet.swapped ? at.X() : at.Y();
+            }
+        const TopoDS_Edge x = edgeBetween(sheet.section(sheet.rail(here)),
+                                          corner[k][0][end],
+                                          reach[0],
+                                          corner[k][1][end],
+                                          reach[1],
+                                          {},
+                                          tol::length);
+        double            lo, hi;
         BRep_Tool::Range(x, lo, hi);
         if (joint.piece == k || other.sheet.surface == sheet.surface)
         {
@@ -4251,10 +4279,12 @@ void Attach::contacts()
                         {{trim.onSheet, sheet.surface, {}}, {onBeyond, surface, location}},
                         tolerance);
         }
-        if (piece.rail.law == Law::Full)
+        if (piece.rail.law == Law::Full || (piece.rail.closed && notch.cliffWhole))
         {
           // A full round's contact takes the far edge's place in the face beyond, running
-          // as it ran (round a closed edge the contact is a loop of its own).
+          // as it ran (round a closed edge the contact is a loop of its own); so does a
+          // closed blend's that uses up its narrow face (a chamfer rolling off a cylinder's
+          // side onto its other cap).
           editOf(edits, notch.trim)
             .replace.Bind(notch.trimEdge, sameWay(contact[k][side], notch.trimEdge));
           removed.push_back(notch.face);

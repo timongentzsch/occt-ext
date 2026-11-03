@@ -314,6 +314,12 @@ struct Rail
   bool byCentre = false;
   //! A split changes the rolling supports, not the original edge's parameter frame.
   std::optional<std::array<Side, 2>> parameterSupports;
+  //! Whether a conic section is made of two spans, split at its middle: where the faces meet so
+  //! sharply somewhere along the edge that it turns by more than 120 degrees (Blend::rails), past
+  //! which one rational quadratic's middle weight cos(turn / 2) falls below a half and its apex
+  //! runs far off the section, ill-conditioned for the fit. Shared along a chain.
+  bool halves = false;
+
   //! The factor on the distances along the edge, by its parameter (Request::radii); empty where
   //! they keep one size.
   SizeLaw sizes;

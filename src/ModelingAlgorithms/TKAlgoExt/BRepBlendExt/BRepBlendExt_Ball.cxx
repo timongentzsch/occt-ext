@@ -682,6 +682,20 @@ static bool frameTangents(const Rail&                      rail,
   return true;
 }
 
+//! A rational quadratic split at its middle into two (Rail::halves): de Casteljau on the
+//! homogeneous poles, so the curve is the same.
+static void halve(Section& out)
+{
+  const double w  = out.weights[1];
+  const gp_XYZ A0 = out.poles[0].XYZ(), A1 = out.poles[1].XYZ() * w, A2 = out.poles[2].XYZ();
+  const double b = (1 + w) / 2, m = (1 + w) / 2;
+  const gp_XYZ B1 = (A0 + A1) / 2, M = (A0 + A1 * 2 + A2) / 4, C1 = (A1 + A2) / 2;
+  out.poles          = {out.poles[0], gp_Pnt(B1 / b), gp_Pnt(M / m), gp_Pnt(C1 / b), out.poles[2]};
+  out.weights        = {1, b, m, b, 1};
+  out.knots          = {0, 0.5, 1};
+  out.multiplicities = {3, 2, 3};
+}
+
 bool sectionAt(const Rail& rail, const Station& s, Section& out)
 {
   return sectionAt(rail, s, out, {});
@@ -715,6 +729,8 @@ bool sectionAt(const Rail&                      rail,
     out.knots          = {0, 1};
     out.multiplicities = {3, 3};
     out.degree         = 2;
+    if (rail.halves)
+      halve(out);
     return true;
   }
   const auto found = sectionCentre(rail, s);
@@ -779,6 +795,8 @@ bool sectionAt(const Rail&                      rail,
       out.knots          = {0, 1};
       out.multiplicities = {3, 3};
       out.degree         = 2;
+      if (rail.halves)
+        halve(out);
       return true;
     case Law::G2: {
 

@@ -59,9 +59,21 @@ it is the regularity condition of a pipe surface in Maekawa, Patrikalakis, Sakka
 1998, not read here); on the rim the arc between the
 contacts passes through that normal at the acute end, so the surface crosses itself once
 r >= (R + r) cos a: from a = 70.5 degrees for r = R / 2, 78.5 for r = R / 4. The contacts themselves do
-not fold there (their speed along the path is s'^2 + R (R + r) |u'|^2 over |c'|, positive). Such rims are
-refused, as before, until the blend is trimmed where it crosses itself; the reference modeller trims it from
-75 degrees.
+not fold there (their speed along the path is s'^2 + R (R + r) |u'|^2 over |c'|, positive).
+Just short of the crossing the fit missed its tolerance (lean 75 for r = R / 4): there the section
+turns by up to 165 degrees, and a single rational quadratic's middle weight cos(turn / 2) falls to
+0.13 with its apex 7.6 r off the arc, which the fit cannot follow as it moves. A conic section that
+turns by more than 120 degrees anywhere along the edge (the faces' normals at its points; along a
+whole chain) is therefore made of two spans, split at its middle by de Casteljau on the homogeneous
+poles, the same curve (the 120 degrees, where the weight is a half, is a judgement; the 5040 straight
+wedges are unchanged to 1e-9 of their volume). Where the surface does cross itself, the fitted sheet's
+sections run back against the way the balls roll (S_u . (n0 x n1) < 0, sampled 65 x 7 places): refused
+by name. Measured (the same 16 rims): the reference modeller makes the exact rolling ball
+(8 faces) at 70 degrees and at 75 for the two rims with r / (R + r) < cos 75, and splits the blend
+(11 faces, off the ball by up to 0.34 mm) for the other two at 75 and all at 80 and 85: exactly the
+criterion above. v2 now makes all four at 70 and the two at 75 as the balls' envelope (every point r
+from the centres' ellipse to 1e-6), and refuses the crossing ones; trimming them is open. The reference modeller
+refuses G2 on every one of these rims.
 
 *A size that changes along the edge* (`Request::radii`, `blendRange`). As the reference modeller makes it,
 measured on its own results (its exported bodies of variable rounds, conics and G2 blends, sectioned across
@@ -99,6 +111,23 @@ and 1e3; a cylinder's rim (periodic) and, held out, the ring of a sphere on a pl
 1e-6; chamfers of a growing setback, also at 30 degrees off a reference face and within a range, remove
 the integral of their sections to 1e-9. G2 in the application (the audit's variable
 and range rows): seams G1 to 0.01 degrees and G2 to 1e-4 / r.
+
+*Over a side narrower than the blend, and a pinched body.* Where the contact on a face lies past the
+face's far edge along the whole edge, the face is used up: a round's ball rests on the far edge instead
+(a cliff), any other section is cut by the face beyond the far edge (a notch). A contact that lies on
+the far edge itself (a side exactly as high as the ball is wide) is taken the same way, as the ball
+there rests on the face and its edge at once. Round a closed edge (a cylinder's rim over its side) the
+notch's edge on the face beyond is a loop of its own, which takes the far edge's place, and the blend's
+seam section ends on it. Measured: the top rim of a cylinder of radius 10 whose side is 0.5 to 2 high,
+rounded or chamfered by 1 to 3 at least as high, keeps three faces and removes pi times the integral of
+R^2 - x(z)^2 (the arc by its angle, the bevel in closed form) to 1e-9 of the body (round) and to the
+length tolerance over the bevel (its edge on the bottom is interpolated); against the reference modeller's meshes of
+the same rims (side 1 to 8, radius 1 and 3) every round and chamfer within 6.5e-7 mm, and its G2 at a
+side as high as the ball within 1e-3 mm^3 of its volume. The reference modeller refuses G2 where the side is lower
+than the ball; v2 makes it (the G2 section cut by the bottom face, its seams G2 to 1e-14 / r).
+A hole tangent to a face beside the edge pinches the body: the hole meets the face in a line along
+which four faces meet. No blend passes it and v2 refuses it by name, as the reference modeller does; with a gap of
+0.25 to 2 every round, chamfer and G2 lies within 1.3e-6 mm (G2 1e-4) of the reference modeller's mesh.
 
 *Unproven.* Every marching limit (step counts, stall windows, Newton tolerances), the carry's stray bound
 (4 r, or 4 / sqrt 2 times the ball's distance at the end in a sharper wedge), the radius/curvature
