@@ -359,7 +359,9 @@ Frame meanPlane(const std::vector<gp_Pnt>& points, double perimeter)
   yy -= a * cy * cy;
   xy -= a * cx * cy;
   // The farthest corner from the middle of the area, and of corners as far (as on a circle)
-  // the one between the longest sides: nothing of the order the edges were given in.
+  // the one between the longest sides: nothing of the order the edges were given in, unless
+  // the sides are as long too (a loop the same after a third of a turn), where the first of
+  // them round the loop is kept and not the one their lengths' rounding favours at this size.
   const size_t sides = points.size() / polygonCorners;
   const auto   run   = [&](size_t side) {
     double length = 0;
@@ -375,7 +377,7 @@ Frame meanPlane(const std::vector<gp_Pnt>& points, double perimeter)
     const gp_XY  at       = flat[s * polygonCorners] - gp_XY(cx, cy);
     const double distance = at.Modulus(), lengths = run(s) + run((s + sides - 1) % sides);
     if (distance > far * (1 + sameCorner)
-        || (distance > far * (1 - sameCorner) && lengths > beside))
+        || (distance > far * (1 - sameCorner) && lengths > beside * (1 + sameCorner)))
     {
       far    = distance;
       beside = lengths;
@@ -776,6 +778,8 @@ occ::handle<Geom_BSplineSurface> fit(SplineNet&                                 
         target.perpendicular = vector(*target.perpendicular);
       target.point = gp_Pnt(scaled(gp_Vec(frame->origin, target.point)).XYZ());
       target.uv.SetCoord(coordinate(target.uv.X()), coordinate(target.uv.Y()));
+      // A bend, as the jets' are, in the units of the size.
+      target.easing *= size;
       if (target.jet)
       {
         auto& j = *target.jet;

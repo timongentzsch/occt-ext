@@ -32,6 +32,8 @@
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRep_Tool.hxx>
+#include <Poly_Triangulation.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
 #include <Bnd_Box.hxx>
 #include <GeomAPI_Interpolate.hxx>
 #include <GeomAPI_PointsToBSplineSurface.hxx>
@@ -873,6 +875,72 @@ TEST(BRepPatchExt, ThreeRoundsAtAMillionthAreRefusedWithTheCornerWhereTheyBendDi
   }
 }
 
+// The rim of a corner of three equal rounds is the same after a third of a turn, so no corner of
+// it is farther from its middle than the others and no side longer: the net is laid along the
+// longest chord, the way the loop runs, and not by the rounding of a product that is zero. Filled
+// at G0 at a thousandth and a thousand times its size, with the tolerance in step, the surface
+// runs its first parameter the same way as at its own size and lies within the tolerance of it.
+TEST(BRepPatchExt, ALoopTheSameAfterAThirdOfATurnIsLaidOutAlikeAtAnySize)
+{
+  std::vector<uint32_t> edges, supports;
+  cornerOfRounds(edges, supports);
+  ASSERT_EQ(edges.size(), 3u);
+  const double tolerance = 1e-4;
+  const auto   fillAt    = [&](double scale) {
+    gp_Trsf pose;
+    pose.SetScale(gp_Pnt(0, 0, 0), scale);
+    BRep_Builder    builder;
+    TopoDS_Compound all;
+    builder.MakeCompound(all);
+    for (const uint32_t id : edges)
+      builder.Add(all, BRepExt::get(session(), id));
+    BRepBuilderAPI_Transform moved(all, pose, true);
+    std::vector<uint32_t>    placed;
+    for (const uint32_t id : edges)
+      placed.push_back(BRepExt::store(session(), moved.ModifiedShape(BRepExt::get(session(), id))));
+    const auto made = BRepExt::patch(session(),
+                                     placed,
+                                     {0, 0, 0},
+                                     {0, 0, 0},
+                                     {},
+                                     {},
+                                     tolerance * scale,
+                                     0.1,
+                                     0.05,
+                                     0);
+    return onlyFace(BRepExt::get(session(), made.evolution.resultId));
+  };
+  const auto way = [](const TopoDS_Face& face) {
+    const Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+    double                     u0, u1, v0, v1;
+    surface->Bounds(u0, u1, v0, v1);
+    gp_Pnt p;
+    gp_Vec du, dv;
+    surface->D1((u0 + u1) / 2, (v0 + v1) / 2, p, du, dv);
+    return gp_Dir(du);
+  };
+  const TopoDS_Face own = fillAt(1);
+  // Points of the face itself, inside its trim.
+  BRepMesh_IncrementalMesh(own, 0.1, false, 0.3);
+  TopLoc_Location                  location;
+  const Handle(Poly_Triangulation) mesh = BRep_Tool::Triangulation(own, location);
+  ASSERT_FALSE(mesh.IsNull());
+  for (const double scale : {1e-3, 1e3})
+  {
+    SCOPED_TRACE(scale);
+    const TopoDS_Face other = fillAt(scale);
+    EXPECT_GT(way(own).Dot(way(other)), 0.999);
+    double far = 0;
+    for (int i = 1; i <= mesh->NbNodes(); ++i)
+      far = std::max(far,
+                     GeomAPI_ProjectPointOnSurf(mesh->Node(i).XYZ() * scale,
+                                                BRep_Tool::Surface(other))
+                         .LowerDistance()
+                       / scale);
+    EXPECT_LE(far, tolerance);
+  }
+}
+
 namespace
 {
 
@@ -920,7 +988,8 @@ Rounds strips(const std::vector<gp_XY>&  polygon,
 // step): every one is delivered meeting its edges, tangent planes and, on the middle of every
 // edge, the strips' bends, with the corners' misses reported. On a plane, where a strip that
 // does not bend meets one that does, no eased fill meets the flat strip beyond its ease within
-// the flat G2 limit: that is refused, naming the corner.
+// the flat G2 limit: that is refused, naming the corner. At a thousandth and a thousand times the
+// size the net is the one made at rest (mirrored it may be another).
 TEST(BRepPatchExt, HeldOutStripsOnDomesAndSaddlesAreEasedAtAnyScaleAndPose)
 {
   const std::vector<std::vector<gp_XY>> polygons = {
@@ -937,6 +1006,10 @@ TEST(BRepPatchExt, HeldOutStripsOnDomesAndSaddlesAreEasedAtAnyScaleAndPose)
                                               {turned(1) * large, 1e3}};
   for (const auto& polygon : polygons)
     for (const auto& [a, b] : {std::pair<double, double>(0.012, 0.012), {0.012, -0.008}})
+    {
+      // The poles of the net made at rest: at a thousandth and a thousand times the size (and
+      // turned) the same net is made, the ease being a share of the size as every length is.
+      std::vector<double> rest;
       for (const auto& [pose, scale] : poses)
       {
         SCOPED_TRACE(testing::Message() << polygon.size() << " sides, " << b << ", " << scale);
@@ -964,7 +1037,13 @@ TEST(BRepPatchExt, HeldOutStripsOnDomesAndSaddlesAreEasedAtAnyScaleAndPose)
         for (size_t i = 0; i < edges.size(); ++i)
           reported = std::max(reported, built.values[5 + 4 * i + 2]);
         EXPECT_GT(reported, 0.05);
+        const std::vector<double> net{built.values[3], built.values[4]};
+        if (rest.empty())
+          rest = net;
+        else if (scale != 1)
+          EXPECT_EQ(net, rest);
       }
+    }
   const Rounds          flat = strips(polygons[0], 0, 0, bends, gp_Trsf());
   std::vector<uint32_t> edges, supports;
   for (size_t i = 0; i < flat.edges.size(); ++i)
@@ -1451,3 +1530,4 @@ TEST(BRepPatchExt, FillsComeAsNearTheFairestSurfaceAtEveryPose)
     }
   }
 }
+
