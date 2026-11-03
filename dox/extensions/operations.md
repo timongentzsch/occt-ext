@@ -172,8 +172,39 @@ bend, the old reference, which refuses 36 of them). On the same elbows with inje
 rims unchanged, every ripple of a hundredth of the size (6 or 12 waves) and 80 % of bulges of a twentieth
 are refused, but gentler defects where the elbow turns pass more often than against the rims alone: on the
 40 elbows the old rule keeps, bulges of a twentieth are refused 108 times in 120 instead of 120, spikes of a
-fiftieth 104 instead of 120. The flat G2 limit, the stopping rules of the outer iteration (which depend on rounding
-and therefore on pose), the span and budget constants of the net, and the 0.17 slope limit are unproven.
+fiftieth 104 instead of 120. The flat G2 limit, the rules by which a ladder that has met nothing yet gives up
+(`stillFalling`, `same`, `unruly`, which compare misses of unconverged nets and so depend on rounding and
+therefore on pose), the span and budget constants of the net, the `settled` share below and the 0.17 slope
+limit are unproven.
+
+*Stop.* A net that meets every limit is not yet the fill asked for: that is the fairest surface of all that
+meet them, which the nets of the ladder come nearer as they become finer.
+Once a net meets the limits, the ladder goes on until two nets in a row lie within `settled` = 1e-3 of the
+loop's size of each other, read from twice as many places as the finer net has spans each way inside the
+loop to the nearest place of the other surface; the coarser of the two that meets the limits is kept, and
+where the ladder or the nets allowed end first, the finest that meets them. That is a Cauchy test: where
+the nets converge at least twice as fast as the ladder refines (a ratio rho <= 1/2), the kept net is within
+d / (1 - rho) <= 2 d of their limit, d the distance between the two. A share of the size makes the stop
+the same at every size and pose. A net free in space and a height over the plane minimise different
+energies and come nearer different surfaces: they are not one sequence, and once nets free in space meet
+the limits, no height is tried after them. The rules this replaces took the first net that met the limits
+(closed loops) or a coarser net unless a finer one bent less by 0.75 (open loops); measured on the
+kinds of published example, that delivered a seat 9.2 off its master (limit 1.04; every finer net 0.17), a mouse top
+0.61 (limit 0.6; finer 0.19), a high mouse top 3.3 (limit 0.9; 0.36), a hull bottom 3.6 at rest and 0.04
+turned (limit 1.44; 0.03), with the outcome changing with rotation and translation. With the stop each is within its limit at rest, turned, at five
+times the size, rotated about z and moved a thousand away, with the same reading to three or four digits.
+On parameter variants held out from that design (hulls, mouse tops, seats of other proportions; three
+poses) the old rules missed 17 of 36 and the stop none. Fills of polygons of three to seven sides at G1
+and G2 on strips of biharmonic masters (a dome, saddle, ridge, bowl and monkey saddle) come out on the same
+nets and surfaces as before. `settled` is a judgement (about the height by which a tilt of 0.1 degree moves a
+surface over half the loop's size): over the nets of the native tests these distances spread from 1e-5
+to 1 of the size with no gap between settled and unsettled pairs, and the seat, mouse tops and hull
+bottom above are delivered on the same nets for any value from 3.1e-4 to 2.4e-3. The cost is at least one net beyond the one kept: about
+2.5 times the CPU time of a fill whose first net was already settled, 5 times for the seat, 14 for the high
+mouse top, and nets that a coarse net met only roughly come out finer (a corner of rounds 2 / 3 / 5: 43 x
+48 poles before, 82 x 89 now; the coarse net was 3.5e-3 of the size from the next). Where nets keep
+differing by more than `settled` the whole ladder is run (a G0 fill at flatness 0.95: 1.2e-3 to 3.8e-3
+between nets, up to the finest).
 Pose dependence is measured, not removed: 47 sampled breaches over 154 rigid-motion variants, none changing
 whether a case is refused. The ease of one coarse span is a judgement bounded by measurement, not an
 optimum: on the teddy (arms and strips of radius 50, sides 79 long, the span 24) eases of 0.3 (the

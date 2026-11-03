@@ -26,11 +26,14 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
+#include <GeomAPI_Interpolate.hxx>
 #include <GeomAPI_PointsToBSplineSurface.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomLProp_SLProps.hxx>
@@ -41,9 +44,11 @@
 #include <Geom_CylindricalSurface.hxx>
 #include <Geom_Plane.hxx>
 #include <Geom_RectangularTrimmedSurface.hxx>
+#include <NCollection_HArray1.hxx>
 
 #include <gtest/gtest.h>
 
+#include <functional>
 #include <regex>
 
 using namespace BRepExtTest;
@@ -1221,4 +1226,228 @@ TEST(BRepPatchExt, TheCapOfASteepConeIsRefusedFromOneTiltOnAtEveryPoseAndSize)
       SCOPED_TRACE(testing::Message() << "pose " << p << ", tilt " << tilts[i]);
       expectSame(placed(rims[i], poses[p]), base[i]);
     }
+}
+
+namespace
+{
+
+//! A surface z = master(x, y) of the rest frame, the curves and faces that ask Patch for it,
+//! and the places of it at which the fill is read.
+struct Master
+{
+  std::function<double(double, double)> height;
+  std::vector<TopoDS_Edge>              rim, guides;
+  std::vector<TopoDS_Face>              faces;
+  std::vector<gp_Pnt>                   points, reads;
+  int                                   order = 0;
+  //! How far from the master the fill may stand: a share of the master's own rise.
+  double limit = 0;
+};
+
+//! The curve through `count` places of `f` from 0 to 1.
+TopoDS_Edge through(const std::function<gp_Pnt(double)>& f, int count = 17)
+{
+  occ::handle<NCollection_HArray1<gp_Pnt>> places = new NCollection_HArray1<gp_Pnt>(1, count);
+  for (int i = 0; i < count; ++i)
+    places->SetValue(i + 1, f(i / (count - 1.0)));
+  GeomAPI_Interpolate interpolate(places, false, 1e-9);
+  interpolate.Perform();
+  return BRepBuilderAPI_MakeEdge(interpolate.Curve()).Edge();
+}
+
+//! The bottom of a hull of length l, half beam b, depth d below the sheer and the sheer rising s
+//! to the bow: at u of the length, z = d (t^2 - 1) sin(pi u / 2)^0.5 + s (1 - u)^2 across t in
+//! [-1, 1] at y = b t sin(pi u / 2)^0.8. Asked are the two sheer lines only, open at bow and stern,
+//! the keel line between 0.15 and 0.85 of the length and one point. Read at 0.2 to 0.9 of the
+//! length, at a share of 0.4 and 0.75 of the half beam; within 8 % of the depth.
+Master hull(double l, double b, double d, double s)
+{
+  const auto at = [=](double u, double t) {
+    const double w = std::sin(M_PI / 2 * u);
+    return gp_Pnt(l * u,
+                  b * std::pow(w, 0.8) * t,
+                  d * (t * t - 1) * std::sqrt(w) + s * (1 - u) * (1 - u));
+  };
+  Master out;
+  out.rim    = {through([&](double u) { return at(u, 1); }),
+                through([&](double u) { return at(u, -1); })};
+  out.guides = {through([&](double u) { return at(0.15 + 0.7 * u, 0); })};
+  out.points = {at(0.5, 0.5)};
+  for (int i = 2; i < 10; ++i)
+    for (const double t : {-0.75, -0.4, 0.4, 0.75})
+      out.reads.push_back(at(i / 10.0, t));
+  out.limit = 0.08 * d;
+  return out;
+}
+
+//! The top of a mouse of length l, width w and crown c, its sides skewed by k: four sides, the
+//! two middle lines across as guides, each through 13 places. Read on a grid of 11 x 11 inside;
+//! within 2 % of the crown.
+Master mouseTop(double l, double w, double c, double k)
+{
+  const auto at = [=](double s, double t) {
+    return gp_Pnt(l * (s - 0.5),
+                  w * (t - 0.5) * (1 + k * std::cos(M_PI * s)),
+                  c * (1 - (2 * s - 1) * (2 * s - 1) * 0.45) * (1 - (2 * t - 1) * (2 * t - 1) * 0.6)
+                    * (1 + 0.1 * (2 * s - 1)));
+  };
+  Master out;
+  out.rim    = {through([&](double u) { return at(u, 0); }, 13),
+                through([&](double u) { return at(1, u); }, 13),
+                through([&](double u) { return at(1 - u, 1); }, 13),
+                through([&](double u) { return at(0, 1 - u); }, 13)};
+  out.guides = {through([&](double u) { return at(u, 0.5); }, 13),
+                through([&](double u) { return at(0.5, u); }, 13)};
+  for (int i = 1; i < 12; ++i)
+    for (int j = 1; j < 12; ++j)
+      out.reads.push_back(at(i / 12.0, j / 12.0));
+  out.limit = 0.02 * c;
+  return out;
+}
+
+//! A seat of length l, width a at the back and n at the nose, rising h: eight straight sides of
+//! the plan, each held G2 to a strip of the seat outside it. Read inside the plan; within 4 % of
+//! the rise.
+Master seat(double l, double a, double n, double h)
+{
+  const auto height = [=](double x, double y) {
+    const double s = x / l, w = n / 2 + (a - n) / 4 * (1 - std::tanh((s - 0.55) * 6));
+    return h * (1 - 0.35 * std::pow(y / (1.5 * w), 2)) * (1 - 0.25 * std::pow(2 * s - 1, 2));
+  };
+  const std::vector<gp_XY> plan = {{0, -a / 2},
+                                   {0.45 * l, -a / 2},
+                                   {0.62 * l, -n / 2},
+                                   {l, -n / 2},
+                                   {l, n / 2},
+                                   {0.62 * l, n / 2},
+                                   {0.45 * l, a / 2},
+                                   {0, a / 2}};
+  Master                   out;
+  out.order = 2;
+  for (size_t i = 0; i < plan.size(); ++i)
+  {
+    const gp_XY p = plan[i], q = plan[(i + 1) % plan.size()];
+    const gp_XY outward = gp_XY(q.Y() - p.Y(), p.X() - q.X()) / (q - p).Modulus();
+    const auto  at      = [&](double s, double t) {
+      const gp_XY xy = p + (q - p) * s + outward * (4 * t);
+      return gp_Pnt(xy.X(), xy.Y(), height(xy.X(), xy.Y()));
+    };
+    NCollection_Array2<gp_Pnt> grid(1, 13, 1, 5);
+    for (int r = 1; r <= 13; ++r)
+      for (int c = 1; c <= 5; ++c)
+        grid(r, c) = at((r - 1) / 12.0, (c - 1) / 4.0);
+    GeomAPI_PointsToBSplineSurface surface;
+    surface.Interpolate(grid, Approx_IsoParametric);
+    Rounds strip;
+    strip.hold(BRepBuilderAPI_MakeFace(surface.Surface(), 1e-7).Face(), at(0.5, 0));
+    out.faces.push_back(strip.faces[0]);
+    out.rim.push_back(strip.edges[0]);
+  }
+  // Inside the plan: behind the waist across the whole width, ahead of it within the nose.
+  for (int i = 1; i < 12; ++i)
+    for (int j = 1; j < 8; ++j)
+    {
+      const double x = l * i / 12.0, half = x < 0.45 * l ? a / 2 : n / 2;
+      const double y = half * (2 * j / 8.0 - 1);
+      out.reads.push_back(gp_Pnt(x, y, height(x, y)));
+    }
+  out.limit = 0.04 * h;
+  return out;
+}
+
+//! The fill Patch makes of `master` placed by `pose`, read at the master's places moved back to
+//! rest: each place's distance from the fill.
+std::vector<double> readFill(const Master& master, const gp_Trsf& pose)
+{
+  const auto placed = [&](const TopoDS_Shape& shape) {
+    return BRepExt::store(session(), BRepBuilderAPI_Transform(shape, pose, true).Shape());
+  };
+  std::vector<uint32_t> edges, supports, guides;
+  for (size_t i = 0; i < master.rim.size(); ++i)
+  {
+    if (master.faces.empty())
+    {
+      edges.push_back(placed(master.rim[i]));
+      supports.push_back(0);
+      continue;
+    }
+    // Placed together, an edge stays the edge of its face.
+    BRepBuilderAPI_Transform moved(master.faces[i], pose, true);
+    edges.push_back(BRepExt::store(session(), moved.ModifiedShape(master.rim[i])));
+    supports.push_back(BRepExt::store(session(), moved.Shape()));
+  }
+  for (const TopoDS_Edge& guide : master.guides)
+    guides.push_back(placed(guide));
+  std::vector<double> points;
+  for (const gp_Pnt& point : master.points)
+  {
+    const gp_Pnt at = point.Transformed(pose);
+    points.insert(points.end(), {at.X(), at.Y(), at.Z()});
+  }
+  BRepExt::PatchControls controls;
+  controls.open            = true;
+  const auto          made = BRepExt::patch(session(),
+                                   edges,
+                                   supports,
+                                   std::vector<int>(edges.size(), master.order),
+                                   guides,
+                                   points,
+                                   1e-3 * pose.ScaleFactor(),
+                                   0.1,
+                                   0.05,
+                                   0,
+                                   -1,
+                                   controls);
+  const TopoDS_Face   fill = onlyFace(BRepExt::get(session(), made.evolution.resultId));
+  std::vector<double> out;
+  for (const gp_Pnt& read : master.reads)
+  {
+    const BRepExtrema_DistShapeShape distance(
+      BRepBuilderAPI_MakeVertex(read.Transformed(pose)).Vertex(),
+      fill);
+    out.push_back(distance.IsDone() ? distance.Value() / pose.ScaleFactor() : HUGE_VAL);
+  }
+  return out;
+}
+
+} // namespace
+
+// Fills over masters of three families, in proportions held out from the design of the ladder's
+// stop (the bottom of a hull, the top of a mouse, a seat at G2), at rest, turned, at five times
+// the size and moved a thousand away. A coarse net can meet every edge and still stand far from
+// the fairest surface inside: the fill is taken from a net the next finer one agrees with. Each
+// stands within its share of the master's rise at every pose, and the fills of all poses lie
+// within 4e-3 of the master's extent of each other: each within twice the distance between the
+// nets that agreed, a thousandth of the size, of the surface they come to. Taking the first net
+// that met the edges, every family missed its share at some pose (the seat by up to 14 against
+// 1.2, the hull by 3.0 against 2), and the hull's fills of two poses stood 2.9 apart.
+TEST(BRepPatchExt, FillsComeAsNearTheFairestSurfaceAtEveryPose)
+{
+  gp_Trsf away;
+  away.SetTranslation(gp_Vec(1000, -400, 230));
+  const gp_Trsf                        poses[]   = {gp_Trsf(), turned(1), turned(5), away};
+  const std::pair<const char*, Master> masters[] = {{"hull", hull(150, 30, 25, 20)},
+                                                    {"mouse", mouseTop(120, 70, 35, 0.2)},
+                                                    {"seat", seat(130, 70, 24, 30)}};
+  for (const auto& [name, master] : masters)
+  {
+    Bnd_Box extent;
+    for (const gp_Pnt& read : master.reads)
+      extent.Add(read);
+    const double        apart = 4e-3 * std::sqrt(extent.SquareExtent());
+    std::vector<double> rest;
+    for (const gp_Trsf& pose : poses)
+    {
+      SCOPED_TRACE(testing::Message() << name << " at scale " << pose.ScaleFactor() << ", moved "
+                                      << pose.TranslationPart().Modulus());
+      const std::vector<double> read = readFill(master, pose);
+      if (rest.empty())
+        rest = read;
+      for (size_t i = 0; i < read.size(); ++i)
+      {
+        EXPECT_LE(read[i], master.limit) << "at " << i;
+        EXPECT_LE(std::abs(read[i] - rest[i]), apart) << "at " << i;
+      }
+    }
+  }
 }

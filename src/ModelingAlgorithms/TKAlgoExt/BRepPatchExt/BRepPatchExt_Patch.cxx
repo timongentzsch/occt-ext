@@ -2004,6 +2004,42 @@ std::vector<double> flatKnots(const occ::handle<Geom_BSplineCurve>& curve)
   return {sequence.begin(), sequence.end()};
 }
 
+//! How near each other, as a share of the loop's size, the surfaces of two nets in a row of the
+//! ladder are to count as having come as near the fairest surface
+//! as finer nets would take them. A share of the size, so that the stop is the same at every size
+//! and pose; the length tolerance, which is absolute, would not be, and nothing inside the loop is
+//! asked to any tolerance. The value is a judgement: between the nets of the tests, these distances
+//! spread from 1e-5 to 1 of the size with no gap between settled and unsettled pairs; a seat, two
+//! mouse tops and a hull bottom that a coarse net filled 0.6 to 9 off their masters stop on
+//! the same nets for any value from 3.1e-4 to 2.4e-3 (see dox/extensions/operations.md).
+constexpr double settled = 1e-3;
+
+//! How far apart the surfaces of two nets are: from places of the coarser, `countU` x `countV`
+//! of them evenly over the parameters from `low` to `high` that are `inside`, to the nearest
+//! place of the finer.
+double apart(const occ::handle<Geom_Surface>&         coarser,
+             const occ::handle<Geom_Surface>&         finer,
+             int                                      countU,
+             int                                      countV,
+             const gp_XY&                             low,
+             const gp_XY&                             high,
+             const std::function<bool(const gp_XY&)>& inside)
+{
+  double farthest = 0;
+  for (int i = 0; i < countU; ++i)
+    for (int j = 0; j < countV; ++j)
+    {
+      const gp_XY at(low.X() + (high.X() - low.X()) * (i + 0.5) / countU,
+                     low.Y() + (high.Y() - low.Y()) * (j + 0.5) / countV);
+      if (!inside(at))
+        continue;
+      const gp_Pnt point = coarser->Value(at.X(), at.Y());
+      const gp_XY  uv    = nearest(finer, at, point);
+      farthest           = std::max(farthest, point.Distance(finer->Value(uv.X(), uv.Y())));
+    }
+  return farthest;
+}
+
 //! A finer net is not tried when the one before it brought the worst miss down by less than
 //! to this share of what it was: the miss has then stopped falling, and what is left of the
 //! ladder would be spent on a net that comes no nearer.
@@ -3910,10 +3946,12 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
     reach.g1 *= .5;
   GraphFit   graphMode = GraphFit::transverse;
   const auto build     = [&](bool wish, int nets) {
-    std::optional<Built> best;
-    int                  tried = 0, unkept = 0;
-    double               placeOnly = HUGE_VAL, keptBend = HUGE_VAL;
-    int                  previousSpans = 0;
+    std::optional<Built>      best;
+    int                       tried = 0, unkept = 0;
+    double                    placeOnly     = HUGE_VAL;
+    int                       previousSpans = 0;
+    occ::handle<Geom_Surface> previous;
+    bool                      previousWithin = false, previousSpatial = false;
     for (int rung : ladder)
     {
       const int spans = std::max(rung,
@@ -4116,6 +4154,13 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
         && std::all_of(targets.begin(), targets.end(), [&](const Target& target) {
              return target.order == 0 || std::abs(target.jet->n.Dot(frame.z)) >= graphNormal;
            });
+      const bool spatial =
+        !heightGraph && order > 0 && asked.guides.empty() && nu * nv <= freePoles;
+      // A net free in space and a height over the plane are fair by different measures and
+      // come nearer different surfaces: the one is not a finer net of the other, and where
+      // nets free in space have met the limits, a height is not tried after them.
+      if (!previous.IsNull() && spatial != previousSpatial && best && best->measured.within)
+        break;
       occ::handle<Geom_BSplineSurface> surface =
         seeded
               ? surfaceOf(net)
@@ -4127,8 +4172,7 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
               reach,
               {},
               [&](double u, double v) { return within(gp_XY(u, v)) ? 1 : outsideWeight; },
-              !heightGraph && order > 0 && asked.guides.empty() && nu * nv <= freePoles ? nullptr
-                                                                                            : &up,
+              spatial ? nullptr : &up,
               jumps,
               order > 0 || asked.controls.open || !asked.guides.empty() || !asked.points.empty()
                     ? &frame
@@ -4256,25 +4300,43 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
           built.measured.worst  = *fault;
           built.measured.excess = unkeptExcess;
         }
+      const double change    = previous.IsNull() || spatial != previousSpatial
+                                     ? HUGE_VAL
+                                     : apart(previous,
+                                      surface,
+                                      // Twice to a span of the finer net each way: the
+                                      // difference of the two is a spline of its spans.
+                                      2 * spansU,
+                                      2 * spansV,
+                                      low,
+                                      high,
+                                      within);
+      const bool   wasWithin = previousWithin;
+      previous               = surface;
+      previousWithin         = built.measured.within;
+      previousSpatial        = spatial;
+      // A net that meets every limit is not yet the surface asked for: that is the fairest of
+      // all that meet them, which the nets of the ladder come nearer to as they become finer,
+      // and a coarse net can meet the edges and still stand far from it inside (a seat of
+      // eight sides: 9.2 off on six spans, 0.17 on every finer net). Two nets in a row that
+      // lie within `settled` of each other have come as near it as finer ones would take
+      // them: then the coarser of them that meets the limits is kept. Until then the finest
+      // that meets them is, should the ladder or the nets allowed end first.
       const double before = best ? best->measured.excess : HUGE_VAL;
-      // The first net that meets the edges is taken only once a finer one bends no less:
-      // a coarse net can meet them all and still bulge between them, by a tolerance that a
-      // model of another size would ask differently.
-      if (built.measured.within && asked.controls.open)
+      if (built.measured.within || (best && best->measured.within))
       {
-        const double tightest = tightestInside(built.face);
-        if (best && best->measured.within && tightest >= clearlyFairer * keptBend)
+        if (change <= settled * asked.size)
+        {
+          if (built.measured.within && !wasWithin)
+            best = built;
           break;
-        best     = built;
-        keptBend = tightest;
+        }
+        if (built.measured.within)
+          best = built;
         continue;
       }
-      if (best && best->measured.within)
-        break;
       if (built.measured.excess < before)
         best = built;
-      if (built.measured.within)
-        break;
       // A few finer nets for a surface that is not one to keep, and no more: after those
       // it is the surface asked for that is not one to keep.
       if (built.measured.unkept)
