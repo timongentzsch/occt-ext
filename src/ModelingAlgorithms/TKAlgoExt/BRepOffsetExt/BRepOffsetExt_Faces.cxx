@@ -13,8 +13,13 @@
 
 // offsetFaces: push-pull.
 //
-// Three ways, in this order:
+// Four ways, in this order:
 //
+// 0. Where every face moves: each on its own offset surface, the topology kept
+//    (BRepOffsetExt_Kept.cxx), certified apart from how it was built. It would take any set of
+//    faces with no tangent neighbour that stays, but a move of some faces keeps the first way:
+//    after it the incremental display mesh of a later Boolean differed from a fresh one (fuzz
+//    seeds 32 and 43 of incremental-mesh-equivalence), for a cause not yet found.
 // 1. BRepOffset_MakeOffset with a global offset of zero, a per-face offset (SetOffsetOnFace)
 //    on the moved faces and GeomAbs_Intersection joins, which makes the unmoved neighbours
 //    extend or trim to the moved faces. It is the engine of BRepOffsetAPI_MakeThickSolid, used
@@ -41,6 +46,7 @@
 #include <BRepToolsExt_Checks.hxx>
 #include <BRepToolsExt_GeomUtil.hxx>
 #include <BRepToolsExt_History.hxx>
+#include <BRepOffsetExt_Kept.hxx>
 #include <BRepOffsetExt_Reconstruct.hxx>
 #include <BRepOffsetExt_Solid.hxx>
 #include <BRepToolsExt_Operations.hxx>
@@ -260,6 +266,24 @@ Moved moveFaces(const TopoDS_Shape&              body,
            fate.partial.empty() ? fate.vanish : fate.partial);
   }
   std::string why;
+  bool every = true;
+  for (TopExp_Explorer all(body, TopAbs_FACE); all.More() && every; all.Next())
+    every = set.Contains(all.Current());
+  if (every)
+  {
+    Lineage      kept(body);
+    TopoDS_Shape same;
+    try
+    {
+      same = keptOffset(body, set, distance, tolerance, kept, why);
+    }
+    catch (const Standard_Failure&)
+    {
+      checkCancelled(op);
+    }
+    if (!same.IsNull())
+      return {same, kept};
+  }
   if (!tangent)
   {
     Lineage            faces(body);

@@ -312,6 +312,37 @@ invalid solid or not at all. Push-pull follows Zou and Feng (2019): the solid sw
 and joined to or cut from the body by a Boolean, which resolves whatever the move does to the rest. Thicken
 divides a C0 sheet's supports without changing their geometry before offsetting.
 
+*Face offset that keeps the topology* (`BRepOffsetExt_Kept.cxx`, tried first by push-pull where every
+face moves; it holds for any set of faces with no tangent neighbour that stays, but a move of some faces
+keeps the engine's route until a difference it caused in a later incremental display mesh is explained). The reference modeller's face offset keeps every face (the same face
+count before and after in 536 of 537 results), which is the intersection join. Each face goes onto its
+offset surface, which `BRepOffset::Surface` gives in the surface's own parameters (a plane translated; a
+cylinder, cone, sphere or torus with the same axes and (u, v), since S(u, v) + d n(u, v) is again such a
+surface in those parameters; otherwise `Geom_OffsetSurface`). *Tangent edges:* if two faces have the same
+normal n along an edge c and move by the same d, the point c + d n lies on both offset surfaces with the
+normal n on both, so they touch along the offset of the edge and its curves on the faces stay; this is
+tested, not assumed (the two faces' points of each edge parameter after the move agree within the
+tolerance). *Sharp edges:* the new edge is the crossing of the two offset surfaces, solved in the plane
+through c(t) normal to the old edge (four equations S1(u1, v1) = S2(u2, v2), (S1 − c(t))·c'(t) = 0 by
+Newton from the old edge's curves on the faces), so it keeps the old parameter t; the curve and the
+curves on the faces are cubic interpolants of those sections, refined locally (a midpoint added where an
+interpolant is further than a tenth of the tolerance from the section there). An offset surface is one
+order less smooth than its basis (its normal takes a derivative), so where the edge crosses a line along
+which a moved surface is less than C2, or the old edge (whose tangent sets the section planes) is less than
+C3, the curve is interpolated apart on each side and joined C0 there; the crossing is found among samples
+and by bisection. Newton steps that do not reduce the residual are halved; where two surfaces only touch
+and the residual stalls, a point within half the tolerance of both is accepted (judgement: the other half is left to the interpolation, a tenth, and the input's own edges). *Vertices:* on a tangent edge's (or seam's) moved curve, crossed with the face
+around the vertex that meets it most steeply among those that meet another at a sharp edge there (all
+tangent: the vertex moves along the common normal); between two edges of the same two faces, in the
+section of one of them; else where three faces cross (the three whose normals are furthest from a common
+plane). A vertex that is then not on every face around it means the move changes the topology (four
+planes of an apex; a face that shrinks away), and the construction declines. *Certificate,* apart from
+the construction: a valid solid; points inside every face and along every edge at the moved distance from
+their sources' unbounded surfaces, on the side moved to (foot point by Newton, Gauss–Newton where the
+Hessian is not positive definite); faces clear of each other; volume grown by an outward move and shrunk
+by an inward one; and where every face moves, nothing nearer the body than the distance. A failure of any
+of these falls back to the routes below. Judgement: the refinement of an edge stops at 16 halvings of the first spacing or 4096 samples (a curve a cubic cannot follow there has a kink).
+
 *Skins and sweeps.* Frames along a path are rotation-minimising by the double reflection method [Wang,
 Jüttler, Zheng, Liu 2008], with a fourth-order error in the step; stock `BRepOffsetAPI_MakePipeShell`
 twists a profile only where the path starts square to it. Gordon surfaces follow [Siggel et al., section 3.2]

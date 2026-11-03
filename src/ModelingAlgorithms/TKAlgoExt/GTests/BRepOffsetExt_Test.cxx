@@ -16,6 +16,7 @@
 
 #include "BRepExtTest_Support.hxx"
 
+#include <BRepOffsetExt_Kept.hxx>
 #include <BRepToolsExt_Checks.hxx>
 #include <BRepToolsExt_Operations.hxx>
 #include <GeomAlgoExt_Failure.hxx>
@@ -29,6 +30,11 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
 
 #include <gtest/gtest.h>
 
@@ -41,6 +47,29 @@ const double a = 60, b = 40, c = 30;
 uint32_t keep(const TopoDS_Shape& shape)
 {
   return BRepExt::store(session(), shape);
+}
+
+//! Every face of `body` moved by `distance` with its topology kept (BRepOffsetExt_Kept.hxx), or a
+//! null shape and the test failed with the reason.
+TopoDS_Shape kept(const TopoDS_Shape& body, double distance, double tolerance)
+{
+  BRepExt::FaceSet all;
+  for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
+    all.Add(f.Current());
+  BRepExt::Lineage   faces(body);
+  std::string        why;
+  const TopoDS_Shape made = BRepExt::keptOffset(body, all, distance, tolerance, faces, why);
+  if (made.IsNull())
+    ADD_FAILURE() << why;
+  return made;
+}
+
+int faceCount(const TopoDS_Shape& shape)
+{
+  int count = 0;
+  for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next())
+    ++count;
+  return count;
 }
 
 std::vector<uint32_t> keep(const std::vector<TopoDS_Face>& faces)
@@ -166,6 +195,88 @@ TEST(BRepOffsetExt, OffsetOfABoxIsSteinersParallelBodyOrTheGrownBox)
               1e-6 * a * b * c);
   EXPECT_NEAR(volume(sharp), (a + 2 * d) * (b + 2 * d) * (c + 2 * d), 1e-9 * a * b * c);
   EXPECT_NEAR(volume(inward), (a - 2 * d) * (b - 2 * d) * (c - 2 * d), 1e-9 * a * b * c);
+}
+
+// Every face of a box with one edge rounded by r moved by d, as the reference modeller's face offset keeps it:
+// the same faces, the sharp edges where the moved planes cross and the round of radius r + d
+// meeting them along the offsets of its edges. The volume is that of the box grown by d each way
+// less the corner the round leaves out along its edge, now a + 2d long:
+// (a + 2d)(b + 2d)(c + 2d) - (1 - pi/4)(r + d)^2 (a + 2d). A round left at r, an edge joined by an
+// arc or a vertex left where it was changes it by d^2 times a length or more. The same at a
+// thousandth and a thousand times the size, turned and moved off the origin.
+TEST(BRepOffsetExt, EveryFaceOfARoundedBoxMovedKeepsItsFacesAndHasTheClosedFormVolume)
+{
+  const double       r = 6;
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(a, b, c).Shape();
+  BRepFilletAPI_MakeFillet round(box);
+  for (const TopoDS_Edge& edge : edgesWhere(box, [](const double* l) {
+         return near(l[1], 0) && near(l[4], 0) && near(l[2], c) && near(l[5], c);
+       }))
+    round.Add(r, edge);
+  const TopoDS_Shape rounded = round.Shape();
+  for (const double s : {1e-3, 1.0, 1e3})
+  {
+    gp_Trsf turn, shift, scale;
+    turn.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), 0.7);
+    shift.SetTranslation(gp_Vec(3, -5, 7));
+    scale.SetScale(gp::Origin(), s);
+    const TopoDS_Shape posed = BRepBuilderAPI_Transform(rounded, scale * shift * turn, true).Shape();
+    for (const double d : {2.0, -2.0})
+    {
+      const TopoDS_Shape made = kept(posed, d * s, 1e-6 * s);
+      if (made.IsNull())
+        continue;
+      EXPECT_TRUE(BRepExt::invalidity(made).empty());
+      EXPECT_EQ(faceCount(made), faceCount(posed)) << "s=" << s << " d=" << d;
+      const double grown = (a + 2 * d) * (b + 2 * d) * (c + 2 * d)
+                           - (1 - M_PI / 4) * (r + d) * (r + d) * (a + 2 * d);
+      EXPECT_NEAR(volume(made) / (s * s * s), grown, 1e-9 * a * b * c) << "s=" << s << " d=" << d;
+    }
+  }
+}
+
+// Held out from the box above: prisms over parallelograms of angles alpha and pi - alpha, h high,
+// one upright edge rounded by r, every face moved by d. Moving the sides of a convex polygon out
+// by d and letting them cross adds P d + d^2 sum cot(a_i / 2) to its area (a_i its angles, P its
+// perimeter); a corner of angle a rounded by rho leaves out rho^2 (cot(a/2) - (pi - a)/2), and the
+// round's radius becomes r + d. So the volume is
+// (h + 2d) (A + P d + d^2 sum cot(a_i / 2) - (r + d)^2 (cot(alpha/2) - (pi - alpha)/2)).
+TEST(BRepOffsetExt, EveryFaceOfARoundedPrismMovedHasTheClosedFormVolumeAtAnyAngle)
+{
+  const double side = 30, h = 20, r = 5;
+  for (const double degrees : {50.0, 70.0, 110.0, 130.0})
+  {
+    const double alpha = degrees * M_PI / 180;
+    const gp_Pnt p0(0, 0, 0), p1(side, 0, 0),
+      p3(side * std::cos(alpha), side * std::sin(alpha), 0),
+      p2(p1.X() + p3.X(), p1.Y() + p3.Y(), 0);
+    const TopoDS_Shape prism =
+      BRepPrimAPI_MakePrism(
+        BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakePolygon(p0, p1, p2, p3, true).Wire()),
+        gp_Vec(0, 0, h))
+        .Shape();
+    BRepFilletAPI_MakeFillet round(prism);
+    for (const TopoDS_Edge& edge : edgesWhere(prism, [](const double* l) {
+           return near(l[0], 0) && near(l[3], 0) && near(l[1], 0) && near(l[4], 0);
+         }))
+      round.Add(r, edge);
+    const TopoDS_Shape rounded = round.Shape();
+    const double area = side * side * std::sin(alpha), perimeter = 4 * side;
+    const double corners = 2 / std::tan(alpha / 2) + 2 / std::tan((M_PI - alpha) / 2);
+    for (const double d : {1.5, -1.5})
+    {
+      const TopoDS_Shape made = kept(rounded, d, 1e-6);
+      if (made.IsNull())
+        continue;
+      EXPECT_TRUE(BRepExt::invalidity(made).empty());
+      EXPECT_EQ(faceCount(made), faceCount(rounded)) << degrees << " degrees, d=" << d;
+      const double cut = (r + d) * (r + d) * (1 / std::tan(alpha / 2) - (M_PI - alpha) / 2);
+      EXPECT_NEAR(volume(made),
+                  (h + 2 * d) * (area + perimeter * d + d * d * corners - cut),
+                  1e-9 * area * h)
+        << degrees << " degrees, d=" << d;
+    }
+  }
 }
 
 // A sheet of two rectangles L x w meeting at a right angle along an edge of length w, thickened

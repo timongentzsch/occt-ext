@@ -3,6 +3,8 @@ set(OCCT_BRepOffsetExt_FILES
   BRepOffsetExt_Defeature.cxx
   BRepOffsetExt_Faces.cxx
   BRepOffsetExt_Hollow.cxx
+  BRepOffsetExt_Kept.cxx
+  BRepOffsetExt_Kept.hxx
   BRepOffsetExt_Parts.cxx
   BRepOffsetExt_Parts.hxx
   BRepOffsetExt_PushFace.cxx
