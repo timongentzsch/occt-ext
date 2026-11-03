@@ -29,6 +29,11 @@
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
+#include <GeomAlgoExt_Failure.hxx>
+#include <Law_Interpol.hxx>
+#include <NCollection_Array1.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -96,6 +101,106 @@ gp_Trsf posed(double s)
   shift.SetTranslation(gp_Vec(3, -5, 7));
   scale.SetScale(gp::Origin(), s);
   return scale * shift * turn;
+}
+
+//! The blend, or a null shape and the test failed with the refusal (so that the case is named).
+TopoDS_Shape blended(const BRepExt::blend2::Request& request)
+{
+  try
+  {
+    return BRepExt::blend2::blend(request).shape;
+  }
+  catch (const std::exception& refused)
+  {
+    ADD_FAILURE() << refused.what();
+    return {};
+  }
+}
+
+//! A size law (Request::radii) as the cubic through its places that OpenCascade's variable fillet
+//! takes, by the place's fraction of [first, last].
+std::function<double(double)> sizeLaw(const std::vector<std::pair<double, double>>& points,
+                                      double                                        first,
+                                      double                                        last,
+                                      bool periodic = false)
+{
+  NCollection_Array1<gp_Pnt2d> at(1, int(points.size()));
+  for (size_t i = 0; i < points.size(); ++i)
+    at(int(i) + 1) = gp_Pnt2d(first + (last - first) * points[i].first, points[i].second);
+  Handle(Law_Interpol) law = new Law_Interpol;
+  law->Set(at, periodic);
+  return [law](double t) { return law->Value(t); };
+}
+
+//! How far the faces of `made` that are not on `input` are from the envelope of the balls of
+//! radius radius(t) centred at centre(t), t in [t0, t1]: for each sample P, min over t of
+//! |P - centre(t)| - radius(t), which is zero on the envelope and negative inside a ball. The
+//! largest by magnitude, and the number of samples.
+std::pair<double, int> envelopeDefect(const TopoDS_Shape&                  made,
+                                      const TopoDS_Shape&                  input,
+                                      const std::function<gp_Pnt(double)>& centre,
+                                      const std::function<double(double)>& radius,
+                                      double                               t0,
+                                      double                               t1)
+{
+  TopoDS_Compound skin;
+  BRep_Builder    builder;
+  builder.MakeCompound(skin);
+  for (TopExp_Explorer f(input, TopAbs_FACE); f.More(); f.Next())
+    builder.Add(skin, f.Current());
+  const auto gap   = [&](const gp_Pnt& p, double t) { return p.Distance(centre(t)) - radius(t); };
+  double     worst = 0;
+  int        count = 0;
+  for (TopExp_Explorer f(made, TopAbs_FACE); f.More(); f.Next())
+  {
+    const TopoDS_Face face = TopoDS::Face(f.Current());
+    double            u0, u1, v0, v1;
+    BRepTools::UVBounds(face, u0, u1, v0, v1);
+    const BRepAdaptor_Surface surface(face);
+    // A face of the input, kept or trimmed, is not the blend: a point inside it lies on the input.
+    bool onInput = false;
+    for (int i = 1; i < 8 && !onInput; ++i)
+    {
+      const double u = u0 + (u1 - u0) * i / 8, v = v0 + (v1 - v0) * (8 - i) / 8;
+      if (BRepClass_FaceClassifier(face, gp_Pnt2d(u, v), 1e-7).State() == TopAbs_IN)
+        onInput =
+          BRepExtrema_DistShapeShape(BRepBuilderAPI_MakeVertex(surface.Value(u, v)).Vertex(), skin)
+            .Value()
+          < 1e-6;
+    }
+    if (onInput)
+      continue;
+    constexpr int N = 12;
+    for (int i = 1; i < N; ++i)
+      for (int j = 1; j < N; ++j)
+      {
+        const double u = u0 + (u1 - u0) * i / N, v = v0 + (v1 - v0) * j / N;
+        if (BRepClass_FaceClassifier(face, gp_Pnt2d(u, v), 1e-7).State() != TopAbs_IN)
+          continue;
+        const gp_Pnt p = surface.Value(u, v);
+        // The nearest ball: a scan, then golden sections about the least.
+        constexpr int samples = 400;
+        int           best    = 0;
+        for (int k = 1; k <= samples; ++k)
+          if (gap(p, t0 + (t1 - t0) * k / samples) < gap(p, t0 + (t1 - t0) * best / samples))
+            best = k;
+        double lo = t0 + (t1 - t0) * std::max(0, best - 1) / samples,
+               hi = t0 + (t1 - t0) * std::min(samples, best + 1) / samples;
+        for (int k = 0; k < 100; ++k)
+        {
+          const double a = lo + (hi - lo) / 3, b = hi - (hi - lo) / 3;
+          if (gap(p, a) < gap(p, b))
+            hi = b;
+          else
+            lo = a;
+        }
+        const double defect = gap(p, (lo + hi) / 2);
+        if (std::abs(defect) > std::abs(worst))
+          worst = defect;
+        ++count;
+      }
+  }
+  return {worst, count};
 }
 
 } // namespace
@@ -292,4 +397,221 @@ TEST(BRepBlendExt, RoundInAWedgeOfACylinderRollsAtDistanceR)
         EXPECT_LE(std::abs(defect.worst), BRepExt::tolerance::sewing)
           << degrees << (convex ? " convex" : " concave") << (cylinders ? " cylinders" : " plane");
       }
+}
+
+// A ball whose radius r(z) changes along a box's edge (planes x = a, y = b, the edge along z): the
+// ball at z has its centre at (a - r, b - r, z), and the blend is the envelope of those balls,
+// whose characteristic circle lies in the plane (x - c).c' = -r r', off the plane across the edge.
+// Every point of the round is on that envelope: its least distance to a ball's sphere is zero, and
+// no ball holds it. Laws held out from the design: linear, a cubic through four places, one that
+// falls and rises again. At rest and turned, moved and scaled by a thousandth and a thousand, the
+// volume the same to rounding.
+TEST(BRepBlendExt, RoundWhoseSizeChangesIsTheEnvelopeOfItsBalls)
+{
+  const double       a = 20, b = 20, c = 20;
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(a, b, c).Shape();
+  const auto         up  = [&](const double* l) {
+    return near(l[0], a) && near(l[1], b) && near(l[3], a) && near(l[4], b);
+  };
+  const std::vector<std::vector<std::pair<double, double>>> laws = {
+    {{0, 1}, {1, 3}},
+    {{0, 0.5}, {1, 2.5}},
+    {{0, 1}, {0.3, 2.5}, {0.7, 1.5}, {1, 2}},
+    {{0, 2}, {0.5, 0.8}, {1, 2}}};
+  for (const auto& points : laws)
+  {
+    SCOPED_TRACE(points.size());
+    const auto edges = edgesWhere(box, up);
+    ASSERT_EQ(edges.size(), 1u);
+    const BRepAdaptor_Curve curve(edges[0]);
+    const auto              r = sizeLaw(points, curve.FirstParameter(), curve.LastParameter());
+    // The edge's parameter is z.
+    BRepExt::blend2::Request request = roundOf(box, edges, 1);
+    request.radii                    = {points};
+    const TopoDS_Shape made          = blended(request);
+    if (made.IsNull())
+      continue;
+    EXPECT_TRUE(BRepExt::invalidity(made).empty());
+    const auto [worst, count] = envelopeDefect(
+      made,
+      box,
+      [&](double z) { return gp_Pnt(a - r(z), b - r(z), z); },
+      r,
+      curve.FirstParameter(),
+      curve.LastParameter());
+    EXPECT_GT(count, 50);
+    EXPECT_LE(std::abs(worst), BRepExt::tolerance::sewing) << points.size() << " places";
+    const double before = volume(made);
+    for (const double s : {1.0, 1e-3, 1e3})
+    {
+      SCOPED_TRACE(s);
+      const gp_Trsf      move   = posed(s);
+      const TopoDS_Shape moved  = BRepBuilderAPI_Transform(box, move, true).Shape();
+      const auto         turned = edgeThrough(moved, gp_Pnt(a, b, c / 2).Transformed(move), s * a);
+      ASSERT_FALSE(turned.IsNull());
+      // The turned edge may run the other way: its places then from its other end.
+      const BRepAdaptor_Curve along(turned);
+      const bool              flipped =
+        along.Value(along.FirstParameter()).Distance(gp_Pnt(a, b, 0).Transformed(move))
+        > 1e-9 * s * a;
+      std::vector<std::pair<double, double>> mine;
+      for (size_t i = 0; i < points.size(); ++i)
+      {
+        const auto& [place, size] = flipped ? points[points.size() - 1 - i] : points[i];
+        mine.emplace_back(flipped ? 1 - place : place, size * s);
+      }
+      BRepExt::blend2::Request again = roundOf(moved, {turned}, s);
+      again.radii                    = {mine};
+      // Each fitted surface within the sewing tolerance of the envelope at its own scale: the
+      // volumes within that over the blend's area.
+      const TopoDS_Shape other = blended(again);
+      if (other.IsNull())
+        continue;
+      EXPECT_NEAR(volume(other) / (s * s * s),
+                  before,
+                  2 * BRepExt::tolerance::sewing * (area(made) - area(box) + 2 * a * c))
+        << "scale " << s;
+    }
+  }
+}
+
+// A chamfer whose setback d(z) changes along the box's edge: each section across the edge is the
+// line between the feet d(z) from the edge on both faces, so every point of it has
+// (a - x) + (b - y) = d(z). A conic of rho 0.7 has its contacts where the balls touch the faces,
+// r(z) from the edge, and its surface tangent to the faces there.
+TEST(BRepBlendExt, ChamferAndConicWhoseSizeChangesKeepTheirFeet)
+{
+  const double       a = 20, b = 20, c = 20;
+  const TopoDS_Shape box   = BRepPrimAPI_MakeBox(a, b, c).Shape();
+  const auto         edges = edgesWhere(box, [&](const double* l) {
+    return near(l[0], a) && near(l[1], b) && near(l[3], a) && near(l[4], b);
+  });
+  ASSERT_EQ(edges.size(), 1u);
+  const std::vector<std::pair<double, double>> points = {{0, 1}, {0.4, 2.5}, {1, 1.5}};
+  const BRepAdaptor_Curve                      curve(edges[0]);
+  const auto r = sizeLaw(points, curve.FirstParameter(), curve.LastParameter());
+  for (const auto law : {BRepExt::blend2::Law::Chamfer, BRepExt::blend2::Law::Conic})
+  {
+    BRepExt::blend2::Request request = roundOf(box, edges, 1);
+    request.law                      = law;
+    request.rho                      = 0.7;
+    request.radii                    = {points};
+    const TopoDS_Shape made          = BRepExt::blend2::blend(request).shape;
+    ASSERT_TRUE(BRepExt::invalidity(made).empty());
+    double worst = 0, turn = 0;
+    int    count = 0;
+    for (const TopoDS_Face& face : facesWhere(made, [&](const double* l) {
+           return l[3] - l[0] > 1e-6 && l[4] - l[1] > 1e-6 && l[3] - l[0] < 4;
+         }))
+    {
+      double u0, u1, v0, v1;
+      BRepTools::UVBounds(face, u0, u1, v0, v1);
+      const BRepAdaptor_Surface surface(face);
+      if (law == BRepExt::blend2::Law::Chamfer)
+        for (int i = 1; i < 12; ++i)
+          for (int j = 1; j < 12; ++j)
+          {
+            const gp_Pnt p = surface.Value(u0 + (u1 - u0) * i / 12, v0 + (v1 - v0) * j / 12);
+            worst          = std::max(worst, std::abs((a - p.X()) + (b - p.Y()) - r(p.Z())));
+            ++count;
+          }
+      // Along the contacts: on x = a the foot is r from the edge, (a, b - r, z), and the blend's
+      // normal is the face's, x; on y = b likewise.
+      for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+      {
+        const BRepAdaptor_Curve on(TopoDS::Edge(e.Current()));
+        for (int k = 1; k < 16; ++k)
+        {
+          const gp_Pnt p =
+            on.Value(on.FirstParameter() + (on.LastParameter() - on.FirstParameter()) * k / 16);
+          const bool x = near(p.X(), a), y = near(p.Y(), b);
+          if (x == y || p.Z() < 1e-6 || p.Z() > c - 1e-6)
+            continue;
+          worst = std::max(worst, std::abs((x ? b - p.Y() : a - p.X()) - r(p.Z())));
+          ++count;
+          if (law != BRepExt::blend2::Law::Conic)
+            continue;
+          GeomAPI_ProjectPointOnSurf onto(p, BRep_Tool::Surface(face));
+          double                     u, v;
+          onto.LowerDistanceParameters(u, v);
+          BRepLProp_SLProps props(surface, u, v, 1, 1e-9);
+          turn =
+            std::max(turn, std::abs(std::abs(props.Normal().Dot(x ? gp::DX() : gp::DY())) - 1));
+        }
+      }
+    }
+    EXPECT_GT(count, 20);
+    EXPECT_LE(worst, BRepExt::tolerance::sewing) << int(law);
+    EXPECT_LE(turn, 1e-10) << "tangent to the faces";
+  }
+}
+
+// Round a cylinder's top rim with a size that changes round it and ends as it begins (periodic):
+// the ball at the rim's angle t, of radius r(t), has its centre at ((R - r) cos t, (R - r) sin t,
+// H - r), and the round is the envelope of those balls. A rim whose size does not end as it begins
+// is refused by name.
+TEST(BRepBlendExt, RoundOfARimWhoseSizeChangesIsTheEnvelopeOfItsBalls)
+{
+  const double       R = 10, H = 20;
+  const TopoDS_Shape cylinder = BRepPrimAPI_MakeCylinder(R, H).Shape();
+  const auto         rim =
+    edgesWhere(cylinder, [&](const double* l) { return near(l[2], H) && near(l[5], H); });
+  ASSERT_EQ(rim.size(), 1u);
+  const std::vector<std::pair<double, double>> points = {{0, 1}, {0.25, 2}, {0.6, 0.7}, {1, 1}};
+  const BRepAdaptor_Curve                      curve(rim[0]);
+  const auto               r = sizeLaw(points, curve.FirstParameter(), curve.LastParameter(), true);
+  BRepExt::blend2::Request request = roundOf(cylinder, rim, 1);
+  request.radii                    = {points};
+  const TopoDS_Shape made          = BRepExt::blend2::blend(request).shape;
+  EXPECT_TRUE(BRepExt::invalidity(made).empty());
+  const auto [worst, count] = envelopeDefect(
+    made,
+    cylinder,
+    [&](double t) { return gp_Pnt((R - r(t)) * std::cos(t), (R - r(t)) * std::sin(t), H - r(t)); },
+    r,
+    curve.FirstParameter(),
+    curve.LastParameter());
+  EXPECT_GT(count, 50);
+  EXPECT_LE(std::abs(worst), BRepExt::tolerance::sewing);
+  request.radii = {{{0, 1}, {1, 3}}};
+  EXPECT_THROW(BRepExt::blend2::blend(request), BRepExt::Failure);
+}
+
+// Held out: a size that changes round the ring where a sphere of radius R stands on a plane, a
+// concave edge between two curved... a plane and a sphere. The ball at the ring's point E(t) has
+// its centre r above the plane, R + r from the sphere's centre, in the half-plane through the axis
+// and E(t): at sqrt((R + r)^2 - r^2) from the axis.
+TEST(BRepBlendExt, RoundOfASphereOnAPlaneWhoseSizeChangesIsTheEnvelopeOfItsBalls)
+{
+  const double       R = 14;
+  const TopoDS_Shape standing =
+    BRepAlgoAPI_Fuse(BRepPrimAPI_MakeBox(gp_Pnt(-25, -25, -10), 50, 50, 10).Shape(),
+                     BRepPrimAPI_MakeSphere(gp_Pnt(0, 0, 0), R).Shape())
+      .Shape();
+  const auto ring = edgesWhere(standing, [](const double* b) {
+    return near(b[2], b[5]) && near(b[2], 0) && b[3] - b[0] < 29 && b[3] - b[0] > 20;
+  });
+  ASSERT_EQ(ring.size(), 1u);
+  const std::vector<std::pair<double, double>> points = {{0, 2}, {0.3, 3}, {0.7, 1.2}, {1, 2}};
+  const BRepAdaptor_Curve                      curve(ring[0]);
+  const auto               r = sizeLaw(points, curve.FirstParameter(), curve.LastParameter(), true);
+  BRepExt::blend2::Request request = roundOf(standing, ring, 2);
+  request.radii                    = {points};
+  const TopoDS_Shape made          = blended(request);
+  ASSERT_FALSE(made.IsNull());
+  EXPECT_TRUE(BRepExt::invalidity(made).empty());
+  const auto [worst, count] = envelopeDefect(
+    made,
+    standing,
+    [&](double t) {
+      const gp_Pnt E = curve.Value(t);
+      const double a = std::atan2(E.Y(), E.X()), size = r(t);
+      const double d = std::sqrt((R + size) * (R + size) - size * size);
+      return gp_Pnt(d * std::cos(a), d * std::sin(a), size);
+    },
+    r,
+    curve.FirstParameter(),
+    curve.LastParameter());
+  EXPECT_GT(count, 50);
+  EXPECT_LE(std::abs(worst), BRepExt::tolerance::sewing);
 }

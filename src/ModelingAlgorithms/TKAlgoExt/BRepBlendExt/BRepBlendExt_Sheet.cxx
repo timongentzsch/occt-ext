@@ -40,6 +40,8 @@ Handle(Geom_BSplineCurve) sectionCurve(const Section& section)
 
 std::optional<Sheet> exactSheet(const Rail& rail, Stations& stations)
 {
+  if (!rail.sizes.IsNull())
+    return {}; // a size that changes: fitted
   // A full round of one size along a straight edge is a cylinder too, its arc through the foot
   // on the face between.
   const bool full = rail.law == Law::Full;
@@ -281,6 +283,8 @@ Handle(Geom_BSplineCurve) endToEnd(std::vector<Handle(Geom_BSplineCurve)> parts,
 
 std::optional<Sheet> extrudedSheet(const Rail& rail, Stations& stations)
 {
+  if (!rail.sizes.IsNull())
+    return {};
   if (rail.curve.GetType() != GeomAbs_Line)
     return {};
   for (const auto& side : rail.s)

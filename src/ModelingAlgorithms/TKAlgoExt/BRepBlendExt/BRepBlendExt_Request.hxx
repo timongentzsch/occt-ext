@@ -51,10 +51,20 @@ struct Request
   double       first = 0, second = 0;
   TopoDS_Shape reference;
   Law          law = Law::Conic;
-  double       rho = 0.5;
+  //! A chamfer's angle off `reference`, in (0, pi / 2): the setback on the other face is the one
+  //! whose bevel makes this angle with the reference face, by the faces' opening at each place
+  //! along the edge (`second` is not read). Zero: two distances.
+  double angle = 0;
+  double rho   = 0.5;
   //! Where not empty, the only edges that tangent ones may be added from (the edges asked are
   //! kept whatever it holds).
   std::vector<TopoDS_Shape> mayAdd;
+  //! A size that changes along an edge: for edges[i], where radii[i] is not empty, (place, size)
+  //! pairs, the place a fraction of the edge's parameter range from its first parameter to its
+  //! last, the size that of `first` there (`second` keeps its ratio to it), interpolated by the
+  //! cubic through them that OpenCascade's variable fillet takes (Law_Interpol). For a round, a
+  //! conic or a G2 blend of equal distances, or a chamfer; such edges add no tangent edges.
+  std::vector<std::vector<std::pair<double, double>>> radii;
   //! For a full round, the radius it must have all along: the two rounds of this radius whose
   //! contacts meet on the face between, made as two faces meeting where they touch it.
   double meet = 0;

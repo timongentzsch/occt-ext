@@ -31,6 +31,8 @@
 #include <Geom_RectangularTrimmedSurface.hxx>
 #include <BRepAlgoExt_ReadBack.hxx>
 #include <GeomAlgoExt_SurfaceJet.hxx>
+#include <Law_BSpFunc.hxx>
+#include <Law_BSpline.hxx>
 #include <GeomAlgoExt_Failure.hxx>
 #ifndef BREPBLENDEXT_POLICY
   #include <BRepBlendExt_Policy.hxx>
@@ -223,7 +225,9 @@ struct Rail
   bool   closed = false; // an edge that closes on itself: no ends, and the blend closes too
   Law    law    = Law::Conic;
   double rho    = 0.5;
-  double scale  = 1; // the larger distance, for tolerances that scale with the blend
+  double angle  = 0; // a chamfer's bevel off the reference face, side `reference` (Request::angle)
+  int    reference = 0;
+  double scale     = 1; // the larger distance, for tolerances that scale with the blend
   double magnitude =
     0; // how far the edge reaches from the origin, which its points' rounding scales with
 
@@ -240,6 +244,22 @@ struct Rail
   bool byCentre = false;
   //! A split changes the rolling supports, not the original edge's parameter frame.
   std::optional<std::array<Side, 2>> parameterSupports;
+  //! The factor on the distances along the edge, by its parameter (Request::radii); null where they
+  //! keep one size.
+  Handle(Law_BSpFunc) sizes;
+
+  //! The factor on the distances at `t`, and its rate along t: the law's, past the edge's ends its
+  //! last span's own polynomial, which goes on as smoothly as inside, as the rail does.
+  double factor(double t, double* rate = nullptr) const
+  {
+    double value = 1, slope = 0;
+    if (!sizes.IsNull())
+      sizes->D1(t, value, slope);
+    if (rate)
+      *rate = slope;
+    return value;
+  }
+
   //! An end where the faces are tangent to each other (two crossing cylinders of one radius): the
   //! ball rests on both at the edge's vertex, and the blend closes to that point [at first, last].
   bool pinch[2] = {false, false};
@@ -280,6 +300,7 @@ struct Station
   gp_Vec normal[2], along;
   double uvMiddle[2] = {0, 0}; // a full round's foot on the face between (Rail::middle)
   gp_Pnt middle;
+  gp_Vec rate; // the centre's rate along the edge's parameter where the size changes (ballAt)
 };
 
 //! A surface at one place, with its outward unit normal and that normal's derivatives.
@@ -705,7 +726,20 @@ private:
       const double t = std::abs(end - current.t) < std::abs(step) ? end : current.t + step;
       // Past the edge's end the rail is carried only as far as the ball goes on with it.
       const bool carried = t < rail_.first || t > rail_.last;
-      Station    next    = current;
+      // Where its size changes along the edge, it goes on past the end as the law's last span
+      // (Rail::factor), and the ball only while its size stays within half and twice its size at
+      // the end (a judgement): not into the nothing or the bulge a cubic's continuation reaches.
+      if (carried && !rail_.sizes.IsNull())
+      {
+        const double atEnd = rail_.factor(t < rail_.first ? rail_.first : rail_.last),
+                     here  = rail_.factor(t);
+        if (!(here >= atEnd / 2 && here <= 2 * atEnd))
+        {
+          reached_[towards] = current.t;
+          return;
+        }
+      }
+      Station next = current;
       // Predict the feet from the last two stations.
       if (previous.t != current.t)
       {

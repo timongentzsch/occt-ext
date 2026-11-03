@@ -18,6 +18,9 @@
 
 namespace BRepExt::blend2
 {
+//! The blend of a stored body's edges (Request). Where `counts` is not empty, edges[i] takes
+//! counts[i] (place, size) pairs of `sizes`, flat, in turn (Request::radii; none: one size);
+//! `angle` a chamfer's (Request::angle).
 Standard_EXPORT Blended blendStored(const OcctKernel&            kernel,
                                     const char*                  operation,
                                     uint32_t                     shape,
@@ -26,5 +29,8 @@ Standard_EXPORT Blended blendStored(const OcctKernel&            kernel,
                                     double                       second,
                                     int                          law,
                                     double                       rho,
-                                    uint32_t                     reference);
-}
+                                    uint32_t                     reference,
+                                    const std::vector<int>&      counts = {},
+                                    const std::vector<double>&   sizes  = {},
+                                    double                       angle  = 0);
+} // namespace BRepExt::blend2

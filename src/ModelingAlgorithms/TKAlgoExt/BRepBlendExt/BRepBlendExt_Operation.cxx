@@ -62,10 +62,15 @@ Blended blendStored(const OcctKernel&            kernel,
                     double                       second,
                     int                          law,
                     double                       rho,
-                    uint32_t                     reference)
+                    uint32_t                     reference,
+                    const std::vector<int>&      counts,
+                    const std::vector<double>&   sizes,
+                    double                       angle)
 {
   if (law < 0 || law > 4)
     fail(op, invalid_input, "unknown section law");
+  if (!counts.empty() && counts.size() != edges.size())
+    fail(op, invalid_input, "one count of size places for each edge");
   Request request;
   request.operation = op;
   request.body      = get(kernel, shape);
@@ -75,8 +80,22 @@ Blended blendStored(const OcctKernel&            kernel,
   request.second = second;
   request.law    = static_cast<Law>(law);
   request.rho    = rho;
+  request.angle  = angle;
   if (reference)
     request.reference = subShapes(kernel, op, request.body, {reference}, TopAbs_FACE)[0];
+  size_t next = 0;
+  for (const int count : counts)
+  {
+    auto& points = request.radii.emplace_back();
+    for (int k = 0; k < count; ++k, next += 2)
+    {
+      if (next + 1 >= sizes.size())
+        fail(op, invalid_input, "fewer size places than counted");
+      points.emplace_back(sizes[next], sizes[next + 1]);
+    }
+  }
+  if (next != sizes.size())
+    fail(op, invalid_input, "more size places than counted");
   Blended blended;
   try
   {
@@ -90,7 +109,12 @@ Blended blendStored(const OcctKernel&            kernel,
          std::string("OpenCascade could not build the blend (") + error.ExceptionType()
            + (*error.what() ? std::string(": ") + error.what() : std::string()) + ")");
   }
-  accepted(op, request.body, blended.shape, std::max(first, second), &blended);
+  // The blend's size: its largest, where it changes along the edges.
+  double size = std::max(first, second);
+  for (const auto& points : request.radii)
+    for (const auto& [place, at] : points)
+      size = std::max(size, std::max(first, second) * at / first);
+  accepted(op, request.body, blended.shape, size, &blended);
   return blended;
 }
 

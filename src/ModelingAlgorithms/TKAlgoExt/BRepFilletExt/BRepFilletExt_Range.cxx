@@ -16,6 +16,8 @@
 #include <BRepAlgoExt_Tolerance.hxx>
 #include <BRepToolsExt_History.hxx>
 #include <BRepFilletExt_Untouched.hxx>
+#include <BRepFilletExt_Blend2.hxx>
+#include <Standard_Failure.hxx>
 #include <BRepToolsExt_Operations.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
@@ -36,6 +38,92 @@
 
 namespace BRepExt
 {
+//! The part of the change `made` makes to `shape` that lies between the planes square to `edge`
+//! at the fractions `start` and `end` of it (the contour's other edges, `others`, must not come
+//! back between them): the material removed and added there only, the rest of `shape` as it was.
+//! The faces' history goes to `history`; the result is stored.
+static EvolutionData withinRange(OcctKernel&                     kernel,
+                                 const char*                     op,
+                                 const TopoDS_Shape&             shape,
+                                 const TopoDS_Shape&             made,
+                                 const TopoDS_Edge&              edge,
+                                 double                          start,
+                                 double                          end,
+                                 const std::vector<TopoDS_Edge>& others,
+                                 FaceHistory&                    history)
+{
+  BRepAdaptor_Curve curve(edge);
+  // Isolate both sides of the change. Concave blends add material; convex
+  // blends remove it. Mixed contours can do both in one operation.
+  Untouched<BRepAlgoAPI_Cut> removed(shape, made), added(made, shape);
+  if (!removed.IsDone() || !added.IsDone())
+    fail(op, no_solution, "could not isolate fillet volume");
+  double a = curve.FirstParameter(), b = curve.LastParameter();
+  if (edge.Orientation() == TopAbs_REVERSED)
+    std::swap(a, b);
+  gp_Pnt p0, p1;
+  gp_Vec t0, t1;
+  curve.D1(a + (b - a) * start, p0, t0);
+  curve.D1(a + (b - a) * end, p1, t1);
+  if (t0.Magnitude() < 1e-12 || t1.Magnitude() < 1e-12)
+    fail(op, unsupported_geometry, "a limit has a singular tangent");
+  if (b < a)
+  {
+    t0.Reverse();
+    t1.Reverse();
+  }
+  const gp_Dir n0(t0), n1(t1);
+  auto         inside = [&](const gp_Pnt& p, double tol) {
+    return gp_Vec(p0, p).Dot(gp_Vec(n0)) > tol && gp_Vec(p1, p).Dot(gp_Vec(n1)) < -tol;
+  };
+  // A pair of normal stopping planes cannot describe a winding interval.
+  // Refuse those inputs instead of accidentally rounding a second arc.
+  for (int i = 0; i <= 256; ++i)
+  {
+    const double f = double(i) / 256;
+    const auto   p = curve.Value(a + (b - a) * f);
+    if (f > start + 1e-8 && f < end - 1e-8)
+    {
+      if (!inside(p, -BRepExt::tolerance::length))
+        fail(op, unsupported_geometry, "range crosses its normal stopping planes");
+    }
+    else if ((f < start - 1e-8 || f > end + 1e-8) && inside(p, BRepExt::tolerance::length))
+      fail(op, unsupported_geometry, "range returns inside its normal stopping planes");
+  }
+  for (const TopoDS_Edge& onward : others)
+  {
+    BRepAdaptor_Curve other(onward);
+    for (int i = 1; i < 64; ++i)
+      if (inside(other.Value(other.FirstParameter()
+                             + (other.LastParameter() - other.FirstParameter()) * i / 64),
+                 BRepExt::tolerance::length))
+        fail(op, unsupported_geometry, "tangent continuation re-enters the limited interval");
+  }
+  auto clip = [&](TopoDS_Shape tool) {
+    for (int i = 0; i < 2; ++i)
+    {
+      const auto         point   = i ? p1 : p0;
+      const auto         normal  = i ? n1 : n0;
+      const auto         plane   = BRepBuilderAPI_MakeFace(gp_Pln(point, normal)).Face();
+      const auto         witness = point.Translated(gp_Vec(normal) * (i ? -1 : 1));
+      const auto         half    = BRepPrimAPI_MakeHalfSpace(plane, witness).Solid();
+      BRepAlgoAPI_Common common(tool, half);
+      if (!common.IsDone())
+        fail(op, no_solution, "fillet limit intersection failed");
+      tool = common.Shape();
+    }
+    return tool;
+  };
+  Untouched<BRepAlgoAPI_Cut> cut(shape, clip(removed.Shape()));
+  if (!cut.IsDone())
+    fail(op, no_solution, "limited fillet subtraction failed");
+  BRepAlgoAPI_Fuse fuse(cut.Shape(), clip(added.Shape()));
+  if (!fuse.IsDone() || !BRepExt::invalidity(fuse.Shape(), shape).empty())
+    fail(op, no_solution, "limited fillet is invalid");
+  history.collectComposed(cut, fuse, shape);
+  return history.finish(store(kernel, fuse.Shape()));
+}
+
 EvolutionData filletRange(OcctKernel&                kernel,
                           uint32_t                   shapeId,
                           uint32_t                   edgeId,
@@ -87,8 +175,7 @@ EvolutionData filletRange(OcctKernel&                kernel,
     }
     maker.SetRadius(points, contour, index);
   }
-  BRepAdaptor_Curve curve(edge);
-  const bool        limited = start > 0 || end < 1 || (!propagate && maker.NbEdges(contour) > 1);
+  const bool limited = start > 0 || end < 1 || (!propagate && maker.NbEdges(contour) > 1);
   maker.Build();
   if (!maker.IsDone() || !BRepExt::invalidity(maker.Shape(), shape).empty())
     fail(op, no_solution, "fillet construction failed");
@@ -98,76 +185,78 @@ EvolutionData filletRange(OcctKernel&                kernel,
     history.collect(maker, shape);
     return history.finish(store(kernel, maker.Shape()));
   }
-  // Isolate both sides of the change. Concave blends add material; convex
-  // blends remove it. Mixed contours can do both in one operation.
-  Untouched<BRepAlgoAPI_Cut> removed(shape, maker.Shape()), added(maker.Shape(), shape);
-  if (!removed.IsDone() || !added.IsDone())
-    fail(op, no_solution, "could not isolate fillet volume");
-  double a = curve.FirstParameter(), b = curve.LastParameter();
-  if (edge.Orientation() == TopAbs_REVERSED)
-    std::swap(a, b);
-  gp_Pnt p0, p1;
-  gp_Vec t0, t1;
-  curve.D1(a + (b - a) * start, p0, t0);
-  curve.D1(a + (b - a) * end, p1, t1);
-  if (t0.Magnitude() < 1e-12 || t1.Magnitude() < 1e-12)
-    fail(op, unsupported_geometry, "a limit has a singular tangent");
-  if (b < a)
-  {
-    t0.Reverse();
-    t1.Reverse();
-  }
-  const gp_Dir n0(t0), n1(t1);
-  auto         inside = [&](const gp_Pnt& p, double tol) {
-    return gp_Vec(p0, p).Dot(gp_Vec(n0)) > tol && gp_Vec(p1, p).Dot(gp_Vec(n1)) < -tol;
-  };
-  // A pair of normal stopping planes cannot describe a winding interval.
-  // Refuse those inputs instead of accidentally rounding a second arc.
-  for (int i = 0; i <= 256; ++i)
-  {
-    const double f = double(i) / 256;
-    const auto   p = curve.Value(a + (b - a) * f);
-    if (f > start + 1e-8 && f < end - 1e-8)
-    {
-      if (!inside(p, -BRepExt::tolerance::length))
-        fail(op, unsupported_geometry, "range crosses its normal stopping planes");
-    }
-    else if ((f < start - 1e-8 || f > end + 1e-8) && inside(p, BRepExt::tolerance::length))
-      fail(op, unsupported_geometry, "range returns inside its normal stopping planes");
-  }
+  std::vector<TopoDS_Edge> others;
   for (int e = 1; e <= maker.NbEdges(contour); ++e)
+    if (!maker.Edge(contour, e).IsSame(edge))
+      others.push_back(maker.Edge(contour, e));
+  return withinRange(kernel, op, shape, maker.Shape(), edge, start, end, others, history);
+}
+
+EvolutionData blendRange(OcctKernel&                kernel,
+                         uint32_t                   shapeId,
+                         uint32_t                   edgeId,
+                         double                     first,
+                         double                     second,
+                         int                        law,
+                         double                     rho,
+                         uint32_t                   reference,
+                         double                     angle,
+                         double                     start,
+                         double                     end,
+                         const std::vector<int>&    hashes,
+                         int                        bound,
+                         const std::vector<double>& sizes)
+{
+  const char* op    = "filletRange";
+  const auto& shape = get(kernel, shapeId);
+  const auto  edge  = TopoDS::Edge(subShapes(kernel, op, shape, {edgeId}, TopAbs_EDGE)[0]);
+  if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end > 1 || start >= end)
+    fail(op, invalid_input, "an ordered range within [0,1] required");
+  if (law < 0 || law > 2)
+    fail(op, invalid_input, "a range takes a conic, G2 or chamfer section");
+  if (sizes.size() % 2)
+    fail(op, invalid_input, "size places come in (place, size) pairs");
+  // The edge alone, no tangent edges added: the range lies on it.
+  blend2::Request request;
+  request.operation = op;
+  request.body      = shape;
+  request.edges     = {edge};
+  request.mayAdd    = {edge};
+  request.first     = first;
+  request.second    = second;
+  request.law       = static_cast<blend2::Law>(law);
+  request.rho       = rho;
+  request.angle     = angle;
+  if (reference)
+    request.reference = subShapes(kernel, op, shape, {reference}, TopAbs_FACE)[0];
+  if (!sizes.empty())
   {
-    if (maker.Edge(contour, e).IsSame(edge))
-      continue;
-    BRepAdaptor_Curve other(maker.Edge(contour, e));
-    for (int i = 1; i < 64; ++i)
-      if (inside(other.Value(other.FirstParameter()
-                             + (other.LastParameter() - other.FirstParameter()) * i / 64),
-                 BRepExt::tolerance::length))
-        fail(op, unsupported_geometry, "tangent continuation re-enters the limited interval");
+    auto& points = request.radii.emplace_back();
+    for (size_t k = 0; k + 1 < sizes.size(); k += 2)
+      points.emplace_back(sizes[k], sizes[k + 1]);
   }
-  auto clip = [&](TopoDS_Shape tool) {
-    for (int i = 0; i < 2; ++i)
-    {
-      const auto         point   = i ? p1 : p0;
-      const auto         normal  = i ? n1 : n0;
-      const auto         plane   = BRepBuilderAPI_MakeFace(gp_Pln(point, normal)).Face();
-      const auto         witness = point.Translated(gp_Vec(normal) * (i ? -1 : 1));
-      const auto         half    = BRepPrimAPI_MakeHalfSpace(plane, witness).Solid();
-      BRepAlgoAPI_Common common(tool, half);
-      if (!common.IsDone())
-        fail(op, no_solution, "fillet limit intersection failed");
-      tool = common.Shape();
-    }
-    return tool;
-  };
-  Untouched<BRepAlgoAPI_Cut> cut(shape, clip(removed.Shape()));
-  if (!cut.IsDone())
-    fail(op, no_solution, "limited fillet subtraction failed");
-  BRepAlgoAPI_Fuse fuse(cut.Shape(), clip(added.Shape()));
-  if (!fuse.IsDone() || !BRepExt::invalidity(fuse.Shape(), shape).empty())
-    fail(op, no_solution, "limited fillet is invalid");
-  history.collectComposed(cut, fuse, shape);
-  return history.finish(store(kernel, fuse.Shape()));
+  blend2::Blended blended;
+  try
+  {
+    blended = blend2::blend(request);
+  }
+  catch (const Standard_Failure& error)
+  {
+    fail(op,
+         no_solution,
+         std::string("OpenCascade could not build the blend (") + error.ExceptionType() + ")");
+  }
+  double size = std::max(first, second);
+  for (const auto& points : request.radii)
+    for (const auto& [place, at] : points)
+      size = std::max(size, std::max(first, second) * at / first);
+  blend2::accepted(op, shape, blended.shape, size, &blended);
+  FaceHistory history(op, hashes, bound);
+  if (start == 0 && end == 1)
+  {
+    history.collect(*blended.history, shape);
+    return history.finish(store(kernel, blended.shape));
+  }
+  return withinRange(kernel, op, shape, blended.shape, edge, start, end, {}, history);
 }
 } // namespace BRepExt

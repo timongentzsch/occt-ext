@@ -65,6 +65,17 @@ std::map<double, int> breaksOf(const Rail& rail, Stations& stations, bool sought
                kDegree - std::max(0, curve->Degree() - curve->Multiplicity(k)));
   }
 
+  // The size law's knots (Rail::sizes): the stations follow its value and the sections its rate
+  // too (the characteristic circle), so the blend is one order less smooth there than the law.
+  if (!rail.sizes.IsNull())
+  {
+    const auto law = rail.sizes->Curve();
+    for (int k = 2; k < law->NbKnots(); ++k)
+      addBreak(breaks,
+               rail.u(law->Knot(k)),
+               kDegree - std::max(0, law->Degree() - 1 - law->Multiplicity(k)));
+  }
+
   // The supports' knot lines, each as a parameter (0 for u, 1 for v), a value and what it needs.
   struct Line
   {

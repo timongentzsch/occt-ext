@@ -30,6 +30,7 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <ElCLib.hxx>
+#include <Law_Interpol.hxx>
 
 namespace BRepExt::blend2
 {
@@ -1395,15 +1396,40 @@ static Blended blendStage(const Request& request, bool continuation)
     fail(op, invalid_input, "the distances must be positive");
   if (request.law != Law::Chamfer && !(request.rho > 0 && request.rho < 1))
     fail(op, invalid_input, "rho is between 0 and 1");
+  if (request.angle != 0
+      && (request.law != Law::Chamfer || request.reference.IsNull()
+          || !(request.angle > 0 && request.angle < M_PI / 2)))
+    fail(op, invalid_input, "a chamfer's angle lies off a reference face, below a right angle");
   if (request.law == Law::Chordal && request.second > 0
       && std::abs(request.second - request.first) > limit::equal * request.first)
     fail(op, invalid_input, "a chordal blend has one chord");
-  if (auto islands = islandEnvelope(request))
-    return *islands;
+  // A size that changes along the edges (Request::radii) is made by the blend of its own edges
+  // alone: the other routes are for one size.
+  const bool varies = std::any_of(request.radii.begin(),
+                                  request.radii.end(),
+                                  [](const auto& points) { return !points.empty(); });
+  if (varies)
+  {
+    if (request.radii.size() > request.edges.size())
+      fail(op, invalid_input, "a size law for an edge not asked");
+    if (request.law == Law::Full || request.law == Law::Chordal)
+      fail(op, invalid_input, "a full or chordal round takes its size from the faces");
+    if (request.law != Law::Chamfer && request.second > 0
+        && std::abs(request.second - request.first) > limit::equal * request.first)
+      fail(op,
+           unsupported_geometry,
+           "a blend whose size changes along the edge has one distance off both faces");
+  }
+  Request own = request;
+  if (varies)
+    own.mayAdd = request.edges;
+  if (!varies)
+    if (auto islands = islandEnvelope(request))
+      return *islands;
   // The blends are made on a copy without its meshes, so that the result shares nothing with the
   // input (whose meshes and edges' samples belong to its own neighbours); what they leave alone
   // is the copy's.
-  if (request.law != Law::Full)
+  if (request.law != Law::Full && !varies)
   {
     std::exception_ptr original;
     // Preserve the established two construction orders before permitting
@@ -1439,7 +1465,7 @@ static Blended blendStage(const Request& request, bool continuation)
   BRepBuilderAPI_Copy copy(request.body, true, false);
   try
   {
-    return blendCopy(request, copy);
+    return blendCopy(own, copy);
   }
   catch (Failure& failure)
   {
@@ -1456,6 +1482,8 @@ static Blended blendStage(const Request& request, bool continuation)
         if (i < failure.at.size())
           failure.at[i] = failureHash(*found);
       }
+    if (varies)
+      throw;
     if (continuation && dynamic_cast<const ContinuationRequired*>(&failure)
         && failure.shapes.size() == 2 && !request.mayAdd.empty()
         && request.replays < limit::replays)
@@ -1690,6 +1718,58 @@ Inside& Blend::inside(const TopoDS_Face& face)
   return insides.emplace_back(face);
 }
 
+//! The rail's size law (Rail::sizes) from the (place, size) pairs asked for its edge: the factor on
+//! its distances by the edge's parameter, the cubic through them (Law_Interpol, periodic round an
+//! edge that closes, whose size must then end as it begins), positive all along; its scale the
+//! largest.
+static void sizesOf(Rail& rail, const std::vector<std::pair<double, double>>& points, double first)
+{
+  const char* op = rail.op;
+  const int   n  = int(points.size());
+  if (n < 2 || points.front().first != 0 || points.back().first != 1)
+    fail(op,
+         invalid_input,
+         "a size law runs from the edge's start (0) to its end (1)",
+         {rail.edge});
+  NCollection_Array1<gp_Pnt2d> at(1, n);
+  for (int i = 0; i < n; ++i)
+  {
+    const auto [place, size] = points[i];
+    if (!std::isfinite(place) || !std::isfinite(size) || !(size > 0)
+        || (i > 0 && !(place > points[i - 1].first)))
+      fail(op, invalid_input, "a size law takes rising places and positive sizes", {rail.edge});
+    at(i + 1) = gp_Pnt2d(rail.first + (rail.last - rail.first) * place, size / first);
+  }
+  TopoDS_Vertex a, b;
+  TopExp::Vertices(rail.edge, a, b);
+  const bool closed = !a.IsNull() && a.IsSame(b);
+  if (closed && std::abs(points.front().second - points.back().second) > limit::equal * first)
+    fail(op,
+         invalid_input,
+         "the size round a closed edge ends where it begins: "
+           + std::to_string(points.front().second) + " and " + std::to_string(points.back().second)
+           + " are at one point",
+         {rail.edge},
+         FailureKind::RadiusEndpoints);
+  Handle(Law_Interpol) law = new Law_Interpol;
+  law->Set(at, closed && n > 2);
+  rail.sizes            = law;
+  constexpr int samples = 64;
+  double        most    = 0;
+  for (int k = 0; k <= samples; ++k)
+  {
+    const double f = rail.factor(rail.first + (rail.last - rail.first) * k / samples);
+    if (!(f > 0))
+      fail(op,
+           unsupported_geometry,
+           "the size law falls to zero between its places",
+           {rail.edge},
+           FailureKind::RadiusLaw);
+    most = std::max(most, f);
+  }
+  rail.scale *= most;
+}
+
 void Blend::rails()
 {
 
@@ -1736,11 +1816,16 @@ void Blend::rails()
     const bool   firstOnSecond = !reference.IsNull() && rail.s[1].face.IsSame(reference);
     rail.s[0].distance         = firstOnSecond ? second : request.first;
     rail.s[1].distance         = firstOnSecond ? request.first : second;
+    rail.angle                 = request.angle;
+    rail.reference             = firstOnSecond ? 1 : 0;
     rail.scale                 = std::max(rail.s[0].distance, rail.s[1].distance);
     rail.magnitude             = magnitudeOf(edge);
     rail.first                 = rail.curve.FirstParameter();
     rail.last                  = rail.curve.LastParameter();
-    const int kind             = convexity(op, edge, rail.s[0].face, rail.s[1].face, rail.scale);
+    for (size_t k = 0; k < asked.size() && k < request.radii.size(); ++k)
+      if (asked[k].IsSame(edge) && !request.radii[k].empty())
+        sizesOf(rail, request.radii[k], request.first);
+    const int kind = convexity(op, edge, rail.s[0].face, rail.s[1].face, rail.scale);
     if (kind == 0)
     {
       pieces.pop_back();
@@ -2140,9 +2225,13 @@ void Blend::carries()
       gp_Pnt p;
       gp_Vec d;
       rail.curve.D1(end == 0 ? rail.first : rail.last, p, d);
+      // The blend's size at this end, where it changes along the edge (Rail::sizes).
+      const double size = rail.sizes.IsNull() ? rail.scale
+                                               : std::max(rail.s[0].distance, rail.s[1].distance)
+                                                  * rail.factor(end == 0 ? rail.first : rail.last);
       // Twice the blend's size on, so that it reaches a face that leans away; a mitre's
       // blends may meet a leaning face further beyond the vertex: twice as far there.
-      double length = (piece.joint[end].meets == Meets::Miter ? 4 : 2) * rail.scale;
+      double length = (piece.joint[end].meets == Meets::Miter ? 4 : 2) * size;
       // At a notch (Attach::notch), where an edge of a support goes on straight from the
       // blended one, the blend may run on along it to the face at its far end: that far on.
       // Where it leaves at an angle to the rail's run on, the contact on that support, its
@@ -2160,7 +2249,7 @@ void Blend::carries()
             && normalAt(rail.s[0].face, rail.edge, ends[end], n0)
             && normalAt(rail.s[1].face, rail.edge, ends[end], n1))
         {
-          const double ballOffset = rail.scale * std::tan(n0.Angle(n1) / 2);
+          const double ballOffset = size * std::tan(n0.Angle(n1) / 2);
           for (const auto& other : edgesOfVertex.FindFromKey(ends[end]))
           {
             if (other.IsSame(rail.edge) || !leaving(TopoDS::Edge(other), ends[end], theirs))
@@ -2172,14 +2261,15 @@ void Blend::carries()
                   on = side;
             if (on < 0)
               continue;
-            const double offset = rail.law == Law::Chamfer ? rail.s[on].distance : ballOffset;
+            const double offset =
+              rail.law == Law::Chamfer ? rail.s[on].distance * size / rail.scale : ballOffset;
             const double reach =
-              GCPnts_AbscissaPoint::Length(BRepAdaptor_Curve(TopoDS::Edge(other))) + 2 * rail.scale;
+              GCPnts_AbscissaPoint::Length(BRepAdaptor_Curve(TopoDS::Edge(other))) + 2 * size;
             const double angle = theirs.Angle(-mine);
             if (tangent(mine, theirs))
               length = std::max(length, reach);
             else if (angle < M_PI / 2)
-              length = std::max(length, std::min(reach, offset / std::tan(angle) + 2 * rail.scale));
+              length = std::max(length, std::min(reach, offset / std::tan(angle) + 2 * size));
             // A mitre's partner on the same face: the contacts, offsets d and d' off the
             // two edges at an angle theta between them, cross (d' + d cos theta) / sin theta
             // past the vertex along this one, far beyond it at a narrow re-entrant notch.
@@ -2198,7 +2288,7 @@ void Blend::carries()
             const double theirOffset = partner.scale * std::tan(m0.Angle(m1) / 2);
             length =
               std::max(length,
-                       (theirOffset + offset * std::cos(theta)) / std::sin(theta) + 2 * rail.scale);
+                       (theirOffset + offset * std::cos(theta)) / std::sin(theta) + 2 * size);
           }
         }
       }

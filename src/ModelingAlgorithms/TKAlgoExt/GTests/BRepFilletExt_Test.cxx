@@ -166,3 +166,84 @@ TEST(BRepFilletExt, AsymmetricChamferWithoutReferenceIsRefused)
                                 false),
                std::exception);
 }
+
+// A chamfer, and one whose setback grows linearly along the edge, kept between the planes square
+// to the edge at 0.2 and 0.7 of it: the prism removed there only, of section d^2 / 2, or of
+// d(z)^2 / 2 integrated over the range for d = d0 + (d1 - d0) z / c. Ranges for every section a
+// blend takes go through the blend of the edge alone (blendRange).
+TEST(BRepFilletExt, ChamferInARangeRemovesThePrismThereOnly)
+{
+  const double       a = 6, b = 4, c = 10, d0 = 0.5, d1 = 1.5, z0 = 0.2 * c, z1 = 0.7 * c;
+  const TopoDS_Shape box  = BRepPrimAPI_MakeBox(a, b, c).Shape();
+  const TopoDS_Edge  edge = uprightAtFarCorner(box, a, b);
+  ASSERT_FALSE(edge.IsNull());
+  // The integral of (d0 + k z)^2 / 2 over [z0, z1], k the law's slope.
+  const double k        = (d1 - d0) / c;
+  const auto   integral = [&](double z) { return std::pow(d0 + k * z, 3) / (6 * k); };
+  for (const bool grows : {false, true})
+  {
+    const uint32_t body = BRepExt::store(session(), box), picked = BRepExt::store(session(), edge);
+    const auto     result =
+      BRepExt::blendRange(session(),
+                          body,
+                          picked,
+                          d0,
+                          0,
+                          2,
+                          0.5,
+                          0,
+                          0,
+                          0.2,
+                          0.7,
+                          {},
+                          BRepExt::failureHashBound,
+                          grows ? std::vector<double>{0, d0, 1, d1} : std::vector<double>{});
+    const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
+    EXPECT_TRUE(BRepExt::invalidity(made).empty());
+    const double removed = grows ? integral(z1) - integral(z0) : 0.5 * d0 * d0 * (z1 - z0);
+    EXPECT_NEAR(volume(made), a * b * c - removed, 1e-9 * a * b * c) << (grows ? "grows" : "");
+  }
+}
+
+// A chamfer at 30 degrees off a reference face whose setback on it grows along the edge, over the
+// whole edge and over a range: on a right angle the other setback is d tan 30, and the section
+// removed d^2 tan 30 / 2, integrated as above.
+TEST(BRepFilletExt, AngleChamferWhoseSetbackGrowsRemovesItsSections)
+{
+  const double       a = 6, b = 4, c = 10, d0 = 0.5, d1 = 1.5, angle = M_PI / 6;
+  const TopoDS_Shape box  = BRepPrimAPI_MakeBox(a, b, c).Shape();
+  const TopoDS_Edge  edge = uprightAtFarCorner(box, a, b);
+  ASSERT_FALSE(edge.IsNull());
+  const auto faces =
+    facesWhere(box, [&](const double* l) { return near(l[0], a) && near(l[3], a); });
+  ASSERT_EQ(faces.size(), 1u);
+  const double k        = (d1 - d0) / c;
+  const auto   integral = [&](double z) {
+    return std::tan(angle) * std::pow(d0 + k * z, 3) / (6 * k);
+  };
+  for (const auto& [start, end] : {std::pair{0.0, 1.0}, std::pair{0.2, 0.7}})
+  {
+    const uint32_t body = BRepExt::store(session(), box), picked = BRepExt::store(session(), edge),
+                   reference   = BRepExt::store(session(), faces[0]);
+    const auto          result = BRepExt::blendRange(session(),
+                                            body,
+                                            picked,
+                                            d0,
+                                            0,
+                                            2,
+                                            0.5,
+                                            reference,
+                                            angle,
+                                            start,
+                                            end,
+                                                     {},
+                                            BRepExt::failureHashBound,
+                                                     {0, d0, 1, d1});
+    const TopoDS_Shape& made   = BRepExt::get(session(), result.resultId);
+    EXPECT_TRUE(BRepExt::invalidity(made).empty());
+    EXPECT_NEAR(volume(made),
+                a * b * c - (integral(end * c) - integral(start * c)),
+                1e-9 * a * b * c)
+      << start << " " << end;
+  }
+}

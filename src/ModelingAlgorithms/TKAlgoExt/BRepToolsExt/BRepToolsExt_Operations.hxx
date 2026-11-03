@@ -121,6 +121,25 @@ Standard_EXPORT EvolutionData filletRange(OcctKernel&,
                                           const std::vector<int>&    hashes,
                                           int                        bound,
                                           const std::vector<double>& law = {});
+//! A blend of `edge` between the planes square to it at the fractions `start` and `end` of it, the
+//! rest of `shape` as it was: the blend of the edge alone (blend2::Request: distances `first` and
+//! `second` off `reference` or a chamfer's `angle` off it, a conic, G2 or chamfer section `law` of
+//! `rho`, and where `sizes` holds (place, size) pairs, flat, a size that changes along it), limited
+//! as filletRange's.
+Standard_EXPORT EvolutionData blendRange(OcctKernel&,
+                                         uint32_t                   shape,
+                                         uint32_t                   edge,
+                                         double                     first,
+                                         double                     second,
+                                         int                        law,
+                                         double                     rho,
+                                         uint32_t                   reference,
+                                         double                     angle,
+                                         double                     start,
+                                         double                     end,
+                                         const std::vector<int>&    hashes,
+                                         int                        bound,
+                                         const std::vector<double>& sizes = {});
 Standard_EXPORT std::vector<int> boundaryEdgeIndices(OcctKernel&, uint32_t shape);
 Standard_EXPORT EvolutionData    offsetSheetEdge(OcctKernel&,
                                                  uint32_t                     face,
