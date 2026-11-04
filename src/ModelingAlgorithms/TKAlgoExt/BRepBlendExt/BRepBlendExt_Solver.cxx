@@ -2573,15 +2573,6 @@ void Blend::sheets()
       // No ball's plane passes through the edge's points somewhere along it (past a bend
       // tighter than the ball, where the contact on a cap folds): the balls are found through
       // their centres instead (Rail::byCentre), the same balls.
-      const auto byCentre = [&] {
-        const bool ball = piece.rail.law == Law::Conic || piece.rail.law == Law::G2;
-        if (piece.rail.byCentre || !ball || piece.rail.s[0].cliffCurve
-            || piece.rail.s[1].cliffCurve)
-          return false;
-        piece.rail.byCentre = true;
-        --attempt;
-        return true;
-      };
       try
       {
         stations.march(seeds[k]);
