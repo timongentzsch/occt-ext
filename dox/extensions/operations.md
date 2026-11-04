@@ -197,6 +197,79 @@ the refusal names the corner and says that G1 can be had, as before. The G2 anal
 vertex-enclosure condition is stated open in [Hermann, Peters, Strotman 2009]; this is the elementary part
 of it that a fill can be held to.
 
+*Over a chart of its own.* A fill over the mean plane is a height over it, and a height has a slope of
+tan(acos |n . z|) where the rim's faces have normal n; the plane's check refuses a loop where some
+|n . z| < 0.17 or where the loop seen along z crosses itself. Some loops are a height over no plane at
+all: where the normals of the faces along the rim sweep a closed half circle or more (the nose of a
+wing, a window round more than half a cylinder), every direction d is square to one of them by the
+intermediate value theorem, so every height over every plane is vertical somewhere on its rim. Which
+plane comes nearest is read exactly: with the signs s of n . d fixed near the best direction of a
+search over the half sphere (a Fibonacci lattice of 4096 directions laid out in the loop's frame, so
+that it turns with the loop), max over unit d of min s n . d is the distance from the origin to the
+convex hull of the signed normals [Boyd and Vandenberghe, Convex Optimization, 2004, 8.1.1: the
+support function], found by Gilbert's iteration [IEEE J. Robotics and Automation 2, 1966]; every
+answer is a direction's own least, so a bound from below. A loop that the plane's check refuses, and
+for which that margin, read at 65 places of every side asked G1 or G2 with their ends, is below the same
+0.17, is filled over a chart of its own (`overChart` in `BRepPatchExt_Patch.cxx`, the chart in
+`BRepPatchExt_Chart.cxx`). Every other loop is filled as before, and a loop that the chart does not
+fill either is refused as it was over the plane, with the same words.
+The loop is first spanned by a disc of triangles: an even lattice in the unit disc, the loop on its rim
+at even steps of its length (160 places round), whose places in space minimise the sum of the squared
+umbrella Laplacians at every node of the rim and inside it, the rim held (discrete thin-plate fairing
+[Kobbelt, Discrete fairing, 1997; Botsch and Kobbelt, SIGGRAPH 2004]). Along a side to be tangent to a
+face, a ring of nodes outside the disc stands in the face, at each piece's middle less the way the fill
+leaves the side (away from the face, read in the face's own parameters) times the height of an even
+triangle; with the rim's umbrella near nothing, the nodes inside next to it stand where the face's
+tangent plane goes on, the discrete form of the condition on the first derivative across the boundary
+that two fixed rings give the biharmonic equation in Botsch and Kobbelt. Elsewhere the outer node is
+free, a natural end. The umbrella is the Laplacian of the lattice's own parameters, so the disc is laid
+out again, twice, as an even lattice in the chart it lays flat to, where an even triangle is near even
+on the surface and the umbrella near its cotangent Laplacian [Pinkall and Polthier 1993], and faired
+again; from the first of these on it is pinned to 33 places of every guide where it was nearest them
+(each pin counting 100 umbrellas, a judgement: the wing tip's disc then passes within 0.006 of its guide).
+It is laid flat by Boundary First Flattening with the scale held at none along the rim [Sawhney and
+Crane 2017, sections 5 and 6.1; Springborn, Schroeder and Pinkall 2008, appendix E]: angles kept
+everywhere and lengths along the rim, so that the thin-plate energy of the parameters is near the
+surface's bending energy, which it is not over a plane where the surface stands steep. The flattening
+has no injectivity guarantee for a boundary that is not convex [Floater 2003, theorem 4.1; Sawhney and
+Crane, section 7]: a triangle laid flat folded over refuses the chart. A net free in space is then fitted
+over the chart as over the plane, each side at its places in the chart, its tangent plane asked as
+N . S_u = N . S_v = 0 and its bend as n . S_nn = II(S_n, S_n) taken about the surface of the pass before
+(both conditions on the derivatives in space, none on how the chart lies), and trimmed by the sides'
+curves in its parameters. A net free in space can meet every tangent plane by not leaving the rim at
+all, S_n running to nothing, which is no parametrisation: measured on the wing tip without it, the
+tangent planes were missed by 20 to 80 degrees with |S_v| from 1 to 120 along one side. In a chart that
+keeps the rim's lengths a surface the chart is conformal to leaves the rim as fast as it runs along it,
+|S_n| = |S_t| = 1, and along each side asked G1 or G2 the speed along the way the fill leaves is held
+within 0.5 of that: read, and asked only where it leaves that band, an inequality and no wish. The band
+is a judgement (the chart is the disc's, not the fill's). The net starts as the coarsest of the ladder
+and spans are halved where a place is missed, as for the Adjacent fit, up to the poles a net free in
+space is let have (`freePoles`, 640); once a net meets the limits the next finer one is fitted and the
+coarser kept where they lie within `settled` of each other, the stop above. The surface is kept only
+where S_u x S_v is shown away from zero on every cell the face uses: per cell it is a polynomial of
+degrees (2p - 1, 2q - 1) whose Bernstein coefficients come from those of S_u and S_v [Farin, Curves and
+Surfaces for CAGD, 2002, 5.8], and by the convex hull property a cell whose coefficients all have a
+positive part along one direction has no zero; a cell that does not is cut in four, at most four times.
+That is the surface form of the Bernstein test of a Jacobian's sign in planar parametrisation [Gravesen,
+Evgrafov, Nguyen and Nortoft 2014].
+Windows round a cylinder of radius 15 between heights 8 and 20, G2 to four strips of it (the application's fixture
+at 200 degrees; 180, 240 and 300 held out from the design, and 270 on a cylinder of radius 20 between 10
+and 34) are filled on the same nets at rest, turned, mirrored and turned at a thousandth and a thousand
+times the size; read by projection onto the strips they meet every edge, the strips' tangent planes
+within 0.005 degrees and their bends within a share of 0.004 (95th percentile), and stand within 0.009 of
+the cylinder (the 200-degree window 0.0024, on 11 x 8 poles, in 0.34 s of CPU time natively; 300 degrees
+1.4 s). The wing tip is still refused. Its chart is right (the disc has the tip's dome and passes the
+guide), but G2 round its nose (radius 1.27) and the narrow fin its guide asks near the trailing edge
+(2.2 thick where the guide is 2.5 out) want spans of about half a unit on a chart of 78 by 18: some 1500
+to 2500 poles free in space against the 640 allowed. Halving where missed up to 54 x 54 spans took 140 s
+and stayed 0.004 off an edge. Open: a chart whose scale along the rim follows the faces' bend (Boundary
+First Flattening with the scale prescribed), or a net that is finer only where it has to be. The cap of a
+cone standing 80 degrees or more against its circle, refused as too steep before, is refused over its
+chart as well, from the same tilt at every pose and size.
+The constants of the chart that are not derived: 160 places round the loop, 33 pins per guide, two
+relays, the pin's 100, the band's 0.5, four cuts of a cell, and the 4096 directions of the search, which
+only seed the exact step.
+
 *Unproven.* The interior acceptance gate (a fault when the interior bends more than 4 times the rim's
 bend, with a floor of 2/size) has no derivation; a bound of the form K sqrt(2D) in the energy gap D was
 tried and rejected. The bridge only replaces the reference that the 4 multiplies; the 4 and the tenth are

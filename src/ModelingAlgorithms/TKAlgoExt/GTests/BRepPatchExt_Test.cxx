@@ -18,11 +18,14 @@
 #include "BRepExtTest_Support.hxx"
 
 #include <BRepToolsExt_Operations.hxx>
+#include <BRepPatchExt_Chart.hxx>
 #include <BRepPatchExt_Inside.hxx>
 #include <BRepPatchExt_Side.hxx>
 #include <GeomAlgoExt_Failure.hxx>
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepClass_FaceClassifier.hxx>
+#include <BRepTools.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
@@ -900,10 +903,10 @@ TEST(BRepPatchExt, ALoopTheSameAfterAThirdOfATurnIsLaidOutAlikeAtAnySize)
       placed.push_back(BRepExt::store(session(), moved.ModifiedShape(BRepExt::get(session(), id))));
     const auto made = BRepExt::patch(session(),
                                      placed,
-                                     {0, 0, 0},
-                                     {0, 0, 0},
-                                     {},
-                                     {},
+                                          {0, 0, 0},
+                                          {0, 0, 0},
+                                          {},
+                                          {},
                                      tolerance * scale,
                                      0.1,
                                      0.05,
@@ -932,11 +935,11 @@ TEST(BRepPatchExt, ALoopTheSameAfterAThirdOfATurnIsLaidOutAlikeAtAnySize)
     EXPECT_GT(way(own).Dot(way(other)), 0.999);
     double far = 0;
     for (int i = 1; i <= mesh->NbNodes(); ++i)
-      far = std::max(far,
-                     GeomAPI_ProjectPointOnSurf(mesh->Node(i).XYZ() * scale,
-                                                BRep_Tool::Surface(other))
-                         .LowerDistance()
-                       / scale);
+      far =
+        std::max(far,
+                 GeomAPI_ProjectPointOnSurf(mesh->Node(i).XYZ() * scale, BRep_Tool::Surface(other))
+                     .LowerDistance()
+                   / scale);
     EXPECT_LE(far, tolerance);
   }
 }
@@ -1125,7 +1128,7 @@ Outcome placed(const Asking& asked, const gp_Trsf& pose)
                                      asked.orders,
                                      {},
                                      {},
-                                     asked.tolerance * pose.ScaleFactor(),
+                                     asked.tolerance * std::abs(pose.ScaleFactor()),
                                      asked.g1Degrees,
                                      asked.g2Share,
                                      asked.method,
@@ -1531,3 +1534,170 @@ TEST(BRepPatchExt, FillsComeAsNearTheFairestSurfaceAtEveryPose)
   }
 }
 
+namespace
+{
+
+//! A window round the front of a cylinder of radius `r` about z, from `from` to `to` high, of
+//! `wrap` degrees: four strips of the cylinder beyond its
+//! edges, each a spline sheet through 25 x 5 of its points, placed by `pose`.
+Rounds window(double r, double from, double to, double wrap, const gp_Trsf& pose)
+{
+  Rounds       out;
+  const double half = wrap * M_PI / 360, height = to + 10;
+  const auto   on = [&](double a, double z) { return gp_Pnt(r * std::sin(a), r * std::cos(a), z); };
+  const auto   strip = [&](const std::function<gp_Pnt(double, double)>& f) {
+    std::vector<double> grid;
+    for (int i = 0; i < 25; ++i)
+      for (int j = 0; j < 5; ++j)
+      {
+        const gp_Pnt p = f(i / 24.0, j / 4.0).Transformed(pose);
+        grid.insert(grid.end(), {p.X(), p.Y(), p.Z()});
+      }
+    const auto made =
+      BRepExt::surfaceThroughGrid(session(), grid, 25, 5, 1e-7 * std::abs(pose.ScaleFactor()));
+    out.hold(onlyFace(BRepExt::get(session(), made.resultId)), f(0.5, 0).Transformed(pose), 0.45);
+  };
+  strip([&](double s, double t) { return on(-half + 2 * half * s, to + t * (height - to)); });
+  strip([&](double s, double t) { return on(-half + 2 * half * s, from - t * from); });
+  for (const double sign : {1.0, -1.0})
+    strip([&](double s, double t) { return on(sign * (half + t * 0.3), from + (to - from) * s); });
+  return out;
+}
+
+//! The places of a face inside its loop, on a grid of its parameters.
+std::vector<gp_Pnt> insideOf(const TopoDS_Face& face, int grid = 24)
+{
+  std::vector<gp_Pnt> out;
+  double              u0, u1, v0, v1;
+  BRepTools::UVBounds(face, u0, u1, v0, v1);
+  const Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+  for (int i = 0; i < grid; ++i)
+    for (int j = 0; j < grid; ++j)
+    {
+      const gp_Pnt2d uv(u0 + (u1 - u0) * (i + 0.5) / grid, v0 + (v1 - v0) * (j + 0.5) / grid);
+      if (BRepClass_FaceClassifier(face, uv, 1e-9).State() == TopAbs_IN)
+        out.push_back(surface->Value(uv.X(), uv.Y()));
+    }
+  return out;
+}
+
+} // namespace
+
+// A window that wraps a cylinder by more than half of it, its four edges G2 to strips of the
+// cylinder beyond them, seen along any direction folds over itself: its rim's normals sweep the
+// whole half circle and more, so it is a height over no plane (see graphMargin). It is filled
+// over a chart of its own (overChart): at 200 degrees, the application's fixture, and at 180, 240 and 300 and
+// on a taller and wider cylinder, held out from the design. Each is made alike at rest, turned,
+// mirrored and turned at a thousandth and a thousand times the size, by the same net; and read
+// without Patch's help, it meets every edge within the tolerance, the strips' tangent planes
+// within 0.1 degrees and their principal curvatures within 5 % on all but the ends of each edge
+// (expectMet), and stands inside the loop within 1 % of the radius of the cylinder, which is the
+// fair answer to its rim.
+TEST(BRepPatchExt, WindowsRoundMoreThanHalfACylinderAreFilledOverAChartOfTheirOwn)
+{
+  struct Case
+  {
+    double r, from, to, wrap;
+  };
+
+  const Case cases[] = {{15, 8, 20, 200},
+                        {15, 8, 20, 180},
+                        {15, 8, 20, 240},
+                        {15, 8, 20, 300},
+                        {20, 10, 34, 270}};
+  gp_Trsf    mirrored;
+  mirrored.SetMirror(gp_Ax2(gp_Pnt(1, 2, 3), gp_Dir(1, 1, 0)));
+  const gp_Trsf poses[] = {turned(1), mirrored, turned(1e-3), turned(1e3)};
+  for (const Case& c : cases)
+  {
+    SCOPED_TRACE(testing::Message() << "wrap " << c.wrap << ", radius " << c.r);
+    const Rounds  loop = window(c.r, c.from, c.to, c.wrap, gp_Trsf());
+    const Outcome base = placed(asking(loop), gp_Trsf());
+    ASSERT_TRUE(base.made) << base.why;
+    EXPECT_EQ(base.built[0], 3);
+    for (const gp_Trsf& pose : poses)
+    {
+      SCOPED_TRACE(pose.ScaleFactor());
+      expectSame(placed(asking(loop), pose), base);
+    }
+    for (const gp_Trsf& pose : {gp_Trsf(), turned(1)})
+    {
+      const Rounds      placedLoop = window(c.r, c.from, c.to, c.wrap, pose);
+      const auto        built      = placedLoop.fill();
+      const TopoDS_Face fill       = onlyFace(BRepExt::get(session(), built.evolution.resultId));
+      ASSERT_FALSE(fill.IsNull());
+      placedLoop.expectMet(fill);
+      const std::vector<gp_Pnt> inside = insideOf(fill);
+      ASSERT_GT(inside.size(), 100u);
+      for (const gp_Pnt& p : inside)
+      {
+        const gp_Pnt rest = p.Transformed(pose.Inverted());
+        EXPECT_LE(std::abs(std::hypot(rest.X(), rest.Y()) - c.r), 0.01 * c.r);
+        EXPECT_GE(rest.Z(), c.from - 1e-3);
+        EXPECT_LE(rest.Z(), c.to + 1e-3);
+      }
+    }
+  }
+}
+
+// What says that no plane carries a fill as a height: the normals of a rim that sweep a half
+// circle and more leave every direction square to one of them, read at 65 places a margin no
+// more than the sine of half the step between two places, whichever way the search is laid out;
+// normals that sweep less leave the direction between them, at the cosine of half the sweep.
+TEST(BRepPatchExt, GraphMarginIsNoneWhereTheRimsNormalsSweepAHalfCircle)
+{
+  const auto sweep = [](double degrees) {
+    std::vector<gp_Vec> normals;
+    for (int i = 0; i <= 64; ++i)
+    {
+      const double a = (i / 64.0 - 0.5) * degrees * M_PI / 180;
+      normals.emplace_back(std::sin(a), std::cos(a), 0);
+    }
+    return normals;
+  };
+  const gp_Vec rest[3] = {gp_Vec(1, 0, 0), gp_Vec(0, 1, 0), gp_Vec(0, 0, 1)};
+  gp_Trsf      turn;
+  turn.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, -2, 0.5)), 0.9);
+  const gp_Vec turned3[3] = {rest[0].Transformed(turn),
+                             rest[1].Transformed(turn),
+                             rest[2].Transformed(turn)};
+  for (const double degrees : {180.0, 200.0, 300.0})
+  {
+    const double gap = std::sin(degrees / 64 / 2 * M_PI / 180) + 1e-6;
+    EXPECT_LT(BRepExt::graphMargin(sweep(degrees), rest), gap) << degrees;
+    EXPECT_LT(BRepExt::graphMargin(sweep(degrees), turned3), gap) << degrees;
+  }
+  for (const double degrees : {60.0, 120.0, 160.0})
+  {
+    const double expected = std::cos((degrees / 2) * M_PI / 180);
+    EXPECT_NEAR(BRepExt::graphMargin(sweep(degrees), rest), expected, 1e-3) << degrees;
+    EXPECT_NEAR(BRepExt::graphMargin(sweep(degrees), turned3), expected, 1e-3) << degrees;
+  }
+}
+
+// The certificate that a surface keeps its normal: a plane bent into a bowl is shown regular, and
+// the same with one row of poles collapsed into a point, whose S_u x S_v vanishes all along that
+// edge, is not.
+TEST(BRepPatchExt, RegularityIsShownForASmoothSheetAndNotWhereItsNormalVanishes)
+{
+  NCollection_Array2<gp_Pnt> poles(1, 6, 1, 6);
+  for (int i = 1; i <= 6; ++i)
+    for (int j = 1; j <= 6; ++j)
+      poles(i, j) = gp_Pnt(i, j, 0.1 * ((i - 3.5) * (i - 3.5) + (j - 3.5) * (j - 3.5)));
+  NCollection_Array1<double> knots(1, 2);
+  NCollection_Array1<int>    ends(1, 2);
+  knots(1) = 0;
+  knots(2) = 1;
+  ends(1) = ends(2) = 6;
+  const auto bowl   = [&] {
+    return occ::handle<Geom_BSplineSurface>(
+      new Geom_BSplineSurface(poles, knots, knots, ends, ends, 5, 5));
+  };
+  const auto all    = [](double, double, double, double) { return true; };
+  const auto margin = BRepExt::regularMargin(bowl(), all);
+  ASSERT_TRUE(margin.has_value());
+  EXPECT_GT(*margin, 0.5);
+  for (int j = 1; j <= 6; ++j)
+    poles(1, j) = gp_Pnt(1, 3.5, 0);
+  EXPECT_FALSE(BRepExt::regularMargin(bowl(), all).has_value());
+}

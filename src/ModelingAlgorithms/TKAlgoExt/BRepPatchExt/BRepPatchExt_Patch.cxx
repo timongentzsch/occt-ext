@@ -24,6 +24,7 @@
 #include <GeomAlgoExt_PatchFit.hxx>
 #include <GeomAlgoExt_PatchCompact.hxx>
 #include <BRepPatchExt_Inside.hxx>
+#include <BRepPatchExt_Chart.hxx>
 #include <GeomAlgoExt_PatchRim.hxx>
 #include <GeomAlgoExt_SurfaceJet.hxx>
 
@@ -35,7 +36,9 @@
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <BRepLib.hxx>
+#include <BRepTools.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepFill_Filling.hxx>
@@ -45,6 +48,7 @@
 #include <Geom2d_BSplineCurve.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
 #include <Geom2dConvert.hxx>
+#include <Geom2dAPI_Interpolate.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <GeomAdaptor_Curve.hxx>
 #include <GeomConvert.hxx>
@@ -539,6 +543,11 @@ struct Target
   bool soft = false;
   //! Near a corner, the least bend a miss of the bend asked is a share of (see Side::easing).
   double easing = 0;
+  //! Over a chart whose lengths along the rim are the rim's own: the way the surface leaves the
+  //! curve in space, a unit vector, along which its derivative `across` is to be within a band
+  //! about one (see overChart). Read and not asked until it is missed: a band and no wish.
+  std::optional<gp_Vec> leave      = {};
+  bool                  leaveAsked = false;
 };
 
 //! What tangency and bend count for against position, in the units of the loop's size. Where
@@ -585,6 +594,13 @@ constexpr double fitShare = 0.25;
 //! measured at yet other places, and a miss that is at its largest between two places of the
 //! fit is found there.
 constexpr double watchShare = 0.5;
+
+//! The speed a surface over a chart is to leave its rim at, across it, and the band about it
+//! that is met: over a chart that keeps the rim's lengths (proxyChart), a surface that the chart
+//! is conformal to leaves the rim as fast as it runs along it, at one; the band keeps it from
+//! running off to nothing or far off, which meet every tangent plane and are no parametrisation.
+//! The band is a judgement, not derived: the chart is the proxy's, not the fill's.
+constexpr double leaveSpeed = 1, leaveBand = 0.5;
 
 enum class GraphFit
 {
@@ -644,6 +660,19 @@ std::vector<FitCondition> conditions(const std::vector<Target>&              tar
                      target.share * tangentWeight,
                      false,
                      1e-7});
+    }
+    if (target.leave)
+    {
+      const gp_XYZ direction = target.leave->XYZ();
+      out.push_back({target.uv.X(),
+                     target.uv.Y(),
+                     {{1, 0, direction * target.across.X()}, {0, 1, direction * target.across.Y()}},
+                     2,
+                     leaveSpeed,
+                     target.share * tangentWeight,
+                     false,
+                     leaveBand,
+                     !target.leaveAsked});
     }
     if (target.order < 1)
       continue;
@@ -776,6 +805,8 @@ occ::handle<Geom_BSplineSurface> fit(SplineNet&                                 
     {
       if (target.perpendicular)
         target.perpendicular = vector(*target.perpendicular);
+      if (target.leave)
+        target.leave = vector(*target.leave);
       target.point = gp_Pnt(scaled(gp_Vec(frame->origin, target.point)).XYZ());
       target.uv.SetCoord(coordinate(target.uv.X()), coordinate(target.uv.Y()));
       // A bend, as the jets' are, in the units of the size.
@@ -871,7 +902,10 @@ occ::handle<Geom_BSplineSurface> fit(SplineNet&                                 
       if (missed.empty() || round == placeRounds)
         break;
       for (int condition : missed)
-        targets[owner[condition]].watch = false;
+      {
+        targets[owner[condition]].watch      = false;
+        targets[owner[condition]].leaveAsked = true;
+      }
       net.poles = start;
     }
     surface = surfaceOf(net);
@@ -3747,6 +3781,530 @@ constexpr double same = 0.02;
 //! The coarsest nets, whose misses say nothing yet of how the finer ones will do.
 constexpr int unruly = 2;
 
+// --- Over a chart of the loop's own ----------------------------------------------------------
+
+//! The places along a side at which its face's normal is read for whether any plane is one the
+//! fill could be a height over (see graphMargin), its ends included.
+constexpr int gaussPlaces = 64;
+
+//! The places along a guide that the loop's chart is drawn through (see proxyChart).
+constexpr int guidePins = 32;
+
+//! The places the loop is spanned by round it for its chart (see proxyChart): the disc inside
+//! has about a tenth of the square of that many nodes.
+constexpr int chartPlaces = 160;
+
+//! Which way along N x T, N the face's normal and T the side's tangent, a fill leaves a side it
+//! is to be tangent to: away from the face, which lies to one side of the edge in the face's own
+//! parameters. Zero where nothing is asked or that side is not found.
+double leaving(const Side& side)
+{
+  if (side.free || side.order < 1 || side.support.IsNull())
+    return 0;
+  double     first, last;
+  const auto onFace = BRep_Tool::CurveOnSurface(side.edge, side.support, first, last);
+  if (onFace.IsNull())
+    return 0;
+  gp_Pnt2d uv;
+  gp_Vec2d along;
+  onFace->D1(side.parameter(0.5), uv, along);
+  if (!(along.Magnitude() > 0))
+    return 0;
+  double u0, u1, v0, v1;
+  BRepTools::UVBounds(side.support, u0, u1, v0, v1);
+  const gp_Vec2d left =
+    gp_Vec2d(-along.Y(), along.X()).Normalized() * (1e-4 * std::hypot(u1 - u0, v1 - v0));
+  gp_Pnt point;
+  gp_Vec su, sv;
+  BRepAdaptor_Surface(side.support).D1(uv.X(), uv.Y(), point, su, sv);
+  const gp_Vec across = side.faceJet(0.5).n.Crossed(side.tangent(0.5));
+  for (const double sign : {1.0, -1.0})
+  {
+    const gp_Vec2d way = left * sign;
+    if (BRepClass_FaceClassifier(side.support, uv.Translated(way), Precision::PConfusion()).State()
+        == TopAbs_IN)
+      return (su * way.X() + sv * way.Y()).Dot(across) > 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+//! The fractions of a side at `pieces` even steps of its length, from its start to its end.
+std::vector<double> evenSteps(const Side& side, int pieces)
+{
+  const int           fine = 16 * pieces;
+  std::vector<double> length(fine + 1, 0);
+  gp_Pnt              before = side.at(0);
+  for (int i = 1; i <= fine; ++i)
+  {
+    const gp_Pnt here = side.at(static_cast<double>(i) / fine);
+    length[i]         = length[i - 1] + before.Distance(here);
+    before            = here;
+  }
+  std::vector<double> out{0};
+  for (int k = 1; k < pieces; ++k)
+  {
+    const double want = length[fine] * k / pieces;
+    const size_t i    = std::upper_bound(length.begin(), length.end(), want) - length.begin() - 1;
+    const double part =
+      length[i + 1] > length[i] ? (want - length[i]) / (length[i + 1] - length[i]) : 0;
+    out.push_back((i + part) / fine);
+  }
+  out.push_back(1);
+  return out;
+}
+
+//! A curve in the chart through `places` at `fractions`, for a curve parameter from `from` to
+//! `to`.
+std::function<gp_XY(double)> laidThrough(const std::vector<gp_XY>&  places,
+                                         const std::vector<double>& fractions,
+                                         double                     from,
+                                         double                     to,
+                                         double                     size)
+{
+  const int                                        count = static_cast<int>(places.size());
+  const occ::handle<NCollection_HArray1<gp_Pnt2d>> points =
+    new NCollection_HArray1<gp_Pnt2d>(1, count);
+  const occ::handle<NCollection_HArray1<double>> at = new NCollection_HArray1<double>(1, count);
+  for (int i = 0; i < count; ++i)
+  {
+    points->SetValue(i + 1, gp_Pnt2d(places[i]));
+    at->SetValue(i + 1, fractions[i]);
+  }
+  Geom2dAPI_Interpolate through(points, at, false, BRepExt::tolerance::exactLength * size);
+  through.Perform();
+  if (!through.IsDone())
+    fail(op, no_solution, "a side of the loop has no curve in its chart");
+  const occ::handle<Geom2d_BSplineCurve> curve = through.Curve();
+  return [curve, from, to](double t) { return curve->Value((t - from) / (to - from)).XY(); };
+}
+
+//! A fill over a chart of the loop's own, for a loop whose rim's faces stand so that it is a
+//! height over no plane (see overPlane). The loop is spanned by a disc of triangles that leaves
+//! every side as its face asks and is laid flat conformally (proxyChart); a net free in space is
+//! fitted over that chart, held to the sides at their places in it as over the mean plane: with
+//! its tangent plane the face's and its bend across the face's where they are asked, which are
+//! conditions on the derivatives in space and none on how the chart lies. It is trimmed by the
+//! sides' curves in its parameters and kept only where S_u x S_v is shown to keep away from zero
+//! inside the loop (regularMargin). Nothing where no net over the chart meets what is asked.
+std::optional<Built> overChart(const Asked& asked, const Frame& frame)
+{
+  PatchPhase   phase("chart");
+  const size_t count     = asked.sides.size();
+  double       perimeter = 0;
+  for (const Side& side : asked.sides)
+    perimeter += side.length;
+  std::vector<ChartRim>            rim;
+  std::vector<std::vector<double>> steps(count);
+  std::vector<size_t>              firstNode(count);
+  std::vector<double>              sign(count);
+  for (size_t s = 0; s < count; ++s)
+  {
+    const Side& side = asked.sides[s];
+    const int   pieces =
+      std::max(1, static_cast<int>(std::lround(chartPlaces * side.length / perimeter)));
+    steps[s]     = evenSteps(side, pieces);
+    firstNode[s] = rim.size();
+    sign[s]      = leaving(side);
+    for (int k = 0; k < pieces; ++k)
+    {
+      const double f = (steps[s][k] + steps[s][k + 1]) / 2;
+      rim.push_back({side.at(steps[s][k]),
+                     sign[s] == 0
+                       ? gp_Vec(0, 0, 0)
+                       : side.faceJet(f).n.Crossed(side.tangent(f)).Normalized() * sign[s]});
+    }
+  }
+  std::vector<gp_Pnt> through = asked.points;
+  for (const Side& guide : asked.guides)
+    for (int i = 0; i <= guidePins; ++i)
+      through.push_back(guide.at(static_cast<double>(i) / guidePins));
+  const ConformalChart                      chart = proxyChart(rim, through);
+  std::vector<std::function<gp_XY(double)>> layout(count);
+  for (size_t s = 0; s < count; ++s)
+  {
+    std::vector<gp_XY> places;
+    for (size_t k = 0; k + 1 < steps[s].size(); ++k)
+      places.push_back(chart.flat[firstNode[s] + k]);
+    places.push_back(chart.flat[firstNode[(s + 1) % count]]);
+    layout[s] = laidThrough(places, steps[s], asked.sides[s].from, asked.sides[s].to, asked.size);
+  }
+  std::vector<gp_XY> loop(chart.flat.begin(), chart.flat.begin() + rim.size());
+  const Inside       within(loop, 0);
+  // Guides and points where they lie on the disc in space.
+  const auto onDisc = [&](const gp_Pnt& point) {
+    double     distance = 0;
+    const auto at       = onChart(chart, point, distance);
+    if (!inside(loop, at, outsideSlack * asked.size))
+      fail(op, invalid_input, "a guide or a point lies outside the boundary");
+    return at;
+  };
+  std::vector<std::function<gp_XY(double)>> guideLayout;
+  for (const Side& guide : asked.guides)
+  {
+    constexpr int       guidePlaces = 64;
+    std::vector<gp_XY>  places;
+    std::vector<double> fractions;
+    for (int i = 0; i <= guidePlaces; ++i)
+    {
+      fractions.push_back(static_cast<double>(i) / guidePlaces);
+      places.push_back(onDisc(guide.at(fractions.back())));
+    }
+    guideLayout.push_back(laidThrough(places, fractions, 0, 1, asked.size));
+  }
+  std::vector<gp_XY> pointPlaces;
+  for (const gp_Pnt& point : asked.points)
+    pointPlaces.push_back(onDisc(point));
+
+  gp_XY low = loop.front(), high = low;
+  for (const gp_XY& at : chart.flat)
+  {
+    low.SetCoord(std::min(low.X(), at.X()), std::min(low.Y(), at.Y()));
+    high.SetCoord(std::max(high.X(), at.X()), std::max(high.Y(), at.Y()));
+  }
+  const double width = high.X() - low.X(), depth = high.Y() - low.Y(),
+               larger = std::max(width, depth);
+  const gp_XY margin(marginShare * width, marginShare * depth);
+  int         order = 0;
+  for (const Side& side : asked.sides)
+    order = std::max(order, side.order);
+  const int degree = order > 0 || !asked.guides.empty() ? 5 : 3;
+
+  const auto certify = [&](const occ::handle<Geom_BSplineSurface>& surface) {
+    std::vector<Rim> rims;
+    for (size_t s = 0; s < count; ++s)
+      rims.push_back(
+        asked.sides[s].free
+          ? Rim{}
+          : preimage(surface, asked.sides[s], frame, asked.limits.g0, asked.size, {}, layout[s]));
+    closeGaps(asked.sides, rims);
+    std::vector<gp_XY> around;
+    for (size_t s = 0; s < count; ++s)
+      for (int k = 0; k < 64; ++k)
+        around.push_back(rims[s].onSurface->Value(asked.sides[s].parameter(k / 64.0)).XY());
+    double turning = 0;
+    for (size_t i = 0; i < around.size(); ++i)
+      turning += around[i].Crossed(around[(i + 1) % around.size()]);
+    Built built{3,
+                {},
+                measureAll(surface,
+                           asked,
+                           [&](const Side& side, double f, const gp_Pnt&) -> std::optional<Place> {
+                             if (const auto s = asked.boundaryIndex(side))
+                               return Place{rims[*s].onSurface->Value(side.parameter(f)).XY(),
+                                            true};
+                             // A guide is read at the surface's nearest from its chart place.
+                             for (size_t g = 0; g < asked.guides.size(); ++g)
+                               if (&side == &asked.guides[g])
+                                 return Place{guideLayout[g](f), false};
+                             return std::nullopt;
+                           })};
+    for (size_t s = 0; s < count; ++s)
+      rims[s].deviation =
+        std::max(rims[s].deviation, built.measured.values[asked.sides[s].input * 4]);
+    built.face = trimmed(surface, asked, rims, turning < 0);
+    for (size_t s = 0; s < count; ++s)
+    {
+      const Side& side = asked.sides[s];
+      if (!side.free)
+        built.spatialBoundary.push_back(
+          {side.input, rims[s].onSurface, side.from, side.to, side.originalReversed});
+      if (hasGaps(asked))
+        built.gaps.push_back(side.free ? rims[s].onSurface : occ::handle<Geom2d_Curve>());
+    }
+    measureSpatialBoundary(built, asked, false);
+    if (built.measured.within)
+    {
+      // The cells the face uses: those that hold a place inside the loop or of its rim.
+      const auto used = [&](double u0, double u1, double v0, double v1) {
+        for (const gp_XY& at : around)
+          if (u0 <= at.X() && at.X() <= u1 && v0 <= at.Y() && at.Y() <= v1)
+            return true;
+        for (int i = 0; i <= 4; ++i)
+          for (int j = 0; j <= 4; ++j)
+            if (within(gp_XY(u0 + (u1 - u0) * i / 4, v0 + (v1 - v0) * j / 4)))
+              return true;
+        return false;
+      };
+      std::optional<std::string> fault;
+      if (!regularMargin(surface, used))
+        fault = "it is not shown regular over the loop's chart";
+      else if (!BRepCheck_Analyzer(built.face).IsValid())
+        fault = "it is not a valid face";
+      else
+        fault = insideFault(built.face, asked.points.empty() ? rimBend(asked) : 0);
+      if (fault)
+      {
+        built.measured.within = false;
+        built.measured.unkept = true;
+        built.measured.worst  = *fault;
+        built.measured.excess = unkeptExcess;
+      }
+    }
+    return built;
+  };
+
+  // The net starts as the coarsest of the ladder over the chart and is made finer span by span
+  // where a place it is held to is missed, as the Adjacent fit is (see adjacentOver): the nose
+  // of a wing asks for spans far shorter than the rest of its chart does.
+  std::vector<double> breaksU, breaksV;
+  const auto even = [&](std::vector<double>& breaks, double from, double to, double extent) {
+    const int spans =
+      std::max(fewestSpans, static_cast<int>(std::lround(ladder[0] * extent / larger)));
+    for (int i = 0; i <= spans; ++i)
+      breaks.push_back(from + (to - from) * i / spans);
+  };
+  even(breaksU, low.X() - margin.X(), high.X() + margin.X(), width);
+  even(breaksV, low.Y() - margin.Y(), high.Y() + margin.Y(), depth);
+  const auto knots = [&](const std::vector<double>& breaks) {
+    std::vector<double> out(degree, breaks.front());
+    out.insert(out.end(), breaks.begin(), breaks.end());
+    out.insert(out.end(), degree, breaks.back());
+    return out;
+  };
+  std::optional<Built>      best;
+  occ::handle<Geom_Surface> previous;
+  int                       idle = 0, unkept = 0;
+  for (double before = HUGE_VAL;;)
+  {
+    SplineNet  net{degree, degree, knots(breaksU), knots(breaksV), {}};
+    const int  nu = net.countU(), nv = net.countV();
+    const auto mean = [&](const std::vector<double>& knots, int i) {
+      double sum = 0;
+      for (int k = 1; k <= degree; ++k)
+        sum += knots[i + k];
+      return sum / degree;
+    };
+    for (int i = 0; i < nu; ++i)
+      for (int j = 0; j < nv; ++j)
+        net.poles.push_back(frame.origin.XYZ() + frame.x.XYZ() * mean(net.knotsU, i)
+                            + frame.y.XYZ() * mean(net.knotsV, j));
+    double smallest = HUGE_VAL;
+    for (const auto* breaks : {&breaksU, &breaksV})
+      for (size_t k = 1; k < breaks->size(); ++k)
+        smallest = std::min(smallest, (*breaks)[k] - (*breaks)[k - 1]);
+    std::vector<Target> targets;
+    // Per target, the way along its side in space where it asks a tangent plane.
+    std::vector<gp_Vec> along;
+    for (size_t s = 0; s < count; ++s)
+    {
+      const Side& side = asked.sides[s];
+      if (side.free)
+        continue;
+      const int places =
+        std::clamp(static_cast<int>(std::ceil(placesPerSpan * side.length / smallest)),
+                   fewestRimPlaces,
+                   mostRimPlaces);
+      const double step = 1.0 / places;
+      // Next to a gap the face has its say at the end as along the rest (see overPlane).
+      const auto quiet = [&](size_t other) {
+        const Side& near = asked.sides[other % count];
+        return near.free || near.support.IsSame(side.support);
+      };
+      const bool lone       = hasGaps(asked);
+      const bool quietStart = lone && quiet(s + count - 1), quietEnd = lone && quiet(s + 1);
+      const auto add = [&](double f, bool end, bool watch) {
+        if (end && ((f == 0 && quietStart) || (f == 1 && quietEnd)))
+        {
+          f   = std::clamp(f, cornerInset, 1 - cornerInset);
+          end = false;
+        }
+        const bool smooth = side.order > 0 && !end;
+        Target     target{side.meet(f),
+                      layout[s](side.parameter(f)),
+                      smooth ? side.order : 0,
+                          {},
+                          {},
+                      step * side.length / asked.size};
+        target.watch = watch;
+        if (smooth)
+        {
+          target.jet          = side.jet(f);
+          target.easing       = side.easing(f);
+          const double h      = std::min({step / 4, f, 1 - f});
+          const gp_XY tangent = layout[s](side.parameter(f + h)) - layout[s](side.parameter(f - h));
+          target.across       = gp_XY(-tangent.Y(), tangent.X()) / tangent.Modulus();
+          if (sign[s] != 0)
+            target.leave = side.faceJet(f).n.Crossed(side.tangent(f)).Normalized() * sign[s];
+        }
+        targets.push_back(target);
+        along.push_back(smooth ? side.tangent(f).Normalized() : gp_Vec(0, 0, 0));
+      };
+      add(0, true, false);
+      add(1, true, false);
+      for (int k = 0; k < places; ++k)
+      {
+        add((k + 0.5) * step, false, false);
+        if (k + 1 < places)
+          add((k + 1) * step, false, true);
+      }
+    }
+    for (size_t g = 0; g < asked.guides.size(); ++g)
+    {
+      const Side& guide = asked.guides[g];
+      const int   places =
+        std::clamp(static_cast<int>(std::ceil(placesPerSpan * guide.length / smallest)),
+                   fewestRimPlaces,
+                   mostRimPlaces);
+      for (int i = 0; i <= 2 * places; ++i)
+      {
+        const double f = static_cast<double>(i) / (2 * places);
+        targets.push_back(
+          {guide.meet(f), guideLayout[g](f), 0, {}, {}, guide.length / places / asked.size});
+        targets.back().watch = i % 2 != 0;
+        along.push_back(gp_Vec(0, 0, 0));
+      }
+    }
+    for (size_t i = 0; i < asked.points.size(); ++i)
+    {
+      targets.push_back({asked.points[i], pointPlaces[i], 0, {}, {}, 1});
+      along.push_back(gp_Vec(0, 0, 0));
+    }
+    const occ::handle<Geom_BSplineSurface> surface = fit(
+      net,
+      std::vector<char>(net.poles.size(), 0),
+      targets,
+      asked.size,
+      asked.limits,
+      {},
+      [&](double u, double v) { return within(gp_XY(u, v)) ? 1 : outsideWeight; },
+      nullptr,
+      {},
+      &frame);
+    Built        built  = certify(surface);
+    const double change = previous.IsNull() ? HUGE_VAL
+                                            : apart(previous,
+                                                    surface,
+                                                    2 * static_cast<int>(breaksU.size() - 1),
+                                                    2 * static_cast<int>(breaksV.size() - 1),
+                                                    low,
+                                                    high,
+                                                    within);
+    previous            = surface;
+    // As over the mean plane: a net that meets every limit is kept once the next finer one lies
+    // within `settled` of it, and until then the finest that meets them.
+    const bool split = built.measured.within || (best && best->measured.within);
+    if (built.measured.within || (best && best->measured.within))
+    {
+      if (change <= settled * asked.size)
+      {
+        if (!best->measured.within)
+          best = std::move(built);
+        break;
+      }
+      if (built.measured.within)
+        best = std::move(built);
+    }
+    else if (!best || built.measured.excess < best->measured.excess)
+      best = built;
+    // Nets that come no nearer, more than the coarsest few may: what is left is not the net's.
+    if (split)
+    {
+    }
+    else if (built.measured.excess > stillFalling * before)
+    {
+      if (++idle > unruly)
+      {
+        best->measured.worst += ". A finer net came no nearer";
+        break;
+      }
+    }
+    else
+    {
+      idle   = 0;
+      before = built.measured.excess;
+    }
+    // Finer in every span where the fit misses a place it was held to, or a side is missed
+    // between them: halved, up to the finest net of the ladder each way.
+    std::vector<char> splitU(breaksU.size() - 1, split), splitV(breaksV.size() - 1, split);
+    const auto        mark = [&](const gp_XY& uv) {
+      const auto span = [](const std::vector<double>& breaks, double at) {
+        return std::clamp(
+          static_cast<int>(std::upper_bound(breaks.begin(), breaks.end(), at) - breaks.begin()) - 1,
+          0,
+          static_cast<int>(breaks.size()) - 2);
+      };
+      splitU[span(breaksU, uv.X())] = splitV[span(breaksV, uv.Y())] = 1;
+    };
+    for (size_t t = 0; !split && t < targets.size(); ++t)
+    {
+      const Target& target = targets[t];
+      const double  share  = target.watch ? watchShare : fitShare;
+      bool          missed = surface->Value(target.uv.X(), target.uv.Y()).Distance(target.point)
+                    > share * asked.limits.g0;
+      if (!missed && target.order > 0)
+      {
+        const SurfaceJet mine   = surfaceJet(op, surface, target.uv.X(), target.uv.Y());
+        const double     cosine = mine.n.Dot(target.jet->n);
+        missed = std::acos(std::min(1.0, std::abs(cosine))) * 180 / M_PI > share * asked.limits.g1;
+        if (!missed && target.order > 1)
+        {
+          const auto [bend, relative] =
+            bendDifference(*target.jet, mine, along[t], cosine < 0 ? -1 : 1);
+          missed = relative > share * asked.limits.g2
+                   && bend * asked.size > share * asked.limits.g2 * flatShare;
+        }
+      }
+      if (missed)
+        mark(target.uv);
+    }
+    for (size_t s = 0; s < count && !split; ++s)
+    {
+      const Side& side = asked.sides[s];
+      if (side.free)
+        continue;
+      Miss miss;
+      miss.g0         = built.measured.values[side.input * 4];
+      miss.g1         = built.measured.values[side.input * 4 + 1];
+      miss.g2Relative = built.measured.values[side.input * 4 + 2];
+      miss.g2         = built.measured.values[side.input * 4 + 3];
+      if (miss.within(asked.limits, side.order, asked.size))
+        continue;
+      const int places =
+        std::clamp(static_cast<int>(std::ceil(4 * placesPerSpan * side.length / smallest)),
+                   fewestRimPlaces,
+                   4 * mostRimPlaces);
+      for (int i = 0; i <= places; ++i)
+        mark(layout[s](side.parameter(static_cast<double>(i) / places)));
+    }
+    // A net that meets the edges with a surface that is not one to keep is too coarse for what
+    // is asked along them, wherever that shows: a few finer nets, and no more.
+    if (!split && built.measured.unkept && ++unkept <= mostUnkept)
+    {
+      std::fill(splitU.begin(), splitU.end(), 1);
+      std::fill(splitV.begin(), splitV.end(), 1);
+    }
+    bool                               finer = false;
+    std::array<std::vector<double>, 2> next;
+    for (int way = 0; way < 2; ++way)
+    {
+      const auto& breaks = way ? breaksV : breaksU;
+      const auto& marked = way ? splitV : splitU;
+      next[way]          = {breaks.front()};
+      int spans          = static_cast<int>(breaks.size()) - 1;
+      for (size_t i = 0; i + 1 < breaks.size(); ++i)
+      {
+        if (marked[i] && spans < std::end(ladder)[-1])
+        {
+          next[way].push_back((breaks[i] + breaks[i + 1]) / 2);
+          ++spans;
+          finer = true;
+        }
+        next[way].push_back(breaks[i + 1]);
+      }
+    }
+    // A net free in space is let have no more poles than over the mean plane (see freePoles).
+    if ((next[0].size() + degree - 1) * (next[1].size() + degree - 1) > freePoles)
+      break;
+    breaksU = next[0];
+    breaksV = next[1];
+    if (!finer)
+      break;
+  }
+  if (!best || !best->measured.within)
+    return std::nullopt;
+  return best;
+}
+
 Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
 {
   // Corners where the faces on both sides are tangent and bend differently (a rim that runs
@@ -3818,7 +4376,51 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
   std::vector<gp_XY> loop;
   for (const gp_Pnt& point : polygon(asked.sides))
     loop.push_back(frame.project(point));
-  const double area = enclosed(loop);
+  // A loop that is refused over the mean plane, and whose rim's faces have normals that no plane
+  // has all within `steepest` of its own, is a height over no plane at all: it is filled over a
+  // chart of its own instead (see overChart). Every other loop is filled as it was, and one that
+  // the chart does not fill either is refused as it was.
+  const auto refused = [&](const std::string& refusal) -> Built {
+    // The plane's check reads the faces between the ends; whether any plane would do is read
+    // at the ends as well, where a rim's normals close their sweep (the nose of a wing).
+    std::vector<gp_Vec> normals;
+    for (const Side& side : asked.sides)
+      for (int i = 0; direction == 0 && side.order > 0 && i <= gaussPlaces; ++i)
+        normals.push_back(
+          side.jet(std::clamp(static_cast<double>(i) / gaussPlaces, cornerInset, 1 - cornerInset))
+            .n);
+    if (direction == 0 && graphMargin(normals, {frame.x, frame.y, frame.z}) < steepest)
+    {
+      std::optional<Built> charted;
+      try
+      {
+        charted = overChart(asked, flat);
+      }
+      catch (const Failure& failure)
+      {
+        if (failure.reason == "cancelled")
+          throw;
+      }
+      catch (const Standard_Failure&)
+      {
+      }
+      if (charted)
+        return *charted;
+    }
+    fail(op, unsupported_geometry, refusal);
+  };
+  double                     area = 0;
+  std::optional<std::string> crossed;
+  try
+  {
+    area = enclosed(loop);
+  }
+  catch (const Failure& failure)
+  {
+    crossed = failure.message;
+  }
+  if (crossed)
+    return refused(*crossed);
   const Inside within(loop, 0);
   // A fixed graph avoids spending fairness on tangential parameter drift. Keep the
   // spatial fit for steep supports, where its movable parameters approximate shape
@@ -3831,9 +4433,8 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
       const double normal = std::abs(side.jet((i + 0.5) / 16).n.Dot(frame.z));
       graphSupports       = graphSupports && normal >= graphNormal;
       if (normal < steepest)
-        fail(op,
-             unsupported_geometry,
-             "a face to be smooth with stands too steeply against the boundary's mean plane");
+        return refused(
+          "a face to be smooth with stands too steeply against the boundary's mean plane");
     }
   for (const Side& guide : asked.guides)
     for (int i = 0; i <= 16; ++i)

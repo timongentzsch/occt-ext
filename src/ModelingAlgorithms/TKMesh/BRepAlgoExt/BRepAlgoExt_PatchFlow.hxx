@@ -56,4 +56,13 @@ Standard_EXPORT ConformalChart conformalChart(const TopoDS_Face& face,
                                               double             spacing,
                                               double             deflection);
 
+//! The constrained Delaunay triangulation of `nodes` in the plane, of which the first
+//! `frontier` are its boundary in turn: triangles by node number, of the nodes it keeps.
+Standard_EXPORT std::vector<std::array<int, 3>> triangulateInside(const std::vector<gp_XY>& nodes,
+                                                                  size_t frontier);
+
+//! Lay `chart` flat as conformalChart does, from its `source`, `point` and `triangles`: the
+//! source is any plane chart of the triangles, the same way round as the surface's normal.
+Standard_EXPORT void layFlat(ConformalChart& chart);
+
 } // namespace BRepExt

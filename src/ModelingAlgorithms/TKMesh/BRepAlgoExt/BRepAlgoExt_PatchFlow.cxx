@@ -150,95 +150,9 @@ double signedArea(const gp_XY& a, const gp_XY& b, const gp_XY& c)
 
 } // namespace
 
-ConformalChart conformalChart(const TopoDS_Face& face, double spacing, double deflection)
+std::vector<std::array<int, 3>> triangulateInside(const std::vector<gp_XY>& nodes, size_t frontier)
 {
-  PatchPhase                      phase("conformal-chart");
-  ConformalChart                  chart;
-  const occ::handle<Geom_Surface> surface = BRep_Tool::Surface(face);
-  // The boundary in the face's parameters: each edge at even steps of its length in space.
-  std::vector<gp_XY> rim;
-  const auto         divide = [&](double step) {
-    rim.clear();
-    for (BRepTools_WireExplorer it(BRepTools::OuterWire(face), face); it.More(); it.Next())
-    {
-      const TopoDS_Edge& edge = it.Current();
-      double             first, last;
-      const auto         curve = BRep_Tool::CurveOnSurface(edge, face, first, last);
-      if (curve.IsNull())
-        fail(op, no_solution, "the face to be flattened has an edge without a curve on it");
-      BRepAdaptor_Curve      inSpace(edge);
-      const double           length = GCPnts_AbscissaPoint::Length(inSpace, first, last);
-      const int              steps = std::max(2, static_cast<int>(std::ceil(length / step)));
-      GCPnts_UniformAbscissa even(inSpace, steps + 1, first, last);
-      if (!even.IsDone() || even.NbPoints() != steps + 1)
-        fail(op, no_solution, "the face to be flattened has an edge that cannot be divided");
-      const bool reversed = edge.Orientation() == TopAbs_REVERSED;
-      for (int k = 0; k < steps; ++k)
-        rim.push_back(curve->Value(even.Parameter(reversed ? steps + 1 - k : 1 + k)).XY());
-    }
-    double turning = 0;
-    for (size_t i = 0; i < rim.size(); ++i)
-      turning += rim[i].Crossed(rim[(i + 1) % rim.size()]);
-    if (turning < 0)
-      std::reverse(rim.begin(), rim.end());
-    return std::abs(turning) / 2;
-  };
-  // Whether face parameters are inside the boundary, and further from it than `margin`.
-  const auto inside = [&](const gp_XY& p, double margin) {
-    bool   in      = false;
-    double nearest = HUGE_VAL;
-    for (size_t i = 0, j = rim.size() - 1; i < rim.size(); j = i++)
-    {
-      const gp_XY edge = rim[i] - rim[j], to = p - rim[j];
-      nearest =
-        std::min(nearest,
-                 (to - edge * std::clamp(to.Dot(edge) / edge.SquareModulus(), 0.0, 1.0)).Modulus());
-      if ((rim[i].Y() > p.Y()) != (rim[j].Y() > p.Y())
-          && p.X() < rim[j].X() + edge.X() * to.Y() / edge.Y())
-        in = !in;
-    }
-    return in && nearest > margin;
-  };
-  const auto bounds = [&] {
-    std::pair<gp_XY, gp_XY> out{rim.front(), rim.front()};
-    for (const gp_XY& p : rim)
-    {
-      out.first.SetCoord(std::min(out.first.X(), p.X()), std::min(out.first.Y(), p.Y()));
-      out.second.SetCoord(std::max(out.second.X(), p.X()), std::max(out.second.Y(), p.Y()));
-    }
-    return out;
-  };
-  // Where the face bends inside the boundary, triangles short enough to stay within
-  // `deflection` of it (a chord of length l on a bend k stands k l^2 / 8 off), as far as the
-  // most nodes allow.
-  const double areaInParameters = divide(spacing);
-  double       bend             = 0;
-  {
-    const auto [low, high] = bounds();
-    for (double u = low.X(); u <= high.X(); u += spacing)
-      for (double v = low.Y(); v <= high.Y(); v += spacing)
-      {
-        if (!inside(gp_XY(u, v), 0))
-          continue;
-        GeomLProp_SLProps props(surface, u, v, 2, BRepExt::tolerance::parameterMerge);
-        if (props.IsCurvatureDefined())
-          bend = std::max({bend, std::abs(props.MaxCurvature()), std::abs(props.MinCurvature())});
-      }
-  }
-  if (bend > 0)
-    spacing = std::min(spacing, std::sqrt(8 * deflection / bend));
-  spacing = std::max(spacing, std::sqrt(areaInParameters / (mostNodes * std::sqrt(3.0) / 4)));
-  divide(spacing);
-  // Inside, an even triangular lattice, kept half a step off the boundary.
-  const auto [from, to]      = bounds();
-  std::vector<gp_XY> nodes   = rim;
-  const double       rowStep = spacing * std::sqrt(3.0) / 2;
-  for (int row = 0; from.Y() + row * rowStep < to.Y(); ++row)
-    for (double u = from.X() + (row % 2) * spacing / 2; u < to.X(); u += spacing)
-      if (const gp_XY p(u, from.Y() + row * rowStep); inside(p, spacing / 2))
-        nodes.push_back(p);
-  if (static_cast<int>(nodes.size()) > mostNodes)
-    fail(op, no_solution, "the face to be flattened needs more nodes than the chart is given");
+  std::vector<std::array<int, 3>> triangles;
   // Constrained Delaunay in the face's parameters, with the boundary as its frontier.
   occ::handle<NCollection_IncAllocator> allocator =
     new NCollection_IncAllocator(IMeshData::MEMORY_BLOCK_SIZE_HUGE);
@@ -249,10 +163,10 @@ ConformalChart conformalChart(const TopoDS_Face& face, double spacing, double de
     ids.push_back(
       structure->AddNode(BRepMesh_Vertex(nodes[i],
                                          static_cast<int>(i),
-                                         i < rim.size() ? BRepMesh_Frontier : BRepMesh_Free),
+                                         i < frontier ? BRepMesh_Frontier : BRepMesh_Free),
                          true));
-  for (size_t i = 0; i < rim.size(); ++i)
-    structure->AddLink(BRepMesh_Edge(ids[i], ids[(i + 1) % rim.size()], BRepMesh_Frontier));
+  for (size_t i = 0; i < frontier; ++i)
+    structure->AddLink(BRepMesh_Edge(ids[i], ids[(i + 1) % frontier], BRepMesh_Frontier));
   IMeshData::VectorOfInteger order(static_cast<int>(nodes.size()), allocator);
   for (int id : ids)
     order.Append(id);
@@ -272,25 +186,13 @@ ConformalChart conformalChart(const TopoDS_Face& face, double spacing, double de
         fail(op, no_solution, "the face's triangulation has a node of its own");
       t[k] = found->second;
     }
-    chart.triangles.push_back(t);
+    triangles.push_back(t);
   }
-  // A free node that the triangulation leaves out, as it does one too near the boundary to
-  // insert, is no part of the chart: only the nodes of its triangles are kept, in their order.
-  std::vector<int> kept(nodes.size(), -1);
-  for (const auto& t : chart.triangles)
-    for (int k : t)
-      kept[k] = 0;
-  for (size_t i = 0; i < nodes.size(); ++i)
-  {
-    if (kept[i] < 0)
-      continue;
-    kept[i] = static_cast<int>(chart.source.size());
-    chart.source.push_back(nodes[i]);
-    chart.point.push_back(surface->Value(nodes[i].X(), nodes[i].Y()));
-  }
-  for (auto& t : chart.triangles)
-    for (int& k : t)
-      k = kept[k];
+  return triangles;
+}
+
+void layFlat(ConformalChart& chart)
+{
   // Every triangle anticlockwise in the face's parameters, which is anticlockwise about the
   // surface's own normal.
   for (auto& t : chart.triangles)
@@ -487,6 +389,116 @@ ConformalChart conformalChart(const TopoDS_Face& face, double spacing, double de
            ++b)
         chart.cells[static_cast<size_t>(a) * side + b].push_back(static_cast<int>(k));
   }
+}
+
+ConformalChart conformalChart(const TopoDS_Face& face, double spacing, double deflection)
+{
+  PatchPhase                      phase("conformal-chart");
+  ConformalChart                  chart;
+  const occ::handle<Geom_Surface> surface = BRep_Tool::Surface(face);
+  // The boundary in the face's parameters: each edge at even steps of its length in space.
+  std::vector<gp_XY> rim;
+  const auto         divide = [&](double step) {
+    rim.clear();
+    for (BRepTools_WireExplorer it(BRepTools::OuterWire(face), face); it.More(); it.Next())
+    {
+      const TopoDS_Edge& edge = it.Current();
+      double             first, last;
+      const auto         curve = BRep_Tool::CurveOnSurface(edge, face, first, last);
+      if (curve.IsNull())
+        fail(op, no_solution, "the face to be flattened has an edge without a curve on it");
+      BRepAdaptor_Curve      inSpace(edge);
+      const double           length = GCPnts_AbscissaPoint::Length(inSpace, first, last);
+      const int              steps = std::max(2, static_cast<int>(std::ceil(length / step)));
+      GCPnts_UniformAbscissa even(inSpace, steps + 1, first, last);
+      if (!even.IsDone() || even.NbPoints() != steps + 1)
+        fail(op, no_solution, "the face to be flattened has an edge that cannot be divided");
+      const bool reversed = edge.Orientation() == TopAbs_REVERSED;
+      for (int k = 0; k < steps; ++k)
+        rim.push_back(curve->Value(even.Parameter(reversed ? steps + 1 - k : 1 + k)).XY());
+    }
+    double turning = 0;
+    for (size_t i = 0; i < rim.size(); ++i)
+      turning += rim[i].Crossed(rim[(i + 1) % rim.size()]);
+    if (turning < 0)
+      std::reverse(rim.begin(), rim.end());
+    return std::abs(turning) / 2;
+  };
+  // Whether face parameters are inside the boundary, and further from it than `margin`.
+  const auto inside = [&](const gp_XY& p, double margin) {
+    bool   in      = false;
+    double nearest = HUGE_VAL;
+    for (size_t i = 0, j = rim.size() - 1; i < rim.size(); j = i++)
+    {
+      const gp_XY edge = rim[i] - rim[j], to = p - rim[j];
+      nearest =
+        std::min(nearest,
+                 (to - edge * std::clamp(to.Dot(edge) / edge.SquareModulus(), 0.0, 1.0)).Modulus());
+      if ((rim[i].Y() > p.Y()) != (rim[j].Y() > p.Y())
+          && p.X() < rim[j].X() + edge.X() * to.Y() / edge.Y())
+        in = !in;
+    }
+    return in && nearest > margin;
+  };
+  const auto bounds = [&] {
+    std::pair<gp_XY, gp_XY> out{rim.front(), rim.front()};
+    for (const gp_XY& p : rim)
+    {
+      out.first.SetCoord(std::min(out.first.X(), p.X()), std::min(out.first.Y(), p.Y()));
+      out.second.SetCoord(std::max(out.second.X(), p.X()), std::max(out.second.Y(), p.Y()));
+    }
+    return out;
+  };
+  // Where the face bends inside the boundary, triangles short enough to stay within
+  // `deflection` of it (a chord of length l on a bend k stands k l^2 / 8 off), as far as the
+  // most nodes allow.
+  const double areaInParameters = divide(spacing);
+  double       bend             = 0;
+  {
+    const auto [low, high] = bounds();
+    for (double u = low.X(); u <= high.X(); u += spacing)
+      for (double v = low.Y(); v <= high.Y(); v += spacing)
+      {
+        if (!inside(gp_XY(u, v), 0))
+          continue;
+        GeomLProp_SLProps props(surface, u, v, 2, BRepExt::tolerance::parameterMerge);
+        if (props.IsCurvatureDefined())
+          bend = std::max({bend, std::abs(props.MaxCurvature()), std::abs(props.MinCurvature())});
+      }
+  }
+  if (bend > 0)
+    spacing = std::min(spacing, std::sqrt(8 * deflection / bend));
+  spacing = std::max(spacing, std::sqrt(areaInParameters / (mostNodes * std::sqrt(3.0) / 4)));
+  divide(spacing);
+  // Inside, an even triangular lattice, kept half a step off the boundary.
+  const auto [from, to]      = bounds();
+  std::vector<gp_XY> nodes   = rim;
+  const double       rowStep = spacing * std::sqrt(3.0) / 2;
+  for (int row = 0; from.Y() + row * rowStep < to.Y(); ++row)
+    for (double u = from.X() + (row % 2) * spacing / 2; u < to.X(); u += spacing)
+      if (const gp_XY p(u, from.Y() + row * rowStep); inside(p, spacing / 2))
+        nodes.push_back(p);
+  if (static_cast<int>(nodes.size()) > mostNodes)
+    fail(op, no_solution, "the face to be flattened needs more nodes than the chart is given");
+  chart.triangles = triangulateInside(nodes, rim.size());
+  // A free node that the triangulation leaves out, as it does one too near the boundary to
+  // insert, is no part of the chart: only the nodes of its triangles are kept, in their order.
+  std::vector<int> kept(nodes.size(), -1);
+  for (const auto& t : chart.triangles)
+    for (int k : t)
+      kept[k] = 0;
+  for (size_t i = 0; i < nodes.size(); ++i)
+  {
+    if (kept[i] < 0)
+      continue;
+    kept[i] = static_cast<int>(chart.source.size());
+    chart.source.push_back(nodes[i]);
+    chart.point.push_back(surface->Value(nodes[i].X(), nodes[i].Y()));
+  }
+  for (auto& t : chart.triangles)
+    for (int& k : t)
+      k = kept[k];
+  layFlat(chart);
   return chart;
 }
 
