@@ -34,6 +34,15 @@
 #include <NCollection_HArray1.hxx>
 #include <Geom_Circle.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRep_Tool.hxx>
+#include <ShapeAnalysis_Surface.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
+#include <TopoDS.hxx>
+#include <gp_Trsf.hxx>
 
 #include <gtest/gtest.h>
 
@@ -266,4 +275,186 @@ TEST(BRepSkinExt, GuidedSkinContainsItsProfilesAndABulgingGuide)
       worst = std::max(worst, distance.Value());
     }
   EXPECT_LT(worst, 1e-5);
+}
+
+namespace
+{
+//! A seeded draw in [0, 1): the minimal standard generator, the same on every platform.
+struct Draw
+{
+  uint64_t state;
+
+  double operator()()
+  {
+    state = state * 48271 % 2147483647;
+    return double(state) / 2147483647;
+  }
+};
+
+//! The Bezier curve of these poles, as a spline.
+Handle(Geom_BSplineCurve) bezier(const std::vector<gp_Pnt>& poles)
+{
+  NCollection_Array1<gp_Pnt> array(1, int(poles.size()));
+  for (size_t i = 0; i < poles.size(); ++i)
+    array(int(i) + 1) = poles[i];
+  NCollection_Array1<double> knots(1, 2);
+  NCollection_Array1<int>    mults(1, 2);
+  knots(1) = 0;
+  knots(2) = 1;
+  mults(1) = mults(2) = int(poles.size());
+  return new Geom_BSplineCurve(array, knots, mults, int(poles.size()) - 1);
+}
+
+TopoDS_Edge bezierEdge(const std::vector<gp_Pnt>& poles)
+{
+  return BRepBuilderAPI_MakeEdge(bezier(poles)).Edge();
+}
+} // namespace
+
+// A guided skin through three to five profiles between two planar supports at any tilt, G1 or G2
+// at each end, in any pose and at any size: guides of degree 5 leave each support in its plane
+// with their first three poles in it (no bend out of it), interior profiles bulge between the
+// guides. Every profile and guide lies on the skin, and at each support the skin's normal is the
+// plane's, and at G2 its bend across is the plane's, nothing. The bug: through more than two
+// profiles G2 was a plate filling that missed the bend limit, or the boundary, on nearly all of
+// these.
+TEST(BRepSkinExt, GuidedSkinThroughSeveralProfilesMeetsPlanarSupports)
+{
+  for (uint64_t seed = 1; seed <= 12; ++seed)
+  {
+    SCOPED_TRACE(seed);
+    Draw         draw{seed * 7919 + 13};
+    const double size = std::pow(10.0, 2 * draw() - 1), width = size * (2 + 2 * draw()),
+                 length = size * (4 + 3 * draw()), drop = size * (draw() - 0.5) * 2;
+    const int    inner     = 1 + int(draw() * 3);
+    const int    orders[2] = {1 + int(draw() * 2), seed % 2 == 0 ? 2 : 1 + int(draw() * 2)};
+    const double tilt[2]   = {(draw() - 0.5) * 1.2, (draw() - 0.5) * 1.2};
+    const gp_Vec way[2]    = {gp_Vec(0, std::cos(tilt[0]), std::sin(tilt[0])),
+                              gp_Vec(0, std::cos(tilt[1]), std::sin(tilt[1]))};
+    gp_Trsf      pose;
+    pose.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(draw() - 0.5, draw() - 0.5, draw() + 0.5)),
+                     2 * M_PI * draw());
+    pose.SetTranslationPart(gp_Vec(size * draw(), size * draw(), size * draw()));
+    const gp_Pnt rim[2] = {gp_Pnt(0, 0, 0), gp_Pnt(0, length, drop)};
+    // The supports: strips of width `size` beyond each end profile, in the planes the guides leave.
+    const auto strip = [&](int end) {
+      const gp_Vec            out  = way[end] * (end == 0 ? -size : size);
+      const gp_Pnt            c[4] = {rim[end],
+                                      rim[end].Translated(gp_Vec(width, 0, 0)),
+                                      rim[end].Translated(gp_Vec(width, 0, 0) + out),
+                                      rim[end].Translated(out)};
+      BRepBuilderAPI_MakeWire wire;
+      for (int i = 0; i < 4; ++i)
+        wire.Add(BRepBuilderAPI_MakeEdge(c[i], c[(i + 1) % 4]).Edge());
+      return TopoDS::Face(
+        BRepBuilderAPI_MakeFace(wire.Wire(), true).Face().Moved(TopLoc_Location(pose)));
+    };
+    const TopoDS_Face                supports[2] = {strip(0), strip(1)};
+    std::vector<std::vector<gp_Pnt>> guidePoles;
+    for (const double x : {0.0, width})
+    {
+      const gp_Vec along(x, 0, 0);
+      const double s0 = length * (0.1 + 0.1 * draw()), s1 = length * (0.1 + 0.1 * draw());
+      const double lift[2] = {size * (draw() - 0.5), size * (draw() - 0.5)};
+      const gp_Pnt a = rim[0].Translated(along), b = rim[1].Translated(along);
+      guidePoles.push_back({a,
+                            a.Translated(way[0] * s0),
+                            a.Translated(way[0] * (2 * s0 + lift[0])),
+                            b.Translated(way[1] * -(2 * s1 + lift[1])),
+                            b.Translated(way[1] * -s1),
+                            b});
+    }
+    std::vector<TopoDS_Edge> guides, inners;
+    for (const auto& poles : guidePoles)
+      guides.push_back(TopoDS::Edge(bezierEdge(poles).Moved(TopLoc_Location(pose))));
+    for (int k = 1; k <= inner; ++k)
+    {
+      const double t = double(k) / (inner + 1) + (draw() - 0.5) * 0.1;
+      const gp_Pnt p = bezier(guidePoles[0])->Value(t), q = bezier(guidePoles[1])->Value(t);
+      const gp_Pnt middle((p.XYZ() + q.XYZ()) / 2
+                          + gp_XYZ(0, size * (draw() - 0.5) * 0.6, size * (draw() - 0.5) * 1.2));
+      inners.push_back(TopoDS::Edge(bezierEdge({p, middle, q}).Moved(TopLoc_Location(pose))));
+    }
+    const auto rimOf = [&](int end) {
+      for (TopExp_Explorer it(supports[end], TopAbs_EDGE); it.More(); it.Next())
+      {
+        BRepAdaptor_Curve c(TopoDS::Edge(it.Current()));
+        const gp_Pnt      m = c.Value((c.FirstParameter() + c.LastParameter()) / 2);
+        if (m.Distance(rim[end].Translated(gp_Vec(width / 2, 0, 0)).Transformed(pose))
+            < 1e-9 * size)
+          return TopoDS::Edge(it.Current());
+      }
+      return TopoDS_Edge();
+    };
+    std::vector<uint32_t> edges{BRepExt::store(session(), rimOf(0))};
+    for (const auto& e : inners)
+      edges.push_back(BRepExt::store(session(), e));
+    edges.push_back(BRepExt::store(session(), rimOf(1)));
+    for (const auto& g : guides)
+      edges.push_back(BRepExt::store(session(), g));
+    const uint32_t     faceIds[2] = {BRepExt::store(session(), supports[0]),
+                                     BRepExt::store(session(), supports[1])};
+    const TopoDS_Shape made       = BRepExt::get(session(),
+                                           BRepExt::skinGuides(session(),
+                                                               edges,
+                                                               faceIds[0],
+                                                               faceIds[1],
+                                                               orders[0],
+                                                               orders[1],
+                                                               1e-6 * size)
+                                             .resultId);
+    ASSERT_TRUE(BRepCheck_Analyzer(made).IsValid());
+    // The net on the skin.
+    double off = 0;
+    for (const auto* list : {&inners, &guides})
+      for (const auto& e : *list)
+      {
+        BRepAdaptor_Curve c(e);
+        for (int i = 0; i <= 16; ++i)
+        {
+          BRepExtrema_DistShapeShape d(
+            BRepBuilderAPI_MakeVertex(
+              c.Value(c.FirstParameter() + (c.LastParameter() - c.FirstParameter()) * i / 16))
+              .Vertex(),
+            made);
+          off = std::max(off, d.Value());
+        }
+      }
+    EXPECT_LT(off, 1e-7 * size);
+    // At each support: the normal of the plane, and at G2 no bend across.
+    TopoDS_Face skin;
+    for (TopExp_Explorer it(made, TopAbs_FACE); it.More(); it.Next())
+      skin = TopoDS::Face(it.Current());
+    const Handle(Geom_Surface) surface = BRep_Tool::Surface(skin);
+    for (int end = 0; end < 2; ++end)
+    {
+      const gp_Dir      n    = gp_Dir(way[end].Crossed(gp_Vec(1, 0, 0))).Transformed(pose);
+      double            turn = 0, bend = 0;
+      BRepAdaptor_Curve c(rimOf(end));
+      for (int i = 0; i <= 16; ++i)
+      {
+        const gp_Pnt p =
+          c.Value(c.FirstParameter() + (c.LastParameter() - c.FirstParameter()) * i / 16);
+        ShapeAnalysis_Surface on(surface);
+        const gp_Pnt2d        uv = on.ValueOfUV(p, 1e-9 * size);
+        gp_Pnt                q;
+        gp_Vec                su, sv, suu, svv, suv;
+        surface->D2(uv.X(), uv.Y(), q, su, sv, suu, svv, suv);
+        const gp_Vec normal = su.Crossed(sv).Normalized();
+        turn                = std::max(turn, normal.Crossed(gp_Vec(n)).Magnitude());
+        // The bend across: the normal curvature in the direction square to the rim.
+        const gp_Vec along =
+          c.DN(c.FirstParameter() + (c.LastParameter() - c.FirstParameter()) * i / 16, 1);
+        const gp_Vec across = normal.Crossed(along).Normalized();
+        const double E = su.Dot(su), F = su.Dot(sv), G = sv.Dot(sv), det = E * G - F * F;
+        const double a = (G * across.Dot(su) - F * across.Dot(sv)) / det,
+                     b = (E * across.Dot(sv) - F * across.Dot(su)) / det;
+        bend =
+          std::max(bend, std::abs(normal.Dot(suu * (a * a) + suv * (2 * a * b) + svv * (b * b))));
+      }
+      EXPECT_LT(turn, 1e-6);
+      if (orders[end] == 2)
+        EXPECT_LT(bend * size, 1e-5);
+    }
+  }
 }

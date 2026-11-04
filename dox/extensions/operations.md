@@ -636,6 +636,20 @@ version here fixes rotation]. Draft of walls that `BRepOffsetAPI_DraftAngle` doe
 cylinders and cones) uses the ruled isocline surface over the wall's neutral curve, whose every tangent plane
 makes the draft angle with the pull direction.
 
+A guided skin through three or more profiles with G1 or G2 at an end is the Gordon skin of the net plus a
+correction across that end. Two surfaces that share an edge and their tangent planes along it meet G2 when
+their normal curvatures agree in one direction across the edge (the linkage curve theorem [Pegna, Wolter
+1992, J. Mech. Design 114]); the skin already holds the profile, so G1 needs only the way across, S_v, turned into the support's
+tangent plane, and G2 then only the normal part of S_vv set to the support's second fundamental form at
+S_v. Both moves are along the support's normal. The correction is h1(v) m1(u) + h2(v) m2(u), with h1 and h2
+the quintic Hermite functions of the end (h1' = 1, h2'' = 1 there, the rest nothing) that vanish to the second
+derivative at the nearest place of the next profile, so the other profiles are kept and the skin stays C2;
+m1 and m2 are the moves less their straight interpolation between the guides, so the guides are kept too.
+Where a guide leaves the end profile out of the support's plane, or with another bend, the surface follows
+the guide there, as between two profiles. Before it, a plate filling stood here, which missed the bend
+limit or the boundary on 22 of 24 nets of a seeded family; the filling stays for nets whose skin carries
+weights and for what this route does not deliver.
+
 *Booleans.* Cell selection from one General Fuse with a ladder of fallbacks, each rung accepted only if
 checked; a sheet tool divides rather than subtracts.
 
