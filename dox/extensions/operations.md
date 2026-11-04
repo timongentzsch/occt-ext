@@ -71,7 +71,7 @@ sections run back against the way the balls roll (S_u . (n0 x n1) < 0, sampled 6
 by name. Measured (the same 16 rims): the reference modeller makes the exact rolling ball
 (8 faces) at 70 degrees and at 75 for the two rims with r / (R + r) < cos 75, and splits the blend
 (11 faces, off the ball by up to 0.34 mm) for the other two at 75 and all at 80 and 85: exactly the
-criterion above. v2 now makes all four at 70 and the two at 75 as the balls' envelope (every point r
+criterion above. The blend now makes all four at 70 and the two at 75 as the balls' envelope (every point r
 from the centres' ellipse to 1e-6), and refuses the crossing ones; trimming them is open. The reference modeller
 refuses G2 on every one of these rims.
 
@@ -102,7 +102,7 @@ the blend of the edge alone makes between the planes square to the edge at its l
 `filletRange` does for the round.
 
 Measured: against the reference modeller's results (box edge and the flat-to-curved edge of a half cylinder, laws
-linear, falling, peak and valley, Round and Conic rho 0.3) v2's lie within 1e-12 to 1.1e-6 mm both ways;
+linear, falling, peak and valley, Round and Conic rho 0.3) the blend's lie within 1e-12 to 1.1e-6 mm both ways;
 round a closed rim the alternating law within 8e-6, but a law of three uneven places (1, 2, 1.5) 0.04 off,
 the reference modeller's closed interpolation being neither the periodic nor the natural spline (open). Native
 (`BRepBlendExt_Test`): rounds on a box edge (linear, steep, peak, valley) lie on their circles to 1e-6
@@ -124,9 +124,9 @@ R^2 - x(z)^2 (the arc by its angle, the bevel in closed form) to 1e-9 of the bod
 length tolerance over the bevel (its edge on the bottom is interpolated); against the reference modeller's meshes of
 the same rims (side 1 to 8, radius 1 and 3) every round and chamfer within 6.5e-7 mm, and its G2 at a
 side as high as the ball within 1e-3 mm^3 of its volume. The reference modeller refuses G2 where the side is lower
-than the ball; v2 makes it (the G2 section cut by the bottom face, its seams G2 to 1e-14 / r).
+than the ball; the blend makes it (the G2 section cut by the bottom face, its seams G2 to 1e-14 / r).
 A hole tangent to a face beside the edge pinches the body: the hole meets the face in a line along
-which four faces meet. No blend passes it and v2 refuses it by name, as the reference modeller does; with a gap of
+which four faces meet. No blend passes it and the blend is refused by name, as the reference modeller does; with a gap of
 0.25 to 2 every round, chamfer and G2 lies within 1.3e-6 mm (G2 1e-4) of the reference modeller's mesh.
 
 *Beyond the reference.* Three constructions go past what the reference modeller makes, and stay: a chamfer whose

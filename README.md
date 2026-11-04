@@ -274,8 +274,7 @@ Known limits and what remains:
    repository's licence text, comments use `//!`, and files are named `Package_Class`. Not done: the packages
    use free functions in namespace `BRepExt`, the handle interface and `std::runtime_error` failures where OCCT
    style would be classes with `IsDone` / `Shape`, `Standard_Failure` and `Message_ProgressRange`. Public
-   free functions carry `Standard_EXPORT`; a Windows DLL build has not been tried. Some messages still say
-   "v2" for the blend solver.
+   free functions carry `Standard_EXPORT`; a Windows DLL build has not been tried.
 8. **Policy.** The choices listed under [Section policy](#section-policy) are not mathematics and are not
    included.
 
