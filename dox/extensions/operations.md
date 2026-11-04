@@ -342,7 +342,12 @@ bottom above are delivered on the same nets for any value from 3.1e-4 to 2.4e-3.
 mouse top, and nets that a coarse net met only roughly come out finer (a corner of rounds 2 / 3 / 5: 43 x
 48 poles before, 82 x 89 now; the coarse net was 3.5e-3 of the size from the next). Where nets keep
 differing by more than `settled` the whole ladder is run (a G0 fill at flatness 0.95: 1.2e-3 to 3.8e-3
-between nets, up to the finest).
+between nets, up to the finest). Open: the Cauchy bound needs the distances to fall, and they need not.
+On the saved eight-edge opening (G0, Natural, a loop of 38.3) the nets lie 2.38e-3, 7.0e-4 and 7.5e-4 of the
+size apart (6 x 3 to 10 x 4, to 16 x 6, to 24 x 10): the ratio is 1.07, not at most 1/2, and the 2 d bound
+does not hold. The nets stand on a plateau below `settled` (their areas 70.20 and 69.98), and on such
+loops the stop is a judgement, not a bound. The same opening as a Patch at G0 never settles (3.8e-3,
+3.1e-3, 1.3e-3, 2.9e-3, 1.2e-3) and is delivered on the finest net, 54 x 22 spans.
 Pose dependence is measured, not removed: 47 sampled breaches over 154 rigid-motion variants, none changing
 whether a case is refused. The ease of one coarse span is a judgement bounded by measurement, not an
 optimum: on the teddy (arms and strips of radius 50, sides 79 long, the span 24) eases of 0.3 (the
@@ -390,7 +395,8 @@ curvatures, 2^-40 of the larger of their principal curvatures (`jetRounding`, a 
 thousand units in the last place, far below any curvature asked). Its margin, as the corner's
 disagreement over the larger curvature: rounding alone, on the pentagon and the split side, came to
 at most 9e-17, ten thousand times below the floor (9.1e-13); the least genuine disagreement, on the
-saved opening below, 6.7e-12, only 7.4 times above it. A floor at the flat share of the
+saved opening below, 6.7e-12, only 7.4 times above it. That margin is thin: a genuine
+disagreement eight times smaller than this one would be taken for rounding, and its turns dropped. A floor at the flat share of the
 G2 limit instead, as for a miss, would be the measure's own, but a saved opening of near-flat spline
 faces (curvatures of 6e-7 on a loop of 38) is filled only when the turns that their small but
 genuine disagreement asks are kept: without them its fill folds over. That fold is an open defect of
