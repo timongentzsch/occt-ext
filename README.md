@@ -6,7 +6,7 @@
 
 The repository is OCCT with its history, followed by commits that add
 
-* **`TKAlgoExt`**, about 55 000 lines in nine packages: rolling-ball fillets and chamfers, boundary-first Patch fills, Gordon and guided skins, framed sweeps, offsets and shells, G0 to G3 bridge curves, surface alignment and squaring, curve and surface deformation, and cell-based Booleans;
+* **`TKAlgoExt`**, about 60 000 lines in nine packages: rolling-ball fillets and chamfers, boundary-first Patch fills, Gordon and guided skins, framed sweeps, offsets and shells, G0 to G3 bridge curves, surface alignment and squaring, curve and surface deformation, and cell-based Booleans;
 * **numerical utilities** in `TKGeomAlgo` and `TKMesh`: interval enclosures, Bernstein products, constrained tensor-spline fitting, certified knot compaction, trim integration, surface jets;
 * **twenty-one corrections** to existing OCCT algorithms, one commit each, with the derivation and limits of each. One of them makes face classification 30 times faster on the benchmark plate.
 
@@ -17,10 +17,10 @@ The base is OCCT `b8f597c6` (30 July 2026). Nothing here has been proposed upstr
 | Capability | Stock OCCT | This tree | Evidence |
 | --- | --- | --- | --- |
 | **Rolling-ball fillets** on curved supports, chains of rounds and corners | `BRepFilletAPI_MakeFillet` leaves a defect of up to 7e-3 where a round runs into earlier rounds and 3e-3 on crossed cylinders | Blends exact to the sampling (defect 1e-8 to 1e-14); radius laws along an edge, ranges, stations, chamfers, corners of three or more blends, junctions of two curved surfaces | [Results](#results), `BRepBlendExt`, `BRepFilletExt` |
-| **Patch**: fill a loop of edges with G0, G1 or G2 to the neighbouring faces | `BRepFill_Filling` / `GeomPlate` plate fit: 0.11 to 0.45 off the defining surface on four cubic sides | Fill 1e-12 from it; n-sided loops, open boundaries chained and closed, interior guides and points; a G1 request that is geometrically impossible is refused with the reason | [operations.md](dox/extensions/operations.md#brepatchext-boundary-first-fill) |
+| **Patch**: fill a loop of edges with G0, G1 or G2 to the neighbouring faces | `BRepFill_Filling` / `GeomPlate` plate fit: 0.11 to 0.45 off the defining surface on four cubic sides | Fill 1e-12 from it; n-sided loops, open boundaries chained and closed, interior guides and points; loops that are a height over no plane (rims whose faces sweep a half circle or more) filled over a conformal chart of their own; the same net at a thousandth and a thousand times the size; a G1 request that is geometrically impossible is refused with the reason | [operations.md](dox/extensions/operations.md#brepatchext-boundary-first-fill) |
 | **Smooth skins** through sections, and Gordon skins through networks of profiles and guides | `BRepOffsetAPI_ThruSections` bulges to half-width 19.3 through six circles of radius at most 10 | Stays within the sections (10.0); closed rings joined seam to seam; guided skins that contain their guides | [benchmarks.md](dox/extensions/benchmarks.md) |
 | **Framed sweeps and drafts** | `MakePipeShell` twists a profile unless the path starts square to it; `DraftAngle` takes planes, cylinders and cones | Rotation-minimising frames (double reflection, fourth-order error); draft of any wall by its isocline surface | [operations.md](dox/extensions/operations.md) |
-| **Hollow, shell, offset, thicken, push-pull, defeature** | An offset that reaches a fillet radius returns an invalid or wrong solid (volume off by 3.3e4 on the benchmark) | Faces the distance would shrink to nothing are removed first; exact to 1e-11 on the benchmark; a face offset keeps every face as the reference modeller's does, sharp edges where the moved faces cross, each result certified by distances; sheets with C0 creases are divided before they are thickened; several features removed in one call | [benchmarks.md](dox/extensions/benchmarks.md) |
+| **Hollow, shell, offset, thicken, push-pull, defeature** | An offset that reaches a fillet radius returns an invalid or wrong solid (volume off by 3.3e4 on the benchmark) | Faces the distance would shrink to nothing are removed first; exact to 1e-11 on the benchmark; a face offset that keeps every face, sharp edges where the moved faces cross, tangent edges held to the input's own tolerance, each result certified by distances and loadable from a saved file; sheets with C0 creases are divided before they are thickened; several features removed in one call | [benchmarks.md](dox/extensions/benchmarks.md) |
 | **Bridge curves of G0 to G3** between curves or from a point and a direction | no direct counterpart | Continuity from the end conditions of the geometric-continuity constraints (Hohmeyer and Barsky 1989), tested to 1e-12 on a circle and a helix; cusps refused | [references.md](dox/extensions/references.md) |
 | **Surface bridging, alignment, squaring, deformation** | no direct counterpart | G1 bridges and alignments whose normals agree with the supports along the shared edge; four-sided surfaces over boundaries with supports; carrying curves and bodies from one face to another in UVN | `BRepSurfaceExt`, `BRepCurveExt` |
 | **Curves**: offset at any scale, outline, regions, corner rounding of wires, tangent circles, spirals | `BRepOffsetAPI_MakeOffset` depends on the curve's size (absolute 1e-7 lengths); `HLRBRep` has documented limits on tangent and edge-on faces | Offsets that behave at any scale, exact silhouette events, all bounded cells of overlapping and nested loops | `BRepCurveExt` |
@@ -98,22 +98,22 @@ is supported; the numbers are in the benchmark and the tests.
 
 | Part | Where | What it is |
 | --- | --- | --- |
-| Corrections | one commit each, [corrections.md](dox/extensions/corrections.md) | Fixes to existing algorithms: quadratic or unbounded loops, wrong ranges, uninitialised reads, missing cancellation. 17 build against current `master` (one needs another of them), three later ones are listed with them. |
+| Corrections | one commit each, [corrections.md](dox/extensions/corrections.md) | Fixes to existing algorithms: quadratic or unbounded loops, wrong ranges, uninitialised reads, missing cancellation. 17 build against current `master` (one needs another of them), four later ones are listed with them. |
 | Numerical utilities | `GeomAlgoExt` in `TKGeomAlgo` | Interval enclosures, Bernstein products, spline collocation, constrained tensor-spline fit, rim fit, certified knot compaction, surface jets |
 | Patch chart and surveys | `BRepAlgoExt` in `TKMesh` | Cotangent-weight chart of a boundary loop, interior fairness survey, trim integration, read-back |
-| Operations | `TKAlgoExt`, nine packages, about 55 000 lines | Listed below |
+| Operations | `TKAlgoExt`, nine packages, about 60 000 lines | Listed below |
 
 | Package | Operations | Lines |
 | --- | --- | ---: |
-| `BRepBlendExt` | Rolling-ball blend solver: ball on two supports, spine marching, section fit, attachment to the body | 15 400 |
-| `BRepFilletExt` | Constant, variable, range and station fillets, chamfer, contour and prism support, blend validity checks | 4 800 |
-| `BRepPatchExt` | Patch: one face inside a loop of edges (chained, with gaps closed, if the boundary does not close), with G0/G1/G2 to neighbouring faces and interior guides | 6 100 |
+| `BRepBlendExt` | Rolling-ball blend solver: ball on two supports, spine marching, section fit, attachment to the body | 15 800 |
+| `BRepFilletExt` | Constant, variable, range and station fillets, chamfer, contour and prism support, blend validity checks | 4 900 |
+| `BRepPatchExt` | Patch: one face inside a loop of edges (chained, with gaps closed, if the boundary does not close), with G0/G1/G2 to neighbouring faces and interior guides, over the mean plane or over a chart of its own | 8 100 |
 | `BRepSurfaceExt` | Surface alignment, bridging, constraint jets, deformation, face support and rebuild, face separation proofs | 7 900 |
 | `BRepCurveExt` | Planar and 3D curve offset, outline, tangent circles, corner rounding of wires, G0 to G3 bridge curves, projection, rebuild, refinement, regions, spiral | 6 600 |
-| `BRepOffsetExt` | Solid offset, hollow, shell, thicken, push-pull, defeaturing, sewing history | 3 000 |
+| `BRepOffsetExt` | Solid offset, hollow, shell, thicken, push-pull, face offset that keeps every face, defeaturing, sewing history | 5 000 |
 | `BRepSkinExt` | Gordon and guided skins, framed sweeps, draft | 4 500 |
 | `BRepBooleanExt` | Cell-based Booleans with a ladder of fallbacks, checked solids, imprints | 3 900 |
-| `BRepToolsExt` | Properties, bounding boxes, dimensions, fairness, hidden-line, failure hints, shared checks and history | 2 700 |
+| `BRepToolsExt` | Properties, bounding boxes, dimensions, fairness, hidden-line, failure hints, shared checks and history | 2 800 |
 
 Each operation is described, with its construction, mathematics, sources, unproven choices and stock
 counterpart, in [operations.md](dox/extensions/operations.md). The utilities and their error budgets are in
@@ -174,10 +174,12 @@ Two options belong to the extension packages (`adm/cmake/occt_extensions.cmake`)
 
 ## Tests
 
-`-DBUILD_GTEST=ON` adds the target `OpenCascadeGTest`, which runs the tests of every built toolkit; 93 tests
-belong to this tree (79 for the operations, 9 for the utilities, 5 for the corrections to core classes). They live in `TKAlgoExt/GTests/BRep*Ext_Test.cxx` (one file per package) with a shared
-session and oracles in `BRepExtTest_Support.*`, in the `GeomAlgoExt` and `BRepAlgoExt` GTests, and in one test
-file for each of the corrections to `CSLib_Class2d`, `BRepTopAdaptor_FClass2d` and `BndLib`. For example:
+`-DBUILD_GTEST=ON` adds the target `OpenCascadeGTest`, which runs the tests of every built toolkit; 116 tests
+belong to this tree (92 for the operations, 16 for the utilities, 8 for the corrections to core classes). They live in `TKAlgoExt/GTests/BRep*Ext_Test.cxx` (one file per package) with a shared
+session and oracles in `BRepExtTest_Support.*`, in the `GeomAlgoExt` and `BRepAlgoExt` GTests, and in the test
+files of the corrected classes `CSLib_Class2d`, `BRepTopAdaptor_FClass2d`, `BndLib`, `gp_Dir`, `gp_Dir2d` and
+`BRepTools`. The Patch tests hold every fill they make to the same net at rest, turned, mirrored and at a
+thousandth and a thousand times the size. For example:
 
 ```sh
 OpenCascadeGTest --gtest_filter='BRep*Ext*:CSLib_Class2d*:BRepTopAdaptor*:BndLib*'
@@ -224,20 +226,22 @@ Known limits and what remains:
 1. **Blend solver.** Some configurations where several blends meet are refused although a valid result exists:
    trimming a blend group needs an owner for every retained region and contact before chain ends are cut, and
    the centre path must be parametrised by arc length along the marched curve, not by the edge's parameter.
-   Curvature-continuous sections at five-sided corners are also refused. An edge whose faces meet at a
+   Curvature-continuous and conic sections at corners where four or more blends meet are also refused. An edge whose faces meet at a
    steady angle is blended at any opening from 5 to 175 degrees, convex or concave (measured on planes,
    plane and cylinder, two cylinders). Where the angle turns along the edge so far that the balls' centre
    path bends more tightly than the ball (the rim of a hole leaning a with r >= (R + r) cos a: from about
-   70 degrees), the rolling-ball surface crosses itself and is refused by name until it is trimmed there,
-   as the reference modeller trims it (it splits exactly those rims); short of that the rim is the balls' envelope.
+   70 degrees), the rolling-ball surface crosses itself and is refused by name until it is trimmed there;
+   short of that the rim is the balls' envelope.
 2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published
    bound for a curvature-continuous conic or quintic section as a function of the support's curvature is
    missing.
 3. **Fill.** The interior acceptance gate and the flat-support curvature limit have no derivation; across two
    rims of an open boundary the gate's reference is the Hermite bridge between them, which is reasoned, but
    the factor it allows over it is the same judgement, and gentle bulges where an elbow turns pass more often
-   than against the rims alone. The fit's
-   stopping decisions depend on rounding and therefore weakly on pose (sampled, not bounded). At a corner whose
+   than against the rims alone. The ladder of nets stops where two nets in a row agree; its rungs are not
+   nested spline spaces, so on some loops the distance between nets does not shrink (a plateau, or nets
+   that never settle) and the stop is then a judgement, and a guide's miss can rise from one rung to the
+   next (a side fill whose guide ends near a G2 edge is refused so). At a corner whose
    faces bend differently the bend asked eases to the one a surface can have over one span of the coarsest
    net, a judgement: G2 is met on the middle of each side only, the corner's miss is reported, and the coarse
    nets of such loops can come out lopsided (5 in 50 off the teddy's symmetry). Refused, and open: a G2
@@ -249,11 +253,16 @@ Known limits and what remains:
    a step of curvature inside, and a corner made of several patches. Fills through
    three profiles with curvature continuity can miss the curvature-share limit. Open boundaries are chained by
    `BRepPatchExt_Chain` (nearest-end growth, gaps closed with straight segments); a general theory of which
-   chain a user means is not attempted. Not yet supported: curvature-continuous fills between plates meeting at
-   three or more edges at once, steep wing tips with two fixed boundaries and a guide, strips with bending
-   flows, flow-direction modes on steep supports, caps whose boundary crosses itself, and profile-curve panels.
+   chain a user means is not attempted. A loop that is a height over no plane is filled over a faired
+   disc laid flat conformally (Boundary First Flattening); the net over that chart is a tensor net, so a
+   loop that needs fine spans in one place needs them right across: the steep wing tip asks for at least
+   980 poles against the 640 allowed, where a net finer only where needed would take about 190 cells
+   (open: local refinement or several faces). Not yet supported: curvature-continuous fills between plates
+   meeting at three or more edges at once, strips with bending flows, flow-direction modes on steep
+   supports, and profile-curve panels.
 4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
-   offsetting solids whose blends meet the wall thickness exactly has no exactness proof.
+   offsetting solids whose blends meet the wall thickness exactly has no exactness proof. In the face offset
+   the largest angle between the faces along a tangent edge is found by sampling, not bounded.
 5. **Speed.** Measured against stock followed by the same check: a single circular edge 1.05 times, the curve
    offset 1.5 times, the hollow 2.6 to 3.2 times, the smooth skin through square, circle and square 4.3 times.
    Everything else in the [table](dox/extensions/benchmarks.md) is level or faster. A profile of that skin
