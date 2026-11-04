@@ -52,36 +52,6 @@ const char* failureKindName(FailureKind kind)
   return "construction";
 }
 
-int failurePriority(const Failure& failure)
-{
-  switch (failure.kind)
-  {
-    case FailureKind::Overflow:
-    case FailureKind::RadiusEndpoints:
-    case FailureKind::RadiusLaw:
-      return 100;
-    case FailureKind::CapConsumed:
-    case FailureKind::ClosingConcave:
-      return 90;
-    case FailureKind::SupportContact:
-    case FailureKind::Tangency:
-    case FailureKind::Curvature:
-      return 80;
-    case FailureKind::InvalidTopology:
-    case FailureKind::MaterialBound:
-      return 70;
-    case FailureKind::TangentEdge:
-      return 60;
-    case FailureKind::Construction:
-      return failure.reason == unsupported_geometry ? 10 : 40;
-    case FailureKind::NativeBuilder:
-      return 30;
-    case FailureKind::UnsupportedRail:
-      return 10;
-  }
-  return 0;
-}
-
 void fail(const char* operation, const char* reason, const std::string& message)
 {
   fail(operation, reason, message, {});

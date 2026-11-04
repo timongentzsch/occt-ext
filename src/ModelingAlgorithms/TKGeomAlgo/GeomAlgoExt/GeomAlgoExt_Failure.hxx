@@ -52,7 +52,6 @@ enum class FailureKind
   MaterialBound
 };
 Standard_EXPORT const char* failureKindName(FailureKind kind);
-Standard_EXPORT int         failurePriority(const struct Failure& failure);
 
 //! What `fail` throws. `what()` remains useful for native diagnostics; callers branch on fields.
 struct Failure : std::runtime_error
