@@ -1066,17 +1066,35 @@ Miss measure(const occ::handle<Geom_Surface>& surface, const Side& side, const K
 //! may have no one direction.
 constexpr double cornerInset = 1e-6;
 
+//! The largest principal curvature of a surface at a place, from its jet.
+double sharpest(const SurfaceJet& jet)
+{
+  const gp_Vec a = jet.u.Normalized(), b = jet.n.Crossed(a);
+  const double aa = jet.curvature(a, a), bb = jet.curvature(b, b), ab = jet.curvature(a, b);
+  return std::abs((aa + bb) / 2) + std::hypot((aa - bb) / 2, ab);
+}
+
+//! What rounding makes of a curvature read from a surface's jet, as a share of its largest
+//! principal curvature: a curvature that is nothing comes out as up to about this much of the ones
+//! beside it. A judgement, not derived: a few thousand units in the last place of a double (2^-52)
+//! for the sums of the jet's derivatives, far below any curvature asked and far above rounding.
+constexpr double jetRounding = 0x1p-40;
+
 //! What the faces on the two sides of a corner say of the one surface that is to leave both
 //! tangentially. Along its edge a face gives the surface its bend along the edge and its twist
 //! (the turn of the tangent plane along the edge); at a corner that is four numbers for the
 //! three of one bend, and where the four do not fit, the surface has to change its bend across a
 //! line through the corner. `conflict` is by what share of their curvature they do not: zero
 //! where they fit, as the two rounds of a ball's corner do, and a plane and a round tangent to it
-//! do not. With `bends`, each face's bend across its edge is asked as well, counting for as much
-//! less as a bend counts for against a tangent plane (see tangentWeight), so that it decides the
-//! one bend only where the four numbers leave it open (an edge that runs straight on); `across`
-//! is then by how much each face's bend across its edge differs from that one bend, a's and b's,
-//! each in its own face's sense.
+//! do not. Where everything the four numbers ask is no more than rounding makes of the faces'
+//! curvatures (`jetRounding` of the larger of the two faces' own principal curvatures, uneased),
+//! it is none: what is asked is rounding, and a share of rounding over rounding says nothing; it
+//! was read against an absolute 1e-15, above which rounding came at one size and not another. With
+//! `bends`, each face's bend across its edge is asked as well, counting for as much less as a bend
+//! counts for against a tangent plane (see tangentWeight), so that it decides the one bend only
+//! where the four numbers leave it open (an edge that runs straight on); `across` is then by how
+//! much each face's bend across its edge differs from that one bend, a's and b's, each in its own
+//! face's sense.
 struct CornerBend
 {
   double conflict  = 0;
@@ -1139,7 +1157,10 @@ CornerBend cornerBend(const Side& a, const Side& b, bool bends)
       std::abs(rows[r][0] * bend(1) + rows[r][1] * bend(2) + rows[r][2] * bend(3) - asked[r]));
     scale = std::max(scale, std::abs(asked[r]));
   }
-  out.conflict = scale > 1e-15 ? out.conflict / scale : 0;
+  // Rounding comes from the faces' own derivatives, whatever an ease has taken off them.
+  const double rounding =
+    jetRounding * std::max(sharpest(a.faceJet(1 - cornerInset)), sharpest(b.faceJet(cornerInset)));
+  out.conflict = scale > rounding ? out.conflict / scale : 0;
   for (int side = 0; bends && side < 2; ++side)
   {
     const double* row = rows[4 + side];
@@ -3918,14 +3939,6 @@ double netSpacing(double bend, int order, int degree, const Limits& limits)
     span =
       std::min(span, M_PI * std::pow(fitShare * limits.g2 / favard, 1.0 / (degree - 1)) / bend);
   return span;
-}
-
-//! The largest principal curvature of a surface at a place, from its jet.
-double sharpest(const SurfaceJet& jet)
-{
-  const gp_Vec a = jet.u.Normalized(), b = jet.n.Crossed(a);
-  const double aa = jet.curvature(a, a), bb = jet.curvature(b, b), ab = jet.curvature(a, b);
-  return std::abs((aa + bb) / 2) + std::hypot((aa - bb) / 2, ab);
 }
 
 //! A fill over a chart of the loop's own, for a loop whose rim's faces stand so that it is a

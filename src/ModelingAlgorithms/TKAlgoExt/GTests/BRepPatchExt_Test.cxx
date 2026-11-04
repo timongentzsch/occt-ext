@@ -1160,10 +1160,12 @@ void expectSame(const Outcome& at, const Outcome& base)
 // same construction with as many poles. A length that is not a share of the size or of the
 // tolerance shows as another net or another answer at one of the sizes. The dish at G0 was
 // refused at a thousandth as crossing itself: two collinear pieces of one straight side, whose
-// orientation determinants are rounding alone, were taken to cross (see crosses). Not yet so,
-// and asked at a thousand times only: at a thousandth the corner of rounds (its tolerance below
-// OpenCascade's least distance) is made, and the pentagon and the split side take other nets. The
-// teddy is left out: it is refused at a thousand times.
+// orientation determinants are rounding alone, were taken to cross (see crosses). The pentagon
+// and the split side took other nets at a thousandth: where both edges at a corner run straight
+// on eased rounds, the share by which their bends disagree was rounding over rounding, and above an
+// absolute floor at one size only (see cornerBend). Not yet so, and asked at a thousand times
+// only: at a thousandth the corner of rounds (its tolerance below OpenCascade's least distance) is
+// made. The teddy is left out: it is refused at a thousand times.
 TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
 {
   struct Case
@@ -1224,9 +1226,8 @@ TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
     cases.push_back({"elbow", bend});
   }
   cases.push_back({"square on rounds", asking(pillow(4, {30}, {1}, gp_Trsf()))});
-  cases.push_back(
-    {"pentagon on rounds", asking(pillow(5, {25, 40, 80}, {1, -1}, turned(1))), {1e3}});
-  cases.push_back({"split side", asking(pillow(4, {30}, {1}, gp_Trsf(), true)), {1e3}});
+  cases.push_back({"pentagon on rounds", asking(pillow(5, {25, 40, 80}, {1, -1}, turned(1)))});
+  cases.push_back({"split side", asking(pillow(4, {30}, {1}, gp_Trsf(), true))});
   {
     Asking corner{{}, {}, {2, 2, 2}, 1e-6, 0.1, 0.05};
     cornerOfRounds(corner.edges, corner.supports);

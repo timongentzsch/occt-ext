@@ -382,9 +382,17 @@ determinant exceeds the bound on what rounding its products and their difference
 1997, the ccwerrboundA of orient2d), a bound relative to the numbers themselves and so the same at
 every size. The square on rounds, which missed G2 by its quad at 1e-3, is made alike there now; it
 changed with the stop by convergence or the corner ease in the fit's own units, and was not traced
-further. Open: at 1e-3 the corner of three rounds (its tolerance
-below `Precision::Confusion()`) is made, the pentagon and the split side take other nets; the teddy is
-refused at 1e3. A
+further. The pentagon and the split side took other nets at 1e-3: at a corner where both edges run
+straight on rounds that are eased to one bend, everything the corner's four numbers ask is rounding,
+and the share by which they disagree, rounding over rounding, counted where it came above an absolute
+1e-15, at one size and not at another. It now counts only above the rounding of the faces' own
+curvatures, 2^-40 of the larger of their principal curvatures (`jetRounding`, a judgement: a few
+thousand units in the last place, far below any curvature asked). A floor at the flat share of the
+G2 limit instead, as for a miss, would be the measure's own, but a saved opening of near-flat spline
+faces (curvatures of 6e-7 on a loop of 38) is filled only when the turns that their small but
+genuine disagreement asks are kept: without them its fill folds over, an open defect of the plane's
+net of its own. Open: at 1e-3 the corner of three rounds
+(its tolerance below `Precision::Confusion()`) is made; the teddy is refused at 1e3. A
 G1 cap over a circle on a cone is refused as too steep from the same tilt on (between 80 and 80.4
 degrees) at rest, turned and at 1e-3 and 1e3, with the same nets below it; but the switch from the height
 graph to the spatial net at a support normal of 0.8 against the mean plane changes the cap's area by 2.1 %
