@@ -69,10 +69,6 @@ struct Piece
 {
   Handle(Geom_Curve) curve;
   double             first = 0, last = 0;
-
-  gp_Pnt start() const { return curve->Value(first); }
-
-  gp_Pnt end() const { return curve->Value(last); }
 };
 
 Piece pieceOf(const TopoDS_Edge& edge)
@@ -127,7 +123,6 @@ std::optional<Fillet> circleAt(const Piece&  a,
 {
   const gp_Dir n = plane.Axis().Direction();
   const gp_Dir X = plane.XAxis().Direction(), Y = plane.YAxis().Direction();
-  gp_Pnt       corner = a.end();
   gp_Vec       ta, tb;
   {
     gp_Pnt p;
@@ -294,7 +289,6 @@ EvolutionData roundWireCorners(OcctKernel&                  kernel,
            no_solution,
            "a corner is too tight for the radius, or its pieces are tangent: no circle of that "
            "radius touches both and stays clear of what is kept");
-    const gp_Pnt at = pieces[i].end();
     const gp_Pnt a = pieces[i].curve->Value(found->s), b = pieces[next].curve->Value(found->t);
     pieces[i].last     = found->s;
     pieces[next].first = found->t;
