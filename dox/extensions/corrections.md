@@ -267,3 +267,29 @@ Commit `14f92b09b4`. Upstream: applies; native toolkit build passed.
 Problem: Wire classification performs expensive curve tests even for disjoint parameter boxes.
 
 Derivation and limits: A loop is contained in the bounds of all its existing pcurves. If two expanded boxes are disjoint, one loop is in the unbounded complement of the other box and can reuse its outside classification. Missing pcurves and block classification keep the old path. The outside probe uses xmax+width+1; 1 is an unproven positive displacement, not an error bound. UV expansion retains stored edge tolerances and therefore inherits their unit assumptions.
+
+### BRepFill_CompatibleWires-planar-polar-cut
+
+Problem: `SameNumberByPolarMethod` finds a planar section's radial cut with a
+three-dimensional global edge/wire distance minimization. Spline sections spend most of the
+compatibility step in that search.
+
+Derivation (derived here): let the section lie in a plane with orthonormal axes X, Y.
+The coordinate map p -> ((p-o).X, (p-o).Y) is an isometry on that plane. Thus a zero of the
+2D section curve minus the projected polar ray is also a zero-distance global minimizer in
+3D. Intersect each trimmed curve with that line and retain roots on the same bounded ray
+as the original algorithm; among them keep the one closest to its target. The edge parameter
+is unchanged by the orthogonal coordinate map, so the existing endpoint tests and edge
+splitting apply without alteration. The plane and ray checks and the 3D residual use
+`Precision::Confusion()`; the intersector uses `Precision::PIntersection()`. There is no new
+size-dependent constant. This is a reduction of the problem, not a completeness proof for
+OCCT's numerical curve intersector.
+
+Use OCCT's `GeomAPI::To2d` and `Geom2dAPI_InterCurveCurve` (Open CASCADE Technology 8,
+reference manual, these classes' intersection-point and intersection-segment contracts).
+Keep the original distance search for a non-planar section, a ray outside its plane,
+overlapping curves, unsupported projection, or no resolved root. The plane's stored location
+is applied before projection. A generated family covers ellipses against polygons of three
+to seven sides, three sizes and nine poses; all output cuts remain on the exact ellipse.
+On a five-section spline skin, 25 native Linux CPU samples gave median 17.71 ms before and
+1.29 ms after, with the same serialized boundary representation. These timings exclude meshing.

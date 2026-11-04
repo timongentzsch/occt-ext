@@ -31,6 +31,11 @@
 #include <BRepLProp.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <Geom_Plane.hxx>
+#include <GeomAPI.hxx>
+#include <Geom2dAPI_InterCurveCurve.hxx>
+#include <Geom2d_Line.hxx>
+#include <Geom_TrimmedCurve.hxx>
+#include <ElCLib.hxx>
 #include <Geom_Surface.hxx>
 #include <gp.hxx>
 #include <gp_Circ.hxx>
@@ -524,6 +529,77 @@ static bool SearchVertex(const NCollection_List<TopoDS_Shape>& List,
   return trouve;
 }
 
+// For a planar section a polar cut is a line/curve intersection, not a
+// three-dimensional global minimum. Keep the latter for non-planar sections,
+// overlapping curves, or any unresolved intersection.
+static bool PlanarPolarCut(const TopoDS_Wire& theWire,
+                           const gp_Lin& theRay,
+                           const double theLength,
+                           const gp_Pnt& theTarget,
+                           TopoDS_Edge& theEdge,
+                           double& theParameter)
+{
+  BRepLib_FindSurface aSupport(theWire, Precision::Confusion(), true);
+  if (!aSupport.Found())
+    return false;
+  const auto aPlane = occ::handle<Geom_Plane>::DownCast(aSupport.Surface());
+  if (aPlane.IsNull())
+    return false;
+  gp_Pln aPln = aPlane->Pln();
+  aPln.Transform(aSupport.Location().Transformation());
+  if (aPln.Distance(theRay.Location()) > Precision::Confusion()
+      || std::abs(aPln.Axis().Direction().Dot(theRay.Direction())) > Precision::Angular())
+    return false;
+  const gp_Ax3& anAxes = aPln.Position();
+  const gp_Vec anOffset(anAxes.Location(), theRay.Location());
+  const gp_Pnt2d anOrigin(anOffset.Dot(anAxes.XDirection()), anOffset.Dot(anAxes.YDirection()));
+  const gp_Dir2d aDirection(theRay.Direction().Dot(anAxes.XDirection()),
+                            theRay.Direction().Dot(anAxes.YDirection()));
+  const occ::handle<Geom2d_Line> aLine = new Geom2d_Line(anOrigin, aDirection);
+  double aBest = RealLast();
+  try
+  {
+    for (BRepTools_WireExplorer anExp(theWire); anExp.More(); anExp.Next())
+    {
+      const TopoDS_Edge& anEdge = anExp.Current();
+      double aFirst, aLast;
+      const auto aCurve = BRep_Tool::Curve(anEdge, aFirst, aLast);
+      if (aCurve.IsNull())
+        return false;
+      const auto aCurve2d = GeomAPI::To2d(new Geom_TrimmedCurve(aCurve, aFirst, aLast), aPln);
+      if (aCurve2d.IsNull())
+        return false;
+      Geom2dAPI_InterCurveCurve anIntersection(aCurve2d, aLine, Precision::PIntersection());
+      if (!anIntersection.Intersector().IsDone() || anIntersection.NbSegments() != 0)
+        return false;
+      for (int i = 1; i <= anIntersection.NbPoints(); ++i)
+      {
+        const auto& aPoint = anIntersection.Intersector().Point(i);
+        const double aParam = aPoint.ParamOnFirst();
+        if (aParam < aFirst || aParam > aLast)
+          continue;
+        const gp_Pnt aP = aCurve->Value(aParam);
+        const double aRayParam = ElCLib::Parameter(theRay, aP);
+        if (aRayParam < 0.0 || aRayParam > theLength
+            || theRay.Distance(aP) > Precision::Confusion())
+          continue;
+        const double aDistance = theTarget.SquareDistance(aP);
+        if (aDistance < aBest)
+        {
+          aBest = aDistance;
+          theEdge = anEdge;
+          theParameter = aParam;
+        }
+      }
+    }
+  }
+  catch (const Standard_Failure&)
+  {
+    return false;
+  }
+  return !theEdge.IsNull();
+}
+
 static bool EdgeIntersectOnWire(
   const gp_Pnt& P1,
   const gp_Pnt& P2,
@@ -558,41 +634,50 @@ static bool EdgeIntersectOnWire(
   gp_Pnt           BP1(x1, y1, z1), BP2(x2, y2, z2);
   double           diag         = BP1.Distance(BP2);
   double           dernierparam = diag;
-  BRepLib_MakeEdge ME(droite, 0., dernierparam);
-  TopoDS_Edge      ECur = BRepLib_MakeEdge(droite, 0., P1.Distance(P2));
 
-  // calculate the intersection by BRepExtrema (point of min distance)
-  BRepExtrema_DistShapeShape DSS(ME.Edge(), W);
-  if (DSS.IsDone())
+  TopoDS_Edge aCutEdge;
+  double aCutParameter = 0.0;
+  TopoDS_Vertex aCutVertex;
+  bool isDone = PlanarPolarCut(W, droite, dernierparam, P2, aCutEdge, aCutParameter);
+  if (!isDone)
   {
-    // choose the solution closest to P2
-    int    isol = 1;
-    gp_Pnt Psol = DSS.PointOnShape2(isol);
-    double dss  = P2.Distance(Psol);
-    for (int iss = 2; iss <= DSS.NbSolution(); iss++)
+    BRepLib_MakeEdge ME(droite, 0., dernierparam);
+    BRepExtrema_DistShapeShape DSS(ME.Edge(), W);
+    isDone = DSS.IsDone();
+    if (isDone)
     {
-      gp_Pnt Pss   = DSS.PointOnShape2(iss);
-      double aDist = P2.Distance(Pss);
-      if (dss > aDist)
+      int isol = 1;
+      double dss = P2.Distance(DSS.PointOnShape2(isol));
+      for (int iss = 2; iss <= DSS.NbSolution(); ++iss)
       {
-        dss  = aDist;
-        isol = iss;
-#ifdef OCCT_DEBUG
-        Psol = Pss;
-#endif
+        const double aDist = P2.Distance(DSS.PointOnShape2(iss));
+        if (dss > aDist)
+        {
+          dss = aDist;
+          isol = iss;
+        }
+      }
+      if (DSS.SupportTypeShape2(isol) == BRepExtrema_IsVertex)
+        aCutVertex = TopoDS::Vertex(DSS.SupportOnShape2(isol));
+      else
+      {
+        aCutEdge = TopoDS::Edge(DSS.SupportOnShape2(isol));
+        DSS.ParOnEdgeS2(isol, aCutParameter);
       }
     }
-
+  }
+  if (isDone)
+  {
     // is the solution a new vertex ?
-    NewVertex = (DSS.SupportTypeShape2(isol) != BRepExtrema_IsVertex);
+    NewVertex = aCutVertex.IsNull();
     if (NewVertex)
     {
-      TopoDS_Edge E   = TopoDS::Edge(DSS.SupportOnShape2(isol));
+      TopoDS_Edge E   = aCutEdge;
       double      tol = Precision::PConfusion();
       double      first, last, param;
       BRep_Tool::Range(E, first, last);
       tol = std::max(tol, percent * std::abs(last - first));
-      DSS.ParOnEdgeS2(isol, param);
+      param = aCutParameter;
       if (std::abs(first - param) < tol)
       {
         NewVertex = false;
@@ -615,21 +700,17 @@ static bool EdgeIntersectOnWire(
     }
     else
     {
-      TopoDS_Shape aLocalShape = DSS.SupportOnShape2(isol);
-      Vsol                     = TopoDS::Vertex(aLocalShape);
-      //      Vsol = TopoDS::Vertex(DSS.SupportOnShape2(isol));
+      Vsol = aCutVertex;
     }
 
     // it is required to cut the edge
     if (NewVertex)
     {
-      TopoDS_Shape aLocalShape = DSS.SupportOnShape2(isol);
-      TopoDS_Edge  E           = TopoDS::Edge(aLocalShape);
-      //      TopoDS_Edge E = TopoDS::Edge(DSS.SupportOnShape2(isol));
+      TopoDS_Edge E = aCutEdge;
       NCollection_Sequence<TopoDS_Shape> EmptySeq;
       theEdgeNewEdges.Bind(E, EmptySeq);
       double first, last, param;
-      DSS.ParOnEdgeS2(isol, param);
+      param = aCutParameter;
       BRep_Tool::Range(E, first, last);
       BRepLib_MakeWire MW;
       for (anExp.Init(W); anExp.More(); anExp.Next())

@@ -5,5 +5,6 @@ set(OCCT_TKBool_GTests_FILES
   BRepAlgoAPI_Cut_Test.cxx
   BRepAlgoAPI_Fuse_Test.cxx
   BRepAlgoAPI_Section_Test.cxx
+  BRepFill_CompatibleWires_Test.cxx
   BRepFill_PipeShell_Test.cxx
 )
