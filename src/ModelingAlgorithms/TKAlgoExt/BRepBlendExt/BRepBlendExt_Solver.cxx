@@ -117,7 +117,10 @@ static bool restOn(Side& side, const TopoDS_Edge& edge)
 
 //! The edge of `face` first met going across it from `edge` at its parameter `t`, along the face's
 //! parameters at right angles to the edge's curve on it, into the face: empty where none is met.
-static TopoDS_Edge firstAcross(const TopoDS_Face& face, const TopoDS_Edge& edge, double t)
+static TopoDS_Edge firstAcross(const TopoDS_Face& face,
+                               const TopoDS_Edge& edge,
+                               double             t,
+                               Inside&            inside)
 {
   double     f, l;
   const auto onFace = BRep_Tool::CurveOnSurface(edge, face, f, l);
@@ -129,7 +132,6 @@ static TopoDS_Edge firstAcross(const TopoDS_Face& face, const TopoDS_Edge& edge,
   if (!(d.Magnitude() > gp::Resolution()))
     return {};
   gp_Dir2d normal(-d.Y(), d.X());
-  Inside   inside(face);
   double   u0, u1, v0, v1;
   BRepTools::UVBounds(face, u0, u1, v0, v1);
   const double step = 1e-6 * std::max(u1 - u0, v1 - v0);
@@ -168,14 +170,14 @@ static TopoDS_Edge firstAcross(const TopoDS_Face& face, const TopoDS_Edge& edge,
 //! across it from the blended one, the same along it; whether the face is that strip alone (four
 //! edges, the far one joined to each end of the blended one by one), and whether the far edge ends
 //! with the strip at one end of the blend at least (the face's edge from the blended edge's vertex
-//! there reaches it).
+//! there reaches it). `inside` classifies points of the face (Blend::inside keeps one per face).
 struct Far
 {
   TopoDS_Edge edge;
   bool        whole = false, ends = false;
 };
 
-static std::optional<Far> farEdge(const Rail& rail, int side)
+static std::optional<Far> farEdge(const Rail& rail, int side, Inside& inside)
 {
   const TopoDS_Face& face = rail.s[side].face;
   Far                out;
@@ -183,7 +185,7 @@ static std::optional<Far> farEdge(const Rail& rail, int side)
   BRep_Tool::Range(rail.edge, f, l);
   for (const double share : {0.1, 0.5, 0.9})
   {
-    const TopoDS_Edge across = firstAcross(face, rail.edge, f + (l - f) * share);
+    const TopoDS_Edge across = firstAcross(face, rail.edge, f + (l - f) * share, inside);
     if (across.IsNull() || (!out.edge.IsNull() && !out.edge.IsSame(across)))
       return {};
     out.edge = across;
@@ -1581,6 +1583,9 @@ struct Blend
   //! Which points of a face's surface lie off it: made once for each face, as a face of many
   //! holes takes long to make it for.
   Inside& inside(const TopoDS_Face& face);
+  //! farEdge of a rail's side, worked out once for each edge and face: the sheets are made again
+  //! for each attempt, and the far edge depends on the edge and the face alone.
+  const std::optional<Far>& farOf(const Rail& rail, int side);
   //! Whether piece k's rail is one whose balls may be found through their centres instead
   //! (Rail::byCentre): a round's or a G2 blend's, off faces (not a cliff), not yet so.
   bool mayCentre(int k) const;
@@ -1619,6 +1624,7 @@ struct Blend
   void absorbEnds();
   NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> insideOf; // face -> insides
   std::deque<Inside>                                              insides;
+  std::deque<std::tuple<TopoDS_Shape, TopoDS_Shape, std::optional<Far>>> fars; // edge, face
   bool again = false; // sheets() to be made again (centreChain)
 
   bool centred(const TopoDS_Shape& edge) const
@@ -1716,6 +1722,15 @@ Inside& Blend::inside(const TopoDS_Face& face)
     return insides[*at];
   insideOf.Bind(face, int(insides.size()));
   return insides.emplace_back(face);
+}
+
+const std::optional<Far>& Blend::farOf(const Rail& rail, int side)
+{
+  const TopoDS_Face& face = rail.s[side].face;
+  for (const auto& [edge, of, far] : fars)
+    if (edge.IsSame(rail.edge) && of.IsSame(face))
+      return far;
+  return std::get<2>(fars.emplace_back(rail.edge, face, farEdge(rail, side, inside(face))));
 }
 
 //! Refused where the fitted blend crosses itself between its contacts: the envelope of the balls
@@ -1952,7 +1967,8 @@ void Blend::fullRail(const std::vector<TopoDS_Shape>& asked)
   TopoDS_Vertex start, end;
   TopExp::Vertices(rails[0], start, end);
   rail.closed    = !start.IsNull() && start.IsSame(end);
-  const auto far = farEdge(rail, 1);
+  Inside     onStrip(rail.s[1].face);
+  const auto far = farEdge(rail, 1, onStrip);
   if (!far || !far->edge.IsSame(rails[1]) || !far->whole)
     fail(op,
          unsupported_geometry,
@@ -2663,7 +2679,7 @@ void Blend::sheets()
         // On the face's far edge all along counts as off it: the ball rests on the face and that
         // edge at once (a side exactly as high as the ball is wide), and the blend uses the face
         // up as where the side is narrower.
-        const auto        far = farEdge(piece.rail, s2);
+        const auto&       far = farOf(piece.rail, s2);
         BRepAdaptor_Curve farCurve;
         if (far)
           farCurve.Initialize(far->edge);
@@ -2724,7 +2740,7 @@ void Blend::sheets()
             return other.rail.edge.IsSame(edge);
           });
         };
-        const auto far = farEdge(piece.rail, offSide);
+        const auto& far = farOf(piece.rail, offSide);
         if (far && !blended(far->edge) && (stopped || piece.rail.closed)
             && cliffOf(piece.rail, offSide, *far))
         {
