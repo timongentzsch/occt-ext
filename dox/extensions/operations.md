@@ -112,6 +112,17 @@ and 1e3; a cylinder's rim (periodic) and, held out, the ring of a sphere on a pl
 the integral of their sections to 1e-9. G2 in the application (the audit's variable
 and range rows): seams G1 to 0.01 degrees and G2 to 1e-4 / r.
 
+*Why spatial stations stay.* `filletStations` (`BRepFilletAPI_MakeFillet` with a `Law_Interpol` law
+through sizes at points in space, cut at limit planes) stays beside the section law, which cannot express
+what it takes: sizes by length along a chain of tangent edges or round a closed contour (the section law
+holds one law per edge), and limit planes that are not square to a straight edge (its range ends at
+sections across the edge). Where both apply, on a box edge, measured both ways from tessellation points
+to the other body's mesh (deflection 2e-3): a constant size between two limit planes gives the same body
+(4.8e-12 mm, the same volume) at 0.55 to 0.8 of the CPU time; one limit plane 7.8e-5 mm, the same volume;
+sizes 1, 2, 3 at three stations 0.046 mm and 0.53 mm^3 apart (`Law_Interpol` is not the natural spline);
+sizes at four stations within two limits 4.5e-3 mm one way; a constant size round an oval rim of four
+Bezier edges 1.6e-3 mm, at 1.5 times the CPU time. G1 and G2 of these pairs were not measured.
+
 *Over a side narrower than the blend, and a pinched body.* Where the contact on a face lies past the
 face's far edge along the whole edge, the face is used up: a round's ball rests on the far edge instead
 (a cliff), any other section is cut by the face beyond the far edge (a notch). A contact that lies on
