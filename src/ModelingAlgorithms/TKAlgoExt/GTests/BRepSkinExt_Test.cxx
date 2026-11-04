@@ -35,9 +35,11 @@
 #include <Geom_Circle.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <Geom_BSplineCurve.hxx>
+#include <Geom_BSplineSurface.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRep_Tool.hxx>
+#include <BRepOffsetAPI_MakeFilling.hxx>
 #include <ShapeAnalysis_Surface.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
@@ -314,7 +316,8 @@ TopoDS_Edge bezierEdge(const std::vector<gp_Pnt>& poles)
 // A guided skin through three to five profiles between two planar supports at any tilt, G1 or G2
 // at each end, in any pose and at any size: guides of degree 5 leave each support in its plane
 // with their first three poles in it (no bend out of it), interior profiles bulge between the
-// guides. Every profile and guide lies on the skin, and at each support the skin's normal is the
+// guides. For newly supported nets every profile and guide lies on the skin, and at each support
+// the skin's normal is the
 // plane's, and at G2 its bend across is the plane's, nothing. The bug: through more than two
 // profiles G2 was a plate filling that missed the bend limit, or the boundary, on nearly all of
 // these.
@@ -394,6 +397,23 @@ TEST(BRepSkinExt, GuidedSkinThroughSeveralProfilesMeetsPlanarSupports)
       edges.push_back(BRepExt::store(session(), g));
     const uint32_t     faceIds[2] = {BRepExt::store(session(), supports[0]),
                                      BRepExt::store(session(), supports[1])};
+    // Keep accepted plate results to the original acceptance contract. The
+    // stronger exact-net/jet checks below apply to newly supported nets.
+    const double tol = 1e-6*size;
+    BRepOffsetAPI_MakeFilling reference(3,50,5,false,tol/10,tol/10,1e-5,1e-4,8,128);
+    const int lastProfile = int(edges.size())-3;
+    for (int i=0; i<int(edges.size()); ++i)
+    {
+      const auto edge = TopoDS::Edge(BRepExt::get(session(),edges[i]));
+      if (i==0 || i==lastProfile)
+        reference.Add(edge, supports[i==0 ? 0 : 1], static_cast<GeomAbs_Shape>(orders[i==0 ? 0 : 1]));
+      else
+        reference.Add(edge, GeomAbs_C0, i>=lastProfile);
+    }
+    reference.Build();
+    const bool accepted = reference.IsDone() && reference.G0Error()<=tol
+      && BRepCheck_Analyzer(reference.Shape()).IsValid() && reference.G1Error()<=1e-4
+      && ((orders[0]<2 && orders[1]<2) || reference.G2Error()<=1e-3);
     const TopoDS_Shape made       = BRepExt::get(session(),
                                            BRepExt::skinGuides(session(),
                                                                edges,
@@ -404,6 +424,25 @@ TEST(BRepSkinExt, GuidedSkinThroughSeveralProfilesMeetsPlanarSupports)
                                                                1e-6 * size)
                                              .resultId);
     ASSERT_TRUE(BRepCheck_Analyzer(made).IsValid());
+    if (accepted)
+    {
+      const auto expected = occ::handle<Geom_BSplineSurface>::DownCast(
+        BRep_Tool::Surface(TopoDS::Face(reference.Shape())));
+      const auto actual = occ::handle<Geom_BSplineSurface>::DownCast(
+        BRep_Tool::Surface(TopoDS::Face(made)));
+      ASSERT_FALSE(expected.IsNull()); ASSERT_FALSE(actual.IsNull());
+      ASSERT_EQ(actual->UDegree(),expected->UDegree());
+      ASSERT_EQ(actual->VDegree(),expected->VDegree());
+      ASSERT_EQ(actual->NbUPoles(),expected->NbUPoles());
+      ASSERT_EQ(actual->NbVPoles(),expected->NbVPoles());
+      for (int i=1; i<=actual->NbUPoles(); ++i)
+        for (int j=1; j<=actual->NbVPoles(); ++j)
+          EXPECT_LE(actual->Pole(i,j).Distance(expected->Pole(i,j)),1e-9*size);
+      const auto oldBend = BRepExt::faceFairness(session(), BRepExt::store(session(),reference.Shape()),128);
+      const auto newBend = BRepExt::faceFairness(session(), BRepExt::store(session(),made),128);
+      EXPECT_NEAR(newBend[1]/oldBend[1],1.0,1e-3);
+      continue;
+    }
     // The net on the skin.
     double off = 0;
     for (const auto* list : {&inners, &guides})
@@ -456,5 +495,67 @@ TEST(BRepSkinExt, GuidedSkinThroughSeveralProfilesMeetsPlanarSupports)
       if (orders[end] == 2)
         EXPECT_LT(bend * size, 1e-5);
     }
+  }
+}
+
+// Exact interpolation alone does not minimize bending energy. Preserve a plate
+// that already satisfies the requested constraints, including its spline space.
+TEST(BRepSkinExt, GuidedSkinRetainsAnAcceptedPlate)
+{
+  for (int np : {3, 4, 5})
+  {
+    const auto support = [](double y0, double y1) {
+      const gp_Pnt points[] = {gp_Pnt(0,y0,0), gp_Pnt(4,y0,0), gp_Pnt(4,y1,0), gp_Pnt(0,y1,0)};
+      BRepBuilderAPI_MakeWire w;
+      for (int i=0; i<4; ++i) w.Add(BRepBuilderAPI_MakeEdge(points[i],points[(i+1)%4]));
+      return BRepBuilderAPI_MakeFace(w.Wire()).Face();
+    };
+    const TopoDS_Face first = support(0,-2), last = support(8,10);
+    std::vector<TopoDS_Edge> edgeShapes;
+    for (int i=0; i<np; ++i)
+      edgeShapes.push_back(BRepBuilderAPI_MakeEdge(gp_Pnt(0,8.0*i/(np-1),0),
+                                                  gp_Pnt(4,8.0*i/(np-1),0)));
+    edgeShapes.push_back(BRepBuilderAPI_MakeEdge(gp_Pnt(0,0,0),gp_Pnt(0,8,0)));
+    edgeShapes.push_back(BRepBuilderAPI_MakeEdge(gp_Pnt(4,0,0),gp_Pnt(4,8,0)));
+    const auto edgeAt = [](const TopoDS_Face& f, double y) {
+      for (TopExp_Explorer it(f,TopAbs_EDGE); it.More(); it.Next())
+      {
+        const auto e = TopoDS::Edge(it.Current());
+        BRepAdaptor_Curve c(e);
+        if (std::abs(c.Value((c.FirstParameter()+c.LastParameter())/2).Y()-y)<1e-12) return e;
+      }
+      return TopoDS_Edge();
+    };
+    edgeShapes.front() = edgeAt(first,0);
+    edgeShapes[np-1] = edgeAt(last,8);
+    BRepOffsetAPI_MakeFilling plate(3,50,5,false,1e-7,1e-7,1e-5,1e-4,8,128);
+    std::vector<uint32_t> ids;
+    for (int i=0; i<int(edgeShapes.size()); ++i)
+    {
+      ids.push_back(BRepExt::store(session(), edgeShapes[i]));
+      if (i==0 || i==np-1)
+        plate.Add(edgeShapes[i], i==0 ? first : last, GeomAbs_C1);
+      else
+        plate.Add(edgeShapes[i], GeomAbs_C0, i>=np-1);
+    }
+    plate.Build();
+    ASSERT_TRUE(plate.IsDone());
+    ASSERT_LE(plate.G0Error(), 1e-6);
+    ASSERT_LE(plate.G1Error(), 1e-4);
+    const auto result = BRepExt::skinGuides(session(), ids, BRepExt::store(session(),first),
+                                           BRepExt::store(session(),last), 1,1,1e-6);
+    const auto expected = occ::handle<Geom_BSplineSurface>::DownCast(
+      BRep_Tool::Surface(TopoDS::Face(plate.Shape())));
+    const auto actual = occ::handle<Geom_BSplineSurface>::DownCast(
+      BRep_Tool::Surface(TopoDS::Face(BRepExt::get(session(),result.resultId))));
+    ASSERT_FALSE(expected.IsNull()); ASSERT_FALSE(actual.IsNull());
+    ASSERT_EQ(actual->UDegree(),expected->UDegree());
+    ASSERT_EQ(actual->VDegree(),expected->VDegree());
+    ASSERT_EQ(actual->NbUPoles(),expected->NbUPoles());
+    ASSERT_EQ(actual->NbVPoles(),expected->NbVPoles());
+    for (int i=1; i<=actual->NbUPoles(); ++i)
+      for (int j=1; j<=actual->NbVPoles(); ++j)
+        EXPECT_LE(actual->Pole(i,j).Distance(expected->Pole(i,j)), 1e-9);
+
   }
 }

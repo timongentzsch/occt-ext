@@ -651,6 +651,16 @@ plate fillings are retained: exact net interpolation does not imply a smaller in
 curvatures. On one accepted net the correction raised that integral from 0.9364 to 1.2673. Nets whose
 skin carries weights remain outside this correction.
 
+Approximating an individual conic by non-rational cubic pieces is not the unresolved problem of
+correspondence between unlike closed sections. Floater, *An O(h^{2n}) Hermite approximation for
+conic sections*, 1997, section 2 and Theorem 3.1, gives geometric Hermite interpolants and a
+Hausdorff bound for positive normalized middle weights up to 3; for degree three the subdivision
+order is six. That bound controls the conversion of each section, not which points on two
+sections should be joined. Repeated bisection of three initial parameter regions can explain a
+knot pattern without determining that correspondence. No new pairing law is inferred from such
+a pattern here. Source: <https://numerika.fmf.uni-lj.si/bib2html/e-documents/clanki/FloaterAnO(h2n)Hermiteapproximationforconicsections.pdf>.
+
+
 *Booleans.* Cell selection from one General Fuse with a ladder of fallbacks, each rung accepted only if
 checked; a sheet tool divides rather than subtracts.
 

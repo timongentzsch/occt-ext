@@ -2,13 +2,13 @@
 
 # OCCT extensions
 
-**A modelling layer for [Open CASCADE Technology](https://dev.opencascade.org) 8: blends that are exact where stock's are approximate, fills and skins with real continuity control, offsets that survive vanishing faces, and twenty-one fixes to the algorithms underneath.** Every result is checked against a definition or a closed form, and every operation checks its own answer before returning it.
+**A modelling layer for [Open CASCADE Technology](https://dev.opencascade.org) 8: blends that are exact where stock's are approximate, fills and skins with real continuity control, offsets that survive vanishing faces, and twenty-three fixes to the algorithms underneath.** Every result is checked against a definition or a closed form, and every operation checks its own answer before returning it.
 
 The repository is OCCT with its history, followed by commits that add
 
 * **`TKAlgoExt`**, about 60 000 lines in nine packages: rolling-ball fillets and chamfers, boundary-first Patch fills, Gordon and guided skins, framed sweeps, offsets and shells, G0 to G3 bridge curves, surface alignment and squaring, curve and surface deformation, and cell-based Booleans;
 * **numerical utilities** in `TKGeomAlgo` and `TKMesh`: interval enclosures, Bernstein products, constrained tensor-spline fitting, certified knot compaction, trim integration, surface jets;
-* **twenty-one corrections** to existing OCCT algorithms, one commit each, with the derivation and limits of each. One of them makes face classification 30 times faster on the benchmark plate.
+* **twenty-three corrections** to existing OCCT algorithms, one commit each, with the derivation and limits of each. One of them makes face classification 30 times faster on the benchmark plate.
 
 The base is OCCT `b8f597c6` (30 July 2026). Nothing here has been proposed upstream yet; it is organised so that it can be proposed in pieces ([Upstreaming](#upstreaming)).
 
