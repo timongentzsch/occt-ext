@@ -428,7 +428,18 @@ surface in those parameters; otherwise `Geom_OffsetSurface`). *Tangent edges:* i
 normal n along an edge c and move by the same d, the point c + d n lies on both offset surfaces with the
 normal n on both, so they touch along the offset of the edge and its curves on the faces stay; this is
 tested, not assumed (the two faces' points of each edge parameter after the move agree within the
-tolerance). *Sharp edges:* the new edge is the crossing of the two offset surfaces, solved in the plane
+tolerance, or within the edge's own tolerance where that is larger). Two faces tangent only to an angle
+θ come apart by |d| · 2 sin(θ/2) ≤ |d| θ more when both move by d. An input that is G1 only to θ, its edge
+tolerance that wide (the reference modeller's G2 blends meet a cylinder to 6e-5 rad, edge tolerances 4e-5 to 2e-4),
+has its edge kept, and the result's edge carries the input's tolerance plus |d| θ_max. θ_max is found,
+not bounded (judgement): 8 samples in each piece of the edge where its curves on the faces are polynomial
+and cross no knot line of either surface, each local maximum refined by golden-section search. A bound
+would need the faces' curvatures bounded along the edge, and the hull bound on curvature was three orders
+loose on blend sheets (above). Measured against 4 097 samples on every nearly tangent edge of the 22
+recorded rows, it found the larger maximum on all of them; 33 even samples fell short by up to 36 per
+cent. The certificate holds that edge to its carried tolerance and its vertices to the input vertex's
+plus the same spread; the result is never claimed more accurate than its input. Tested on a held-out family:
+prisms whose round meets its sides at θ from 1e-5 to 1e-3, at three scales. *Sharp edges:* the new edge is the crossing of the two offset surfaces, solved in the plane
 through c(t) normal to the old edge (four equations S1(u1, v1) = S2(u2, v2), (S1 − c(t))·c'(t) = 0 by
 Newton from the old edge's curves on the faces), so it keeps the old parameter t; the curve and the
 curves on the faces are cubic interpolants of those sections, refined locally (a midpoint added where an

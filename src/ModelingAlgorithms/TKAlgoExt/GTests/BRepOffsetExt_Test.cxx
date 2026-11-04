@@ -27,7 +27,13 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
+#include <GC_MakeArcOfCircle.hxx>
+#include <Geom_CylindricalSurface.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -277,6 +283,104 @@ TEST(BRepOffsetExt, EveryFaceOfARoundedPrismMovedHasTheClosedFormVolumeAtAnyAngl
         << degrees << " degrees, d=" << d;
     }
   }
+}
+
+// Held out: a square prism a x a x h whose corner at the origin is rounded by an arc that meets
+// its two sides at a known angle theta instead of tangentially: the circle through (r, 0) and
+// (0, r) centred at (c, c), c = r / (1 + tan theta). Its edges along the round claim tangency to
+// a tolerance tau (as an input that is G1 only to a few 1e-5 rad does). Moved by d, the faces
+// there come apart by |d| 2 sin(theta / 2), and the result's edge carries tau + |d| theta, the
+// input's tolerance and what the move adds, where |d| theta is within tau; past that the edge is
+// a crossing and keeps the tolerance. At three scales, both ways.
+TEST(BRepOffsetExt, EveryFaceOfAPrismWithANearlyTangentRoundCarriesTheInputsTolerance)
+{
+  for (const double scale : {1e-3, 1.0, 1e3})
+    for (const double theta : {1e-5, 3e-5, 1e-4, 1e-3})
+      for (const double d : {0.5, -0.5})
+      {
+        const double a = 30 * scale, h = 20 * scale, r = 5 * scale, tau = 1e-4 * scale;
+        const double c = r / (1 + std::tan(theta)), rho = std::hypot(r - c, c);
+        const gp_Pnt mid(c - rho / std::sqrt(2.0), c - rho / std::sqrt(2.0), 0);
+        BRepBuilderAPI_MakeWire wire;
+        wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(0, r, 0), gp_Pnt(0, a, 0)));
+        wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(0, a, 0), gp_Pnt(a, a, 0)));
+        wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(a, a, 0), gp_Pnt(a, 0, 0)));
+        wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(a, 0, 0), gp_Pnt(r, 0, 0)));
+        wire.Add(BRepBuilderAPI_MakeEdge(
+          GC_MakeArcOfCircle(gp_Pnt(r, 0, 0), mid, gp_Pnt(0, r, 0)).Value()));
+        const TopoDS_Shape prism =
+          BRepPrimAPI_MakePrism(BRepBuilderAPI_MakeFace(wire.Wire()), gp_Vec(0, 0, h)).Shape();
+        // The two edges along the round: lines between the cylinder and a plane.
+        BRep_Builder builder;
+        const auto   alongRound = [](const TopoDS_Shape& shape) {
+          std::vector<TopoDS_Edge> found;
+          for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next())
+          {
+            if (!BRep_Tool::Surface(TopoDS::Face(f.Current()))
+                   ->IsKind(STANDARD_TYPE(Geom_CylindricalSurface)))
+              continue;
+            for (TopExp_Explorer e(f.Current(), TopAbs_EDGE); e.More(); e.Next())
+            {
+              double first, last;
+              const Handle(Geom_Curve) curve = BRep_Tool::Curve(TopoDS::Edge(e.Current()), first, last);
+              if (curve->Value(first).Z() != curve->Value(last).Z())
+                found.push_back(TopoDS::Edge(e.Current()));
+            }
+          }
+          return found;
+        };
+        const std::vector<TopoDS_Edge> claimed = alongRound(prism);
+        ASSERT_EQ(claimed.size(), 2u);
+        for (const TopoDS_Edge& edge : claimed)
+        {
+          builder.UpdateEdge(edge, tau);
+          for (TopExp_Explorer v(edge, TopAbs_VERTEX); v.More(); v.Next())
+            builder.UpdateVertex(TopoDS::Vertex(v.Current()), tau);
+        }
+        const double       spread = std::abs(d) * scale * theta;
+        const TopoDS_Shape made   = kept(prism, d * scale, 1e-6 * scale);
+        ASSERT_FALSE(made.IsNull()) << scale << " " << theta << " " << d;
+        EXPECT_TRUE(BRepExt::invalidity(made).empty());
+        EXPECT_EQ(faceCount(made), faceCount(prism));
+        const std::vector<TopoDS_Edge> moved = alongRound(made);
+        ASSERT_EQ(moved.size(), 2u);
+        for (const TopoDS_Edge& edge : moved)
+        {
+          if (spread > tau)
+          {
+            EXPECT_LE(BRep_Tool::Tolerance(edge), tau * (1 + 1e-9)) << scale << " " << theta << " " << d;
+            continue;
+          }
+          EXPECT_NEAR(BRep_Tool::Tolerance(edge), tau + spread, 1e-9 * tau)
+            << scale << " " << theta << " " << d;
+          // The two faces' points of the edge, apart by what the move adds.
+          std::vector<TopoDS_Face> faces;
+          for (TopExp_Explorer f(made, TopAbs_FACE); f.More(); f.Next())
+            for (TopExp_Explorer e(f.Current(), TopAbs_EDGE); e.More(); e.Next())
+              if (e.Current().IsSame(edge))
+              {
+                faces.push_back(TopoDS::Face(f.Current()));
+                break;
+              }
+          ASSERT_EQ(faces.size(), 2u);
+          double first, last, apart = 0;
+          BRep_Tool::Range(edge, first, last);
+          for (int k = 0; k <= 8; ++k)
+          {
+            const double t = first + (last - first) * k / 8;
+            gp_Pnt       on[2];
+            for (int j = 0; j < 2; ++j)
+            {
+              double                   c0, c1;
+              const Handle(Geom2d_Curve) uv = BRep_Tool::CurveOnSurface(edge, faces[j], c0, c1);
+              on[j] = BRep_Tool::Surface(faces[j])->Value(uv->Value(t).X(), uv->Value(t).Y());
+            }
+            apart = std::max(apart, on[0].Distance(on[1]));
+          }
+          EXPECT_NEAR(apart, 2 * std::abs(d) * scale * std::sin(theta / 2), 1e-3 * spread)
+            << scale << " " << theta << " " << d;
+        }
+      }
 }
 
 // A sheet of two rectangles L x w meeting at a right angle along an edge of length w, thickened

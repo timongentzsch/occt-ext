@@ -627,13 +627,14 @@ bool interpolate(double                                                        f
 }
 
 //! The parameters in [first, last] where `uv(t)`, parameters on `surface`, cross a line of the
-//! surface along which it is less than C2: a sign change of u - k or v - k between `n` samples,
-//! then bisection.
+//! surface along which it is less than C2 (less than `continuity`): a sign change of u - k or
+//! v - k between `n` samples, then bisection.
 void knotCrossings(const Handle(Geom_Surface)&                   surface,
                    const std::function<bool(double, gp_Pnt2d&)>& uv,
                    double                                        first,
                    double                                        last,
-                   std::vector<double>&                          out)
+                   std::vector<double>&                          out,
+                   GeomAbs_Shape                                 continuity = GeomAbs_C2)
 {
   const GeomAdaptor_Surface adaptor(surface);
   std::vector<std::pair<int, double>> lines;
@@ -641,10 +642,10 @@ void knotCrossings(const Handle(Geom_Surface)&                   surface,
       || adaptor.GetType() == GeomAbs_SurfaceOfExtrusion
       || adaptor.GetType() == GeomAbs_SurfaceOfRevolution)
   {
-    const int nu = adaptor.NbUIntervals(GeomAbs_C2), nv = adaptor.NbVIntervals(GeomAbs_C2);
+    const int nu = adaptor.NbUIntervals(continuity), nv = adaptor.NbVIntervals(continuity);
     NCollection_Array1<double> us(1, nu + 1), vs(1, nv + 1);
-    adaptor.UIntervals(us, GeomAbs_C2);
-    adaptor.VIntervals(vs, GeomAbs_C2);
+    adaptor.UIntervals(us, continuity);
+    adaptor.VIntervals(vs, continuity);
     for (int i = 2; i <= nu; ++i)
       lines.emplace_back(0, us(i));
     for (int i = 2; i <= nv; ++i)
@@ -693,6 +694,95 @@ void curveBreaks(const Adaptor& adaptor, GeomAbs_Shape continuity, std::vector<d
   adaptor.Intervals(t, continuity);
   for (int i = 2; i <= n; ++i)
     out.push_back(t(i));
+}
+
+//! The largest angle between the outward normals of `one` and `other` along `edge`: sampled 8
+//! times in each piece of the edge where both curves on the faces are polynomial and cross no knot
+//! line of either surface, and each local maximum of the samples refined by golden-section
+//! search between its two neighbours. A judgement, not a bound: a bound needs the normals' rate of
+//! turn along the edge, that is the faces' curvatures, bounded over it, and the hull bound on
+//! curvature was three orders above the sampled curvature on blend sheets. Its measured margin is
+//! in operations.md.
+double largestAngle(const TopoDS_Edge& edge, const TopoDS_Face& one, const TopoDS_Face& other)
+{
+  double                     first, last, c0, c1;
+  const Handle(Geom2d_Curve) on1 = BRep_Tool::CurveOnSurface(edge, one, c0, c1);
+  const Handle(Geom2d_Curve) on2 = BRep_Tool::CurveOnSurface(edge, other, c0, c1);
+  BRep_Tool::Range(edge, first, last);
+  const auto angle = [&](double t) {
+    gp_Vec n[2];
+    int    k = 0;
+    for (const auto& [face, on] : {std::pair(one, on1), std::pair(other, on2)})
+    {
+      const gp_Pnt2d uv = on->Value(t);
+      gp_Pnt         p;
+      gp_Vec         su, sv;
+      BRep_Tool::Surface(face)->D1(uv.X(), uv.Y(), p, su, sv);
+      n[k] = su.Crossed(sv);
+      if (face.Orientation() == TopAbs_REVERSED)
+        n[k].Reverse();
+      ++k;
+    }
+    return n[0].Magnitude() > gp::Resolution() && n[1].Magnitude() > gp::Resolution()
+             ? n[0].Angle(n[1])
+             : 0.0;
+  };
+  std::vector<double> pieces{first, last};
+  for (const auto& [face, on] : {std::pair(one, on1), std::pair(other, on2)})
+  {
+    curveBreaks(Geom2dAdaptor_Curve(on, first, last), GeomAbs_CN, pieces);
+    knotCrossings(
+      BRep_Tool::Surface(face),
+      [&](double t, gp_Pnt2d& uv) {
+        uv = on->Value(t);
+        return true;
+      },
+      first,
+      last,
+      pieces,
+      GeomAbs_CN);
+  }
+  std::sort(pieces.begin(), pieces.end());
+  std::vector<double> ts;
+  for (size_t i = 0; i + 1 < pieces.size(); ++i)
+    for (int k = 0; k < 8; ++k)
+      if (pieces[i + 1] > pieces[i])
+        ts.push_back(pieces[i] + (pieces[i + 1] - pieces[i]) * k / 8);
+  ts.push_back(last);
+  std::vector<double> sampled(ts.size());
+  for (size_t k = 0; k < ts.size(); ++k)
+    sampled[k] = angle(ts[k]);
+  double       largest = *std::max_element(sampled.begin(), sampled.end());
+  const double golden  = 0.5 * (std::sqrt(5.0) - 1.0);
+  for (size_t k = 0; k < ts.size(); ++k)
+  {
+    if ((k > 0 && sampled[k - 1] > sampled[k]) || (k + 1 < ts.size() && sampled[k + 1] > sampled[k]))
+      continue;
+    double a = ts[k > 0 ? k - 1 : k], b = ts[k + 1 < ts.size() ? k + 1 : k];
+    double x = b - golden * (b - a), y = a + golden * (b - a);
+    double fx = angle(x), fy = angle(y);
+    for (int i = 0; i < 30; ++i)
+    {
+      if (fx > fy)
+      {
+        b  = y;
+        y  = x;
+        fy = fx;
+        x  = b - golden * (b - a);
+        fx = angle(x);
+      }
+      else
+      {
+        a  = x;
+        x  = y;
+        fx = fy;
+        y  = a + golden * (b - a);
+        fy = angle(y);
+      }
+    }
+    largest = std::max({largest, fx, fy});
+  }
+  return largest;
 }
 
 //! Where two elementary surfaces (plane, cylinder, cone, sphere) cross, the crossing is a line or a
@@ -1088,8 +1178,12 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
   TopExp::MapShapesAndUniqueAncestors(body, TopAbs_VERTEX, TopAbs_FACE, facesOfVertex);
 
   // Edges that keep their curves on their faces: the faces' points of each parameter agree after
-  // the move. A degenerate edge (a pole) must stay a point.
-  NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> keeps;
+  // the move, within the tolerance or the edge's own, whichever is the larger: two faces tangent
+  // along an edge only to an angle theta (an input that is G1 to a few 1e-5 rad, its edges' tolerances
+  // that wide) come apart by |d| theta more, and the result is held to no more than the input
+  // held. A degenerate edge (a pole) must stay a point. `spread` is |d| theta_max (largestAngle).
+  NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher>         keeps;
+  NCollection_DataMap<TopoDS_Shape, double, TopTools_ShapeMapHasher> spread;
   for (int i = 1; i <= facesOfEdge.Extent(); ++i)
   {
     const TopoDS_Edge& edge = TopoDS::Edge(facesOfEdge.FindKey(i));
@@ -1127,8 +1221,11 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
         return {};
       }
     }
-    if (gap <= tolerance || one.IsSame(other))
+    if (gap <= std::max(tolerance, BRep_Tool::Tolerance(edge)) || one.IsSame(other))
+    {
       keeps.Add(edge);
+      spread.Bind(edge, one.IsSame(other) ? 0.0 : std::abs(distance) * largestAngle(edge, one, other));
+    }
   }
 
   // Vertices.
@@ -1316,22 +1413,30 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       why = "a vertex has no place where its faces meet after the move";
       return {};
     }
-    // On every face around it.
+    // On every face around it, within the tolerance or what the input's vertex and the spread of
+    // its tangent edges allow.
+    double carried = 0.0;
+    for (const TopoDS_Shape& e : edgesOfVertex.FindFromKey(vertex))
+      if (const double* d = spread.Seek(e))
+        carried = std::max(carried, BRep_Tool::Tolerance(vertex) + *d);
+    double off = 0.0;
     for (const TopoDS_Shape& f : around)
     {
       const TopoDS_Face face = TopoDS::Face(f);
       gp_Pnt2d          uv   = BRep_Tool::Parameters(vertex, face);
       double            u = uv.X(), v = uv.Y();
       gp_Pnt            at;
-      if (!nearest(plan->faces.Find(face).surface, point, u, v, at) || at.Distance(point) > tolerance)
+      if (!nearest(plan->faces.Find(face).surface, point, u, v, at)
+          || at.Distance(point) > std::max(tolerance, carried))
       {
         why = "the faces round a vertex do not meet in one point after the move; the topology "
               "would change there";
         return {};
       }
+      off = std::max(off, at.Distance(point));
     }
     // No finer than the input's: its edges meet within that.
-    plan->vertices.Bind(vertex, {point, BRep_Tool::Tolerance(vertex)});
+    plan->vertices.Bind(vertex, {point, std::max(BRep_Tool::Tolerance(vertex), 1.001 * off)});
   }
 
   // Edges.
@@ -1453,7 +1558,8 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
         made.onFace.Bind(one, curves[0]);
         made.onFace.Bind(other, curves[1]);
       }
-      made.tolerance = std::max({BRep_Tool::Tolerance(edge), error, gap});
+      made.tolerance =
+        std::max({BRep_Tool::Tolerance(edge) + spread.Find(edge), error, gap});
     }
     else
     {
@@ -1510,7 +1616,10 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
         gp_Pnt       c;
         gp_Vec       along;
         old->D1(tm, c, along);
+        // Into copies: a crossing that fails part way leaves the edge's parameters as they were.
         Handle(Geom2d_Curve) on1, on2;
+        Handle(Geom_Curve)   exact;
+        double               e0 = made.first, e1 = made.last;
         if (station(tm, z)
             && exactCrossing(a.surface,
                              b.surface,
@@ -1524,12 +1633,17 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
                                                          : BRep_Tool::Pnt(end),
                              closed,
                              tolerance,
-                             made.curve,
-                             made.first,
-                             made.last,
+                             exact,
+                             e0,
+                             e1,
                              on1,
                              on2))
-          curves = {on1, on2};
+        {
+          made.curve = exact;
+          made.first = e0;
+          made.last  = e1;
+          curves     = {on1, on2};
+        }
       }
       // Else by sections. Breaks where the old edge is less than C3 (its tangent, which sets the
       // section planes, less than C2), and where the crossing runs over a line of either surface
@@ -1651,7 +1765,13 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
     why = "the faces moved with their topology kept do not make a valid shape";
     return {};
   }
-  const auto atDistance = [&](const TopoDS_Face& source, const gp_Pnt& p, double u, double v) {
+  // Within the tolerance, or a result edge's own where it carries an input's (above).
+  const auto atDistance = [&](const TopoDS_Face& source,
+                              const gp_Pnt&      p,
+                              double             u,
+                              double             v,
+                              double             carried = 0.0) {
+    const double within = std::max(tolerance, carried);
     const Moved& m = plan->faces.Find(source);
     const Handle(Geom_Surface) surface = BRep_Tool::Surface(source);
     gp_Pnt       at;
@@ -1671,7 +1791,7 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
     const bool   pole    = normal.Magnitude() <= 1e-6 * (su.SquareMagnitude() + sv.SquareMagnitude());
     const double signed_ = pole ? std::copysign(at.Distance(p), m.by)
                                 : gp_Vec(at, p).Dot(normal.Normalized());
-    return std::abs(signed_ - m.by) <= tolerance && std::abs(at.Distance(p) - std::abs(m.by)) <= tolerance;
+    return std::abs(signed_ - m.by) <= within && std::abs(at.Distance(p) - std::abs(m.by)) <= within;
   };
   for (TopExp_Explorer all(body, TopAbs_FACE); all.More(); all.Next())
   {
@@ -1715,7 +1835,11 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       {
         const double   t  = first + (last - first) * k / 16;
         const gp_Pnt2d uv = onFace->Value(t);
-        if (!atDistance(source, curve->Value(t), uv.X(), uv.Y()))
+        if (!atDistance(source,
+                        curve->Value(t),
+                        uv.X(),
+                        uv.Y(),
+                        keeps.Contains(edge) ? BRep_Tool::Tolerance(made) : 0.0))
         {
           why = "an edge of the result is not at the distance from both its faces' sources";
           return {};
