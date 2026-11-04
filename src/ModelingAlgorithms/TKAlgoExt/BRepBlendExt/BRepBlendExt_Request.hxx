@@ -43,7 +43,7 @@ enum class Law
 
 struct Request
 {
-  const char*               operation = "filletV2";
+  const char*               operation = "blendEdges";
   TopoDS_Shape              body;
   std::vector<TopoDS_Shape> edges;
   //! Offset distances of the supports, as a ball's radius is; `second` zero means `first`.

@@ -425,7 +425,7 @@ static bool foldsOn(const TopoDS_Edge& edge, const TopoDS_Face& cap, double r)
       continue;
     const TopoDS_Edge       inCap = TopoDS::Edge(e.Current());
     const BRepAdaptor_Curve curve(inCap);
-    const BoundaryJet       jet("filletV2", inCap, cap);
+    const BoundaryJet       jet("blendEdges", inCap, cap);
     const double            sign    = inCap.Orientation() == TopAbs_REVERSED ? -1 : 1;
     constexpr int           samples = 16;
     for (int i = 0; i <= samples; ++i)
@@ -1737,8 +1737,8 @@ const std::optional<Far>& Blend::farOf(const Rail& rail, int side)
 //! along a path that bends more tightly than the ball (a pipe surface c + r (cos a N + sin a B)
 //! moves along the path at |c'| (1 - kappa r cos a), which changes sign there), so its sections
 //! run back against the way the balls roll. Read off the sheet: S_u against the station's rolling
-//! direction, at 65 x 7 places; where it turns against it, the surface has folded. The reference modeller trims
-//! the blend there, which v2 does not yet.
+//! direction, at 65 x 7 places; where it turns against it, the surface has folded. The reference
+//! modeller trims the blend there, which is not done here yet.
 static void checkCrossing(const Rail& rail, Stations& stations, const Fitted& fitted)
 {
   if (fitted.blend.IsNull())
@@ -1764,7 +1764,7 @@ static void checkCrossing(const Rail& rail, Stations& stations, const Fitted& fi
         fail(rail.op,
              unsupported_geometry,
              "the blend crosses itself between its contacts, where the balls' path bends more "
-             "tightly than the ball, which v2 does not trim yet",
+             "tightly than the ball, which the blend does not trim yet",
              {rail.edge},
              FailureKind::Curvature);
     }
@@ -2046,8 +2046,8 @@ void Blend::joints()
     if (meets == Meets::Miter && a == b)
       fail(op,
            unsupported_geometry,
-           "an edge that closes on itself at an angle is blended with its corner, which v2 does "
-           "not do yet",
+           "an edge that closes on itself at an angle is blended with its corner, which the blend "
+           "does not do yet",
            {pieces[a].rail.edge});
     pieces[a].joint[ea] = {meets, b, eb, false};
     pieces[b].joint[eb] = {meets, a, ea, false};
@@ -2082,8 +2082,8 @@ void Blend::vertexBlend(const TopoDS_Vertex&                    vertex,
                        && std::abs(rail.s[0].distance - r) < limit::equal * scale
                        && std::abs(rail.s[1].distance - r) < limit::equal * scale;
     if (!round || rail.sigma != sigma)
-      refuse("where more than three blended edges meet, v2 blends the corner of rounds of one "
-             "radius, all convex or all concave");
+      refuse("where more than three blended edges meet, only the corner of rounds of one "
+             "radius, all convex or all concave, is blended");
   }
   // The faces round the vertex in turn: after[i] is the end of the blend between ring[i] and ring[i
   // + 1].
@@ -2147,7 +2147,7 @@ void Blend::vertexBlend(const TopoDS_Vertex&                    vertex,
   for (int i = 0; i < count; ++i)
     if (GeomAdaptor_Surface(sides[i].surface).GetType() != GeomAbs_Plane)
       refuse("where more than three blended edges meet between faces that are not all planes and "
-             "no one ball rests on them all, v2 does not blend the corner yet");
+             "no one ball rests on them all, the blend does not blend the corner yet");
 
   struct Cell
   {
@@ -2769,8 +2769,8 @@ void Blend::sheets()
         else
           fail(op,
                unsupported_geometry,
-               "the blend's contact runs off the face beside the edge, onto faces v2 does not roll "
-               "it over yet",
+               "the blend's contact runs off the face beside the edge, onto faces the blend does "
+               "not roll it over yet",
                {piece.rail.edge});
       }
       for (int s2 = 0; s2 < 2 && side < 0; ++s2)
@@ -2956,8 +2956,8 @@ void Blend::sheets()
                               previous))
                 fail(op,
                      unsupported_geometry,
-                     "a blend's contact runs off its face partway along the edge, which v2 does "
-                     "not do yet",
+                     "a blend's contact runs off its face partway along the edge, which the blend "
+                     "does not do yet",
                      {piece.rail.edge});
               notched = true;
             }
@@ -2969,10 +2969,11 @@ void Blend::sheets()
             break;
           }
           if (side < 0 && !trimmed)
-            fail(op,
-                 unsupported_geometry,
-                 "a blend's contact leaves its face where v2 does not find the edge it crosses",
-                 {piece.rail.edge});
+            fail(
+              op,
+              unsupported_geometry,
+              "a blend's contact leaves its face where the blend does not find the edge it crosses",
+              {piece.rail.edge});
           if (trimmed)
           {
             // A stop at one end may be followed by a support crossing at the other.
@@ -3052,8 +3053,8 @@ void Blend::sheets()
             if (side < 0)
               fail(op,
                    unsupported_geometry,
-                   "a blend's contact crosses its face's seam where v2 does not find the face's "
-                   "period beyond",
+                   "a blend's contact crosses its face's seam where the blend does not find the "
+                   "face's period beyond",
                    {piece.rail.edge});
           }
         }
@@ -3146,8 +3147,8 @@ void Blend::sheets()
           || !SectionPolicy::tangentFor(before.n.Angle(after.n), piece.rail.scale))
         fail(op,
              unsupported_geometry,
-             "a blend's contact runs over an edge where its faces are not tangent, which v2 does "
-             "not do yet",
+             "a blend's contact runs over an edge where its faces are not tangent, which the blend "
+             "does not do yet",
              {piece.rail.edge});
       // `piece` refers into `pieces`, which must not grow past what it holds.
       if (pieces.size() >= pieces.capacity())
@@ -3318,7 +3319,7 @@ void Blend::crossFolds(const std::vector<std::pair<int, std::vector<Fold>>>& fol
         }
       }
       if (!best)
-        refuseFold(k, "a contact on the cap folds where v2 finds no loop");
+        refuseFold(k, "a contact on the cap folds where the blend finds no loop");
       crosses.push_back(*best);
     }
   // Each place where a contact runs back lies in one loop, and no loop overlaps one within a piece.
@@ -3327,7 +3328,7 @@ void Blend::crossFolds(const std::vector<std::pair<int, std::vector<Fold>>>& fol
       if (std::none_of(crosses.begin(), crosses.end(), [&](const Cross& c) {
             return inLoop(c, k, place.from);
           }))
-        refuseFold(k, "a contact on the cap folds where v2 finds no loop");
+        refuseFold(k, "a contact on the cap folds where the blend finds no loop");
   for (const auto& c : crosses)
     for (const auto& [k, found] : folds)
       for (const Fold& fold : found)

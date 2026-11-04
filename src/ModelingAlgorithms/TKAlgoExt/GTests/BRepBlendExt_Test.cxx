@@ -777,13 +777,15 @@ TEST(BRepBlendExt, BlendOfARimOverASideNarrowerThanItUsesTheSideUp)
     }
 }
 
-// The rim of a hole of radius R leaning a through a plate t thick (the slanted-rim family of the application's
-// tests), rounded by r. The balls' centres lie r below the top and R + r from the hole's axis: on
-// an ellipse of semi-axes R + r and (R + r) / cos a, whose radius of curvature at its acute end is
-// (R + r) cos a. Below that the round is the balls' envelope, every point r from the ellipse (at 75
-// degrees its sections turn by up to 165 degrees and are made of two spans); past it (r / (R + r)
-// >= cos a) the envelope crosses itself, and v2 refuses it by name, as the reference modeller trims it there:
-// these are exactly the members the reference modeller splits into 11 faces.
+// The rim of a hole of radius R leaning a through a plate t thick (the slanted-rim family of the
+// application's tests), rounded by r. The balls' centres lie r below the top and R + r from the
+// hole's axis: on an ellipse of semi-axes R + r and (R + r) / cos a, whose radius of curvature at
+// its acute end is (R + r) cos a. Below that the round is the balls' envelope, every point r from
+// the ellipse (at 75 degrees its sections turn by up to 165 degrees and are made of two spans);
+// past it (r / (R + r)
+// >= cos a) the envelope crosses itself, and the blend is refused by name, as the reference
+// modeller trims it there: these are exactly the members the reference modeller splits into 11
+// faces.
 TEST(BRepBlendExt, RoundOfASteepRimIsTheBallsWhereItDoesNotCrossItself)
 {
   struct Member

@@ -157,7 +157,7 @@ struct Attach
       fail(op,
            unsupported_geometry,
            "the blends at the two ends of an edge between them meet on it or reach past each "
-           "other, which v2 does not make",
+           "other, which the blend does not make",
            {edge});
     if (cuts.Contains(edge))
       cuts.ChangeFromKey(edge) = out;
@@ -690,8 +690,8 @@ void Attach::chainEnds()
           if (gap > rail.resolved(limit::together))
             fail(op,
                  unsupported_geometry,
-                 "the blends of tangent edges do not meet in one section there, which v2 does not "
-                 "do yet",
+                 "the blends of tangent edges do not meet in one section there, which the blend "
+                 "does not do yet",
                  {rail.edge});
           TopoDS_Vertex vertex;
           builder.MakeVertex(vertex, point, std::max(tolerance, gap));
@@ -800,7 +800,7 @@ void Attach::chainEnds()
             fail(op,
                  unsupported_geometry,
                  "a contact crosses onto the next face over an edge that does not reach the "
-                 "blended edges, which v2 does not do yet",
+                 "blended edges, which the blend does not do yet",
                  {rail.edge});
           cut(edge, from, corner[k][joint.side][end], crossing);
         }
@@ -830,7 +830,7 @@ void Attach::chainEnds()
               fail(op,
                    unsupported_geometry,
                    "where a chain of blended edges meets another face, the corner is blended too, "
-                   "which v2 does not do yet",
+                   "which the blend does not do yet",
                    {rail.edge});
             if (poleInStrip(piece, side, TopoDS::Edge(shape))
                 && sweepToPole(TopoDS::Edge(shape), ends[end]))
@@ -854,7 +854,7 @@ void Attach::chainEnds()
               fail(op,
                    unsupported_geometry,
                    "the contact of a chain's blend leaves the edge between its faces there, which "
-                   "v2 does not do yet",
+                   "the blend does not do yet",
                    {rail.edge});
             }
             cut(shape, ends[end], corner[k][side][end], on.LowerDistanceParameter());
@@ -1019,7 +1019,8 @@ void Attach::fold(int a, int ea, int b, int eb)
     if (apart > one.rail.resolved(limit::together))
       fail(op,
            unsupported_geometry,
-           "the blends of tangent edges do not meet in one section there, which v2 does not do yet",
+           "the blends of tangent edges do not meet in one section there, which the blend does not "
+           "do yet",
            {one.rail.edge});
     TopoDS_Vertex J;
     builder.MakeVertex(J, P, std::max(tolerance, apart));
@@ -1032,18 +1033,19 @@ void Attach::fold(int a, int ea, int b, int eb)
       if (!onFace(shape, one.rail.s[other].face) && !onFace(shape, two.rail.s[otherB].face))
         fail(op,
              unsupported_geometry,
-             "where the loop of a fold crosses a joint another edge meets the cap there, which v2 "
-             "does not do yet",
+             "where the loop of a fold crosses a joint another edge meets the cap there, which the "
+             "blend does not do yet",
              {one.rail.edge});
       double                      lo, hi;
       const auto                  curve = BRep_Tool::Curve(TopoDS::Edge(shape), lo, hi);
       GeomAPI_ProjectPointOnCurve on(P, curve, lo, hi);
       if (on.NbPoints() == 0 || on.LowerDistance() > one.rail.resolved(limit::together))
-        fail(op,
-             unsupported_geometry,
-             "the contact of a chain's blend leaves the edge between its faces there, which v2 "
-             "does not do yet",
-             {one.rail.edge});
+        fail(
+          op,
+          unsupported_geometry,
+          "the contact of a chain's blend leaves the edge between its faces there, which the blend "
+          "does not do yet",
+          {one.rail.edge});
       cut(shape, V, J, on.LowerDistanceParameter());
     }
   }
@@ -1729,7 +1731,7 @@ TopoDS_Edge Attach::rolledEdge(int k, int side, const TopoDS_Face& stop)
           fail(op,
                unsupported_geometry,
                "a blend that closes on the face beyond its narrow face runs past the face that "
-               "stops it, which v2 does not do yet",
+               "stops it, which the blend does not do yet",
                {rail.edge});
       const auto onSheet  = meeting.on(i, 1, std::min(t0, t1), std::max(t0, t1));
       const auto onBeyond = meeting.on(i, 2, std::min(t0, t1), std::max(t0, t1));
@@ -1772,11 +1774,11 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
     return;
   }
   if (edges.Extent() != 3)
-    fail(
-      op,
-      unsupported_geometry,
-      "where blended edges meet other edges, the corner is blended too, which v2 does not do yet",
-      {rail.edge});
+    fail(op,
+         unsupported_geometry,
+         "where blended edges meet other edges, the corner is blended too, which the blend does "
+         "not do yet",
+         {rail.edge});
   TopoDS_Face stop;
   TopoDS_Edge beside[2], sliverEdge[2];
   TopoDS_Face sliverOf[2];
@@ -1812,8 +1814,8 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
       if (!stop.IsNull() && !stop.IsSame(face))
         fail(op,
              unsupported_geometry,
-             "an edge that ends among several faces is blended with the corner, which v2 does not "
-             "do yet",
+             "an edge that ends among several faces is blended with the corner, which the blend "
+             "does not do yet",
              {rail.edge});
       stop = TopoDS::Face(face);
     }
@@ -1834,8 +1836,8 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
       if (from[s].IsSame(vertex))
         fail(op,
              unsupported_geometry,
-             "an edge that ends among several faces is blended with the corner, which v2 does not "
-             "do yet",
+             "an edge that ends among several faces is blended with the corner, which the blend "
+             "does not do yet",
              {rail.edge});
       for (TopExp_Explorer e(sliverOf[s], TopAbs_EDGE); e.More(); e.Next())
       {
@@ -2230,11 +2232,11 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
   else
   {
     if ((!rail.s[0].trim.IsNull() || !rail.s[1].trim.IsNull()) && rail.law != Law::Full)
-      fail(
-        op,
-        unsupported_geometry,
-        "a notch's blend ends on a face it does not meet in a section, which v2 does not make yet",
-        {rail.edge});
+      fail(op,
+           unsupported_geometry,
+           "a notch's blend ends on a face it does not meet in a section, which the blend does not "
+           "make yet",
+           {rail.edge});
     const auto met = meetingEdge(placedSheet(sheet),
                                  cornerOnSheet,
                                  placedFace(stop),
@@ -2285,7 +2287,7 @@ void Attach::miters()
           fail(op,
                unsupported_geometry,
                "two blended edges that meet at an angle without a face in common do not end on "
-               "each other's faces, which v2 does not do yet",
+               "each other's faces, which the blend does not do yet",
                {a.rail.edge});
         continue;
       }
@@ -2293,7 +2295,7 @@ void Attach::miters()
         fail(op,
              unsupported_geometry,
              "one convex and one concave blended edge that meet at an angle are blended with their "
-             "corner, which v2 does not do yet",
+             "corner, which the blend does not do yet",
              {a.rail.edge});
       const int   oa = 1 - sa, ob = 1 - sb;
       TopoDS_Edge third;
@@ -2305,8 +2307,8 @@ void Attach::miters()
             || !onFace(shape, b.rail.s[ob].face))
           fail(op,
                unsupported_geometry,
-               "where two blended edges meet among more faces, the corner is blended too, which v2 "
-               "does not do yet",
+               "where two blended edges meet among more faces, the corner is blended too, which "
+               "the blend does not do yet",
                {a.rail.edge});
         third = TopoDS::Edge(shape);
       }
@@ -2522,7 +2524,7 @@ void Attach::rollRound(int                  k,
     fail(op,
          unsupported_geometry,
          "two blends that cannot be mitred at a re-entrant vertex roll round it only on a flat "
-         "face, which v2 does not do yet",
+         "face, which the blend does not do yet",
          {a.rail.edge});
   const gp_Pnt P = a.sheet.contact(oa)->Value(a.sheet.rail(pa.first));
   if (P.Distance(b.sheet.contact(ob)->Value(b.sheet.rail(pb.first)))
@@ -2530,7 +2532,7 @@ void Attach::rollRound(int                  k,
     fail(op,
          unsupported_geometry,
          "two blends that cannot be mitred at a re-entrant vertex reach the edge between them at "
-         "different places, which v2 does not roll round",
+         "different places, which the blend does not roll round",
          {a.rail.edge});
   // Each end ball: its foot on the shared face, and its centre.
   const double r = a.rail.s[0].distance;
@@ -3166,8 +3168,9 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
       if (!ownEdge(piece, shape) && onFace(shape, own))
         edge = TopoDS::Edge(shape);
     if (edge.IsNull() || railEdge(edge))
-      refuse("where blended edges meet other edges, the corner is blended too, which v2 does not "
-             "do yet");
+      refuse(
+        "where blended edges meet other edges, the corner is blended too, which the blend does not "
+        "do yet");
     TopoDS_Vertex from        = vertex;
     size_t        facesBefore = 0, betweenBefore = 0;
     // Each edge of the support is swept over at most once.
@@ -3584,7 +3587,7 @@ void Attach::cornerPatches()
     if (!alike)
       fail(op,
            unsupported_geometry,
-           "where three blended edges meet, v2 makes the corner of one law so far",
+           "where three blended edges meet, the blend makes the corner of one law so far",
            {first.rail.edge});
     const bool round =
       even && first.rail.law == Law::Conic && std::abs(first.rail.rho - 0.5) < limit::equal;
@@ -3594,13 +3597,14 @@ void Attach::cornerPatches()
         fail(op,
              unsupported_geometry,
              "where more than three G2, conic or chamfer blends meet, the corner is blended with "
-             "them, which v2 does not do yet",
+             "them, which the blend does not do yet",
              {first.rail.edge});
       if (!planes)
-        fail(op,
-             unsupported_geometry,
-             "a corner of three G2 or conic blends on curved faces, which v2 does not make yet",
-             {first.rail.edge});
+        fail(
+          op,
+          unsupported_geometry,
+          "a corner of three G2 or conic blends on curved faces, which the blend does not make yet",
+          {first.rail.edge});
       patches[c] = lawCorner(at, c);
       continue;
     }
@@ -3944,22 +3948,22 @@ TopoDS_Face Attach::lawCorner(const Corner& at, size_t c)
       if (sheet.IsNull())
         fail(op,
              unsupported_geometry,
-             "a conic's corner on an exact sheet, which v2 does not make yet",
+             "a conic's corner on an exact sheet, which the blend does not make yet",
              {first.rail.edge});
       const double mine =
         sheet->Weight(sheet->NbUPoles() / 2 + 1, 2) / sheet->Weight(sheet->NbUPoles() / 2 + 1, 1);
       if (weight > 0 && std::abs(mine - weight) > limit::agree)
-        fail(
-          op,
-          unsupported_geometry,
-          "a conic's corner where its faces meet at different angles, which v2 does not make yet",
-          {first.rail.edge});
+        fail(op,
+             unsupported_geometry,
+             "a conic's corner where its faces meet at different angles, which the blend does not "
+             "make yet",
+             {first.rail.edge});
       weight = mine;
     }
     if (std::abs(p[0][1] - p[0][2]) > limit::agree * first.rail.scale)
       fail(op,
            unsupported_geometry,
-           "a conic's corner whose blends reach it unevenly, which v2 does not make yet",
+           "a conic's corner whose blends reach it unevenly, which the blend does not make yet",
            {first.rail.edge});
     x      = {1, 0, 0};
     w      = {1, weight, 1};
@@ -4048,7 +4052,8 @@ TopoDS_Face Attach::lawCorner(const Corner& at, size_t c)
             > piece.rail.resolved(limit::together))
           fail(op,
                unsupported_geometry,
-               "a corner of three chamfers whose ends do not lie flat, which v2 does not make yet",
+               "a corner of three chamfers whose ends do not lie flat, which the blend does not "
+               "make yet",
                {piece.rail.edge});
     edges[i] = edgeBetween(
       sides[i].curve,
@@ -4175,7 +4180,7 @@ void Attach::ridges()
             fail(op,
                  unsupported_geometry,
                  "the blends of two parts of an outline cross over their cap across a joint of "
-                 "their edges, which v2 does not do yet",
+                 "their edges, which the blend does not do yet",
                  {one.rail.edge});
           std::sort(at.begin(), at.end());
           for (size_t i = 0; i < at.size(); i += 2)
@@ -4421,7 +4426,7 @@ void Attach::contacts()
           fail(op,
                unsupported_geometry,
                "the blends of two parts of an outline cross over their cap beside a split, which "
-               "v2 does not do yet",
+               "the blend does not do yet",
                {piece.rail.edge});
         const bool rising = u[k][side][0] < u[k][side][1];
         const auto order  = [&](const auto& x, const auto& y) {
@@ -4563,7 +4568,7 @@ void Attach::contacts()
       if (!gone)
         fail(op,
              unsupported_geometry,
-             "the blends use up part of a face between them, which v2 does not make yet",
+             "the blends use up part of a face between them, which the blend does not make yet",
              {pieces.front().rail.edge});
     }
     removed.push_back(face);

@@ -279,7 +279,7 @@ std::vector<TopoDS_Face> rebuiltFaces(const TopoDS_Face&              face,
       const TopoDS_Edge edge = TopoDS::Edge(e.Current());
       double            f, l;
       if (!BRep_Tool::Degenerated(edge) && BRep_Tool::CurveOnSurface(edge, out, f, l).IsNull())
-        throw Failure("filletV2",
+        throw Failure("blendEdges",
                       no_solution,
                       "an edge of a face the blend changes does not lie on it",
                       {});
@@ -287,7 +287,7 @@ std::vector<TopoDS_Face> rebuiltFaces(const TopoDS_Face&              face,
                                          std::pair{TopExp::FirstVertex(edge, true), -1}})
       {
         if (vertex.IsNull())
-          throw Failure("filletV2",
+          throw Failure("blendEdges",
                         no_solution,
                         "an edge of a face the blend changes has no vertex at an end",
                         {});
@@ -300,7 +300,7 @@ std::vector<TopoDS_Face> rebuiltFaces(const TopoDS_Face&              face,
          it.More();
          it.Next())
       if (it.Value() != 0)
-        throw Failure("filletV2",
+        throw Failure("blendEdges",
                       no_solution,
                       "a face the blend changes does not close round its edges",
                       {});
@@ -332,7 +332,7 @@ std::vector<TopoDS_Face> rebuiltFaces(const TopoDS_Face&              face,
       inner.push_back(w.Value());
   }
   if (faces.empty())
-    throw Failure("filletV2", no_solution, "a face the blend changes has no outer boundary", {});
+    throw Failure("blendEdges", no_solution, "a face the blend changes has no outer boundary", {});
   for (const auto& wire : inner)
   {
     // The face whose outer boundary holds a place of the wire.
@@ -344,7 +344,7 @@ std::vector<TopoDS_Face> rebuiltFaces(const TopoDS_Face&              face,
              != TopAbs_OUT;
     });
     if (holder == faces.end())
-      throw Failure("filletV2",
+      throw Failure("blendEdges",
                     no_solution,
                     "a hole of a face the blend changes lies in none of its islands",
                     {});
@@ -485,7 +485,7 @@ TopoDS_Edge edgeBetween(const Handle(Geom_Curve)&     curve,
 {
   // A null vertex would be written through: in WASM that overwrites memory rather than traps.
   if (first.IsNull() || second.IsNull())
-    throw Failure("filletV2", no_solution, "a new edge has no vertex at an end", {});
+    throw Failure("blendEdges", no_solution, "a new edge has no vertex at an end", {});
   BRep_Builder builder;
   TopoDS_Edge  edge;
   builder.MakeEdge(edge, curve, tolerance);

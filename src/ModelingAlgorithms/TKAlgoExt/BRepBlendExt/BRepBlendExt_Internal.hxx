@@ -286,7 +286,7 @@ struct SizeLaw
 
 struct Rail
 {
-  const char*       op = "filletV2";
+  const char*       op = "blendEdges";
   TopoDS_Edge       edge;
   BRepAdaptor_Curve curve;
   Side              s[2];

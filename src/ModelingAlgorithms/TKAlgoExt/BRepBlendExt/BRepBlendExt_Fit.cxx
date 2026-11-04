@@ -768,14 +768,16 @@ void checkFold(Dips& dips)
     // Where a contact folds, the blend's own swallowtail is to be trimmed, which the blend does
     // not do yet; past the faces' bound nothing can be made.
     const bool flat = GeomAdaptor_Surface(rail.s[side].surface).GetType() == GeomAbs_Plane;
-    fail(rail.op,
-         unsupported_geometry,
-         flat ? "a contact on the planar cap beside the edge folds at this radius, which v2 does "
-                "not trim yet"
-              : "a contact folds where the radius is beyond a face's convex radius, which v2 does "
-                "not trim yet",
-         {rail.edge},
-         FailureKind::Curvature);
+    fail(
+      rail.op,
+      unsupported_geometry,
+      flat
+        ? "a contact on the planar cap beside the edge folds at this radius, which the blend does "
+          "not trim yet"
+        : "a contact folds where the radius is beyond a face's convex radius, which the blend does "
+          "not trim yet",
+      {rail.edge},
+      FailureKind::Curvature);
   }
 }
 
