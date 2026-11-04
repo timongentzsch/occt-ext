@@ -17,8 +17,6 @@
 #include <BRepAlgoExt_Cells.hxx>
 #include <BRepToolsExt_GeomUtil.hxx>
 #include <BRepToolsExt_Checks.hxx>
-#include <NCollection_List.hxx>
-#include <functional>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 
@@ -41,21 +39,10 @@ Standard_EXPORT BlendBoundaryRoles
                                         const TopoDS_Shape&              result,
                                         const BooleanResult&             history,
                                         const std::vector<TopoDS_Shape>& generated = {});
-Standard_EXPORT void markMiterBoundaries(const TopoDS_Shape&              before,
-                                         const std::vector<TopoDS_Shape>& selected,
-                                         const TopoDS_Shape&              result,
-                                         BlendBoundaryRoles&              roles);
 Standard_EXPORT void certifyBlendBoundaries(const char*               op,
                                             const TopoDS_Shape&       result,
                                             const BlendBoundaryRoles& roles,
                                             double                    scale,
                                             double                    angleDegrees = .5,
                                             int                       samples      = 65);
-//! The faces a face of `before` became in `after`, as the algorithm that made it reports them.
-using BlendModified = std::function<const NCollection_List<TopoDS_Shape>&(const TopoDS_Shape&)>;
-//! Fails if a face the blend made runs into a face of the body that is not beside it.
-Standard_EXPORT void checkBlendClear(const TopoDS_Shape&              before,
-                                     const TopoDS_Shape&              after,
-                                     const std::vector<TopoDS_Shape>& selected,
-                                     const BlendModified&             modified);
 } // namespace BRepExt

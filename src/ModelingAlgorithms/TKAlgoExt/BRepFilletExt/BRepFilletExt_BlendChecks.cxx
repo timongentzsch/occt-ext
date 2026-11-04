@@ -15,13 +15,7 @@
 #include <GeomAlgoExt_SurfaceJet.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
-#include <GeomAlgoExt_SurfaceBounds.hxx>
-#include <BRepBndLib.hxx>
-#include <BRepExtrema_DistShapeShape.hxx>
-#include <BndLib_AddSurface.hxx>
-#include <Bnd_Box.hxx>
 #include <Geom_BSplineSurface.hxx>
-#include <Geom_BezierSurface.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRep_Tool.hxx>
@@ -31,7 +25,6 @@
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <gp_Cylinder.hxx>
-#include <gp_Pln.hxx>
 #include <array>
 #include <optional>
 
@@ -134,63 +127,6 @@ BlendBoundaryRoles blendBoundaryRoles(const TopoDS_Shape&              before,
       (support ? roles.supports : roles.stops).Add(f.Current());
   }
   return roles;
-}
-
-// Two incident stripes terminate in a construction-defined bisector miter.
-// The remaining source edge carries the sharp corner through the joint.
-void markMiterBoundaries(const TopoDS_Shape&              before,
-                         const std::vector<TopoDS_Shape>& selected,
-                         const TopoDS_Shape&              result,
-                         BlendBoundaryRoles&              roles)
-{
-  Adjacency vertices, seams;
-  TopExp::MapShapesAndUniqueAncestors(before, TopAbs_VERTEX, TopAbs_EDGE, vertices);
-  TopExp::MapShapesAndUniqueAncestors(result, TopAbs_EDGE, TopAbs_FACE, seams);
-  for (int i = 1; i <= vertices.Extent(); ++i)
-  {
-    const auto               vertex = TopoDS::Vertex(vertices.FindKey(i));
-    const auto               point  = BRep_Tool::Pnt(vertex);
-    std::vector<TopoDS_Edge> incident;
-    const auto&              edges = vertices.FindFromIndex(i);
-    for (const auto& edge : edges)
-      for (const auto& pick : selected)
-        if (edge.IsSame(pick))
-          incident.push_back(TopoDS::Edge(edge));
-    if (incident.size() != 2 || edges.Extent() != 3)
-      continue;
-    gp_Vec direction[2];
-    bool   straight = true;
-    for (int side = 0; side < 2; ++side)
-    {
-      BRepAdaptor_Curve curve(incident[side]);
-      straight &= curve.GetType() == GeomAbs_Line;
-      const auto a = curve.Value(curve.FirstParameter()), b = curve.Value(curve.LastParameter());
-      direction[side] = point.Distance(a) < point.Distance(b) ? gp_Vec(a, b) : gp_Vec(b, a);
-      direction[side].Normalize();
-    }
-    if (!straight || direction[0].Crossed(direction[1]).Magnitude() < tolerance::coarseAngle)
-      continue;
-    const gp_Pln bisector(point, gp_Dir(direction[0] - direction[1]));
-    for (int j = 1; j <= seams.Extent(); ++j)
-    {
-      const auto& pair = seams.FindFromIndex(j);
-      if (pair.Extent() != 2 || !roles.blends.Contains(pair.First())
-          || !roles.blends.Contains(pair.Last()))
-        continue;
-      const auto edge = TopoDS::Edge(seams.FindKey(j));
-      if (BRep_Tool::Degenerated(edge))
-        continue;
-      BRepAdaptor_Curve curve(edge);
-      bool              on = true;
-      for (int k = 0; k <= 8; ++k)
-        on &= bisector.Distance(
-                curve.Value(curve.FirstParameter()
-                            + (curve.LastParameter() - curve.FirstParameter()) * (k + .5) / 9))
-              < tolerance::sewing;
-      if (on)
-        roles.sharp.Add(edge);
-    }
-  }
 }
 
 void certifyBlendBoundaries(const char*               op,
@@ -308,151 +244,5 @@ void certifyBlendBoundaries(const char*               op,
         }
       }
   }
-}
-
-//! A face the blend made that runs into a face behind its supports is no blend.
-void checkBlendClear(const TopoDS_Shape&              before,
-                     const TopoDS_Shape&              after,
-                     const std::vector<TopoDS_Shape>& selected,
-                     const BlendModified&             modified)
-{
-  struct Face
-  {
-    TopoDS_Face          face;
-    Bnd_Box              box;
-    std::vector<gp_Pnt>  corners;
-    bool                 made;
-    std::vector<Bnd_Box> patches;
-    bool                 tight = false;
-  };
-
-  std::vector<Face> faces;
-  ShapeSet          supports;
-  for (TopExp_Explorer old(before, TopAbs_FACE); old.More(); old.Next())
-  {
-    supports.Add(old.Current());
-    for (const auto& changed : modified(old.Current()))
-      if (changed.ShapeType() == TopAbs_FACE)
-        supports.Add(changed);
-  }
-  for (TopExp_Explorer f(after, TopAbs_FACE); f.More(); f.Next())
-  {
-    Face item{TopoDS::Face(f.Current()), {}, {}, true, {}};
-    item.made = !supports.Contains(item.face);
-    BRepBndLib::Add(item.face, item.box, false);
-    for (TopExp_Explorer v(item.face, TopAbs_VERTEX); v.More(); v.Next())
-      item.corners.push_back(BRep_Tool::Pnt(TopoDS::Vertex(v.Current())));
-    faces.push_back(std::move(item));
-  }
-  // Retain remote original faces as obstacles even if the rolling builder
-  // accidentally drops their entire inner shell from its result.
-  for (TopExp_Explorer old(before, TopAbs_FACE); old.More(); old.Next())
-  {
-    bool present = false, incident = false;
-    for (const auto& f : faces)
-      present |= f.face.IsSame(old.Current());
-    if (present || !modified(old.Current()).IsEmpty())
-      continue;
-    Face item{TopoDS::Face(old.Current()), {}, {}, false, {}};
-    for (TopExp_Explorer v(old.Current(), TopAbs_VERTEX); v.More(); v.Next())
-    {
-      const auto p = BRep_Tool::Pnt(TopoDS::Vertex(v.Current()));
-      item.corners.push_back(p);
-      for (const auto& edge : selected)
-        for (TopExp_Explorer ev(edge, TopAbs_VERTEX); ev.More(); ev.Next())
-          incident |=
-            p.Distance(BRep_Tool::Pnt(TopoDS::Vertex(ev.Current()))) < BRepExt::tolerance::length;
-    }
-    if (incident)
-      continue;
-    BRepBndLib::Add(item.face, item.box, false);
-    faces.push_back(std::move(item));
-  }
-  for (size_t i = 0; i < faces.size(); ++i)
-    for (size_t j = i + 1; j < faces.size(); ++j)
-    {
-      auto& a = faces[i];
-      auto& b = faces[j];
-      if ((!a.made && !b.made) || a.box.IsOut(b.box))
-        continue;
-      bool adjacent = false;
-      for (const auto& p : a.corners)
-        for (const auto& q : b.corners)
-          adjacent |= p.Distance(q) < BRepExt::tolerance::length;
-      if (adjacent)
-        continue;
-      // The exact box of a face of an elementary kind is dear (some milliseconds for the
-      // torus of every rounded rim), and is worked out only for a pair that the loose
-      // boxes and the corners have not already told apart.
-      const auto tighten = [](Face& item) {
-        if (item.tight)
-          return;
-        item.tight = true;
-        if (BRepAdaptor_Surface(item.face).GetType() > GeomAbs_Torus)
-          return;
-        Bnd_Box exact;
-        BRepBndLib::AddOptimal(item.face, exact, false, false);
-        item.box = exact;
-      };
-      tighten(a);
-      tighten(b);
-      if (a.box.IsOut(b.box))
-        continue;
-      const auto patches = [](Face& item) {
-        if (!item.patches.empty())
-          return;
-        BRepAdaptor_Surface surface(item.face);
-        const auto          type = surface.GetType();
-        if (type != GeomAbs_BSplineSurface && type != GeomAbs_SurfaceOfExtrusion)
-        {
-          item.patches.push_back(item.box);
-          return;
-        }
-        // A closed spline wall's single AABB covers every hole in the cap.
-        // Bound its parametric pieces separately; these are enclosing
-        // surface boxes, not sampled points or a mesh collision test.
-        const double u0 = surface.FirstUParameter(), u1 = surface.LastUParameter();
-        const double v0 = surface.FirstVParameter(), v1 = surface.LastVParameter();
-        if (type == GeomAbs_BSplineSurface)
-        {
-          for (const auto& patch : GeomAlgoExt::surfacePatches(surface.BSpline(), u0, u1, v0, v1))
-            for (int i = 0; i < 4; ++i)
-              for (int j = 0; j < 4; ++j)
-              {
-                auto piece = Handle(Geom_BezierSurface)::DownCast(patch->Copy());
-                piece->Segment(i * .25, (i + 1) * .25, j * .25, (j + 1) * .25);
-                auto box = GeomAlgoExt::bezierBounds(piece);
-                box.Enlarge(BRepExt::tolerance::length);
-                item.patches.push_back(box);
-              }
-        }
-        else
-          for (int k = 0; k < 32; ++k)
-          {
-            Bnd_Box box;
-            BndLib_AddSurface::Add(surface,
-                                   u0 + (u1 - u0) * k / 32,
-                                   u0 + (u1 - u0) * (k + 1) / 32,
-                                   v0,
-                                   v1,
-                                   BRepExt::tolerance::length,
-                                   box);
-            item.patches.push_back(box);
-          }
-      };
-      patches(a);
-      patches(b);
-      bool overlap = false;
-      for (const auto& x : a.patches)
-        for (const auto& y : b.patches)
-          overlap |= !x.IsOut(y);
-      if (!overlap)
-        continue;
-      BRepExtrema_DistShapeShape distance(a.face, b.face);
-      if (distance.IsDone() && distance.Value() <= BRepExt::tolerance::length)
-        fail("fillet",
-             no_solution,
-             "new blend face runs into a nonadjacent face behind its supports");
-    }
 }
 } // namespace BRepExt
