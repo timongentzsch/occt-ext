@@ -1163,9 +1163,10 @@ void expectSame(const Outcome& at, const Outcome& base)
 // orientation determinants are rounding alone, were taken to cross (see crosses). The pentagon
 // and the split side took other nets at a thousandth: where both edges at a corner run straight
 // on eased rounds, the share by which their bends disagree was rounding over rounding, and above an
-// absolute floor at one size only (see cornerBend). Not yet so, and asked at a thousand times
-// only: at a thousandth the corner of rounds (its tolerance below OpenCascade's least distance) is
-// made. The teddy is left out: it is refused at a thousand times.
+// absolute floor at one size only (see cornerBend). The corner of rounds was made at a thousandth:
+// the faces' derivatives, of their own parameters, were rounded to the grid of the places as
+// shares of the loop's size, which kept a few digits of a slow one (see fit). The teddy is left
+// out: it takes other nets at a thousand times, by how the multipliers stop (see the teddy test).
 TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
 {
   struct Case
@@ -1231,7 +1232,7 @@ TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
   {
     Asking corner{{}, {}, {2, 2, 2}, 1e-6, 0.1, 0.05};
     cornerOfRounds(corner.edges, corner.supports);
-    cases.push_back({"corner of rounds", corner, {1e3}});
+    cases.push_back({"corner of rounds", corner});
   }
   for (const Case& c : cases)
   {
@@ -1244,6 +1245,24 @@ TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
       pose.SetScale(gp_Pnt(0, 0, 0), scale);
       expectSame(placed(c.asked, pose), base);
     }
+  }
+}
+
+// The teddy, made at its size, at a thousandth and at a thousand times: it was refused at a
+// thousand times, where a cylinder's derivative along its axis, one at every size, was divided by
+// the size and rounded to the grid of places to three digits, and the bends asked of the fit were
+// wrong. Its nets are not yet the same at every size: the multipliers that meet its eased corners
+// stop at other places for a difference in the last digits.
+TEST(BRepPatchExt, TheTeddyIsMadeAtAThousandthAndAThousandTimesItsSize)
+{
+  const Asking teddyAsked = asking(teddy(50, 50, gp_Trsf()));
+  for (const double scale : {1e-3, 1.0, 1e3})
+  {
+    SCOPED_TRACE(scale);
+    gp_Trsf pose;
+    pose.SetScale(gp_Pnt(0, 0, 0), scale);
+    const Outcome made = placed(teddyAsked, pose);
+    EXPECT_TRUE(made.made) << made.why;
   }
 }
 
