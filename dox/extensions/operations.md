@@ -422,7 +422,28 @@ thousand units in the last place, far below any curvature asked). Its margin, as
 disagreement over the larger curvature: rounding alone, on the pentagon and the split side, came to
 at most 9e-17, ten thousand times below the floor (9.1e-13); the least genuine disagreement, on the
 saved opening below, 6.7e-12, only 7.4 times above it. That margin is thin: a genuine
-disagreement eight times smaller than this one would be taken for rounding, and its turns dropped. A floor at the flat share of the
+disagreement eight times smaller than this one would be taken for rounding, and its turns dropped.
+A floor derived from the faces' own representation instead (each derivative off by up to
+(gamma_n + eps) of the sum of |N_i^(a)| |N_j^(b)| |P_ij| over the poles where the face stands, carried
+into the normal curvature) was measured and is not used. On the held-out flat strips it is about
+2.7e-13 (2^-40 gives 2.7e-14 to 4.5e-14), and the largest of a corner's four numbers is:
+
+| pose | largest of the four | derived floor |
+| --- | --- | --- |
+| at rest | 2.6e-19 to 3.2e-18 | 2.6e-13 to 2.7e-13 |
+| mirrored | 8.4e-12 to 1.7e-11 | 2.5e-13 to 2.8e-13 |
+| moved | 1.2e-12 to 1.4e-12 | 1.9e-13 to 3.7e-13 |
+| turned | 2.3e-11 to 4.9e-11 | 2.8e-13 to 6.7e-13 |
+
+The strips are interpolated from posed points, and an interpolation is rounded by the solve's
+condition, not by the poles' storage: posed, they bend by about 1e-11 along their edges and are other
+surfaces than at rest, which no bound from their representation can tell. And the saved opening's
+corners ask turns of numbers of 1.1e-18 to 2.2e-18 (its largest curvature 4e-8), five orders below
+what its representation is known to: its fill is delivered only through turns that its input cannot
+know. 2^-40 stays, a judgement. Open: the flat strips come out on other nets mirrored, moved and
+turned (their inputs differ); and the saved opening's real defect is the fold of the net over the
+plane without those turns. The structural path is a floor at the flat share of the G2 limit, the
+measure's own, once that fold is fixed. A floor at the flat share of the
 G2 limit instead, as for a miss, would be the measure's own, but a saved opening of near-flat spline
 faces (curvatures of 6e-7 on a loop of 38) is filled only when the turns that their small but
 genuine disagreement asks are kept: without them its fill folds over. That fold is an open defect of
