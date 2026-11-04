@@ -292,7 +292,10 @@ stretched so is not convex and the two coordinates extended each on its own fold
 stretching the nose widens the chart both ways. Open: a net that is finer only where it has to be, or
 several faces. The cap of a cone standing 80 degrees or more against its circle, refused as too steep
 before, asks for 529 to 576 poles at a tolerance of 1e-4, within the 640: it is tried, and its coarse nets
-are not shown regular, so that it is refused as before at about 0.4 s more per loop.
+are not shown regular, so that it is refused as before at about 0.4 s more per loop (the steep
+cones' GTest 23.4 s against 17.8 before there was a chart). That is not foreseen from the chart: the
+chart's own map is regular (a triangle laid flat folded over refuses it), and what is not shown
+regular is S_u x S_v of the net fitted over it, which the chart does not decide.
 The constants of the chart that are not derived: 160 places round the loop, 33 pins per guide, two
 relays, the pin's 100, the band's 0.5, four cuts of a cell, the 4096 directions of the search, which
 only seed the exact step, and the 256 bins over which the spans asked are read across the chart; the
@@ -371,10 +374,17 @@ edges keep that as their tolerance and STEP gives the joint back (a G1 cap over 
 its ladder when the bounded rim correction leaves its own places further off than the tolerance (the
 correction's own residual, no constant). The fills of the tests, with every length and the tolerance
 scaled by 1e3, are made or refused alike with the same nets; at 1e-3 so are a disc, a cap, an open loop of
-arcs, the dish at G1 and the elbow. Open: at 1e-3 the dish at G0 (its tolerance then
-`Precision::Confusion()`) is refused as folding over, the corner of three rounds (its tolerance below it)
-is made, the square on rounds misses G2 by a share of 0.109 by its quad and is trimmed instead, the
-pentagon and the split side take other nets; the teddy takes another net at 1e-3 and is refused at 1e3. A
+arcs, the dish at G0 and G1, the square on rounds and the elbow. The dish at G0 was refused at 1e-3
+as crossing itself: two pieces of one straight side, collinear, were taken to cross by the signs of
+orientation determinants whose true value is nothing and which rounding alone decided, otherwise at
+one size and not at another. A point now counts as on one side of a segment only where the
+determinant exceeds the bound on what rounding its products and their difference can do (Shewchuk
+1997, the ccwerrboundA of orient2d), a bound relative to the numbers themselves and so the same at
+every size. The square on rounds, which missed G2 by its quad at 1e-3, is made alike there now; it
+changed with the stop by convergence or the corner ease in the fit's own units, and was not traced
+further. Open: at 1e-3 the corner of three rounds (its tolerance
+below `Precision::Confusion()`) is made, the pentagon and the split side take other nets; the teddy is
+refused at 1e3. A
 G1 cap over a circle on a cone is refused as too steep from the same tilt on (between 80 and 80.4
 degrees) at rest, turned and at 1e-3 and 1e3, with the same nets below it; but the switch from the height
 graph to the spatial net at a support normal of 0.8 against the mean plane changes the cap's area by 2.1 %

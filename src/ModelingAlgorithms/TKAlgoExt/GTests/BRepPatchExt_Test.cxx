@@ -1158,12 +1158,12 @@ void expectSame(const Outcome& at, const Outcome& base)
 // The fills above, with every length and the tolerance a thousandth and a thousand times as
 // large: Patch measures what it asks in the loop's size, so each is made or refused alike, by the
 // same construction with as many poles. A length that is not a share of the size or of the
-// tolerance shows as another net or another answer at one of the sizes. Not yet so, and asked at
-// a thousand times only: at a thousandth the dish at G0 (its tolerance then OpenCascade's least
-// distance) is refused as folding over, the corner of rounds (its tolerance below that) is made,
-// the square on rounds misses G2 by its quad (a share of 0.109) and is trimmed instead, and the
-// pentagon and the split side take other nets. The teddy is left out: it takes another net at a
-// thousandth and is refused at a thousand times.
+// tolerance shows as another net or another answer at one of the sizes. The dish at G0 was
+// refused at a thousandth as crossing itself: two collinear pieces of one straight side, whose
+// orientation determinants are rounding alone, were taken to cross (see crosses). Not yet so,
+// and asked at a thousand times only: at a thousandth the corner of rounds (its tolerance below
+// OpenCascade's least distance) is made, and the pentagon and the split side take other nets. The
+// teddy is left out: it is refused at a thousand times.
 TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
 {
   struct Case
@@ -1214,10 +1214,7 @@ TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
     Asking              plates{{}, {}, std::vector<int>(6, order), 1e-4, 1, 0.1};
     std::vector<gp_Dir> normals;
     dish(plates.edges, plates.supports, normals);
-    if (order)
-      cases.push_back({"dish at G1", plates});
-    else
-      cases.push_back({"dish at G0", plates, {1e3}});
+    cases.push_back({order ? "dish at G1" : "dish at G0", plates});
   }
   {
     const Elbow elbow;
@@ -1226,7 +1223,7 @@ TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
     bend.controls.open = true;
     cases.push_back({"elbow", bend});
   }
-  cases.push_back({"square on rounds", asking(pillow(4, {30}, {1}, gp_Trsf())), {1e3}});
+  cases.push_back({"square on rounds", asking(pillow(4, {30}, {1}, gp_Trsf()))});
   cases.push_back(
     {"pentagon on rounds", asking(pillow(5, {25, 40, 80}, {1, -1}, turned(1))), {1e3}});
   cases.push_back({"split side", asking(pillow(4, {30}, {1}, gp_Trsf(), true)), {1e3}});

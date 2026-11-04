@@ -80,6 +80,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <tuple>
 #include <unordered_map>
@@ -414,9 +415,23 @@ Frame meanPlane(const std::vector<gp_Pnt>& points, double perimeter)
   return {gp_Pnt(centre), x, gp_Vec(z).Crossed(x), gp_Vec(z)};
 }
 
+//! Whether the segments a-b and c-d cross. A point counts as on one side of a segment only where
+//! the sign of the determinant that says so is beyond what rounding its two products and their
+//! difference can change (Shewchuk, "Adaptive precision floating-point arithmetic and fast robust
+//! geometric predicates", 1997: the bound ccwerrboundA = (3 + 16 e) e, e = 2^-53, of orient2d);
+//! where it is not, the point is on the segment's line as far as the numbers tell, and the
+//! segments are not taken to cross there. Collinear pieces of one straight side, whose
+//! determinants are rounding alone, otherwise crossed or not by the size of the model.
 bool crosses(const gp_XY& a, const gp_XY& b, const gp_XY& c, const gp_XY& d)
 {
-  auto side = [](const gp_XY& p, const gp_XY& q, const gp_XY& r) { return (q - p).Crossed(r - p); };
+  auto side = [](const gp_XY& p, const gp_XY& q, const gp_XY& r) {
+    constexpr double e       = std::numeric_limits<double>::epsilon() / 2;
+    const double     left    = (q.X() - p.X()) * (r.Y() - p.Y()),
+                 right       = (q.Y() - p.Y()) * (r.X() - p.X());
+    const double determinant = left - right,
+                 bound       = (3 + 16 * e) * e * (std::abs(left) + std::abs(right));
+    return determinant > bound ? 1 : determinant < -bound ? -1 : 0;
+  };
   return side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0;
 }
 
