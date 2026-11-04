@@ -208,6 +208,26 @@ the refusal names the corner and says that G1 can be had, as before. The G2 anal
 vertex-enclosure condition is stated open in [Hermann, Peters, Strotman 2009]; this is the elementary part
 of it that a fill can be held to.
 
+*Corner compatibility (derived).* Take a common oriented tangent plane at a corner p.
+For a regular C2 fill F, its second fundamental form II_F is continuous there. G2 contact to
+support A along one incident edge gives II_F = II_A on that edge; taking its limit at p gives
+II_F(p) = II_A(p). The other edge similarly requires II_F(p) = II_B(p). Thus
+II_A(p) = II_B(p) is necessary. A nonzero difference of these forms rules out exact G2 at
+that corner, however many poles or internally G2 patches the fill has. This is the elementary
+corner obstruction, not a sufficient existence theorem for compatible data. The definition
+of II and its relation to normal curvature are in Patrikalakis, Maekawa and Cho,
+*Shape Interrogation for Computer Aided Design and Manufacturing* (2009 online edition),
+[section 3.3, equations (3.26)-(3.30), Theorem 3.3.1](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node29.html).
+
+The scalar twist compatibility residual alone cannot detect this obstruction: for example,
+in a common orthonormal frame II_A = diag(k, 0) and II_B = 0 have zero mixed term but differ
+by |k| in normal curvature. This covers a bending strip meeting a flat strip, and also unequal
+curvature forms of several rounds at a corner. These are impossible exact corner requests,
+not missing solver capabilities. An eased fill reports its actual miss against the supports;
+its ease is a relaxation of the request. Failure to meet the unchanged limits *beyond* that
+ease remains a finite approximation issue, not a consequence of this nonexistence proof.
+A seam with lower continuity or a singular vertex would change the regular G2 request.
+
 *Over a chart of its own.* A fill over the mean plane is a height over it, and a height has a slope of
 tan(acos |n . z|) where the rim's faces have normal n; the plane's check refuses a loop where some
 |n . z| < 0.17 or where the loop seen along z crosses itself. Some loops are a height over no plane at

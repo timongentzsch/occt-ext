@@ -247,13 +247,14 @@ Known limits and what remains:
    next (a side fill whose guide ends near a G2 edge is refused so). At a corner whose
    faces bend differently the bend asked eases to the one a surface can have over one span of the coarsest
    net, a judgement: G2 is met on the middle of each side only, the corner's miss is reported, and the coarse
-   nets of such loops can come out lopsided (5 in 50 off the teddy's symmetry). Refused, and open: a G2
-   corner where a flat face meets one that bends across its edge, unless the loop is four-sided (9 of the 36
-   held-out polygons per pose and scale, those of three, five and six sides on a plane): beyond the ease the
-   flat face is held to the flat G2 limit, an absolute curvature of a thousandth of the share over the size,
-   which the fan of the bend near the corner leaves no eased fill within.
-   Not tried: lines of lower continuity through such a corner, which meet G2 to the corner at the price of
-   a step of curvature inside, and a corner made of several patches. Fills through
+   nets of such loops can come out lopsided. Exact G2 at a regular corner whose supports have
+   different second fundamental forms is impossible: continuity would require the fill's one
+   form there to equal both (the [corner compatibility proof](dox/extensions/operations.md#brepatchext-boundary-first-fill)).
+   This includes a bending strip meeting a flat strip and rounds with unequal forms; local
+   refinement or several internally G2 faces cannot remove the obstruction. The eased fill with
+   its reported corner miss relaxes that impossible request. Some non-four-sided loops remain
+   refused because the finite net misses the flat-support limit beyond the ease; the proof does
+   not establish that this relaxed problem is impossible. Fills through
    three profiles with curvature continuity can miss the curvature-share limit. Open boundaries are chained by
    `BRepPatchExt_Chain` (nearest-end growth, gaps closed with straight segments); a general theory of which
    chain a user means is not attempted. A loop that is a height over no plane is filled over a faired
