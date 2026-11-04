@@ -408,6 +408,34 @@ generated surface's tangent plane and curvature at that point, which may not agr
 surfaces'"; "disconnecting the boundary curves is a solution for enforcing G2"), and its examples
 deliver with such corners marked as conflicting.
 
+*Read up to the corners.* A fill is measured at the 129 places of Measure Continuity along each side
+and, between the first and the last of them and the side's ends, at places that halve their way to
+each end, down to `cornerInset` (1e-6 of the side, a fraction and so the same at every size; a
+judgement of how near is at the corner: read down to 1e-5 or to 1e-7 instead, the application's Patch
+tests and the mixed records came out the same). G0 and G1 are read there as everywhere; the bend is
+read there too, but not within an ease the corner's faces are shown to ask for (see agreeAtCorners),
+where it is read from the first place on as the ease's allowance was set. Read so densely inside the
+first 1/258 of each side, fills delivered before were not all within: a five-corner tangent chain at
+1e-6 left its rim by 7.97 times the tolerance at 1/16 of the first place, and a later panel at G2 bent
+1.125 times its share there; a fill of the band fit at a hundred times the size of an unresolved
+corner was within.
+
+Where two sides that are only to be met meet at a corner p, a surface that holds both is tangent at p
+to the plane of their two tangents: each edge lies on it, so each tangent lies in its tangent plane,
+and two tangents that are not parallel span it. The plane may stand far from the surface around it
+(at that chain's corner the edges meet at 1.72 degrees in plan with slopes of -0.043 and -0.016, and
+the plane of the two is 42 degrees from the mean plane), but it is asked at p only: along each edge the
+surface's tangent plane need hold only that edge's tangent, and turns as fast as it will. Where the
+edges run on within the G1 angle the two tangents span no plane, and nothing is asked. Within the
+tolerance a surface need not be tangent to it, and asking it of every such corner bends fills that
+were within before (the saved eight-edge opening came out 68.66 for 70.20): so a correction onto the
+sides holds, besides its even places, those of the measure's places near such a corner that the
+corrected surface misses by more than the tolerance, and finer nets of the ladder are asked the plane
+at that corner. On the tangent chain the surface's plane at p came within 0.04 to 0.3 degrees of it and
+the miss near the corner from 7.97 to 0.27 times the tolerance; it is filled on the same net at rest,
+moved and turned, mirrored, and at a thousandth and a thousand times its size (128 x 99 poles at 1e-6,
+75 x 54 at 1e-5), the posed fills within 2.5e-4 of the tolerance of the one at rest mapped back.
+
 *Size.* Lengths are shares of the loop's size or of the tolerance, with one exception by design: where a
 fill goes over into planes and other faces at once (or into a cone alone) its rim and its edges' parameter
 curves are made to a tenth of `Precision::Confusion()`, OpenCascade's absolute least distance, so that its

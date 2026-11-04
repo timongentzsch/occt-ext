@@ -1001,16 +1001,45 @@ std::optional<gp_XY> nearestWithin(const occ::handle<Geom_Surface>& surface,
   return std::nullopt;
 }
 
+//! How far from a corner, as a share of a side, the face along the side is read for what it
+//! asks at the corner: off the corner itself, where the faces of both sides meet and a face
+//! may have no one direction.
+constexpr double cornerInset = 1e-6;
+
+//! The fractions of a side that the measure reads, in order: the places of Measure Continuity,
+//! and between the first and the last of them and the side's ends places that halve their way to
+//! each end down to `cornerInset`, so that what a surface does up to a corner is read as well. How
+//! near is at the corner is a judgement, a fraction of the side and so the same at every size: read
+//! down to 1e-5 or 1e-7 instead, the Patch tests came out the same (see
+//! dox/extensions/operations.md).
+const std::vector<double>& measuredFractions()
+{
+  static const std::vector<double> out = [] {
+    std::vector<double> toEnd, all;
+    for (double t = 0.25 / places; t >= cornerInset; t /= 2)
+      toEnd.push_back(t);
+    all.insert(all.end(), toEnd.rbegin(), toEnd.rend());
+    for (int i = 0; i < places; ++i)
+      all.push_back((i + 0.5) / places);
+    for (const double t : toEnd)
+      all.push_back(1 - t);
+    return all;
+  }();
+  return out;
+}
+
 //! How far a surface is from what a side asks, read from the surface alone.
 Miss measure(const occ::handle<Geom_Surface>& surface, const Side& side, const Known& known)
 {
-  ShapeAnalysis_Surface project(surface);
-  Miss                  miss;
-  gp_Pnt2d              uv;
-  for (int i = 0; i < places + 2; ++i)
+  ShapeAnalysis_Surface      project(surface);
+  Miss                       miss;
+  gp_Pnt2d                   uv;
+  const std::vector<double>& reads = measuredFractions();
+  const int                  count = static_cast<int>(reads.size());
+  for (int i = 0; i < count + 2; ++i)
   {
-    const bool   end      = i >= places;
-    const double fraction = end ? i - places : (i + 0.5) / places;
+    const bool   end      = i >= count;
+    const double fraction = end ? i - count : reads[i];
     const gp_Pnt point    = side.meet(fraction);
     const auto   start    = known ? known(side, fraction, point) : std::nullopt;
     if (start && start->own)
@@ -1041,7 +1070,11 @@ Miss measure(const occ::handle<Geom_Surface>& surface, const Side& side, const K
     const SurfaceJet mine = surfaceJet(op, surface, uv.X(), uv.Y()), theirs = side.jet(fraction);
     const double     cosine = theirs.n.Dot(mine.n);
     miss.g1 = std::max(miss.g1, std::acos(std::min(1.0, std::abs(cosine))) * 180 / M_PI);
-    if (side.order < 2)
+    // The bend is read up to a corner too, but not within an ease that the corner's faces are
+    // shown to ask for (see agreeAtCorners): there it is read from the first place on, as the
+    // ease's own allowance was set.
+    const bool nearEnd = fraction < 0.5 / places || fraction > 1 - 0.5 / places;
+    if (side.order < 2 || (nearEnd && side.easing(fraction) > 0))
       continue;
     auto [bend, relative] =
       bendDifference(theirs, mine, side.tangent(fraction).Normalized(), cosine < 0 ? -1 : 1);
@@ -1060,11 +1093,6 @@ Miss measure(const occ::handle<Geom_Surface>& surface, const Side& side, const K
   }
   return miss;
 }
-
-//! How far from a corner, as a share of a side, the face along the side is read for what it
-//! asks at the corner: off the corner itself, where the faces of both sides meet and a face
-//! may have no one direction.
-constexpr double cornerInset = 1e-6;
 
 //! The largest principal curvature of a surface at a place, from its jet.
 double sharpest(const SurfaceJet& jet)
@@ -4690,6 +4718,9 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
     occ::handle<Geom_Surface> previous;
     bool                      previousWithin = false, previousSpatial = false, settledOn = false;
     std::vector<Built>        meeting;
+    // The corners of two sides that are only to be met at which a surface of the ladder left the
+    // sides nearer the corner than the even places of its correction reach (see below).
+    std::vector<char> forced(asked.sides.size(), 0);
     for (int rung : ladder)
     {
       const int spans = std::max(rung,
@@ -4858,6 +4889,26 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
         }
       for (const gp_Pnt& point : asked.points)
         targets.push_back({point, frame.project(point), 0, {}, {}, 1.0 / spans});
+      // Where two sides that are only to be met meet at a corner, a surface that holds both is
+      // tangent there to the plane of their two tangents, whatever it is elsewhere. Within the
+      // tolerance it need not be, and that plane is asked at the corner only once a surface of the
+      // ladder has left the sides near the corner (see below). Not where they run on, where the two
+      // give no plane.
+      for (size_t i = 0; i < asked.sides.size(); ++i)
+      {
+        const Side &a = asked.sides[i], &b = asked.sides[(i + 1) % asked.sides.size()];
+        if (!forced[i] || a.free || b.free || a.order > 0 || b.order > 0)
+          continue;
+        const gp_Vec ta = a.tangent(1).Normalized(), tb = b.tangent(0).Normalized();
+        const gp_Vec normal = ta.Crossed(tb);
+        if (normal.Magnitude() < std::sin(asked.limits.g1 * M_PI / 180))
+          continue;
+        const gp_Pnt corner = b.meet(0);
+        Target       target{corner, frame.project(corner), 1, {}, {}, 1.0 / spans};
+        SurfaceJet   jet{op, corner, ta, tb, {}, {}, {}, normal.Normalized()};
+        target.jet = jet;
+        targets.push_back(target);
+      }
       const std::vector<char> fixed(net.poles.size(), 0);
       // Across a line through a corner where the rim's faces change their bend, the surface
       // may change its own: at the corner, where the rim needs it, and less and less the
@@ -4946,7 +4997,10 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
       if (moved)
       {
         const size_t knots = net.knotsU.size() + net.knotsV.size();
-        const auto   onto  = [&](double span) {
+        // Per side, the places near its corners that the correction holds as well: those the
+        // measure reads there (see measuredFractions) where the surface it leaves misses them.
+        std::vector<std::vector<double>> nearCorners(asked.sides.size());
+        const auto                       onto = [&](double span) {
           std::vector<RimPlace> onto;
           for (const auto* curves : {&asked.sides, &asked.guides})
             for (const Side& side : *curves)
@@ -4956,12 +5010,18 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
               const int count = std::clamp(static_cast<int>(rimPlacesPerSpan * side.length / span),
                                            fewestRimPlaces,
                                            mostRimPlaces);
+              std::vector<double> fractions;
               for (int i = 0; i <= count; ++i)
+                fractions.push_back(static_cast<double>(i) / count);
+              if (curves == &asked.sides)
+                fractions.insert(fractions.end(),
+                                 nearCorners[&side - asked.sides.data()].begin(),
+                                 nearCorners[&side - asked.sides.data()].end());
+              for (const double f : fractions)
               {
-                const double f     = static_cast<double>(i) / count;
                 const gp_Pnt point = side.meet(f);
                 gp_XY        across(0, 0);
-                if (side.order > 0 && i > 0 && i < count)
+                if (side.order > 0 && f > 0 && f < 1)
                 {
                   const gp_Vec along3 = side.tangent(f);
                   const gp_XY  along2(along3.Dot(frame.x), along3.Dot(frame.y));
@@ -4974,14 +5034,51 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
             onto.push_back({point, frame.project(point), gp_XY(0, 0), false});
           return onto;
         };
-        const double worst = correctRim(
-          op,
-          net,
-          onto,
-          up,
-          std::min(rimShare * asked.limits.g0, exchange ? exchangeWithin : HUGE_VAL),
-          std::min(enoughShare * asked.limits.g0, exchange ? 2 * exchangeWithin : HUGE_VAL),
-          std::min(mostRimSpans, (order > 0 ? rimFiner : rimFinerMet) * std::max(spansU, spansV)));
+        const auto correct = [&] {
+          return correctRim(
+            op,
+            net,
+            onto,
+            up,
+            std::min(rimShare * asked.limits.g0, exchange ? exchangeWithin : HUGE_VAL),
+            std::min(enoughShare * asked.limits.g0, exchange ? 2 * exchangeWithin : HUGE_VAL),
+            std::min(mostRimSpans,
+                     (order > 0 ? rimFiner : rimFinerMet) * std::max(spansU, spansV)));
+        };
+        double worst = correct();
+        // The correction's even places reach a corner of two sides that are only to be met no
+        // nearer than its step: where the surface leaves a side nearer the corner than that by
+        // more than the tolerance, those places are held as well and the correction made again,
+        // and finer nets are asked the corner's tangent plane (see above).
+        {
+          const occ::handle<Geom_BSplineSurface> corrected = surfaceOf(net);
+          bool                                   more      = false;
+          const size_t                           count     = asked.sides.size();
+          for (size_t s = 0; s < count; ++s)
+          {
+            const Side& side = asked.sides[s];
+            if (side.free || side.order > 0)
+              continue;
+            for (const double f : measuredFractions())
+            {
+              const bool start = f < 0.5 / places, end = f > 1 - 0.5 / places;
+              // The corner at that end, numbered by the side before it.
+              const size_t corner = start ? (s + count - 1) % count : s;
+              if ((!start && !end) || asked.sides[start ? corner : (s + 1) % count].order > 0)
+                continue;
+              const gp_Pnt point = side.meet(f);
+              const gp_XY  uv    = nearest(corrected, frame.project(point), point);
+              if (corrected->Value(uv.X(), uv.Y()).Distance(point) > asked.limits.g0)
+              {
+                nearCorners[s].push_back(f);
+                forced[corner] = 1;
+                more           = true;
+              }
+            }
+          }
+          if (more)
+            worst = correct();
+        }
         if (net.knotsU.size() + net.knotsV.size() == knots)
           left = worst;
         surface = surfaceOf(net);
