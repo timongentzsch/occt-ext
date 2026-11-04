@@ -502,6 +502,13 @@ circle round a surface of revolution's axis a coaxial circle, with the parameter
 points). At a pole, where S_u × S_v vanishes against the derivatives' size, the certificate checks the
 distance alone (judgement: below a millionth of |S_u|² + |S_v|²), as the normal's sign is not defined there.
 
+*Read back as written.* A body read from a saved file has the directions it was written with, bit for bit
+(`gp_Dir::Restored` in the BinTools and GeomTools readers; corrections.md, gp_Dir-restored), so a body
+and the same body loaded again mesh alike. Open: the X and Y directions of an axis placement (`gp_Ax2`,
+`gp_Ax3`, `gp_Ax22d`: planes, conics, elementary surfaces) are rebuilt from the main and X directions by
+cross products when read, and come back exact only where those products are; a reader that keeps
+orthonormal axes as written is not yet made.
+
 *Skins and sweeps.* Frames along a path are rotation-minimising by the double reflection method [Wang,
 Jüttler, Zheng, Liu 2008], with a fourth-order error in the step; stock `BRepOffsetAPI_MakePipeShell`
 twists a profile only where the path starts square to it. Gordon surfaces follow [Siggel et al., section 3.2]

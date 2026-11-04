@@ -23,6 +23,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <random>
+
 TEST(gp_DirTest, CoordinateConstructor)
 {
   gp_Dir aDir(0.0, 0.0, 1.0);
@@ -195,4 +198,37 @@ TEST(gp_DirTest, OCC22558_MirrorThroughAx2_CorrectResult)
   EXPECT_NEAR(aToSym.X(), -aExpected, Precision::Confusion());
   EXPECT_NEAR(aToSym.Y(), aExpected, Precision::Confusion());
   EXPECT_NEAR(aToSym.Z(), aExpected, Precision::Confusion());
+}
+
+// A direction gp_Dir normalized has a computed square length within gp::UnitSquareBand() of 1
+// (10 u + O(u^2), u = RealEpsilon() / 2), so gp_Dir::Restored keeps it bit for bit, as a reader of
+// what was written must; and restoring a restored direction keeps it. Vectors of any size and
+// direction, and vectors a few units of roundoff off unit length.
+TEST(gp_DirTest, RestoredKeepsANormalizedDirectionBitForBit)
+{
+  std::mt19937_64                        aRandom(20261103u);
+  std::uniform_real_distribution<double> aCoord(-1.0, 1.0);
+  std::uniform_int_distribution<int>     aScale(-400, 400);
+  std::uniform_real_distribution<double> anUlps(-24.0, 24.0);
+  const double                           anU = 0.5 * RealEpsilon();
+  for (int i = 0; i < 100000; ++i)
+  {
+    const int    anExp = aScale(aRandom);
+    const gp_Dir aDir(std::ldexp(aCoord(aRandom), anExp),
+                      std::ldexp(aCoord(aRandom), anExp),
+                      std::ldexp(aCoord(aRandom), anExp));
+    const double aSq = aDir.X() * aDir.X() + aDir.Y() * aDir.Y() + aDir.Z() * aDir.Z();
+    ASSERT_LE(std::abs(aSq - 1.0), 10.5 * anU);
+    const gp_Dir aBack = gp_Dir::Restored(aDir.X(), aDir.Y(), aDir.Z());
+    ASSERT_EQ(aBack.X(), aDir.X());
+    ASSERT_EQ(aBack.Y(), aDir.Y());
+    ASSERT_EQ(aBack.Z(), aDir.Z());
+    const gp_Dir aNear = gp_Dir::Restored(aDir.X() * (1.0 + anUlps(aRandom) * anU),
+                                          aDir.Y() * (1.0 + anUlps(aRandom) * anU),
+                                          aDir.Z() * (1.0 + anUlps(aRandom) * anU));
+    const gp_Dir anAgain = gp_Dir::Restored(aNear.X(), aNear.Y(), aNear.Z());
+    ASSERT_EQ(anAgain.X(), aNear.X());
+    ASSERT_EQ(anAgain.Y(), aNear.Y());
+    ASSERT_EQ(anAgain.Z(), aNear.Z());
+  }
 }

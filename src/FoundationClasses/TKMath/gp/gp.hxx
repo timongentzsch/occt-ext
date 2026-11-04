@@ -59,6 +59,13 @@ public:
   //! always referred to as gp::Resolution().
   static constexpr double Resolution() { return RealSmall(); }
 
+  //! The band about 1 within which gp_Dir::Restored and gp_Dir2d::Restored take the computed square
+  //! length of a vector as that of a unit vector and keep its coordinates: 8 RealEpsilon(), sixteen
+  //! units of roundoff u = RealEpsilon() / 2. A direction that gp_Dir or gp_Dir2d normalized has a
+  //! computed square length within 10 u + O(u^2) of 1 (8 u + O(u^2) in the plane), so it is
+  //! restored bit for bit.
+  static constexpr double UnitSquareBand() { return 8.0 * RealEpsilon(); }
+
   //! Identifies a Cartesian point with coordinates X = Y = Z = 0.0.0
   Standard_EXPORT static const gp_Pnt& Origin() noexcept;
 

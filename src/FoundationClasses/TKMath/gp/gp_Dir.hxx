@@ -117,6 +117,13 @@ public:
   //! @note Constexpr-compatible when input is already normalized.
   constexpr void SetCoord(const double theXv, const double theYv, const double theZv);
 
+  //! The direction of coordinates that a direction was written with, as a file reader restores
+  //! it: they are kept bit for bit where the vector is of unit length to rounding, its computed
+  //! square length within gp::UnitSquareBand() of 1, as that of every direction gp_Dir normalized
+  //! is; else they are normalized as by gp_Dir(theXv, theYv, theZv). Restoring a restored
+  //! direction keeps it.
+  [[nodiscard]] static gp_Dir Restored(const double theXv, const double theYv, const double theZv);
+
   //! Assigns the given value to the X coordinate of this unit vector.
   //! @note Constexpr-compatible when result is already normalized.
   constexpr void SetX(const double theX);
@@ -385,6 +392,20 @@ inline constexpr void gp_Dir::SetCoord(const int theIndex, const double theXi)
   {
     SetZ(theXi);
   }
+}
+
+//=================================================================================================
+
+inline gp_Dir gp_Dir::Restored(const double theXv, const double theYv, const double theZv)
+{
+  const double aSqMod = theXv * theXv + theYv * theYv + theZv * theZv;
+  if (aSqMod < 1.0 - gp::UnitSquareBand() || aSqMod > 1.0 + gp::UnitSquareBand())
+  {
+    return gp_Dir(theXv, theYv, theZv);
+  }
+  gp_Dir aDir;
+  aDir.coord.SetCoord(theXv, theYv, theZv);
+  return aDir;
 }
 
 //=================================================================================================

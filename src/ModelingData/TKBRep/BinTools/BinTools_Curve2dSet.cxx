@@ -343,7 +343,7 @@ static Standard_IStream& operator>>(Standard_IStream& IS, gp_Dir2d& D)
   double X = 0., Y = 0.;
   BinTools::GetReal(IS, X);
   BinTools::GetReal(IS, Y);
-  D.SetCoord(X, Y);
+  D = gp_Dir2d::Restored(X, Y);
   return IS;
 }
 

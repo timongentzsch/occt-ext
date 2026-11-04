@@ -685,7 +685,7 @@ static Standard_IStream& operator>>(Standard_IStream& IS, gp_Dir& D)
   GeomTools::GetReal(IS, X);
   GeomTools::GetReal(IS, Y);
   GeomTools::GetReal(IS, Z);
-  D.SetCoord(X, Y, Z);
+  D = gp_Dir::Restored(X, Y, Z);
   return IS;
 }
 

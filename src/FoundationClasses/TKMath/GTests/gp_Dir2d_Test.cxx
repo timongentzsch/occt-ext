@@ -22,6 +22,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <random>
+
 TEST(gp_Dir2dTest, CoordinateConstructor)
 {
   gp_Dir2d aDir(1.0, 0.0);
@@ -135,4 +138,29 @@ TEST(gp_Dir2dTest, ZeroMagnitudeThrows)
 #else
   GTEST_SKIP() << "No_Exception is defined; exception behavior is disabled in this build.";
 #endif
+}
+
+// As for gp_Dir: a normalized direction's computed square length is within gp::UnitSquareBand() of
+// 1 (8 u + O(u^2)), gp_Dir2d::Restored keeps it bit for bit, and restoring is idempotent.
+TEST(gp_Dir2dTest, RestoredKeepsANormalizedDirectionBitForBit)
+{
+  std::mt19937_64                        aRandom(20261103u);
+  std::uniform_real_distribution<double> aCoord(-1.0, 1.0);
+  std::uniform_int_distribution<int>     aScale(-400, 400);
+  std::uniform_real_distribution<double> anUlps(-24.0, 24.0);
+  const double                           anU = 0.5 * RealEpsilon();
+  for (int i = 0; i < 100000; ++i)
+  {
+    const int      anExp = aScale(aRandom);
+    const gp_Dir2d aDir(std::ldexp(aCoord(aRandom), anExp), std::ldexp(aCoord(aRandom), anExp));
+    ASSERT_LE(std::abs(aDir.X() * aDir.X() + aDir.Y() * aDir.Y() - 1.0), 8.5 * anU);
+    const gp_Dir2d aBack = gp_Dir2d::Restored(aDir.X(), aDir.Y());
+    ASSERT_EQ(aBack.X(), aDir.X());
+    ASSERT_EQ(aBack.Y(), aDir.Y());
+    const gp_Dir2d aNear = gp_Dir2d::Restored(aDir.X() * (1.0 + anUlps(aRandom) * anU),
+                                              aDir.Y() * (1.0 + anUlps(aRandom) * anU));
+    const gp_Dir2d anAgain = gp_Dir2d::Restored(aNear.X(), aNear.Y());
+    ASSERT_EQ(anAgain.X(), aNear.X());
+    ASSERT_EQ(anAgain.Y(), aNear.Y());
+  }
 }

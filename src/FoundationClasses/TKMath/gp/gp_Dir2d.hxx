@@ -114,6 +114,11 @@ public:
   //! @note Constexpr-compatible when input is already normalized.
   constexpr void SetCoord(const double theXv, const double theYv);
 
+  //! The direction of coordinates that a direction was written with, as a file reader restores
+  //! it: kept bit for bit where the vector is of unit length to rounding (gp::UnitSquareBand), as
+  //! every direction gp_Dir2d normalized is; else normalized as by gp_Dir2d(theXv, theYv).
+  [[nodiscard]] static gp_Dir2d Restored(const double theXv, const double theYv);
+
   //! Assigns the given value to the X coordinate of this unit vector,
   //! and then normalizes it.
   //! Warning
@@ -333,6 +338,20 @@ inline constexpr void gp_Dir2d::SetCoord(const int theIndex, const double theXi)
   {
     SetY(theXi);
   }
+}
+
+//=================================================================================================
+
+inline gp_Dir2d gp_Dir2d::Restored(const double theXv, const double theYv)
+{
+  const double aSqMod = theXv * theXv + theYv * theYv;
+  if (aSqMod < 1.0 - gp::UnitSquareBand() || aSqMod > 1.0 + gp::UnitSquareBand())
+  {
+    return gp_Dir2d(theXv, theYv);
+  }
+  gp_Dir2d aDir;
+  aDir.coord.SetCoord(theXv, theYv);
+  return aDir;
 }
 
 //=================================================================================================
