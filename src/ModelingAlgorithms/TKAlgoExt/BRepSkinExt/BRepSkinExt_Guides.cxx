@@ -632,25 +632,6 @@ EvolutionData skinGuides(OcctKernel&                  kernel,
       kernel,
       guidedSum(kernel, op, edges, firstFace, lastFace, firstOrder, lastOrder, tolerance));
   }
-  // Through three or more profiles, the net's skin made to meet the supports; the filling below
-  // where that does not come about.
-  if (edges.size() > 4 && (firstOrder > 0 || lastOrder > 0) && (firstOrder == 0 || firstFace)
-      && (lastOrder == 0 || lastFace))
-  {
-    try
-    {
-      const TopoDS_Face face =
-        guidedNet(kernel, op, edges, firstFace, lastFace, firstOrder, lastOrder, tolerance);
-      if (!face.IsNull())
-        return stored(kernel, face);
-    }
-    catch (const Failure&)
-    {
-    }
-    catch (const Standard_Failure&)
-    {
-    }
-  }
   for (int i = 0; i < int(edges.size()); ++i)
   {
     const auto     edge    = TopoDS::Edge(get(kernel, edges[i]));
@@ -668,14 +649,39 @@ EvolutionData skinGuides(OcctKernel&                  kernel,
     else
       fill.Add(edge, GeomAbs_C0, i == 0 || i >= last);
   }
-  fill.Build();
-  if (!fill.IsDone() || fill.G0Error() > tolerance || !BRepCheck_Analyzer(fill.Shape()).IsValid())
-    fail(op, no_solution, "guided skin did not meet its boundary tolerance");
-  if ((firstOrder > 0 || lastOrder > 0) && fill.G1Error() > 1e-4)
-    fail(op, no_solution, "guided skin did not meet G1");
-  if ((firstOrder > 1 || lastOrder > 1) && fill.G2Error() > 1e-3)
-    fail(op, no_solution, "guided skin did not meet G2: " + std::to_string(fill.G2Error()));
-  return stored(kernel, fill.Shape());
+  // A valid plate is retained: enforcing the net exactly is not a fairness
+  // improvement in general. Only a refused plate needs another construction.
+  try
+  {
+    fill.Build();
+    if (!fill.IsDone() || fill.G0Error() > tolerance || !BRepCheck_Analyzer(fill.Shape()).IsValid())
+      fail(op, no_solution, "guided skin did not meet its boundary tolerance");
+    if ((firstOrder > 0 || lastOrder > 0) && fill.G1Error() > 1e-4)
+      fail(op, no_solution, "guided skin did not meet G1");
+    if ((firstOrder > 1 || lastOrder > 1) && fill.G2Error() > 1e-3)
+      fail(op, no_solution, "guided skin did not meet G2: " + std::to_string(fill.G2Error()));
+    return stored(kernel, fill.Shape());
+  }
+  catch (const Failure&)
+  {
+    if (edges.size() > 4 && (firstOrder > 0 || lastOrder > 0))
+    {
+      try
+      {
+        const TopoDS_Face face =
+          guidedNet(kernel, op, edges, firstFace, lastFace, firstOrder, lastOrder, tolerance);
+        if (!face.IsNull())
+          return stored(kernel, face);
+      }
+      catch (const Failure&)
+      {
+      }
+      catch (const Standard_Failure&)
+      {
+      }
+    }
+    throw;
+  }
 }
 } // namespace BRepExt
 
