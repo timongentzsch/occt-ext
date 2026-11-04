@@ -1,6 +1,6 @@
 # Corrections to existing OCCT algorithms
 
-Twenty changes to existing OCCT code, one commit each, on top of OCCT `b8f597c6` (30 July 2026).
+Twenty-one changes to existing OCCT code, one commit each, on top of OCCT `b8f597c6` (30 July 2026).
 Each entry states the problem, the derivation that makes the change correct, and its limits.
 Derivations are elementary arguments, not machine-checked proofs, unless a paper is cited.
 Existing OCCT tolerances and limits are kept unless an entry names an added constant.
@@ -32,12 +32,43 @@ guard (`Geom_OffsetSurfaceUtils-cancellable-progress`) first.
 | [IntTools_EdgeFace-line-plane-touch](#inttools_edgeface-line-plane-touch) | `def5b1740c` | missed intersections | applies |
 | [IntTools_FaceFace-plane-across-sweep](#inttools_faceface-plane-across-sweep) | `5ce72fca97` | lost exact construction | applies |
 | [TopOpeBRepBuild_WireEdgeClassifier-box-apart](#topopebrepbuild_wireedgeclassifier-box-apart) | `14f92b09b4` | needless work | applies |
+| [gp_Dir-restored](#gp_dir-restored) | `ac6046d3d7` | lost bits on reload | not assessed |
 | [BndLib-torus-patch-box](#bndlib-torus-patch-box) | `810a8e12a5` | box misses the patch | not assessed |
 | [CSLib_Class2d-v-bucket-index](#cslib_class2d-v-bucket-index) | `341272613f` | linear scan per query | not assessed |
 | [BRepTopAdaptor_FClass2d-periods-read-once](#breptopadaptor_fclass2d-periods-read-once) | `6e6ea43f94` | repeated work | not assessed |
 
-A twenty-first entry, [BRepSkinExt-section-vertices-exact](#brepskinext-section-vertices-exact), fixes a defect
+A twenty-second entry, [BRepSkinExt-section-vertices-exact](#brepskinext-section-vertices-exact), fixes a defect
 in the extension package `BRepSkinExt` rather than in OCCT.
+
+### gp_Dir-restored
+
+Commit `ac6046d3d7`. Upstream: not assessed.
+
+Problem: the BREP readers (`BinTools_CurveSet`, `BinTools_Curve2dSet`, `BinTools_SurfaceSet` and the
+`GeomTools` sets, binary and text) rebuilt every direction with `gp_Dir::SetCoord`, which keeps the coordinates
+only when their computed square length is 1 within `gp::Resolution()` (about 1e-308), so in effect only for exact
+unit vectors, and divides by the norm otherwise. A direction normalized once has a computed square length a few
+units of roundoff off 1, so a body read back from a file differed from the one written in the last bits of its
+oblique lines, line pcurves and extrusion directions. Measured: of 1e5 random directions, 32 per cent (3D) and 31
+per cent (2D) changed when made again from their own coordinates; a body and the same body saved and loaded
+meshed with the same nodes and different triangles (an incremental mesh comparison, seed 27).
+
+Derivation and limits: for v normalized as y_i = fl(v_i / D), D = fl(sqrt(fl(sum v_i^2))), with unit roundoff
+u = 2^-53 and g_n = n u / (1 - n u): fl(sum v_i^2) = |v|^2 (1 + t1), |t1| <= g3; D = |v| (1 + t1)^(1/2) (1 + e0),
+|e0| <= u; y_i = (v_i / D)(1 + e_i), |e_i| <= u. So |y|^2 lies within 2u + g3 + 2u of 1, and the square length
+computed from y, |y|^2 (1 + t2) with |t2| <= g3, within 10 u + O(u^2) of 1 (8 u in the plane); contracting
+products into FMA only removes roundings. `gp_Dir::Restored` and `gp_Dir2d::Restored` keep the coordinates where
+that computed square length is within `gp::UnitSquareBand()` = 8 DBL_EPSILON = 16 u of 1, and normalize as before
+otherwise, and the six readers use them. Every direction `gp_Dir` or `gp_Dir2d` normalized is therefore read back
+bit for bit, and restoring is idempotent. Normalization itself is unchanged: widening `gp_Dir`'s own band instead
+changed last bits throughout the kernel and made 32 of 90 runs of the incremental mesh fuzz fail. The band is the
+one added constant; 16 u against the 10 u bound leaves the margin for directions made by other arithmetic within a
+few units of roundoff of unit length. Not covered: an axis placement's X and Y directions, which the readers rebuild
+from its main and X directions by cross products (`gp_Ax3(P, N, Vx)`), and come back exact only where those
+products are (operations.md, open). Tests: random vectors of sizes 2^-400 to 2^400 normalize within 10.5 u (8.5 u)
+of unit square length, are restored bit for bit, and vectors 24 units of roundoff off unit length restore
+idempotently; 200 random oblique lines, plane normals and lines on the planes read back bit for bit through the
+binary and the text format (the test fails with the previous readers).
 
 ### BndLib-torus-patch-box
 
