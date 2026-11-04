@@ -15,7 +15,7 @@
 
 #include <BRepBlendExt_Internal.hxx>
 
-namespace BRepExt::blend2::detail
+namespace BRepExt::blending::detail
 {
 
 Handle(Geom_BSplineCurve) sectionCurve(const Section& section)
@@ -536,4 +536,4 @@ std::optional<Fitted> exactContacts(const Rail& rail, Stations& stations, const 
   return out;
 }
 
-} // namespace BRepExt::blend2::detail
+} // namespace BRepExt::blending::detail

@@ -732,15 +732,15 @@ void rounds(const char*              name,
     for (const Step& step : steps)
     {
       lastInputExt = body;
-      BRepExt::blend2::Request request;
+      BRepExt::blending::Request request;
       request.operation = "round";
       request.body      = body;
       for (const TopoDS_Edge& edge : edgesWhere(body, step.pick))
         request.edges.push_back(edge);
       request.first = step.radius;
-      request.law   = BRepExt::blend2::Law::Conic;
+      request.law   = BRepExt::blending::Law::Conic;
       request.rho   = 0.5;
-      body          = BRepExt::blend2::blend(request).shape;
+      body          = BRepExt::blending::blend(request).shape;
     }
     resultExt = body;
     validExt  = valid(body);
@@ -808,15 +808,15 @@ void junction(const char* name, const TopoDS_Shape& body, const Pick& pick, doub
     return maker.IsDone() && validTimed(maker.Shape(), body);
   });
   const Stats  ext     = measure([&] {
-    BRepExt::blend2::Request request;
+    BRepExt::blending::Request request;
     request.operation = "round";
     request.body      = body;
     for (const TopoDS_Edge& edge : edgesWhere(body, pick))
       request.edges.push_back(edge);
     request.first           = radius;
-    request.law             = BRepExt::blend2::Law::Conic;
+    request.law             = BRepExt::blending::Law::Conic;
     request.rho             = 0.5;
-    const TopoDS_Shape made = BRepExt::blend2::blend(request).shape;
+    const TopoDS_Shape made = BRepExt::blending::blend(request).shape;
     resultExt               = made;
     validExt                = valid(made);
     volumeExt               = volume(made);

@@ -32,7 +32,7 @@
 #include <ElCLib.hxx>
 #include <Extrema_ExtPC.hxx>
 
-namespace BRepExt::blend2
+namespace BRepExt::blending
 {
 
 using namespace detail;
@@ -3619,4 +3619,4 @@ static Blended blendCopy(const Request&                   request,
   return b.result();
 }
 
-} // namespace BRepExt::blend2
+} // namespace BRepExt::blending

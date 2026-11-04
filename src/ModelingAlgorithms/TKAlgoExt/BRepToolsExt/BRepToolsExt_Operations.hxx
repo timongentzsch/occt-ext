@@ -122,7 +122,7 @@ Standard_EXPORT EvolutionData filletRange(OcctKernel&,
                                           int                        bound,
                                           const std::vector<double>& law = {});
 //! A blend of `edge` between the planes square to it at the fractions `start` and `end` of it, the
-//! rest of `shape` as it was: the blend of the edge alone (blend2::Request: distances `first` and
+//! rest of `shape` as it was: the blend of the edge alone (blending::Request: distances `first` and
 //! `second` off `reference` or a chamfer's `angle` off it, a conic, G2 or chamfer section `law` of
 //! `rho`, and where `sizes` holds (place, size) pairs, flat, a size that changes along it), limited
 //! as filletRange's.

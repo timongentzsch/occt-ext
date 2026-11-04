@@ -1,6 +1,6 @@
 set(OCCT_BRepFilletExt_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
 set(OCCT_BRepFilletExt_FILES
-  BRepFilletExt_Blend2.hxx
+  BRepFilletExt_Blend.hxx
   BRepFilletExt_BlendChains.cxx
   BRepFilletExt_BlendChecks.cxx
   BRepFilletExt_BlendChecks.hxx

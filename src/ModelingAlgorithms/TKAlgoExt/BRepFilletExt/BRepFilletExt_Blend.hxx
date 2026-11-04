@@ -16,7 +16,7 @@
 #include <BRepToolsExt_Session.hxx>
 #include <BRepBlendExt_Request.hxx>
 
-namespace BRepExt::blend2
+namespace BRepExt::blending
 {
 //! The blend of a stored body's edges (Request). Where `counts` is not empty, edges[i] takes
 //! counts[i] (place, size) pairs of `sizes`, flat, in turn (Request::radii; none: one size);
@@ -33,4 +33,4 @@ Standard_EXPORT Blended blendStored(const OcctKernel&            kernel,
                                     const std::vector<int>&      counts = {},
                                     const std::vector<double>&   sizes  = {},
                                     double                       angle  = 0);
-} // namespace BRepExt::blend2
+} // namespace BRepExt::blending

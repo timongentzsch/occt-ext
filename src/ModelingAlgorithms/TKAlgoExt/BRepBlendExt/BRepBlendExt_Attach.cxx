@@ -26,7 +26,7 @@
 #include <ShapeAnalysis_Edge.hxx>
 #include <numeric>
 
-namespace BRepExt::blend2::detail
+namespace BRepExt::blending::detail
 {
 
 //! The blends of chains of edges attached to the body: each support cut back to its
@@ -4709,8 +4709,8 @@ void Attach::continuity()
   // for the G2 law and G1 for conics; joints, seams and corner sides likewise where the law
   // gives it. Mitres and ends on stopping faces are sharp and carry none.
   // Across a joint where a support's second form jumps, the ball's path and so the sheet's
-  // curvature jump with it: that joint is only G1 (the limit is the one blend2::accepted holds the
-  // rest to).
+  // curvature jump with it: that joint is only G1 (the limit is the one blending::accepted holds
+  // the rest to).
   const auto supportBreaks = [&](int k, int end) {
     const Piece& a     = pieces[k];
     const auto&  joint = a.joint[end];
@@ -5155,4 +5155,4 @@ TopoDS_Shape attach(TopoDS_Shape                     body,
   return a.assemble();
 }
 
-} // namespace BRepExt::blend2::detail
+} // namespace BRepExt::blending::detail

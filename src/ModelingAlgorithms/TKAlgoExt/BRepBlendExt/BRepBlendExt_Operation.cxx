@@ -16,7 +16,7 @@
 // valid, closed body whose curvature-continuous seams hold their claim.
 
 #include <BRepToolsExt_Session.hxx>
-#include <BRepFilletExt_Blend2.hxx>
+#include <BRepFilletExt_Blend.hxx>
 #include <BRepBlendExt_Internal.hxx>
 #include <GeomAlgoExt_SurfaceJet.hxx>
 #include <BRepAdaptor_Curve.hxx>
@@ -36,7 +36,7 @@
 namespace BRepExt
 {
 
-namespace blend2
+namespace blending
 {
 static int freeEdges(const TopoDS_Shape& shape)
 {
@@ -178,6 +178,6 @@ void accepted(const char*         op,
     }
   }
 }
-} // namespace blend2
+} // namespace blending
 
 } // namespace BRepExt

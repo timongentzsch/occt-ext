@@ -37,7 +37,7 @@
 #include <GeomAlgoExt_Failure.hxx>
 #ifndef BREPBLENDEXT_POLICY
   #include <BRepBlendExt_Policy.hxx>
-  #define BREPBLENDEXT_POLICY BRepExt::blend2::NativePolicy
+  #define BREPBLENDEXT_POLICY BRepExt::blending::NativePolicy
 #endif
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <deque>
@@ -125,7 +125,7 @@
 #include <type_traits>
 #include <optional>
 
-namespace BRepExt::blend2::detail
+namespace BRepExt::blending::detail
 {
 using SectionPolicy = BREPBLENDEXT_POLICY;
 using rho           = SectionPolicy;
@@ -1509,4 +1509,4 @@ Standard_EXPORT TopoDS_Shape attach(TopoDS_Shape                     body,
                                     const std::vector<Corner>&       cornersAt,
                                     const Handle(BRepTools_History)& history);
 
-} // namespace BRepExt::blend2::detail
+} // namespace BRepExt::blending::detail

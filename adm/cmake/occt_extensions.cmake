@@ -6,7 +6,7 @@ option(BUILD_EXT_KEEP_EXCEPTIONS
        ON)
 set(BREPBLENDEXT_POLICY_HEADER "" CACHE FILEPATH
     "Header that defines the section laws of the rolling-ball blend (see BRepBlendExt_Policy.hxx); force-included into the BRepBlendExt sources. Empty: the built-in policy")
-set(BREPBLENDEXT_POLICY_CLASS "BRepExt::blend2::NativePolicy" CACHE STRING
+set(BREPBLENDEXT_POLICY_CLASS "BRepExt::blending::NativePolicy" CACHE STRING
     "The class of that header that BRepBlendExt uses")
 
 if (BUILD_EXT_KEEP_EXCEPTIONS)

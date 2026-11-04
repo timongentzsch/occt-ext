@@ -18,7 +18,7 @@
 #include <GeomAlgoExt_Failure.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
 
-namespace BRepExt::blend2
+namespace BRepExt::blending
 {
 struct NativePolicy
 {
@@ -54,4 +54,4 @@ struct NativePolicy
     return false;
   }
 };
-} // namespace BRepExt::blend2
+} // namespace BRepExt::blending

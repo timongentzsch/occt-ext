@@ -16,7 +16,7 @@
 #include <BRepAlgoExt_Tolerance.hxx>
 #include <BRepToolsExt_History.hxx>
 #include <BRepFilletExt_Untouched.hxx>
-#include <BRepFilletExt_Blend2.hxx>
+#include <BRepFilletExt_Blend.hxx>
 #include <Standard_Failure.hxx>
 #include <BRepToolsExt_Operations.hxx>
 #include <BRepAdaptor_Curve.hxx>
@@ -217,14 +217,14 @@ EvolutionData blendRange(OcctKernel&                kernel,
   if (sizes.size() % 2)
     fail(op, invalid_input, "size places come in (place, size) pairs");
   // The edge alone, no tangent edges added: the range lies on it.
-  blend2::Request request;
+  blending::Request request;
   request.operation = op;
   request.body      = shape;
   request.edges     = {edge};
   request.mayAdd    = {edge};
   request.first     = first;
   request.second    = second;
-  request.law       = static_cast<blend2::Law>(law);
+  request.law       = static_cast<blending::Law>(law);
   request.rho       = rho;
   request.angle     = angle;
   if (reference)
@@ -235,10 +235,10 @@ EvolutionData blendRange(OcctKernel&                kernel,
     for (size_t k = 0; k + 1 < sizes.size(); k += 2)
       points.emplace_back(sizes[k], sizes[k + 1]);
   }
-  blend2::Blended blended;
+  blending::Blended blended;
   try
   {
-    blended = blend2::blend(request);
+    blended = blending::blend(request);
   }
   catch (const Standard_Failure& error)
   {
@@ -250,7 +250,7 @@ EvolutionData blendRange(OcctKernel&                kernel,
   for (const auto& points : request.radii)
     for (const auto& [place, at] : points)
       size = std::max(size, std::max(first, second) * at / first);
-  blend2::accepted(op, shape, blended.shape, size, &blended);
+  blending::accepted(op, shape, blended.shape, size, &blended);
   FaceHistory history(op, hashes, bound);
   if (start == 0 && end == 1)
   {

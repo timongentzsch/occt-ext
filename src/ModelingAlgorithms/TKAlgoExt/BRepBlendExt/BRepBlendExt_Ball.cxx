@@ -21,7 +21,7 @@
 #include <Geom_SurfaceOfRevolution.hxx>
 #include <gp_Lin.hxx>
 
-namespace BRepExt::blend2::detail
+namespace BRepExt::blending::detail
 {
 
 namespace
@@ -929,4 +929,4 @@ std::optional<Ball> restingBall(const std::vector<Side>& faces,
   return {};
 }
 
-} // namespace BRepExt::blend2::detail
+} // namespace BRepExt::blending::detail

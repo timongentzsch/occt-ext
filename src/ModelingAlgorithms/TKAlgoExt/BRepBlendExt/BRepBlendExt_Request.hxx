@@ -27,7 +27,7 @@
 #include <utility>
 #include <vector>
 
-namespace BRepExt::blend2
+namespace BRepExt::blending
 {
 
 //! Section law: rational conic, curvature-continuous spline, bevel, chord-controlled or
@@ -101,4 +101,4 @@ Standard_EXPORT void accepted(const char*         operation,
                               double              size,
                               const Blended*      made = nullptr);
 
-} // namespace BRepExt::blend2
+} // namespace BRepExt::blending

@@ -17,7 +17,7 @@
 #include <GeomAlgoExt_Hermite.hxx>
 #include <set>
 
-namespace BRepExt::blend2::detail
+namespace BRepExt::blending::detail
 {
 // Express the sections in a common basis before comparing or joining their poles.
 static bool commonSections(const std::vector<Handle(Geom_BSplineSurface)>& surfaces)
@@ -1228,4 +1228,4 @@ void joinSplitPieces(const char*                                op,
   sheetJoins(op, pieces, seeds);
 }
 
-} // namespace BRepExt::blend2::detail
+} // namespace BRepExt::blending::detail

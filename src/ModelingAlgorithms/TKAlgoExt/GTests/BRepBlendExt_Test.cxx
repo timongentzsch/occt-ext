@@ -44,17 +44,17 @@ using namespace BRepExtTest;
 namespace
 {
 
-BRepExt::blend2::Request roundOf(const TopoDS_Shape&             body,
-                                 const std::vector<TopoDS_Edge>& edges,
-                                 double                          radius)
+BRepExt::blending::Request roundOf(const TopoDS_Shape&             body,
+                                   const std::vector<TopoDS_Edge>& edges,
+                                   double                          radius)
 {
-  BRepExt::blend2::Request request;
+  BRepExt::blending::Request request;
   request.operation = "round";
   request.body      = body;
   for (const TopoDS_Edge& edge : edges)
     request.edges.push_back(edge);
   request.first = radius;
-  request.law   = BRepExt::blend2::Law::Conic;
+  request.law   = BRepExt::blending::Law::Conic;
   request.rho   = 0.5;
   return request;
 }
@@ -102,11 +102,11 @@ gp_Trsf posed(double s)
 }
 
 //! The blend, or a null shape and the test failed with the refusal (so that the case is named).
-TopoDS_Shape blended(const BRepExt::blend2::Request& request)
+TopoDS_Shape blended(const BRepExt::blending::Request& request)
 {
   try
   {
-    return BRepExt::blend2::blend(request).shape;
+    return BRepExt::blending::blend(request).shape;
   }
   catch (const std::exception& refused)
   {
@@ -229,7 +229,7 @@ TEST(BRepBlendExt, RoundingEveryEdgeOfABoxHasSteinersVolume)
   for (const double r : {6.0, 9.0})
   {
     const TopoDS_Shape made =
-      BRepExt::blend2::blend(roundOf(box, edgesWhere(box, [](const double*) { return true; }), r))
+      BRepExt::blending::blend(roundOf(box, edgesWhere(box, [](const double*) { return true; }), r))
         .shape;
     EXPECT_TRUE(BRepExt::invalidity(made).empty());
     EXPECT_NEAR(volume(made), roundedBoxVolume(a, b, c, r), 1e-6 * volume(box)) << "r=" << r;
@@ -252,7 +252,7 @@ TEST(BRepBlendExt, RoundOfASphereOnABoxRollsAtDistanceR)
   {
     const auto edges = edgesWhere(standing, ring);
     ASSERT_FALSE(edges.empty());
-    const TopoDS_Shape made = BRepExt::blend2::blend(roundOf(standing, edges, r)).shape;
+    const TopoDS_Shape made = BRepExt::blending::blend(roundOf(standing, edges, r)).shape;
     EXPECT_TRUE(BRepExt::invalidity(made).empty());
     const Defect defect = ballDefect(made, standing, r);
     ASSERT_GT(defect.samples, 0);
@@ -276,7 +276,7 @@ TEST(BRepBlendExt, RoundOfCrossedCylindersRollsAtDistanceR)
   {
     const auto edges = edgesWhere(crossed, inside);
     ASSERT_FALSE(edges.empty());
-    const TopoDS_Shape made = BRepExt::blend2::blend(roundOf(crossed, edges, r)).shape;
+    const TopoDS_Shape made = BRepExt::blending::blend(roundOf(crossed, edges, r)).shape;
     EXPECT_TRUE(BRepExt::invalidity(made).empty());
     const Defect defect = ballDefect(made, crossed, r);
     ASSERT_GT(defect.samples, 0);
@@ -294,10 +294,10 @@ TEST(BRepBlendExt, ReblendOfRoundedEdgesRollsAtDistanceR)
   const auto         uprights = [](const double* b) {
     return near(b[0], b[3]) && near(b[1], b[4]) && b[5] - b[2] > 5;
   };
-  const TopoDS_Shape first = BRepExt::blend2::blend(roundOf(box, edgesWhere(box, top), 8)).shape;
+  const TopoDS_Shape first = BRepExt::blending::blend(roundOf(box, edgesWhere(box, top), 8)).shape;
   const auto         edges = edgesWhere(first, uprights);
   ASSERT_FALSE(edges.empty());
-  const TopoDS_Shape second = BRepExt::blend2::blend(roundOf(first, edges, 3)).shape;
+  const TopoDS_Shape second = BRepExt::blending::blend(roundOf(first, edges, 3)).shape;
   EXPECT_TRUE(BRepExt::invalidity(second).empty());
   const Defect defect =
     ballDefect(second, first, 3, [](const gp_Pnt& centre) { return centre.Z() >= 3; });
@@ -344,7 +344,7 @@ TEST(BRepBlendExt, RoundInAWedgeOfAnyAngleHasTheClosedFormSection)
           ASSERT_FALSE(edge.IsNull());
           if (!turned && s != 1)
             continue;
-          const TopoDS_Shape made = BRepExt::blend2::blend(roundOf(moved, {edge}, r * s)).shape;
+          const TopoDS_Shape made = BRepExt::blending::blend(roundOf(moved, {edge}, r * s)).shape;
           EXPECT_TRUE(BRepExt::invalidity(made).empty()) << degrees << (convex ? " convex" : "");
           EXPECT_NEAR(volume(made) / (s * s * s),
                       before + (convex ? -1 : 1) * section * height,
@@ -400,7 +400,7 @@ TEST(BRepBlendExt, RoundInAWedgeOfACylinderRollsAtDistanceR)
         const double      r    = 0.3 * std::min(1.0, 4 * std::pow(std::sin(psi / 2), 2));
         const TopoDS_Edge edge = edgeThrough(body, on, R);
         ASSERT_FALSE(edge.IsNull()) << degrees;
-        const TopoDS_Shape made = BRepExt::blend2::blend(roundOf(body, {edge}, r)).shape;
+        const TopoDS_Shape made = BRepExt::blending::blend(roundOf(body, {edge}, r)).shape;
         EXPECT_TRUE(BRepExt::invalidity(made).empty()) << degrees;
         // Where the ball rolls: between the faces that stop the edge.
         const Defect defect = ballDefect(made, body, r, [&](const gp_Pnt& centre) {
@@ -445,7 +445,7 @@ TEST(BRepBlendExt, RoundWhoseSizeChangesHasCircularSectionsAcrossTheEdge)
     // The edge runs up z with its parameter.
     ASSERT_NEAR(curve.Value(curve.FirstParameter()).Z(), 0, 1e-12);
     const auto               r       = [&](double z) { return law(z / c); };
-    BRepExt::blend2::Request request = roundOf(box, edges, 1);
+    BRepExt::blending::Request request = roundOf(box, edges, 1);
     request.radii                    = {points};
     const TopoDS_Shape made          = blended(request);
     if (made.IsNull())
@@ -486,7 +486,7 @@ TEST(BRepBlendExt, RoundWhoseSizeChangesHasCircularSectionsAcrossTheEdge)
         const auto& [place, size] = flipped ? points[points.size() - 1 - i] : points[i];
         mine.emplace_back(flipped ? 1 - place : place, size * s);
       }
-      BRepExt::blend2::Request again = roundOf(moved, {turned}, s);
+      BRepExt::blending::Request again = roundOf(moved, {turned}, s);
       again.radii                    = {mine};
       const TopoDS_Shape other       = blended(again);
       if (other.IsNull())
@@ -512,9 +512,9 @@ TEST(BRepBlendExt, ChamferAndConicWhoseSizeChangesKeepTheirFeet)
     const double x = std::min(z / c, 1 - z / c);
     return 1 + 6 * x - 8 * x * x * x;
   };
-  for (const auto law : {BRepExt::blend2::Law::Chamfer, BRepExt::blend2::Law::Conic})
+  for (const auto law : {BRepExt::blending::Law::Chamfer, BRepExt::blending::Law::Conic})
   {
-    BRepExt::blend2::Request request = roundOf(box, edges, 1);
+    BRepExt::blending::Request request = roundOf(box, edges, 1);
     request.law                      = law;
     request.rho                      = 0.7;
     request.radii                    = {points};
@@ -530,7 +530,7 @@ TEST(BRepBlendExt, ChamferAndConicWhoseSizeChangesKeepTheirFeet)
       double u0, u1, v0, v1;
       BRepTools::UVBounds(face, u0, u1, v0, v1);
       const BRepAdaptor_Surface surface(face);
-      if (law == BRepExt::blend2::Law::Chamfer)
+      if (law == BRepExt::blending::Law::Chamfer)
         for (int i = 1; i < 12; ++i)
           for (int j = 1; j < 12; ++j)
           {
@@ -551,7 +551,7 @@ TEST(BRepBlendExt, ChamferAndConicWhoseSizeChangesKeepTheirFeet)
             continue;
           worst = std::max(worst, std::abs((x ? b - p.Y() : a - p.X()) - r(p.Z())));
           ++count;
-          if (law != BRepExt::blend2::Law::Conic)
+          if (law != BRepExt::blending::Law::Conic)
             continue;
           GeomAPI_ProjectPointOnSurf onto(p, BRep_Tool::Surface(face));
           double                     u, v;
@@ -582,7 +582,7 @@ TEST(BRepBlendExt, RoundOfARimWhoseSizeChangesHasCircularSections)
   const std::vector<std::pair<double, double>> points = {{0, 1}, {0.25, 2}, {0.6, 0.7}, {1, 1}};
   const BRepAdaptor_Curve                      curve(rim[0]);
   const auto               r = sizeLaw(points, curve.FirstParameter(), curve.LastParameter(), true);
-  BRepExt::blend2::Request request = roundOf(cylinder, rim, 1);
+  BRepExt::blending::Request request = roundOf(cylinder, rim, 1);
   request.radii                    = {points};
   const TopoDS_Shape made          = blended(request);
   ASSERT_FALSE(made.IsNull());
@@ -600,7 +600,7 @@ TEST(BRepBlendExt, RoundOfARimWhoseSizeChangesHasCircularSections)
   EXPECT_GT(count, 50);
   EXPECT_LE(std::abs(worst), BRepExt::tolerance::sewing);
   request.radii = {{{0, 1}, {1, 3}}};
-  EXPECT_THROW(BRepExt::blend2::blend(request), BRepExt::Failure);
+  EXPECT_THROW(BRepExt::blending::blend(request), BRepExt::Failure);
 }
 
 // Held out: a size that changes round the ring where a sphere of radius R stands on a plane, a
@@ -621,7 +621,7 @@ TEST(BRepBlendExt, RoundOfASphereOnAPlaneWhoseSizeChangesHasCircularSections)
   const std::vector<std::pair<double, double>> points = {{0, 2}, {0.3, 3}, {0.7, 1.2}, {1, 2}};
   const BRepAdaptor_Curve                      curve(ring[0]);
   const auto               r = sizeLaw(points, curve.FirstParameter(), curve.LastParameter(), true);
-  BRepExt::blend2::Request request = roundOf(standing, ring, 2);
+  BRepExt::blending::Request request = roundOf(standing, ring, 2);
   request.radii                    = {points};
   const TopoDS_Shape made          = blended(request);
   ASSERT_FALSE(made.IsNull());
@@ -695,7 +695,7 @@ TEST(BRepBlendExt, RoundBesideAHoleTangentToItsFaceIsRefusedByName)
     {
       try
       {
-        BRepExt::blend2::blend(roundOf(body, edges, r));
+        BRepExt::blending::blend(roundOf(body, edges, r));
         ADD_FAILURE() << "a pinched body was blended";
       }
       catch (const BRepExt::Failure& refused)
@@ -704,7 +704,7 @@ TEST(BRepBlendExt, RoundBesideAHoleTangentToItsFaceIsRefusedByName)
       }
       continue;
     }
-    const TopoDS_Shape made = BRepExt::blend2::blend(roundOf(body, edges, r)).shape;
+    const TopoDS_Shape made = BRepExt::blending::blend(roundOf(body, edges, r)).shape;
     EXPECT_TRUE(BRepExt::invalidity(made).empty()) << gap;
     const Defect defect = ballDefect(made, body, r, [&](const gp_Pnt& c) {
       return std::hypot(c.X() - 3 - gap, c.Y() - 10) > 3 + r && c.Y() > r && c.Y() < 20 - r;
@@ -733,9 +733,9 @@ TEST(BRepBlendExt, BlendOfARimOverASideNarrowerThanItUsesTheSideUp)
       const auto         rim =
         edgesWhere(cylinder, [&](const double* b) { return near(b[2], h) && near(b[5], h); });
       ASSERT_EQ(rim.size(), 1u);
-      BRepExt::blend2::Request request = roundOf(cylinder, rim, r);
+      BRepExt::blending::Request request = roundOf(cylinder, rim, r);
       if (chamfer)
-        request.law = BRepExt::blend2::Law::Chamfer;
+        request.law = BRepExt::blending::Law::Chamfer;
       const TopoDS_Shape made = blended(request);
       if (made.IsNull())
         continue;
@@ -834,7 +834,7 @@ TEST(BRepBlendExt, RoundOfASteepRimIsTheBallsWhereItDoesNotCrossItself)
                    + std::to_string(m.R));
       try
       {
-        const TopoDS_Shape made = BRepExt::blend2::blend(roundOf(plate, rim, m.r)).shape;
+        const TopoDS_Shape made = BRepExt::blending::blend(roundOf(plate, rim, m.r)).shape;
         EXPECT_FALSE(crosses) << "a crossing envelope was delivered";
         EXPECT_TRUE(BRepExt::invalidity(made).empty());
         // Every point of the blend r from the centres' ellipse: about the axis through (size/2,

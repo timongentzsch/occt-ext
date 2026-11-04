@@ -23,7 +23,7 @@
 
 #include <functional>
 
-namespace BRepExt::blend2::detail
+namespace BRepExt::blending::detail
 {
 
 TopoDS_Edge trimmed(const TopoDS_Edge&   edge,
@@ -1605,4 +1605,4 @@ bool smoothAt(const TopoDS_Face&   a,
          && na.Crossed(nb).Magnitude() <= tol::coarseAngle;
 }
 
-} // namespace BRepExt::blend2::detail
+} // namespace BRepExt::blending::detail
