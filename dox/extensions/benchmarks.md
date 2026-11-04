@@ -4,7 +4,7 @@
 
 ![CPU time per call: stock OCCT, stock followed by a validity check, and TKAlgoExt](operation-benchmark.svg)
 
-Median process CPU time of ten runs after one warm-up (`std::clock`), one thread, GCC 12.2 `-O3`, static
+Median process CPU time of ten runs after one warm-up (`std::clock`), the median of three such runs, one thread, GCC 12.2 `-O3`, static
 Release libraries, TBB off, AMD Ryzen 9 7950X3D on a shared machine. The complete output with minima and maxima is
 [operation-benchmark-results.txt](../../adm/scripts/extensions/operation-benchmark-results.txt); rerun it with
 `adm/scripts/extensions/operation-benchmark.sh NATIVE_BUILD_DIRECTORY` and redraw the chart with
@@ -19,21 +19,21 @@ difference between implementations and is not). Hatched bars are calls with no v
 
 | Operation | Input | Stock ms | Stock + check ms | TKAlgoExt ms | Result |
 | --- | --- | ---: | ---: | ---: | --- |
-| Round | plate, hole r=1, edge r=0.2 / 0.5 | 0.24 / 0.24 | 0.35 / 0.35 | 0.37 / 0.37 | both exact to 5e-12 (closed form) |
-| Round | box, all 12 edges, r=6 / r=9 | 2.7 / 2.7 | 3.5 / 3.5 | 1.6 / 1.6 | both exact to 3e-11 (Steiner) |
-| Round | box, three edges at a corner, r=7 | 0.87 | 1.24 | 0.54 | same volume |
-| Round | box, top r=8 then uprights r=3 | 5.9 | 7.4 | 7.2 | ball defect: stock 7e-3 at most, TKAlgoExt 2e-9 |
-| Round | crossed cylinders R10/R6, r=1 / 2.5 | 10.2 / 11.1 | 12.5 / 13.7 | 8.3 / 10.2 | ball defect: stock 2e-4 / 3e-3, TKAlgoExt 2e-8 / 3e-8 |
-| Round | sphere R14 on a box, r=2 / 6 | 1.03 / 1.03 | 1.24 / 1.24 | 0.45 / 0.44 | volumes agree to 1e-7; ball defect: stock 4e-6, TKAlgoExt 1e-14 |
-| Fill | four cubic sides, a=0.5 / 2.0 | 2.6 / 13.7 | | 1.9 / 1.9 | stock 0.11 / 0.45 off the defining surface, TKAlgoExt 1e-12 |
-| Hollow | filleted box, wall 2 / 4 | 2.6 / 2.5 | | 6.8 / 8.0 | stock volume wrong by 3.3e4 / invalid; TKAlgoExt exact to 1e-11 |
+| Round | plate, hole r=1, edge r=0.2 / 0.5 | 0.25 / 0.25 | 0.38 / 0.37 | 0.40 / 0.40 | both exact to 5e-12 (closed form) |
+| Round | box, all 12 edges, r=6 / r=9 | 2.6 / 2.8 | 3.5 / 3.6 | 1.8 / 1.8 | both exact to 3e-11 (Steiner) |
+| Round | box, three edges at a corner, r=7 | 0.88 | 1.26 | 0.60 | same volume |
+| Round | box, top r=8 then uprights r=3 | 5.8 | 7.3 | 8.6 | ball defect: stock 7e-3 at most, TKAlgoExt 2e-9 |
+| Round | crossed cylinders R10/R6, r=1 / 2.5 | 10.1 / 11.0 | 12.2 / 13.5 | 11.6 / 13.7 | ball defect: stock 2e-4 / 3e-3, TKAlgoExt 2e-8 / 3e-8 |
+| Round | sphere R14 on a box, r=2 / 6 | 1.02 / 1.02 | 1.23 / 1.22 | 0.48 / 0.46 | volumes agree to 1e-7; ball defect: stock 4e-6, TKAlgoExt 1e-14 |
+| Fill | four cubic sides, a=0.5 / 2.0 | 2.7 / 13.4 | | 2.0 / 1.9 | stock 0.11 / 0.45 off the defining surface, TKAlgoExt 1e-12 |
+| Hollow | filleted box, wall 2 / 4 | 2.6 / 2.5 | | 6.7 / 8.0 | stock volume wrong by 3.3e4 / invalid; TKAlgoExt exact to 1e-11 |
 | Curve offset | rectangle, d=2 / 10 | 0.14 / 0.14 | | 0.21 / 0.21 | both exact |
-| Skin | two circles, ruled | 0.22 | 0.42 | 0.40 | frustum volume, both exact to 2e-11 |
-| Skin | six circles at unequal heights, ruled | 0.64 | 1.33 | 1.46 | stack of frusta, both exact to 1.3e-11 |
-| Skin | six circles, smooth | 1.08 | 1.26 | 1.00 | stock bulges to half-width 19.3 through sections of radius at most 10 (volume 13 000, more than any profile within the sections allows); TKAlgoExt 10.0 |
-| Skin | three circles, smooth | 0.56 | 0.72 | 0.80 | both valid; sections lie on the result to 1.5e-8 (stock) and 7e-15 (TKAlgoExt) |
-| Skin | square to circle, ruled | 1.15 | 1.79 | 1.50 | same volume |
-| Skin | square, circle, square, smooth | 1.58 | 2.18 | 9.3 | both valid (TKAlgoExt's was an unconnected solid before [this correction](corrections.md#brepskinext-section-vertices-exact)) |
+| Skin | two circles, ruled | 0.23 | 0.43 | 0.40 | frustum volume, both exact to 2e-11 |
+| Skin | six circles at unequal heights, ruled | 0.64 | 1.32 | 1.44 | stack of frusta, both exact to 1.3e-11 |
+| Skin | six circles, smooth | 1.07 | 1.26 | 0.99 | stock bulges to half-width 19.3 through sections of radius at most 10 (volume 13 000, more than any profile within the sections allows); TKAlgoExt 10.0 |
+| Skin | three circles, smooth | 0.55 | 0.71 | 0.79 | both valid; sections lie on the result to 1.5e-8 (stock) and 7e-15 (TKAlgoExt) |
+| Skin | square to circle, ruled | 1.15 | 1.78 | 1.42 | same volume |
+| Skin | square, circle, square, smooth | 1.47 | 2.06 | 8.9 | both valid (TKAlgoExt's was an unconnected solid before [this correction](corrections.md#brepskinext-section-vertices-exact)) |
 
 *Ball defect.* The exact blend of radius r on a body B is the envelope of the balls of radius r that lie on one side
 of the surface and touch B; so for a point P of it with unit normal N, the centre c = P -/+ rN is at distance exactly r
@@ -49,19 +49,23 @@ volumes; stock's blends are the approximations and TKAlgoExt's are exact to the 
 
 How to read it, without flattering it:
 
-* **Where TKAlgoExt is faster than the checked stock bar:** twelve-edge and corner rounds (2.2 and 2.3 times), the sphere on a
-  box (2.8 times), the crossed cylinders (1.5 and 1.3 times), the fill (which is also exact where stock is not), the smooth skin
-  through six circles (which also stays within the radius of its sections where stock bulges to nearly twice it) and the ruled
-  skin from a square to a circle (1.2 times).
-* **Where it is level:** a single circular edge is 1.05 times the checked stock bar (0.37 against 0.35 ms; the remaining 0.02 ms is
-  face history and the closedness test), the round blended into earlier rounds is 0.97 times, the ruled skins are 1.0 to 1.1
+* **Where TKAlgoExt is faster than the checked stock bar:** twelve-edge and corner rounds (2.0 and 2.1 times), the sphere on a
+  box (2.6 times), the fill (which is also exact where stock is not), the smooth skin through six circles (which also stays within
+  the radius of its sections where stock bulges to nearly twice it) and the ruled skin from a square to a circle (1.25 times).
+* **Where it is level:** a single circular edge is 1.05 to 1.07 times the checked stock bar (0.40 against 0.38 ms; the remaining
+  0.02 ms is face history and the closedness test), the crossed cylinders are 0.95 and 1.01 times, the ruled skins are 0.9 to 1.1
   times (they call the same `BRepOffsetAPI_ThruSections`; the extra is lining up the rings).
-* **Where it is slower:** the curve offset (1.5 times; it brings the curve to a working size so that offsets behave at any scale,
+* **Where it is slower:** the round blended into earlier rounds (1.19 times), the curve offset (1.5 times; it brings the curve to a working size so that offsets behave at any scale,
   redraws it, builds the plane and polylines and tests the result for crossing, none of which stock does, and the offset
   itself costs the same; the test of a line or conic arc against itself is skipped, which is exact), the hollow (2.6 to 3.2 times, against a stock call that returns a wrong or invalid body; by instruction count
   36 per cent is OCCT's offset, 20 per cent defeaturing, 11 per cent the Boolean cut, 22 per cent the check that the wall is
   nowhere thinner than asked and 8 per cent validity checks), the smooth skin through three circles (1.1 times) and the smooth skin through a square, a circle and a square (4.3
   times: TKAlgoExt's own Gordon-type construction against stock's; profiled below).
+* **What the rounds and junctions pay for steep rims and narrow sides:** a test that a fitted blend does not cross itself
+  between its contacts (65 by 7 surface evaluations and the contacts' run-back check) and each face's far edge, found once per
+  edge and face. Together they make those rows 6 to 40 per cent slower than without them (the crossed cylinders 11.6 against
+  8.3 ms), which is why the crossed cylinders are now level with the checked stock bar rather than 1.3 to 1.5 times faster and
+  the round into earlier rounds slower than it.
 * **What changed:** a profile of the sphere on a block found 80 per cent of the call in an exact face-to-face distance between the
   toroidal blend and the block's far sides. `BRepBndLib` boxes a face that is not planar by its whole surface, so the box of the
   blend was that of the entire torus and reached the sides, and the torus box that `BndLib` gives for a parameter range was itself

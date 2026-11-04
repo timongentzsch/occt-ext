@@ -33,24 +33,26 @@ Where this tree is slower than stock plus the same check, or does not do somethi
 
 ![CPU time per call: stock OCCT, stock followed by a validity check, and TKAlgoExt](dox/extensions/operation-benchmark.svg)
 
-Median CPU time per call, ten runs. Every call of `TKAlgoExt` checks its own result before returning it, so the
+Median CPU time per call of ten runs, the median of three such runs. Every call of `TKAlgoExt` checks its own result before returning it, so the
 fair reference is the middle bar, stock followed by the same check. Hatched bars are calls with no valid or a
 wrong result. Selected rows (milliseconds; full table, method and caveats in
 [benchmarks.md](dox/extensions/benchmarks.md)):
 
 | Operation | Stock | Stock + check | TKAlgoExt | Quality |
 | --- | ---: | ---: | ---: | --- |
-| Box, all 12 edges rounded | 2.7 | 3.5 | 1.6 | both exact to 3e-11 (Steiner) |
-| Sphere R14 on a box, junction rounded | 1.03 | 1.24 | 0.45 | ball defect: stock 4e-6, TKAlgoExt 1e-14 |
-| Round blended into earlier rounds | 5.9 | 7.4 | 7.2 | ball defect: stock 7e-3, TKAlgoExt 2e-9 |
-| Crossed cylinders R10 / R6, r = 1 | 10.2 | 12.5 | 8.3 | ball defect: stock 2e-4, TKAlgoExt 2e-8 |
-| Fill of four cubic sides | 2.6 | | 1.9 | stock 0.11 off the defining surface, TKAlgoExt 1e-12 |
-| Hollow of a filleted box | 2.6 | | 6.8 | stock volume wrong by 3.3e4; TKAlgoExt exact to 1e-11 |
-| Smooth skin through six circles | 1.08 | 1.26 | 1.00 | stock bulges to half-width 19.3; sections have radius at most 10 |
+| Box, all 12 edges rounded | 2.6 | 3.5 | 1.8 | both exact to 3e-11 (Steiner) |
+| Sphere R14 on a box, junction rounded | 1.02 | 1.23 | 0.48 | ball defect: stock 4e-6, TKAlgoExt 1e-14 |
+| Round blended into earlier rounds | 5.8 | 7.3 | 8.6 | ball defect: stock 7e-3, TKAlgoExt 2e-9 |
+| Crossed cylinders R10 / R6, r = 1 | 10.1 | 12.2 | 11.6 | ball defect: stock 2e-4, TKAlgoExt 2e-8 |
+| Fill of four cubic sides | 2.7 | | 2.0 | stock 0.11 off the defining surface, TKAlgoExt 1e-12 |
+| Hollow of a filleted box | 2.6 | | 6.7 | stock volume wrong by 3.3e4; TKAlgoExt exact to 1e-11 |
+| Smooth skin through six circles | 1.07 | 1.26 | 0.99 | stock bulges to half-width 19.3; sections have radius at most 10 |
 
-It is not uniformly faster: a single circular fillet is level (1.05 times stock plus check), the curve offset is
-1.5 times, the smooth skin through square, circle and square 4.3 times, and the hollow 2.6 to 3.2 times
-slower while returning a correct body. [benchmarks.md](dox/extensions/benchmarks.md) gives the cause of each.
+It is not uniformly faster: a single circular fillet and the crossed cylinders are level (1.05 and 0.95 times stock plus
+check), the round blended into earlier rounds is 1.19 times, the curve offset 1.5 times, the smooth skin through square,
+circle and square 4.3 times, and the hollow 2.6 to 3.2 times slower while returning a correct body. The rounds pay for a
+test that a blend does not cross itself, which steep rims need. [benchmarks.md](dox/extensions/benchmarks.md) gives the
+cause of each.
 
 ## Gallery
 
@@ -231,7 +233,8 @@ Known limits and what remains:
    plane and cylinder, two cylinders). Where the angle turns along the edge so far that the balls' centre
    path bends more tightly than the ball (the rim of a hole leaning a with r >= (R + r) cos a: from about
    70 degrees), the rolling-ball surface crosses itself and is refused by name until it is trimmed there;
-   short of that the rim is the balls' envelope.
+   short of that the rim is the balls' envelope. Eleven cases of the blend matrix over pairs of support surfaces
+   (round and curvature-continuous sections) that were built on 31 October are refused now; the cause is being traced.
 2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published
    bound for a curvature-continuous conic or quintic section as a function of the support's curvature is
    missing.
@@ -263,9 +266,11 @@ Known limits and what remains:
 4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
    offsetting solids whose blends meet the wall thickness exactly has no exactness proof. In the face offset
    the largest angle between the faces along a tangent edge is found by sampling, not bounded.
-5. **Speed.** Measured against stock followed by the same check: a single circular edge 1.05 times, the curve
-   offset 1.5 times, the hollow 2.6 to 3.2 times, the smooth skin through square, circle and square 4.3 times.
-   Everything else in the [table](dox/extensions/benchmarks.md) is level or faster. A profile of that skin
+5. **Speed.** Measured against stock followed by the same check: a single circular edge 1.05 times, the round
+   blended into earlier rounds 1.19 times, the curve offset 1.5 times, the hollow 2.6 to 3.2 times, the smooth skin
+   through square, circle and square 4.3 times. Everything else in the [table](dox/extensions/benchmarks.md) is level
+   or faster. The test that a fitted blend does not cross itself is evaluated on every fitted blend; a curvature bound
+   that proves the sections cannot run back would let it be skipped (not done). A profile of that skin
    ([benchmarks.md](dox/extensions/benchmarks.md#smooth-skin-through-square-circle-square)) puts a third of
    it in arc-length placement of points while a grid is refined, a quarter in sewing, a sixth each in face
    construction and in orienting the solid.
