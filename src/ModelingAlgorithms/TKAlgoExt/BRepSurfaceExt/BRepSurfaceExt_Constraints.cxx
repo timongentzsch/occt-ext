@@ -165,12 +165,17 @@ Constraint constraint(const char*        op,
   return {ref, a, b, order};
 }
 
+namespace
+{
+// Derivative constraints only. Values are equation tolerances, scaled by the current metric.
+constexpr double normalWeight = 1e-3, normalWithin = 1e-7;
+constexpr double curvatureWeight = 1e-6, curvatureWithin = 1e-9, metricFloor = 1;
+
 void appendJetConditions(std::vector<FitCondition>& out,
                          const gp_XY&               uv,
                          const SurfaceJet&          j,
                          const SurfaceJet&          current,
-                         int                        order,
-                         const JetFitSettings&      settings)
+                         int                        order)
 {
   if (order == 0)
     return;
@@ -181,9 +186,9 @@ void appendJetConditions(std::vector<FitCondition>& out,
                    {{du, dv, n}},
                    1,
                    0,
-                   settings.normalWeight,
+                   normalWeight,
                    false,
-                   settings.normalWithin * (du ? current.u.Magnitude() : current.v.Magnitude())});
+                   normalWithin * (du ? current.u.Magnitude() : current.v.Magnitude())});
   if (order < 2)
     return;
   // The same linearisation as Patch, applied to all entries of the second form.
@@ -195,24 +200,24 @@ void appendJetConditions(std::vector<FitCondition>& out,
   {
     auto         x = du == 0 ? current.v : current.u, y = dv == 0 ? current.u : current.v;
     const double value = j.curvature(x, y);
-    out.push_back(
-      {uv.X(),
-       uv.Y(),
-       {{du, dv, n},
-        {1, 0, du == 0 ? gp_XYZ(0, 0, 0) : w(y) * -1},
-        {0, 1, dv == 0 ? gp_XYZ(0, 0, 0) : w(x) * -1},
-        {du == 2 ? 1 : 0,
-         du == 2 ? 0 : 1,
-         du == 2   ? w(x) * -1
-         : dv == 2 ? w(y) * -1
-                   : gp_XYZ(0, 0, 0)}},
-       4,
-       -value,
-       settings.curvatureWeight,
-       false,
-       settings.curvatureWithin * std::max(settings.metricFloor, x.Magnitude() * y.Magnitude())});
+    out.push_back({uv.X(),
+                   uv.Y(),
+                   {{du, dv, n},
+                    {1, 0, du == 0 ? gp_XYZ(0, 0, 0) : w(y) * -1},
+                    {0, 1, dv == 0 ? gp_XYZ(0, 0, 0) : w(x) * -1},
+                    {du == 2 ? 1 : 0,
+                     du == 2 ? 0 : 1,
+                     du == 2   ? w(x) * -1
+                     : dv == 2 ? w(y) * -1
+                               : gp_XYZ(0, 0, 0)}},
+                   4,
+                   -value,
+                   curvatureWeight,
+                   false,
+                   curvatureWithin * std::max(metricFloor, x.Magnitude() * y.Magnitude())});
   }
 }
+} // namespace
 
 std::vector<FitCondition> conditions(const char*                             op,
                                      const std::vector<Constraint>&          constraints,

@@ -60,20 +60,6 @@ Standard_EXPORT int   boundarySide(const char*, const TopoDS_Face&, const TopoDS
 Standard_EXPORT Constraint
   constraint(const char*, const TopoDS_Face&, const TopoDS_Edge&, Boundary, int);
 
-// Derivative constraints only. Values are equation tolerances, scaled by the
-// current metric; the defaults preserve the existing surface-tool contract.
-struct JetFitSettings
-{
-  double normalWeight = 1e-3, normalWithin = 1e-7;
-  double curvatureWeight = 1e-6, curvatureWithin = 1e-9, metricFloor = 1;
-};
-
-Standard_EXPORT void appendJetConditions(std::vector<FitCondition>&,
-                                         const gp_XY&,
-                                         const SurfaceJet& target,
-                                         const SurfaceJet& current,
-                                         int               order,
-                                         const JetFitSettings& = {});
 Standard_EXPORT std::vector<FitCondition> conditions(const char*,
                                                      const std::vector<Constraint>&,
                                                      const occ::handle<Geom_BSplineSurface>&,
