@@ -61,6 +61,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -218,17 +219,57 @@ void certify(const Handle(Geom_BSplineSurface)&            surface,
              double                                        tolerance)
 {
   const size_t np = profiles.size(), ng = guides.size();
-  // Every curve of the net lies on the surface: eight places to each of its spans.
+  // Every curve of the net lies on the surface: eight places to each of its spans. A place is
+  // within the tolerance of the surface as soon as some point of the surface is, so the point that
+  // Gauss-Newton steps reach from the place before settles it; only where that is farther is the
+  // whole surface searched, and that distance is the one held to the tolerance.
   ShapeAnalysis_Surface on(surface);
-  double                off = 0;
+  double                u0, u1, v0, v1;
+  surface->Bounds(u0, u1, v0, v1);
+  const auto nearFrom = [&](gp_Pnt2d uv, const gp_Pnt& p) {
+    for (int step = 0; step < 16; ++step)
+    {
+      gp_Pnt q;
+      gp_Vec su, sv;
+      surface->D1(uv.X(), uv.Y(), q, su, sv);
+      const gp_Vec r(q, p);
+      const double a = su.SquareMagnitude(), b = su.Dot(sv), c = sv.SquareMagnitude();
+      const double det = a * c - b * b;
+      if (!(det > 0))
+        break;
+      const double du = (c * r.Dot(su) - b * r.Dot(sv)) / det,
+                   dv = (a * r.Dot(sv) - b * r.Dot(su)) / det;
+      uv.SetCoord(std::clamp(uv.X() + du, u0, u1), std::clamp(uv.Y() + dv, v0, v1));
+      if (std::abs(du) <= 1e-12 * (u1 - u0) && std::abs(dv) <= 1e-12 * (v1 - v0))
+        break;
+    }
+    return uv;
+  };
+  double off = 0;
   for (const auto* curves : {&profiles, &guides})
     for (const auto& c : *curves)
+    {
+      std::optional<gp_Pnt2d> before;
       for (int k = c->FirstUKnotIndex(); k < c->LastUKnotIndex(); ++k)
         for (int s = 0; s <= 8; ++s)
         {
-          const gp_Pnt p = c->Value(c->Knot(k) + (c->Knot(k + 1) - c->Knot(k)) * s / 8);
-          off = std::max(off, on.Value(on.ValueOfUV(p, Precision::Confusion())).Distance(p));
+          const gp_Pnt p    = c->Value(c->Knot(k) + (c->Knot(k + 1) - c->Knot(k)) * s / 8);
+          double       away = Precision::Infinite();
+          if (before)
+          {
+            const gp_Pnt2d uv = nearFrom(*before, p);
+            away              = surface->Value(uv.X(), uv.Y()).Distance(p);
+            if (away <= tolerance)
+              before = uv;
+          }
+          if (!(away <= tolerance))
+          {
+            before = on.ValueOfUV(p, Precision::Confusion());
+            away   = on.Value(*before).Distance(p);
+          }
+          off = std::max(off, away);
         }
+    }
   if (off > tolerance)
     fail(op,
          no_solution,
