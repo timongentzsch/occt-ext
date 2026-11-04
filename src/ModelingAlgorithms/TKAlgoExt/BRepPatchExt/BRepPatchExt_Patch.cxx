@@ -3878,6 +3878,41 @@ std::function<gp_XY(double)> laidThrough(const std::vector<gp_XY>&  places,
   return [curve, from, to](double t) { return curve->Value((t - from) / (to - from)).XY(); };
 }
 
+//! The Favard constant that bounds the best approximation of degree p splines on even knots of span
+//! h: no more than K (h / pi)^(p + 1 - k) |f^(p + 1)| for the k-th derivative, K between 1 and
+//! pi / 2 (Favard 1937; de Boor, A Practical Guide to Splines, 2001, XII). The larger is taken.
+constexpr double favard = M_PI / 2;
+
+//! The largest span of a net of degree `degree` that, by that bound, follows a surface bending by
+//! `bend` as `order` asks it: a surface that bends by k at a place is there, to the order that
+//! matters, a circle of radius 1/k, whose (p + 1)-th derivative by length is k^p. Its place is then
+//! met within `fitShare` of the tolerance, its tangent plane (the first derivative) within that
+//! share of the angle's sine, and its bend (the second, as a share of k) within that share of the
+//! curvature's.
+double netSpacing(double bend, int order, int degree, const Limits& limits)
+{
+  if (!(bend > 0))
+    return HUGE_VAL;
+  double span =
+    M_PI * std::pow(fitShare * limits.g0 / (favard * std::pow(bend, degree)), 1.0 / (degree + 1));
+  if (order > 0)
+    span = std::min(
+      span,
+      M_PI * std::pow(fitShare * std::sin(limits.g1 * M_PI / 180) / favard, 1.0 / degree) / bend);
+  if (order > 1)
+    span =
+      std::min(span, M_PI * std::pow(fitShare * limits.g2 / favard, 1.0 / (degree - 1)) / bend);
+  return span;
+}
+
+//! The largest principal curvature of a surface at a place, from its jet.
+double sharpest(const SurfaceJet& jet)
+{
+  const gp_Vec a = jet.u.Normalized(), b = jet.n.Crossed(a);
+  const double aa = jet.curvature(a, a), bb = jet.curvature(b, b), ab = jet.curvature(a, b);
+  return std::abs((aa + bb) / 2) + std::hypot((aa - bb) / 2, ab);
+}
+
 //! A fill over a chart of the loop's own, for a loop whose rim's faces stand so that it is a
 //! height over no plane (see overPlane). The loop is spanned by a disc of triangles that leaves
 //! every side as its face asks and is laid flat conformally (proxyChart); a net free in space is
@@ -3918,7 +3953,80 @@ std::optional<Built> overChart(const Asked& asked, const Frame& frame)
   for (const Side& guide : asked.guides)
     for (int i = 0; i <= guidePins; ++i)
       through.push_back(guide.at(static_cast<double>(i) / guidePins));
-  const ConformalChart                      chart = proxyChart(rim, through);
+  int order = 0;
+  for (const Side& side : asked.sides)
+    order = std::max(order, side.order);
+  const int            degree = order > 0 || !asked.guides.empty() ? 5 : 3;
+  const ConformalChart chart  = proxyChart(rim, through);
+  // The span each node asks of a net (netSpacing): inside, by how the disc bends there; along the
+  // rim, by how the side's curve and its face bend, to the order the side asks.
+  const std::vector<double> bends = nodeBends(chart);
+  std::vector<double>       spacing(chart.point.size());
+  for (size_t i = 0; i < spacing.size(); ++i)
+    spacing[i] = std::min(asked.size, netSpacing(bends[i], 0, degree, asked.limits));
+  for (size_t s = 0; s < count; ++s)
+  {
+    const Side& side = asked.sides[s];
+    for (size_t j = 0; j < steps[s].size(); ++j)
+    {
+      const size_t node = j + 1 < steps[s].size() ? firstNode[s] + j : firstNode[(s + 1) % count];
+      const double f    = steps[s][j];
+      // The side's bend from the circle through its places beside this one, at even steps of its
+      // length: its parameter may slow to nothing (a trailing edge) where its derivatives say
+      // nothing of the bend, and a corner, at a side's end, is no bend.
+      double curve = 0;
+      if (steps[s].size() >= 3)
+      {
+        const size_t middle = std::clamp<size_t>(j, 1, steps[s].size() - 2);
+        const gp_Pnt before = side.at(steps[s][middle - 1]), here = side.at(steps[s][middle]),
+                     after = side.at(steps[s][middle + 1]);
+        const double product =
+          before.Distance(here) * here.Distance(after) * before.Distance(after);
+        if (product > 0)
+          curve = 2 * gp_Vec(here, before).Crossed(gp_Vec(here, after)).Magnitude() / product;
+      }
+      const double face =
+        side.order > 0 ? sharpest(side.faceJet(std::clamp(f, cornerInset, 1 - cornerInset))) : 0;
+      spacing[node] =
+        std::min({spacing[node],
+                  netSpacing(std::max({curve, face, bends[node]}), 0, degree, asked.limits),
+                  netSpacing(std::max(face, bends[node]), side.order, degree, asked.limits)});
+    }
+  }
+  // The spans a net over the chart needs at least: each way, over the chart's extent, the span
+  // each node asks as the chart stretches it there, the finest across the other way. Where those
+  // make more poles than a net free in space is let have, no net over the chart is tried.
+  {
+    const std::vector<double> stretch = nodeStretch(chart);
+    constexpr int             bins    = 256;
+    const auto                needed  = [&](int way, double from, double to) {
+      std::vector<double> span(bins, HUGE_VAL);
+      for (size_t i = 0; i < chart.flat.size(); ++i)
+      {
+        const int bin =
+          std::clamp(static_cast<int>((chart.flat[i].Coord(way) - from) / (to - from) * bins),
+                     0,
+                     bins - 1);
+        span[bin] = std::min(span[bin], spacing[i] * stretch[i]);
+      }
+      double spans = 0;
+      for (const double one : span)
+        if (std::isfinite(one))
+          spans += (to - from) / bins / one;
+      return std::max(fewestSpans, static_cast<int>(std::ceil(spans)));
+    };
+    gp_XY low = chart.flat.front(), high = low;
+    for (const gp_XY& at : chart.flat)
+    {
+      low.SetCoord(std::min(low.X(), at.X()), std::min(low.Y(), at.Y()));
+      high.SetCoord(std::max(high.X(), at.X()), std::max(high.Y(), at.Y()));
+    }
+    const gp_XY margin = (high - low) * marginShare;
+    const int   spansU = needed(1, low.X() - margin.X(), high.X() + margin.X()),
+              spansV   = needed(2, low.Y() - margin.Y(), high.Y() + margin.Y());
+    if ((spansU + degree) * (spansV + degree) > freePoles)
+      return std::nullopt;
+  }
   std::vector<std::function<gp_XY(double)>> layout(count);
   for (size_t s = 0; s < count; ++s)
   {
@@ -3964,10 +4072,6 @@ std::optional<Built> overChart(const Asked& asked, const Frame& frame)
   const double width = high.X() - low.X(), depth = high.Y() - low.Y(),
                larger = std::max(width, depth);
   const gp_XY margin(marginShare * width, marginShare * depth);
-  int         order = 0;
-  for (const Side& side : asked.sides)
-    order = std::max(order, side.order);
-  const int degree = order > 0 || !asked.guides.empty() ? 5 : 3;
 
   const auto certify = [&](const occ::handle<Geom_BSplineSurface>& surface) {
     std::vector<Rim> rims;

@@ -258,17 +258,45 @@ and 34) are filled on the same nets at rest, turned, mirrored and turned at a th
 times the size; read by projection onto the strips they meet every edge, the strips' tangent planes
 within 0.005 degrees and their bends within a share of 0.004 (95th percentile), and stand within 0.009 of
 the cylinder (the 200-degree window 0.0024, on 11 x 8 poles, in 0.34 s of CPU time natively; 300 degrees
-1.4 s). The wing tip is still refused. Its chart is right (the disc has the tip's dome and passes the
-guide), but G2 round its nose (radius 1.27) and the narrow fin its guide asks near the trailing edge
-(2.2 thick where the guide is 2.5 out) want spans of about half a unit on a chart of 78 by 18: some 1500
-to 2500 poles free in space against the 640 allowed. Halving where missed up to 54 x 54 spans took 140 s
-and stayed 0.004 off an edge. Open: a chart whose scale along the rim follows the faces' bend (Boundary
-First Flattening with the scale prescribed), or a net that is finer only where it has to be. The cap of a
-cone standing 80 degrees or more against its circle, refused as too steep before, is refused over its
-chart as well, from the same tilt at every pose and size.
+1.4 s).
+How fine a net over the chart has to be is known before any net is fitted, and a loop that needs more
+poles than a net free in space is let have (`freePoles`, 640) is refused at once. A spline of degree p on
+even knots of span h comes within K (h / pi)^(p + 1 - k) |f^(p + 1)| of a function in its k-th derivative
+[Favard 1937; de Boor, A Practical Guide to Splines, 2001, XII], with the Favard constant K between 1 and
+pi / 2. A surface that bends by k at a place is there, to the order that matters, a circle of radius
+1 / k, whose (p + 1)-th derivative by length is k^p. Held to a quarter (`fitShare`) of the tolerance in
+place, of the angle's sine in its tangent plane and of the share asked in its bend, the span may be no
+more than pi (s tol / (K k^p))^(1 / (p + 1)) for the place, pi (s sin g1 / K)^(1 / p) / k for the tangent
+plane and pi (s g2 / K)^(1 / (p - 1)) / k for the bend, the finest of what each place asks (`netSpacing`;
+for degree 5 and Patch's limits k h <= 0.61 at G1 and 0.94 at G2). The bend is read inside from the disc
+(the discrete operators of Meyer, Desbrun, Schroeder and Barr 2003, no tighter than one over the mean edge
+of a node's triangles, which is as tight as they can show) and along the rim from the circle through the
+side's places at even steps of its length, and from the face's own principal curvatures where tangency is
+asked: a parameter that slows to nothing at a trailing edge makes the curve's own derivatives say nothing
+of its bend. Each node's span, times how the chart stretches there, is the span the net needs at its place
+in the chart; the finest of them across each way, summed over the chart's extent with its margins,
+counts the spans of the coarsest net of graded knots that meets every place, and the poles that come of
+them. The window of 200 degrees asks for 8 x 3 spans (104 poles; it is met on 6 x 3), that of 300 degrees
+for 12 x 3. The wing tip asks for 65 x 9 spans, 980 poles: it is refused after the disc is made, in 63 to
+70 ms of CPU time natively (a fill over its chart took 3.3 s before, 2 ms before there was one; in
+WASM 80 to 130 ms per tip against 2.4 to 3.3 s and 12 to 36 ms, read by the application's test), at rest,
+turned and at five times the size, as are tips held out from the design (thickness 9 % and 15 % of the
+chord with the guide 6 and 12 out, a cambered tip of 70 by 15 %, and a tip of 70 with 2 % camber): 930 to
+1050 poles. Where the spans asked are: round the nose (0.6 for its radius of 1.27 at G1 and G2) and at
+the narrow fin that the guide asks near the trailing edge (the disc bends there by about 1 / 1.2). A net
+whose every cell were of the span asked where it lies would need 167 to 191 cells; it is the tensor net,
+whose fine spans run right across the chart, that needs five times that. A chart whose scale along the rim
+was set to stretch every place to the span an even net of 640 poles affords (Boundary First Flattening with
+the boundary's scale prescribed, the inside extended conformally by the harmonic conjugate, as a chart
+stretched so is not convex and the two coordinates extended each on its own fold it) needed more, 1050:
+stretching the nose widens the chart both ways. Open: a net that is finer only where it has to be, or
+several faces. The cap of a cone standing 80 degrees or more against its circle, refused as too steep
+before, asks for 529 to 576 poles at a tolerance of 1e-4, within the 640: it is tried, and its coarse nets
+are not shown regular, so that it is refused as before at about 0.4 s more per loop.
 The constants of the chart that are not derived: 160 places round the loop, 33 pins per guide, two
-relays, the pin's 100, the band's 0.5, four cuts of a cell, and the 4096 directions of the search, which
-only seed the exact step.
+relays, the pin's 100, the band's 0.5, four cuts of a cell, the 4096 directions of the search, which
+only seed the exact step, and the 256 bins over which the spans asked are read across the chart; the
+Favard constant is taken at its upper end, so that the spans are, as far as the bound goes, enough.
 
 *Unproven.* The interior acceptance gate (a fault when the interior bends more than 4 times the rim's
 bend, with a floor of 2/size) has no derivation; a bound of the form K sqrt(2D) in the energy gap D was

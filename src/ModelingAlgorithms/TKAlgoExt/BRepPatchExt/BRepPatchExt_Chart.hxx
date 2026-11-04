@@ -50,6 +50,17 @@ struct ChartRim
 Standard_EXPORT ConformalChart proxyChart(const std::vector<ChartRim>& rim,
                                           const std::vector<gp_Pnt>&   through);
 
+//! Per node of `chart`, the largest principal curvature of its triangles in space by the discrete
+//! operators of Meyer, Desbrun, Schroeder and Barr (2003): the mean curvature from the cotangent
+//! Laplacian and the Gaussian from the angle defect, over a third of the area round the node.
+//! A node of the boundary takes the largest of its neighbours inside; none is more than one over
+//! the mean length of the node's edges, as tight as its triangles can show.
+Standard_EXPORT std::vector<double> nodeBends(const ConformalChart& chart);
+
+//! Per node of `chart`, the chart's lengths over the surface's about it: the root of the ratio
+//! of the areas of its triangles laid flat and in space.
+Standard_EXPORT std::vector<double> nodeStretch(const ConformalChart& chart);
+
 //! Where in the chart the point of the chart's triangles nearest to `point` lies, and how far
 //! that is from it in space.
 Standard_EXPORT gp_XY onChart(const ConformalChart& chart, const gp_Pnt& point, double& distance);

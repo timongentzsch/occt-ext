@@ -506,6 +506,89 @@ ConformalChart proxyChart(const std::vector<ChartRim>& rim, const std::vector<gp
   return chart;
 }
 
+std::vector<double> nodeBends(const ConformalChart& chart)
+{
+  const size_t        n = chart.point.size();
+  std::vector<gp_XYZ> laplace(n, gp_XYZ(0, 0, 0));
+  std::vector<double> area(n, 0), angle(n, 0);
+  std::vector<char>   onBoundary(n, 0);
+  for (const int b : chart.boundary)
+    onBoundary[b] = 1;
+  for (const auto& t : chart.triangles)
+  {
+    const double whole = gp_Vec(chart.point[t[0]], chart.point[t[1]])
+                           .Crossed(gp_Vec(chart.point[t[0]], chart.point[t[2]]))
+                           .Magnitude()
+                         / 2;
+    for (int k = 0; k < 3; ++k)
+    {
+      const int    i = t[k], j = t[(k + 1) % 3], l = t[(k + 2) % 3];
+      const gp_Vec a(chart.point[l], chart.point[i]), b(chart.point[l], chart.point[j]);
+      const double cross = a.Crossed(b).Magnitude();
+      if (!(cross > 0))
+        continue;
+      const double cotangent = a.Dot(b) / cross;
+      angle[l] += std::atan2(cross, a.Dot(b));
+      area[l] += whole / 3;
+      const gp_XYZ edge = chart.point[i].XYZ() - chart.point[j].XYZ();
+      laplace[i] += edge * (cotangent / 2);
+      laplace[j] -= edge * (cotangent / 2);
+    }
+  }
+  // No bend tighter than the triangles round a node is read from them: one over their mean edge.
+  std::vector<double> edges(n, 0);
+  std::vector<int>    counted(n, 0);
+  for (const auto& t : chart.triangles)
+    for (int k = 0; k < 3; ++k)
+    {
+      const double length = chart.point[t[k]].Distance(chart.point[t[(k + 1) % 3]]);
+      for (const int end : {t[k], t[(k + 1) % 3]})
+      {
+        edges[end] += length;
+        ++counted[end];
+      }
+    }
+  std::vector<double> bend(n, 0);
+  for (size_t i = 0; i < n; ++i)
+  {
+    if (onBoundary[i] || !(area[i] > 0))
+      continue;
+    const double mean  = laplace[i].Modulus() / (2 * area[i]),
+                 gauss = (2 * M_PI - angle[i]) / area[i];
+    bend[i] = std::min(mean + std::sqrt(std::max(0.0, mean * mean - gauss)), counted[i] / edges[i]);
+  }
+  for (const auto& t : chart.triangles)
+    for (int k = 0; k < 3; ++k)
+      for (int e = 1; e < 3; ++e)
+        if (onBoundary[t[k]] && !onBoundary[t[(k + e) % 3]])
+          bend[t[k]] = std::max(bend[t[k]], bend[t[(k + e) % 3]]);
+  return bend;
+}
+
+std::vector<double> nodeStretch(const ConformalChart& chart)
+{
+  const size_t        n = chart.point.size();
+  std::vector<double> flat(n, 0), space(n, 0);
+  for (const auto& t : chart.triangles)
+  {
+    const double inSpace = gp_Vec(chart.point[t[0]], chart.point[t[1]])
+                             .Crossed(gp_Vec(chart.point[t[0]], chart.point[t[2]]))
+                             .Magnitude();
+    const double laid =
+      std::abs((chart.flat[t[1]] - chart.flat[t[0]]).Crossed(chart.flat[t[2]] - chart.flat[t[0]]));
+    for (const int k : t)
+    {
+      flat[k] += laid;
+      space[k] += inSpace;
+    }
+  }
+  std::vector<double> out(n, 1);
+  for (size_t i = 0; i < n; ++i)
+    if (space[i] > 0)
+      out[i] = std::sqrt(flat[i] / space[i]);
+  return out;
+}
+
 gp_XY onChart(const ConformalChart& chart, const gp_Pnt& point, double& distance)
 {
   distance = HUGE_VAL;
