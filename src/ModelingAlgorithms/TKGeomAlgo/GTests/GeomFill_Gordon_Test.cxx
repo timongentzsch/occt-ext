@@ -2545,3 +2545,56 @@ TEST(GeomFill_Gordon, NetworkSurface_ClosedNetworkWithNonUnitUParameters_Produce
   ASSERT_TRUE(aNetwork.IsDone()) << static_cast<int>(aNetwork.Status());
   EXPECT_TRUE(aNetwork.Surface()->IsUPeriodic());
 }
+
+// Known contacts must give the same Gordon construction on shifted parameter domains.
+TEST(GeomFill_Gordon, KnownContactsOnQuadraticNetworks)
+{
+  for (int seed = 1; seed <= 8; ++seed)
+  {
+    const int np = 3 + seed % 3, ng = 2 + seed % 4;
+    NCollection_Array1<occ::handle<Geom_Curve>> profiles(1, np), guides(1, ng);
+    NCollection_Array2<double> pu(1, np, 1, ng), gv(1, np, 1, ng);
+    const double a = seed * 0.13, b = seed * 0.07;
+    for (int i = 0; i < np; ++i)
+    {
+      const double v = double(i) / (np - 1);
+      profiles(i + 1) = makeQuadraticBSpline(gp_Pnt(0, v, b*v*v),
+        gp_Pnt(0.5, v, b*v*v), gp_Pnt(1, v, a + b*v*v), 2, 6);
+    }
+    for (int j = 0; j < ng; ++j)
+    {
+      const double u = double(j) / (ng - 1);
+      guides(j + 1) = makeQuadraticBSpline(gp_Pnt(u, 0, a*u*u),
+        gp_Pnt(u, 0.5, a*u*u), gp_Pnt(u, 1, a*u*u + b), -3, 7);
+      for (int i = 0; i < np; ++i)
+      {
+        pu(i + 1, j + 1) = 2 + 4*u;
+        gv(i + 1, j + 1) = -3 + 10*double(i)/(np - 1);
+      }
+    }
+    GeomFill_Gordon discovered, known;
+    discovered.Init(profiles, guides, 1e-9);
+    known.Init(profiles, guides, pu, gv, 1e-9);
+    discovered.Perform(); known.Perform();
+    ASSERT_TRUE(discovered.IsDone()) << seed;
+    ASSERT_TRUE(known.IsDone()) << seed;
+    ASSERT_EQ(discovered.Surface()->NbUPoles(), known.Surface()->NbUPoles());
+    ASSERT_EQ(discovered.Surface()->NbVPoles(), known.Surface()->NbVPoles());
+    for (int i = 1; i <= known.Surface()->NbUPoles(); ++i)
+      for (int j = 1; j <= known.Surface()->NbVPoles(); ++j)
+        EXPECT_LE(discovered.Surface()->Pole(i,j).Distance(known.Surface()->Pole(i,j)), 1e-9);
+    known.Perform();
+    ASSERT_TRUE(known.IsDone());
+    pu(1,1) = 3; // lies on the curve, but does not meet this guide
+    known.Init(profiles, guides, pu, gv, 1e-9);
+    known.Perform();
+    EXPECT_EQ(known.Status(), GeomFill_Gordon::ResultStatus::IntersectionFailed);
+    pu(1,1) = 7; // outside the original parameter domain
+    known.Init(profiles, guides, pu, gv, 1e-9);
+    known.Perform();
+    EXPECT_EQ(known.Status(), GeomFill_Gordon::ResultStatus::IntersectionFailed);
+    known.Init(profiles, guides, 1e-9);
+    known.Perform();
+    EXPECT_TRUE(known.IsDone());
+  }
+}

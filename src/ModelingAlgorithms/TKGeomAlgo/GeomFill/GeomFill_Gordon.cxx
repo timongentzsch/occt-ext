@@ -480,7 +480,10 @@ void GeomFill_Gordon::Perform()
     return;
   }
 
-  if (!aNetwork.FillIntersectionParameters())
+  if (!(myHasKnownContacts
+          ? myKnownContactsValid
+              && aNetwork.SetIntersectionParameters(myKnownProfileParams, myKnownGuideParams)
+          : aNetwork.FillIntersectionParameters()))
   {
     setStatus(myReport, ResultStatus::IntersectionFailed, BuildStage::ContactDiscovery);
     return;
@@ -582,6 +585,7 @@ void GeomFill_Gordon::Init(const NCollection_Array1<occ::handle<Geom_Curve>>& th
                            const NCollection_Array1<occ::handle<Geom_Curve>>& theGuides,
                            double                                             theTolerance)
 {
+  myHasKnownContacts = false;
   myTolerance = theTolerance;
   myIsUClosed = false;
   myIsVClosed = false;
@@ -622,6 +626,35 @@ void GeomFill_Gordon::Init(const NCollection_Array1<occ::handle<Geom_Curve>>& th
     NCollection_Array2<double>(1, static_cast<int>(aNbProf), 1, static_cast<int>(aNbGuid));
   myGuideParams =
     NCollection_Array2<double>(1, static_cast<int>(aNbProf), 1, static_cast<int>(aNbGuid));
+}
+
+//=================================================================================================
+
+void GeomFill_Gordon::Init(const NCollection_Array1<occ::handle<Geom_Curve>>& theProfiles,
+                           const NCollection_Array1<occ::handle<Geom_Curve>>& theGuides,
+                           const NCollection_Array2<double>& theProfileParams,
+                           const NCollection_Array2<double>& theGuideParams,
+                           double theTolerance)
+{
+  Init(theProfiles, theGuides, theTolerance);
+  myHasKnownContacts = true;
+  const int np = myInputProfiles.Length(), ng = myInputGuides.Length();
+  myKnownContactsValid = np >= 2 && ng >= 2 && theProfileParams.ColLength() == np && theProfileParams.RowLength() == ng
+                        && theGuideParams.ColLength() == np && theGuideParams.RowLength() == ng;
+  if (!myKnownContactsValid)
+    return;
+  myKnownProfileParams = NCollection_Array2<double>(1, np, 1, ng);
+  myKnownGuideParams = NCollection_Array2<double>(1, np, 1, ng);
+  for (int i = 0; i < np; ++i)
+    for (int j = 0; j < ng; ++j)
+    {
+      const auto& p = myInputProfiles.At(i);
+      const auto& g = myInputGuides.At(j);
+      myKnownProfileParams.ChangeAt(i, j) =
+        (theProfileParams.At(i, j) - p->FirstParameter()) / (p->LastParameter() - p->FirstParameter());
+      myKnownGuideParams.ChangeAt(i, j) =
+        (theGuideParams.At(i, j) - g->FirstParameter()) / (g->LastParameter() - g->FirstParameter());
+    }
 }
 
 //=================================================================================================

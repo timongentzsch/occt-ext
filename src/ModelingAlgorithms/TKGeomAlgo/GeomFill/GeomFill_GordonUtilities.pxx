@@ -1656,6 +1656,30 @@ public:
     return isDone;
   }
 
+  //! Validates contacts supplied by a caller, without solving curve extrema again.
+  bool SetIntersectionParameters(const NCollection_Array2<double>& theProfileParams,
+                                 const NCollection_Array2<double>& theGuideParams)
+  {
+    myContactSets.Clear();
+    for (size_t i = 0; i < myProfiles.Size(); ++i)
+      for (size_t j = 0; j < myGuides.Size(); ++j)
+      {
+        const double u = theProfileParams.At(i, j), v = theGuideParams.At(i, j);
+        if (!std::isfinite(u) || !std::isfinite(v) || u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0)
+          return false;
+        ContactSet aSet;
+        appendContact(myProfiles.At(i), myGuides.At(j), u, v, myTolerance, aSet);
+        if (aSet.Candidates.IsEmpty())
+          return false;
+        appendBoundaryContacts(myProfiles.At(i), myGuides.At(j), myTolerance, aSet);
+        myContactSets.Append(aSet);
+      }
+    const bool isDone = chooseNearestContacts(myContactSets, myProfiles.Size(), myGuides.Size(),
+                                               myProfileParams, myGuideParams);
+    myMaxContactGap = isDone ? maxNearestContactGap(myContactSets) : 0.0;
+    return isDone;
+  }
+
   //! Reorders and orients the curve network.
   bool ReorderNetwork()
   {

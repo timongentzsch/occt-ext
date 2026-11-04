@@ -131,6 +131,18 @@ public:
                             const NCollection_Array1<occ::handle<Geom_Curve>>& theGuides,
                             double                                             theTolerance);
 
+  //! Initializes with one known contact per profile/guide pair, in the parameters
+  //! of the B-spline curves produced by CurveToBSplineCurve. Tables have profiles in rows and guides in columns.
+  //! Use only for a network with a known single monotone contact branch. Each
+  //! parameter and geometric gap is validated; invalid contacts fail at the
+  //! ContactDiscovery stage. Ordering, reparametrization and validation remain
+  //! the same as for contacts discovered internally.
+  Standard_EXPORT void Init(const NCollection_Array1<occ::handle<Geom_Curve>>& theProfiles,
+                            const NCollection_Array1<occ::handle<Geom_Curve>>& theGuides,
+                            const NCollection_Array2<double>& theProfileParams,
+                            const NCollection_Array2<double>& theGuideParams,
+                            double theTolerance);
+
   //! Performs the Gordon surface construction.
   Standard_EXPORT void Perform();
 
@@ -178,6 +190,10 @@ private:
   bool                                               myToUseParallel = false;
   ApproximationMode myApproximationMode                              = ApproximationMode::ExactOnly;
   BuildReport       myReport;
+  NCollection_Array2<double> myKnownProfileParams;
+  NCollection_Array2<double> myKnownGuideParams;
+  bool myHasKnownContacts = false;
+  bool myKnownContactsValid = false;
 };
 
 #endif // _GeomFill_Gordon_HeaderFile

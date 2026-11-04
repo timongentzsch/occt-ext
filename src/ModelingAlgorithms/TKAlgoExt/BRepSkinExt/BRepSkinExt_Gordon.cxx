@@ -1036,7 +1036,15 @@ EvolutionData skinGordon(OcctKernel&                  kernel,
   if (surface.IsNull())
   {
     GeomFill_Gordon gordon;
-    gordon.Init(profileList, guideList, tolerance);
+    NCollection_Array2<double> profileParams(1, int(np), 1, int(ng));
+    NCollection_Array2<double> guideParams(1, int(np), 1, int(ng));
+    for (size_t i = 0; i < np; ++i)
+      for (size_t j = 0; j < ng; ++j)
+      {
+        profileParams.ChangeAt(i, j) = at[i][j].onFirst;
+        guideParams.ChangeAt(i, j) = at[i][j].onSecond;
+      }
+    gordon.Init(profileList, guideList, profileParams, guideParams, tolerance);
     gordon.Perform();
     if (!gordon.IsDone() || gordon.Surface().IsNull())
       fail(op,

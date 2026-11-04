@@ -293,3 +293,38 @@ is applied before projection. A generated family covers ellipses against polygon
 to seven sides, three sizes and nine poses; all output cuts remain on the exact ellipse.
 On a five-section spline skin, 25 native Linux CPU samples gave median 17.71 ms before and
 1.29 ms after, with the same serialized boundary representation. These timings exclude meshing.
+
+### GeomFill_Gordon-known-contacts
+
+Problem: a caller that already located the profile/guide crossings had no way to supply them.
+`Perform()` repeated all curve/curve extrema searches in `fillContactTable`.
+
+Construction: an `Init` overload accepts one profile and one guide parameter for each pair,
+in the parameter domains of the converted B-spline inputs. Affine normalization carries each
+parameter to the working unit interval. Finite values, domain membership and geometric gaps
+are checked before any ordering. Endpoint contacts are retained for closed seams. The same
+monotone ordering, parameter equalization, exact Gordon sum and final validation then apply.
+Callers that have not identified a single monotone branch keep the original contact discovery.
+A supplied table does not purport to discover other branches of a multiply intersecting net.
+
+Source: Siggel, Kleinert, Stollenwerk and Maierl, *TiGL: An Open Source Computational Geometry
+Library for Parametric Aircraft Design*, 2019, section 3.2, equations (8)-(11) and Algorithm 1,
+step 1 (<https://arxiv.org/html/1810.10795v1>). The intersection parameters are input to the
+compatibility step; rediscovering them is not part of the transfinite interpolation identity.
+An eight-member family of quadratic networks tests the supplied and discovered constructions
+on shifted parameter domains, repeated construction, invalid gaps, out-of-domain parameters
+and reinitialization with discovery.
+
+On a three-profile/three-guide closed network, 25 native Linux CPU samples gave medians
+9.05 ms before and 5.82 ms after. The degrees, knots, multiplicities, pole counts and face kind
+are unchanged. Serialization differs at roundoff: maximum pole displacement 5.04e-11 and
+weight displacement 4.88e-12; relative volume change 1.88e-15. Exact face projections of a
+33 by 33 grid in both directions gave a maximum 4.53e-14.
+
+A global bound, derived here, is available when the nonnegative basis is common and weights
+stay positive. Write the old poles relative to any fixed origin with norm at most R, the largest
+pole displacement as dP, the largest weight displacement as dw, and the smallest new weight as
+wmin. Splitting the difference of the two rational sums and using partition of unity gives
+`|Snew-Sold| <= dP + 2 R dw / wmin` over the entire parameter rectangle. For this network the
+bound is 2.26e-10. This bounds two-sided Hausdorff distance as well, since both surfaces have
+the same parameter domain. It does not claim bit-identical serialization.
