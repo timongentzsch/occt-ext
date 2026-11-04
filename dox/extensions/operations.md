@@ -387,11 +387,15 @@ straight on rounds that are eased to one bend, everything the corner's four numb
 and the share by which they disagree, rounding over rounding, counted where it came above an absolute
 1e-15, at one size and not at another. It now counts only above the rounding of the faces' own
 curvatures, 2^-40 of the larger of their principal curvatures (`jetRounding`, a judgement: a few
-thousand units in the last place, far below any curvature asked). A floor at the flat share of the
+thousand units in the last place, far below any curvature asked). Its margin, as the corner's
+disagreement over the larger curvature: rounding alone, on the pentagon and the split side, came to
+at most 9e-17, ten thousand times below the floor (9.1e-13); the least genuine disagreement, on the
+saved opening below, 6.7e-12, only 7.4 times above it. A floor at the flat share of the
 G2 limit instead, as for a miss, would be the measure's own, but a saved opening of near-flat spline
 faces (curvatures of 6e-7 on a loop of 38) is filled only when the turns that their small but
-genuine disagreement asks are kept: without them its fill folds over, an open defect of the plane's
-net of its own. Open: at 1e-3 the corner of three rounds
+genuine disagreement asks are kept: without them its fill folds over. That fold is an open defect of
+the net over the plane, not of the corner: a fill whose rim asks no turns should not fold, and the
+turns only hide it. Open: at 1e-3 the corner of three rounds
 (its tolerance below `Precision::Confusion()`) is made; the teddy is refused at 1e3. A
 G1 cap over a circle on a cone is refused as too steep from the same tilt on (between 80 and 80.4
 degrees) at rest, turned and at 1e-3 and 1e3, with the same nets below it; but the switch from the height
