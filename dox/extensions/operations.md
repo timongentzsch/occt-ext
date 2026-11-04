@@ -289,8 +289,16 @@ whose fine spans run right across the chart, that needs five times that. A chart
 was set to stretch every place to the span an even net of 640 poles affords (Boundary First Flattening with
 the boundary's scale prescribed, the inside extended conformally by the harmonic conjugate, as a chart
 stretched so is not convex and the two coordinates extended each on its own fold it) needed more, 1050:
-stretching the nose widens the chart both ways. Open: a net that is finer only where it has to be, or
-several faces. The cap of a cone standing 80 degrees or more against its circle, refused as too steep
+stretching the nose widens the chart both ways. Nor does the net the bound asks for, its knots graded
+strip by strip as the spans asked there: on the wing tip at rest 65 x 9 spans (980 poles) took 7.5 s to
+fit, missed its place by 0.0034 (the limit 0.001) and its bend by a share of 0.46 (0.05), and folded;
+graded on through the margins, 78 x 11 (1328 poles) took 11.2 s, met its places and missed its bend by a
+share of about 0.29, and bent ten times more tightly inside than its rim. More than nine tenths of that
+time is in the band solves of the multipliers' passes, which stall short of the conditions. A fold or
+such a bend is no surface to deliver with its misses reported, so the tip is refused as before. Open:
+the multipliers, solved as a constrained problem instead of by passes that stall (an active-set or
+interior-point solve of the band), are what the wing needs first; then a net finer only where it has
+to be, or several faces. The cap of a cone standing 80 degrees or more against its circle, refused as too steep
 before, asks for 529 to 576 poles at a tolerance of 1e-4, within the 640: it is tried, and its coarse nets
 are not shown regular, so that it is refused as before at about 0.4 s more per loop (the steep
 cones' GTest 23.4 s against 17.8 before there was a chart). That is not foreseen from the chart: the
