@@ -830,27 +830,8 @@ occ::handle<Geom_BSplineSurface> fit(SplineNet&                                 
       {
         auto& j = *target.jet;
         j.p     = gp_Pnt(scaled(gp_Vec(frame->origin, j.p)).XYZ());
-        // The derivatives are of the face's own parameters, whose speed is the face's and not a
-        // share of the loop's size (a cylinder's along its axis is one at every size): divided
-        // by the size and rounded to the grid of places, a slow one kept a few digits. Taken to
-        // unit speed first, an exact change of parameters that leaves the tangent plane and the
-        // bend as they are, they are then shares of the size and rounded as finely as places.
-        const double su = j.u.Magnitude(), sv = j.v.Magnitude();
-        if (su > 0 && sv > 0)
-        {
-          j.u /= su;
-          j.v /= sv;
-          j.uu /= su * su;
-          j.vv /= sv * sv;
-          j.uv /= su * sv;
-          for (gp_Vec* v : {&j.u, &j.v})
-            *v = scaled(*v * size);
-          for (gp_Vec* v : {&j.uu, &j.vv, &j.uv})
-            *v = scaled(*v * (size * size));
-        }
-        else
-          for (gp_Vec* v : {&j.u, &j.v, &j.uu, &j.vv, &j.uv})
-            *v = scaled(*v);
+        for (gp_Vec* v : {&j.u, &j.v, &j.uu, &j.vv, &j.uv})
+          *v = scaled(*v);
         j.n = vector(j.n);
         for (int c = 1; c <= 3; ++c)
           j.n.SetCoord(c, std::round(j.n.Coord(c) * frameSteps) / frameSteps);

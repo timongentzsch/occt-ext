@@ -427,16 +427,8 @@ G2 limit instead, as for a miss, would be the measure's own, but a saved opening
 faces (curvatures of 6e-7 on a loop of 38) is filled only when the turns that their small but
 genuine disagreement asks are kept: without them its fill folds over. That fold is an open defect of
 the net over the plane, not of the corner: a fill whose rim asks no turns should not fold, and the
-turns only hide it. The corner of three rounds was made at 1e-3 and the teddy refused at 1e3, for
-one cause: the fit took the faces' jets into the loop's frame as it takes places, dividing their
-derivatives by the loop's size and rounding them to the same grid; but a jet's derivatives are of its
-face's own parameters, and a cylinder's along its axis is one at every size, so that at 1e3 the
-teddy's rounds kept three digits of it and the bends asked of the fit were wrong. The jets are now
-taken to unit speed first, an exact change of parameters that leaves the tangent plane and the
-bend as they are, and are then shares of the size like the places. The corner of rounds is refused
-alike at every size, and the teddy made; its nets are not yet the same at 1e3 (21 x 19 poles
-against 67 x 59), where the multipliers that meet its eased corners stop at other places for
-differences in the last digits: the stopped iterate of the solver, not a length. A
+turns only hide it. Open: at 1e-3 the corner of three rounds
+(its tolerance below `Precision::Confusion()`) is made; the teddy is refused at 1e3. A
 G1 cap over a circle on a cone is refused as too steep from the same tilt on (between 80 and 80.4
 degrees) at rest, turned and at 1e-3 and 1e3, with the same nets below it; but the switch from the height
 graph to the spatial net at a support normal of 0.8 against the mean plane changes the cap's area by 2.1 %
