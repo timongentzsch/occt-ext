@@ -4315,7 +4315,7 @@ std::optional<Built> overChart(const Asked& asked, const Frame& frame)
     // As over the mean plane: a net that meets every limit is kept once the next finer one lies
     // within `settled` of it, and until then the finest that meets them.
     const bool split = built.measured.within || (best && best->measured.within);
-    if (built.measured.within || (best && best->measured.within))
+    if (split)
     {
       if (change <= settled * asked.size)
       {
