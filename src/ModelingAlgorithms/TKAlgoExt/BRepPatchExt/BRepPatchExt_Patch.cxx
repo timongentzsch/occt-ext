@@ -4688,7 +4688,8 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
     double                    placeOnly     = HUGE_VAL;
     int                       previousSpans = 0;
     occ::handle<Geom_Surface> previous;
-    bool                      previousWithin = false, previousSpatial = false;
+    bool                      previousWithin = false, previousSpatial = false, settledOn = false;
+    std::vector<Built>        meeting;
     for (int rung : ladder)
     {
       const int spans = std::max(rung,
@@ -5060,12 +5061,15 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
       // them: then the coarser of them that meets the limits is kept. Until then the finest
       // that meets them is, should the ladder or the nets allowed end first.
       const double before = best ? best->measured.excess : HUGE_VAL;
+      if (built.measured.within)
+        meeting.push_back(built);
       if (built.measured.within || (best && best->measured.within))
       {
         if (change <= settled * asked.size)
         {
           if (built.measured.within && !wasWithin)
             best = built;
+          settledOn = true;
           break;
         }
         if (built.measured.within)
@@ -5125,6 +5129,19 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
         best->measured.worst += ". A finer net came no nearer";
         break;
       }
+    }
+    // Where no two nets in a row have come to agree, the ladder has not shown which of the
+    // surfaces it made is near the fairest that meets the limits; of those that meet them, the
+    // one that bends least is nearest it by the energy it is the least of.
+    if (!settledOn && meeting.size() > 1)
+    {
+      double least = HUGE_VAL;
+      for (const Built& candidate : meeting)
+        if (const double bending = bendingInside(candidate.face); bending < least)
+        {
+          least = bending;
+          best  = candidate;
+        }
     }
     return *best;
   };

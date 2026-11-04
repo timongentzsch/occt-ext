@@ -52,4 +52,8 @@ Standard_EXPORT double insideStep(const TopoDS_Face& face);
 
 //! The largest principal curvature of a face at the places it is looked at inside its loop.
 Standard_EXPORT double tightestInside(const TopoDS_Face& face);
+
+//! The bending energy of a face inside its loop, the integral of k1^2 + k2^2 over its area, read
+//! at the same places.
+Standard_EXPORT double bendingInside(const TopoDS_Face& face);
 } // namespace BRepExt

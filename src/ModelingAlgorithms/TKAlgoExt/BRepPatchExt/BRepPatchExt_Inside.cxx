@@ -498,6 +498,29 @@ double tightestInside(const TopoDS_Face& face)
   return bend;
 }
 
+double bendingInside(const TopoDS_Face& face)
+{
+  const auto surface = BRep_Tool::Surface(face);
+  double     u0, u1, v0, v1;
+  BRepTools::UVBounds(face, u0, u1, v0, v1);
+  FinalTrim    inside(face);
+  const double cell    = (u1 - u0) * (v1 - v0) / (grid * grid);
+  double       bending = 0;
+  for (int i = 0; i < grid; ++i)
+    for (int j = 0; j < grid; ++j)
+    {
+      const double u = u0 + (u1 - u0) * (i + .5) / grid, v = v0 + (v1 - v0) * (j + .5) / grid;
+      if (!inside.contains(u, v))
+        continue;
+      GeomLProp_SLProps at(surface, u, v, 2, 1e-12);
+      if (!at.IsCurvatureDefined())
+        continue;
+      const double k1 = at.MaxCurvature(), k2 = at.MinCurvature();
+      bending += (k1 * k1 + k2 * k2) * at.D1U().Crossed(at.D1V()).Magnitude() * cell;
+    }
+  return bending;
+}
+
 std::optional<std::string> insideFault(const TopoDS_Face&             face,
                                        double                         rimBend,
                                        const std::optional<Crossing>& crossing)

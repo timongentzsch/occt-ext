@@ -346,8 +346,26 @@ between nets, up to the finest). Open: the Cauchy bound needs the distances to f
 On the saved eight-edge opening (G0, Natural, a loop of 38.3) the nets lie 2.38e-3, 7.0e-4 and 7.5e-4 of the
 size apart (6 x 3 to 10 x 4, to 16 x 6, to 24 x 10): the ratio is 1.07, not at most 1/2, and the 2 d bound
 does not hold. The nets stand on a plateau below `settled` (their areas 70.20 and 69.98), and on such
-loops the stop is a judgement, not a bound. The same opening as a Patch at G0 never settles (3.8e-3,
-3.1e-3, 1.3e-3, 2.9e-3, 1.2e-3) and is delivered on the finest net, 54 x 22 spans.
+loops the stop is a judgement, not a bound.
+
+*A ladder that does not settle.* The same opening as a Patch at G0 never settles: its nets lie 3.8e-3,
+3.1e-3, 1.3e-3, 2.9e-3 and 1.2e-3 of the size apart, up to the finest. Why they need not come nearer: a
+condition is met once it is within its reach, and the multipliers stop at the first shifts that put every
+condition there ("nearer is not better"); the correction then moves the net onto the curves by the least
+movement of its poles. What a net delivers is so one surface of the band of all that meet the limits, the
+one at which that iteration and that correction stopped, and not the least bending of the band. The band
+has an inside, the limits being inequalities, and as the nets become finer there is nothing that draws
+their surfaces to one point of it. Read inside the loop, the nets of this opening bend 13.8, 15.6, 7.7,
+7.8, 12.2 (missing the rim, 0.0105 for 0.01) and 14.9, ∫ (k1² + k2²) dA. The rule that kept the first
+net that met the limits delivered the 13.8; keeping the finest delivered the 14.9.
+What is asked is the fairest surface that meets the limits, the least of that energy over the band. Every
+net that meets them is a surface of the band; where the ladder has not settled, nothing says that one of
+them is nearer the least than the others but their energy, and the one that bends least is, by the energy
+of which the least is asked. So where no two nets in a row have come within `settled` of each other, of
+the nets that met every limit the one of least bending is kept (`bendingInside`, read at the places the
+inside of a face is looked at; k² dA has no unit, so the choice is the same at every size and pose to
+rounding). A ladder that settles keeps what it kept. Nothing new is tuned: the energy is the measure of
+fairness, and the places are those of the inside check.
 Pose dependence is measured, not removed: 47 sampled breaches over 154 rigid-motion variants, none changing
 whether a case is refused. The ease of one coarse span is a judgement bounded by measurement, not an
 optimum: on the teddy (arms and strips of radius 50, sides 79 long, the span 24) eases of 0.3 (the
