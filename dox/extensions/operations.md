@@ -1028,3 +1028,20 @@ Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided Design an
 Manufacturing*, hyperbook (2009), [section 1.4.2, convex hull property](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
 Applying that property to each constant coordinate is derived here. Unrecognized
 boundary representations are not assumed rectangular.
+
+### Coincidence of projected curves
+
+Five common points and equal lengths do not imply equal curves. Plane projection
+removes an edge only after establishing a common normalized spline basis (degree
+elevation, knot insertion, and optionally reversal) with identical positive
+weights. If every corresponding pole differs by at most the modelling tolerance,
+the rational convex-combination formula bounds the displacement for every
+parameter by that tolerance. The common parameter interval covers both edges,
+so the bound is bidirectional. The pole-distance arithmetic is outward rounded.
+This implication is derived here from Patrikalakis, Maekawa and Cho, *Shape
+Interrogation for Computer Aided Design and Manufacturing*, hyperbook (2009),
+[section 1.4.2](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
+Representations whose correspondence cannot be established are both retained.
+Degree elevation and knot insertion use OCCT's floating-point implementations;
+the enclosure bounds the resulting common-basis representations, with the usual
+rounding limitations of those representation conversions.

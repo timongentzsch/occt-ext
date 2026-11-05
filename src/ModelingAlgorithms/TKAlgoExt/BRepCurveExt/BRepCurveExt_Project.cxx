@@ -12,6 +12,11 @@
 // commercial license or contractual agreement.
 
 #include <GeomAlgoExt_ModelTolerance.hxx>
+#include <GeomAlgoExt_Interval.hxx>
+#include <BSplCLib.hxx>
+#include <GeomConvert.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <set>
 #include <BRepAlgoExt_Tolerance.hxx>
 #include <BRepToolsExt_GeomUtil.hxx>
 #include <BRepToolsExt_Checks.hxx>
@@ -62,6 +67,67 @@ namespace BRepExt
 {
 namespace
 {
+// A shared positive rational basis gives a whole-interval displacement bound.
+// Unresolved parametrizations are retained, never treated as duplicates.
+bool sameProjection(const TopoDS_Edge& first, const TopoDS_Edge& second)
+{
+  try
+  {
+    const auto spline = [](const TopoDS_Edge& edge) {
+      double a, b;
+      const auto curve = BRep_Tool::Curve(edge, a, b);
+      auto result = GeomConvert::CurveToBSplineCurve(new Geom_TrimmedCurve(curve, a, b));
+      if (result->IsPeriodic()) result->SetNotPeriodic();
+      result->Segment(result->FirstParameter(), result->LastParameter());
+      auto knots = result->Knots();
+      BSplCLib::Reparametrize(0, 1, knots);
+      result->SetKnots(knots);
+      return result;
+    };
+    const auto a = spline(first);
+    for (const bool reverse : {false, true})
+    {
+      const auto b = spline(second);
+      if (reverse) b->Reverse();
+      const int degree = std::max(a->Degree(), b->Degree());
+      a->IncreaseDegree(degree);
+      b->IncreaseDegree(degree);
+      std::set<double> knots;
+      for (const auto& curve : {a, b})
+        for (int k = 1; k <= curve->NbKnots(); ++k) knots.insert(curve->Knot(k));
+      for (double knot : knots)
+      {
+        int multiplicity = 0;
+        for (const auto& curve : {a, b})
+          for (int k = 1; k <= curve->NbKnots(); ++k)
+            if (curve->Knot(k) == knot) multiplicity = std::max(multiplicity, curve->Multiplicity(k));
+        a->InsertKnot(knot, multiplicity, 0, false);
+        b->InsertKnot(knot, multiplicity, 0, false);
+      }
+      bool same = a->NbPoles() == b->NbPoles() && a->NbKnots() == b->NbKnots();
+      for (int k = 1; same && k <= a->NbKnots(); ++k)
+        same = a->Knot(k) == b->Knot(k) && a->Multiplicity(k) == b->Multiplicity(k);
+      namespace I = GeomAlgoExt::interval;
+      const auto tolerance2 = I::multiply(I::point(BRepExt::tolerance::length),
+                                          I::point(BRepExt::tolerance::length));
+      for (int i = 1; same && i <= a->NbPoles(); ++i)
+      {
+        same = a->Weight(i) > 0 && a->Weight(i) == b->Weight(i);
+        auto squared = I::point(0);
+        for (int axis = 1; axis <= 3; ++axis)
+        {
+          const auto delta = I::subtract(I::point(a->Pole(i).Coord(axis)), I::point(b->Pole(i).Coord(axis)));
+          squared = I::add(squared, I::multiply(delta, delta));
+        }
+        same = same && I::valid(squared) && squared.high <= tolerance2.low;
+      }
+      if (same) return true;
+    }
+  }
+  catch (const Standard_Failure&) {}
+  return false;
+}
+
 gp_Dir direction(const char* op, Vec3 v)
 {
   if (!finite(v) || gp_Vec(v.x, v.y, v.z).Magnitude() < 1e-15)
@@ -200,7 +266,6 @@ EvolutionData projectPlane(OcctKernel& kernel, uint32_t shapeId, Vec3 origin, Ve
       continue;
     // Coincident 3D silhouette edges can have different depths but the same
     // image.
-    BRepAdaptor_Curve c(out);
     bool              duplicate = false;
     for (const auto& other : accepted)
     {
@@ -213,13 +278,7 @@ EvolutionData projectPlane(OcctKernel& kernel, uint32_t shapeId, Vec3 origin, Ve
       BRepGProp::LinearProperties(other, q);
       if (std::abs(q.Mass() - props.Mass()) > BRepExt::tolerance::length)
         continue;
-      bool same = true;
-      for (int i = 0; i <= 4 && same; ++i)
-      {
-        auto p = c.Value(c.FirstParameter() + (c.LastParameter() - c.FirstParameter()) * i / 4);
-        BRepExtrema_DistShapeShape d(BRepBuilderAPI_MakeVertex(p).Vertex(), other);
-        same = d.IsDone() && d.Value() <= BRepExt::tolerance::length;
-      }
+      const bool same = sameProjection(out, other);
       if (same)
       {
         duplicate = true;

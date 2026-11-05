@@ -430,3 +430,50 @@ TEST(BRepCurveExt, DeformCurveUvnCarriesALineToTheLineOfTheLinearMap)
   EXPECT_LT(offSegment(carry(true, false, false), gp_Pnt(2, 2, 5), gp_Pnt(2, 18, 8)), 1e-6);
   EXPECT_LT(offSegment(carry(false, false, true), gp_Pnt(2, 2, 5), gp_Pnt(18, 2, 2)), 1e-6);
 }
+
+TEST(BRepCurveExt, PlaneProjectionPreservesDistinctCurvesThroughFiveCommonPoints)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+  {
+    TopoDS_Compound input;
+    BRep_Builder builder;
+    builder.MakeCompound(input);
+    const double y[] = {0, 37.5, -81.25, 81.25, -37.5, 0};
+    for (const double sign : {-1.0, 1.0})
+    {
+      NCollection_Array1<gp_Pnt> poles(1, 6);
+      for (int i = 0; i < 6; ++i)
+        poles(i + 1) = gp_Pnt(4 * i * scale, sign * y[i] * scale, sign * scale);
+      builder.Add(input, BRepBuilderAPI_MakeEdge(new Geom_BezierCurve(poles)).Edge());
+    }
+    const auto result = BRepExt::projectPlane(session(), BRepExt::store(session(), input),
+                                              {0, 0, 0}, {0, 0, 1});
+    int edges = 0;
+    for (TopExp_Explorer it(BRepExt::get(session(), result.resultId), TopAbs_EDGE); it.More(); it.Next())
+      ++edges;
+    EXPECT_EQ(edges, 2);
+  }
+}
+
+TEST(BRepCurveExt, PlaneProjectionStillMergesCoincidentReversedCurves)
+{
+  TopoDS_Compound input;
+  BRep_Builder builder;
+  builder.MakeCompound(input);
+  NCollection_Array1<gp_Pnt> poles(1, 4);
+  poles(1) = gp_Pnt(0, 0, 1);
+  poles(2) = gp_Pnt(3, 4, 1);
+  poles(3) = gp_Pnt(6, -4, 1);
+  poles(4) = gp_Pnt(10, 0, 1);
+  Handle(Geom_BezierCurve) curve = new Geom_BezierCurve(poles);
+  builder.Add(input, BRepBuilderAPI_MakeEdge(curve).Edge());
+  curve = Handle(Geom_BezierCurve)::DownCast(curve->Copy());
+  curve->Translate(gp_Vec(0, 0, 4));
+  curve->Reverse();
+  builder.Add(input, BRepBuilderAPI_MakeEdge(curve).Edge());
+  const auto result = BRepExt::projectPlane(session(), BRepExt::store(session(), input),
+                                            {0, 0, 0}, {0, 0, 1});
+  int edges = 0;
+  for (TopExp_Explorer it(BRepExt::get(session(), result.resultId), TopAbs_EDGE); it.More(); it.Next()) ++edges;
+  EXPECT_EQ(edges, 1);
+}
