@@ -15,6 +15,8 @@
 // edge-tolerance loop. Dividing changes topology, not the support geometry.
 #include <BRepToolsExt_Operations.hxx>
 #include <BRepOffsetExt_Parts.hxx>
+#include <BRepOffsetExt_Focal.hxx>
+#include <TopoDS.hxx>
 #include <GeomAlgoExt_Cancel.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepOffset_MakeOffset.hxx>
@@ -34,6 +36,14 @@ EvolutionData thicken(OcctKernel&             kernel,
   const TopoDS_Shape given = get(kernel, id);
   if (!std::isfinite(thickness) || thickness == 0 || !std::isfinite(tolerance) || tolerance <= 0)
     fail(op, invalid_input, "a finite nonzero thickness and positive tolerance are required");
+  if (given.ShapeType() == TopAbs_FACE || given.ShapeType() == TopAbs_SHELL)
+    for (TopExp_Explorer faces(given, TopAbs_FACE); faces.More(); faces.Next())
+      if (focalSweep(TopoDS::Face(faces.Current()), thickness) == FocalSweep::Crosses)
+        fail(op,
+             no_solution,
+             "the thickness passes a principal radius of curvature: the normal sweep folds",
+             {faces.Current()},
+             FailureKind::Curvature);
   FaceHistory         history(op, hashes, bound);
   BRepBuilderAPI_Copy copy(given, true, false);
   Lineage             divided(given);

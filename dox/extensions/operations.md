@@ -709,3 +709,61 @@ checked; a sheet tool divides rather than subtracts.
 *Unproven.* Seam and pairing conventions of closed skins (a convention, not derived), tolerance ladders of the Boolean fallbacks, the sampling counts of the offset and
 skin validity checks.
 
+
+### Local focal witnesses for a sheet's normal sweep
+
+`BRepOffsetExt_Focal` encloses non-periodic rational B-spline and Bezier supports directly from
+stored poles, positive weights and knots, on each nonempty knot rectangle. The homogeneous first
+and second derivative control nets use the derivative formula in Patrikalakis, Maekawa and Cho,
+*Shape Interrogation for Computer Aided Design and Manufacturing*, hyperbook edition (2009),
+[section 1.4.2, equations (1.65)–(1.68)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
+Their active-pole hulls enclose their values by nonnegativity and partition of unity
+([section 1.4.1, (1.58)–(1.61)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node16.html)).
+Each hull is intersected with interval Cox–de Boor evaluation on the current rectangle. Homogeneous
+poles, location matrices, knot differences, quotient derivatives and fundamental forms all use outward-rounded
+interval arithmetic; the calculation does not first convert or insert knots with ordinary floating
+point arithmetic. This follows the arithmetic requirement in
+[section 4.9.1](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node53.html).
+
+Let I be the first fundamental form and II the second form against S_u cross S_v. Principal
+curvatures are the generalized eigenvalues of (II,I); see the same authors,
+[section 3.4, (3.41)–(3.43)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node30.html).
+**Derived here:** the normal sweep S+s n, 0 <= s <= d (signed), has no focal point on a regular
+parameter rectangle precisely when I-d II is positive definite. Indeed its eigenvalues in an
+I-orthonormal frame are 1-d k_i. A negative diagonal entry or determinant proves that an eigenvalue
+has passed zero somewhere along that normal segment. Sylvester's criterion proves the positive
+case without subtracting nearly equal curvature roots. The signed curvature convention here is
+opposite to that of the hyperbook's offset chapter; the focal condition is the same
+([section 11.3.1, (11.18)–(11.25)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html)).
+The face orientation reverses d. A crossing witness must lie strictly inside the trimmed face;
+it refuses thickening with kind `Curvature` and names that source face, before copying or building.
+
+A regular verdict proves only local regularity within the support's knot rectangles. It does not
+prove separation of distinct normal segments, nor continuity across knots. Periodic or other
+supports, zero derivative denominators, singular parameter regions, exact equality and exhausted
+work remain `Unknown`; a loose interval never causes a refusal. The existing construction remains
+for unknowns, so complete general self-intersection exclusion is still open. The breadth-first
+subdivision budgets (4096 rectangles, depth 24) are work choices, not geometric thresholds.
+
+### A circular tube's parallel body after its hole closes
+
+For a complete ring torus with core circle C of radius R and tube radius r<R, **derived here**:
+T=C+B_r, so its outward distance-d parallel body is T+B_d=C+B_(r+d), using associativity of the
+Minkowski sum and B_r+B_d=B_(r+d). Put a=r+d. At radial coordinate rho>=0 its meridian satisfies
+(rho-R)^2+z^2 <= a^2, since the closest point on C has the same azimuth. When a>R, this is the
+circle's disk clipped at the rotation axis. Revolving the circular arc through (R+a,0) between
+(0,+/-sqrt((a-R)(a+R))) together with its axis segment constructs the boundary without the
+self-crossing continuation. No surface fitting or new tolerance allowance is involved. The exact
+hole-closure equality a=R remains on the existing route.
+
+The construction applies to a valid positive-volume solid with one toroidal face. The source
+face maps to the new skin; validity, positive volume and the existing independent clearance check
+still apply. The independent volume oracle in the held-out family is the meridian's first moment:
+
+V = 4 pi [ z0^3/3 + R (pi a^2/4 + R z0/2 + a^2 asin(R/a)/2) ],
+where z0=sqrt((a-R)(a+R)).
+
+This is a trimmed parallel **body**, whereas thickening retains the input sheet's normal sweep.
+Trimming arbitrary spline offsets requires tracing all self-intersection components; the distinction
+is described by Patrikalakis, Maekawa and Cho (2009),
+[section 11.3.2, equations (11.28)–(11.29)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node225.html).

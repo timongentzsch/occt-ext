@@ -25,6 +25,14 @@
 #include <BRepToolsExt_Operations.hxx>
 
 #include <BRepAlgoAPI_Defeaturing.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
+#include <Geom_Circle.hxx>
+#include <Geom_TrimmedCurve.hxx>
+#include <gp_Torus.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <BRepOffset_MakeOffset.hxx>
@@ -39,6 +47,64 @@
 
 namespace BRepExt
 {
+
+namespace
+{
+// A complete ring torus is C + B_r (core circle C, radius-r ball). Its outward
+// parallel body is C + B_(r+d), by associativity of the Minkowski sum. Beyond
+// the hole closure the meridian is the disk centred at (R,0), restricted to
+// radial coordinate >= 0. Revolve that clipped disk, not the self-crossing
+// continuation of the toroidal surface. The derivation is in operations.md.
+TopoDS_Shape closedRingOffset(const TopoDS_Shape& body, double distance, Lineage& faces)
+{
+  if (!(distance > 0))
+    return {};
+  TopExp_Explorer it(body, TopAbs_FACE);
+  if (!it.More())
+    return {};
+  const TopoDS_Face source = TopoDS::Face(it.Current());
+  it.Next();
+  if (it.More())
+    return {};
+  const BRepAdaptor_Surface support(source);
+  if (support.GetType() != GeomAbs_Torus || !(estimatedVolume(body) > 0)
+      || !BRepCheck_Analyzer(body).IsValid())
+    return {};
+  const gp_Torus torus = support.Torus();
+  const double   R = torus.MajorRadius(), r = torus.MinorRadius(), a = r + distance;
+  if (!(r < R && a > R) || !std::isfinite(a))
+    return {};
+  const double z = std::sqrt((a - R) * (a + R));
+  if (!std::isfinite(z))
+    return {};
+  const gp_Ax3              axes   = torus.Position();
+  const gp_Pnt              centre = axes.Location().Translated(gp_Vec(axes.XDirection()) * R);
+  const gp_Ax2              section(centre,
+                       gp_Dir(gp_Vec(axes.XDirection()).Crossed(gp_Vec(axes.Direction()))),
+                       axes.XDirection());
+  const double              angle     = std::acos(-R / a);
+  const Handle(Geom_Circle) circle    = new Geom_Circle(section, a);
+  const Handle(Geom_TrimmedCurve) arc = new Geom_TrimmedCurve(circle, -angle, angle);
+  const gp_Pnt      bottom            = axes.Location().Translated(gp_Vec(axes.Direction()) * -z);
+  const gp_Pnt      top               = axes.Location().Translated(gp_Vec(axes.Direction()) * z);
+  const TopoDS_Edge rim               = BRepBuilderAPI_MakeEdge(arc, bottom, top).Edge();
+  const TopoDS_Edge axis              = BRepBuilderAPI_MakeEdge(top, bottom).Edge();
+  const TopoDS_Face disk =
+    BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakeWire(rim, axis).Wire()).Face();
+  BRepPrimAPI_MakeRevol revolve(disk, gp_Ax1(axes.Location(), axes.Direction()), true);
+  checkCancelled("offsetSolid");
+  if (!revolve.IsDone())
+    return {};
+  const TopoDS_Shape result = singleSolid(revolve.Shape());
+  if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid() || !(estimatedVolume(result) > 0))
+    return {};
+  std::vector<TopoDS_Shape> images;
+  for (TopExp_Explorer f(result, TopAbs_FACE); f.More(); f.Next())
+    images.push_back(f.Current());
+  faces.set(source, images);
+  return result;
+}
+} // namespace
 
 TopoDS_Shape dividedAtC0(const TopoDS_Shape& body, Lineage& faces)
 {
@@ -179,10 +245,15 @@ EvolutionData offsetSolid(OcctKernel&             kernel,
          invalid_input,
          "one solid, a distance that is not zero, a positive tolerance and a supported join are "
          "required");
-  FaceHistory        history(op, hashes, bound);
-  Lineage            faces(solid);
-  const TopoDS_Shape work   = withoutVanishing(op, dividedAtC0(solid, faces), distance, faces);
-  const TopoDS_Shape result = offsetBody(work, distance, tolerance, join, {}, 0.0, faces);
+  FaceHistory  history(op, hashes, bound);
+  Lineage      faces(solid);
+  TopoDS_Shape result = closedRingOffset(solid, distance, faces);
+  TopoDS_Shape work   = solid;
+  if (result.IsNull())
+  {
+    work   = withoutVanishing(op, dividedAtC0(solid, faces), distance, faces);
+    result = offsetBody(work, distance, tolerance, join, {}, 0.0, faces);
+  }
   if (result.IsNull())
     fail(op,
          no_solution,

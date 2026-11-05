@@ -17,6 +17,10 @@
 #include "BRepExtTest_Support.hxx"
 
 #include <BRepOffsetExt_Kept.hxx>
+#include <BRepOffsetExt_Focal.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <Geom_BezierSurface.hxx>
+#include <GeomConvert.hxx>
 #include <BRepToolsExt_Checks.hxx>
 #include <BRepToolsExt_Operations.hxx>
 #include <GeomAlgoExt_Failure.hxx>
@@ -26,6 +30,7 @@
 #include <NCollection_Array2.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeTorus.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
@@ -511,4 +516,104 @@ TEST(BRepOffsetExt, DefeatureOfTwoBossesAtOnceLeavesTheBoxAndOneAtATimeLeavesThe
     EXPECT_TRUE(BRepExt::invalidity(made).empty());
     EXPECT_NEAR(volume(made), a * b * c + bossVolume, 1e-9 * a * b * c);
   }
+}
+
+// Quadratic graphs have principal curvatures 2a/s and 2b/s at their centre. Convex,
+// saddle and cylindrical graphs, positive rational weights, sizes, poses and orientations
+// exercise the signed normal sweep, independently of the solid builder's validity test.
+TEST(BRepOffsetExt, SplineFocalWitnessIsSignedAndIndependentOfSizeAndPose)
+{
+  for (double scale : {0.01, 1.0, 100.0})
+    for (double b : {-0.3, 0.0, 0.3})
+      for (bool rational : {false, true})
+        for (bool posed : {false, true})
+        {
+          NCollection_Array2<gp_Pnt> poles(1, 3, 1, 3);
+          NCollection_Array2<double> weights(1, 3, 1, 3);
+          const double               x[]{-1, 0, 1}, z[]{1, -1, 1};
+          for (int i = 1; i <= 3; ++i)
+            for (int j = 1; j <= 3; ++j)
+            {
+              poles(i, j) =
+                gp_Pnt(scale * x[i - 1], scale * x[j - 1], scale * (0.5 * z[i - 1] + b * z[j - 1]));
+              weights(i, j) = rational && i == 2 && j == 2 ? 1.125 : 1.0;
+            }
+          Handle(Geom_BezierSurface)  patch  = new Geom_BezierSurface(poles, weights);
+          Handle(Geom_BSplineSurface) spline = GeomConvert::SurfaceToBSplineSurface(patch);
+          // Extra spans exercise repeated knots without converting before the proof.
+          spline->InsertUKnot(0.37, 1, 1e-12);
+          spline->InsertVKnot(0.61, 1, 1e-12);
+          if (posed)
+          {
+            gp_Trsf turn;
+            turn.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 2, 3)), 0.71);
+            turn.SetTranslationPart(gp_Vec(7 * scale, -3 * scale, 11 * scale));
+            spline->Transform(turn);
+          }
+          const TopoDS_Face face = BRepBuilderAPI_MakeFace(spline, 1e-9 * scale).Face();
+          EXPECT_EQ(BRepExt::focalSweep(face, 1.5 * scale), BRepExt::FocalSweep::Crosses);
+          try
+          {
+            BRepExt::thicken(session(),
+                             keep(face),
+                             1.5 * scale,
+                             1e-8 * scale,
+                             {},
+                             BRepExt::failureHashBound);
+            ADD_FAILURE() << "a focal crossing was accepted";
+          }
+          catch (const BRepExt::Failure& failure)
+          {
+            EXPECT_EQ(failure.operation, "thicken");
+            EXPECT_EQ(failure.reason, BRepExt::no_solution);
+            EXPECT_EQ(failure.kind, BRepExt::FailureKind::Curvature);
+            ASSERT_EQ(failure.shapes.size(), 1u);
+            EXPECT_TRUE(failure.shapes[0].IsSame(face));
+          }
+          EXPECT_EQ(BRepExt::focalSweep(TopoDS::Face(face.Reversed()), -1.5 * scale),
+                    BRepExt::FocalSweep::Crosses);
+          EXPECT_EQ(BRepExt::focalSweep(face, 0.05 * scale), BRepExt::FocalSweep::Regular);
+          gp_Trsf placement;
+          placement.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(3, 1, 2)), 0.43);
+          placement.SetTranslationPart(gp_Vec(-13 * scale, 4 * scale, 7 * scale));
+          const auto located = TopoDS::Face(face.Moved(TopLoc_Location(placement)));
+          EXPECT_EQ(BRepExt::focalSweep(located, 1.5 * scale), BRepExt::FocalSweep::Crosses);
+          EXPECT_EQ(BRepExt::focalSweep(located, 0.05 * scale), BRepExt::FocalSweep::Regular);
+          // The outward side of a convex graph has no positive focal distance.
+          if (b >= 0 && !rational)
+            EXPECT_EQ(BRepExt::focalSweep(face, -1.5 * scale), BRepExt::FocalSweep::Regular);
+        }
+}
+
+// Independent meridian integral: 2 pi times the first moment of the disk of radius
+// a centred at (R,0), clipped at x=0. This is a parallel BODY after the hole closes.
+TEST(BRepOffsetExt, RingParallelBodyClosesItsHoleWithoutKeepingTheCrossingSheet)
+{
+  for (double scale : {0.1, 1.0, 10.0})
+    for (double ratio : {1.001, 1.1, 2.0})
+      for (bool posed : {false, true})
+      {
+        const double R = 10 * scale, r = 4 * scale, a = ratio * R, d = a - r;
+        gp_Ax2       axes(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
+        if (posed)
+          axes = gp_Ax2(gp_Pnt(7 * scale, -3 * scale, 11 * scale), gp_Dir(1, 2, 3));
+        const TopoDS_Shape source = BRepPrimAPI_MakeTorus(axes, R, r).Shape();
+        const double       before = volume(source);
+        const auto         result = BRepExt::offsetSolid(session(),
+                                                 keep(source),
+                                                 d,
+                                                 1e-7 * scale,
+                                                 0,
+                                                         {},
+                                                 BRepExt::failureHashBound);
+        const TopoDS_Shape made   = BRepExt::get(session(), result.resultId);
+        EXPECT_TRUE(BRepCheck_Analyzer(made).IsValid());
+        EXPECT_EQ(faceCount(made), 1);
+        const double z = std::sqrt((a - R) * (a + R));
+        const double expected =
+          4 * M_PI
+          * (z * z * z / 3 + R * (M_PI * a * a / 4 + R * z / 2 + a * a * std::asin(R / a) / 2));
+        EXPECT_NEAR(volume(made), expected, expected * 1e-8);
+        EXPECT_EQ(volume(source), before);
+      }
 }

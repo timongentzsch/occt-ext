@@ -1,6 +1,8 @@
 set(OCCT_BRepOffsetExt_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
 set(OCCT_BRepOffsetExt_FILES
   BRepOffsetExt_Defeature.cxx
+  BRepOffsetExt_Focal.cxx
+  BRepOffsetExt_Focal.hxx
   BRepOffsetExt_Faces.cxx
   BRepOffsetExt_Hollow.cxx
   BRepOffsetExt_Kept.cxx

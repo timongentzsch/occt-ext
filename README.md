@@ -264,8 +264,10 @@ Known limits and what remains:
    (open: local refinement or several faces). Not yet supported: curvature-continuous fills between plates
    meeting at three or more edges at once, strips with bending flows, flow-direction modes on steep
    supports, and profile-curve panels.
-4. **Offsets and thickening.** Thickening a sheet whose surface self-crosses is unproven for general splines;
-   offsetting solids whose blends meet the wall thickness exactly has no exactness proof. In the face offset
+4. **Offsets and thickening.** Strict local focal crossings on non-periodic rational spline sheets are
+   refused by interval witnesses; periodic supports, inconclusive bounds and global collisions remain
+   unproven. A complete circular tube's outward parallel body closes its hole by revolving its clipped
+   meridian. Offsetting solids whose blends meet the wall thickness exactly has no exactness proof. In the face offset
    the largest angle between the faces along a tangent edge is found by sampling, not bounded.
 5. **Speed.** Measured against stock followed by the same check: a single circular edge 1.05 times, the round
    blended into earlier rounds 1.19 times, the curve offset 1.5 times, the hollow 2.6 to 3.2 times, the smooth skin
