@@ -826,3 +826,39 @@ outside its certified rectangle. The existing approximation-error, topology, cle
 and self-interference checks still apply to that rectangle. A generated family varies
 scale, pose and signed distance on a valid near-planar C0 support, checking face lineage,
 volume and independently evaluated normal-offset samples.
+
+### Continuing both branches of a periodic seam
+
+A seam has two curves on its face, although it has only one three-dimensional edge.
+The two curves may differ by a period in either surface parameter. When the end faces
+move, a finite seam pcurve can need the same end-span continuation as a tangent edge.
+The kept-face construction now fits both branches independently, at its existing
+one-tenth-tolerance interpolation bound, and gives the modifier the branch selected by
+that edge use's orientation. Binding both curves by face identity alone would overwrite
+one with the other. Branches that need no continuation keep their original route.
+The solid validity, source-normal distance, self-interference and clearance checks remain.
+A generated cylinder with finite spline seam pcurves checks the closed-form volume
+pi (r+d)^2 (h+2d), at three scales and a rotated, translated pose, in both directions.
+
+The continuation argument is **derived** from the existing parameter curves and the
+normal-offset definition of Patrikalakis, Maekawa and Cho, *Shape Interrogation for
+Computer Aided Design and Manufacturing* (2009), section 11.3.1, equation (11.17):
+<https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html>.
+The representation contract is OCCT's `BRep_Builder::UpdateEdge(E,C1,C2,F,Tol)`
+overload for a closed face, and `BRepTools_Modifier`'s separate `NewCurve2d` calls
+for the two uses. This does not prove that arbitrary continuation is regular or
+non-self-intersecting; those are still checked on the constructed body.
+
+For an *exact* pipe P(s,t)=c(s)+r e(s,t), where e is the unit radial vector in the
+normal plane of the regular spine, its normal is radial while the surface is regular.
+Substituting into equation (11.17) gives c(s)+(r +/- d)e(s,t): its offset is a pipe
+about the same spine. This substitution is **derived** from the pipe parameterization
+and normal in the same authors' section 11.6.2, equations (11.111)-(11.115):
+<https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node237.html>.
+The local condition is that the shifted radius times the maximum spine curvature
+is less than one; global separation also matters (section 11.6.3.4, Theorem 11.6.1):
+<https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node242.html>.
+A fitted tensor spline through circular sections is not thereby certified to be this
+exact pipe. The kept-face operation has no retained spine/radius descriptor for a
+general spline support. Inferring one from a nominal size and replacing the support
+would change the input surface; this change does not do so.

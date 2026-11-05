@@ -28,6 +28,8 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <Geom2d_Curve.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
+#include <Geom2dConvert.hxx>
 #include <NCollection_Array2.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -716,6 +718,53 @@ TEST(BRepOffsetExt, NormalOffsetApproximationCoversTheExtendedFaceDomain)
             EXPECT_LE(after->Value(u, v).Distance(exact), tolerance);
           }
       }
+    }
+  }
+}
+
+// A finite spline pcurve on a periodic seam has two distinct parameter branches. Moving
+// the end planes extends both branches, without moving either to the other periodic bound.
+// This changes only the representation of the cylinder's seam, not its geometry.
+TEST(BRepOffsetExt, FiniteSeamBranchesExtendWithTheirEndPlanes)
+{
+  const double radius = 3.0, height = 7.0;
+  TopoDS_Shape body = BRepPrimAPI_MakeCylinder(radius, height).Shape();
+  BRep_Builder builder;
+  for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
+  {
+    const TopoDS_Face face = TopoDS::Face(f.Current());
+    for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+    {
+      const TopoDS_Edge edge = TopoDS::Edge(e.Current());
+      if (!BRep_Tool::IsClosed(edge, face))
+        continue;
+      double first, last;
+      BRep_Tool::Range(edge, first, last);
+      const auto branch = [&](TopAbs_Orientation orientation) {
+        return Geom2dConvert::CurveToBSplineCurve(new Geom2d_TrimmedCurve(
+          BRep_Tool::CurveOnSurface(TopoDS::Edge(edge.Oriented(orientation)), face, first, last),
+          first, last));
+      };
+      const Handle(Geom2d_Curve) one = branch(TopAbs_FORWARD), two = branch(TopAbs_REVERSED);
+      builder.UpdateEdge(edge, one, two, face, BRep_Tool::Tolerance(edge));
+    }
+  }
+  ASSERT_TRUE(BRepCheck_Analyzer(body).IsValid());
+  for (const double scale : {0.01, 1.0, 100.0})
+  {
+    gp_Trsf turn, shift, size;
+    turn.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), 0.47);
+    shift.SetTranslation(gp_Vec(2, -3, 5));
+    size.SetScale(gp::Origin(), scale);
+    const TopoDS_Shape input = BRepBuilderAPI_Transform(body, size * shift * turn, true).Shape();
+    for (const double d : {-0.2, 0.2})
+    {
+      const TopoDS_Shape result = kept(input, d * scale, 1e-6 * scale);
+      ASSERT_FALSE(result.IsNull());
+      EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
+      EXPECT_EQ(faceCount(result), 3);
+      EXPECT_NEAR(volume(result) / (scale * scale * scale),
+                  M_PI * (radius + d) * (radius + d) * (height + 2 * d), 1e-7);
     }
   }
 }

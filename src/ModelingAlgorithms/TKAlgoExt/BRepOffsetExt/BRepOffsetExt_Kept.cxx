@@ -251,6 +251,9 @@ struct NewEdge
   double                                                                             last  = 0.0;
   double                                                                             tolerance = 0.0;
   bool                                                                               crossing = false;
+  // Only present when a seam needs both pcurves extended beyond their old domains.
+  Handle(Geom2d_Curve) seamOther;
+  TopAbs_Orientation   seamOrientation = TopAbs_FORWARD;
   NCollection_DataMap<TopoDS_Shape, Handle(Geom2d_Curve), TopTools_ShapeMapHasher> onFace;
 };
 
@@ -323,6 +326,8 @@ public:
     const Handle(Geom2d_Curve)* onFace = made->onFace.Seek(face);
     double                      first, last;
     curve     = onFace ? *onFace : BRep_Tool::CurveOnSurface(edge, face, first, last);
+    if (!made->seamOther.IsNull() && edge.Orientation() != made->seamOrientation)
+      curve = made->seamOther;
     // Not shared with the input's edge: the result's geometry is its own.
     if (!curve.IsNull() && !onFace)
       curve = Handle(Geom2d_Curve)::DownCast(curve->Copy());
@@ -1488,18 +1493,17 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       // interpolated too, through their own continuation.
       double                     c0, c1;
       const Handle(Geom2d_Curve) onOne   = BRep_Tool::CurveOnSurface(edge, one, c0, c1);
-      const Handle(Geom2d_Curve) onOther = BRep_Tool::CurveOnSurface(edge, other, c0, c1);
+      Handle(Geom2d_Curve) onOther = BRep_Tool::CurveOnSurface(edge, other, c0, c1);
       const auto                 within  = [&](const Handle(Geom2d_Curve)& c) {
         return c->IsPeriodic()
                || (c->FirstParameter() <= made.first + Precision::PConfusion()
                    && made.last <= c->LastParameter() + Precision::PConfusion());
       };
-      const bool refit = !within(onOne) || !within(onOther);
-      if (refit && one.IsSame(other))
-      {
-        why = "a seam runs past the ends of its curves on its face after the move";
-        return {};
-      }
+      const Handle(Geom2d_Curve) opposite = one.IsSame(other)
+        ? BRep_Tool::CurveOnSurface(TopoDS::Edge(edge.Reversed()), other, c0, c1) : onOther;
+      const bool refit = !within(onOne) || !within(opposite);
+      if (refit)
+        onOther = opposite;
       // Breaks where a curve on a face, or the moved surface along it, is less than C2.
       std::vector<double> breaks;
       for (const auto& [face, on] : {std::pair(one, onOne), std::pair(other, onOther)})
@@ -1537,8 +1541,10 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
         breaks,
         [&](double t, gp_Pnt& p, std::vector<gp_Pnt2d>& uvs) {
           p   = along(*plan, edge, one, t, nullptr);
-          gap = std::max(gap, p.Distance(along(*plan, edge, other, t, nullptr)));
           uvs = {onOne->Value(t), onOther->Value(t)};
+          const gp_Pnt otherPoint = refit && one.IsSame(other)
+            ? b.surface->Value(uvs[1].X(), uvs[1].Y()) : along(*plan, edge, other, t, nullptr);
+          gap = std::max(gap, p.Distance(otherPoint));
           return true;
         },
         [&](size_t f, const gp_Pnt2d& uv) {
@@ -1558,7 +1564,13 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       if (refit)
       {
         made.onFace.Bind(one, curves[0]);
-        made.onFace.Bind(other, curves[1]);
+        if (one.IsSame(other))
+        {
+          made.seamOther = curves[1];
+          made.seamOrientation = edge.Orientation();
+        }
+        else
+          made.onFace.Bind(other, curves[1]);
       }
       made.tolerance =
         std::max({BRep_Tool::Tolerance(edge) + spread.Find(edge), error, gap});
