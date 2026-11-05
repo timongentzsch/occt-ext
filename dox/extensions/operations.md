@@ -314,6 +314,42 @@ before and 0.00558283 ms/query after (1.05606 ratio). The cost includes finding
 the previously missed extrema. Native extension and distance tests: 139 passed
 in 17 suites. Timing is a measurement of this family, not a complexity bound.
 
+### Compatibility before a second-order join
+
+Jorg Peters, *Geometric Continuity* (2001), section 2, defines continuity by
+regular reparameterization, rather than equality of arbitrary parameter speeds:
+<https://www.cise.ufl.edu/research/SurfLab/papers/01handbook.pdf>.
+**Derived here by the chain rule:** orient a common seam as
+`A(0,s)=B(0,s)`, and write the first transverse reparameterization derivatives
+as `alpha,beta` and the second as `gamma,delta`. Then
+`B_t=alpha A_u+beta A_v` and
+`B_tt=alpha^2 A_uu+2 alpha beta A_uv+beta^2 A_vv+gamma A_u+delta A_v`.
+The mixed derivative follows by differentiating the first equation along s.
+The parameter map must remain nonsingular; in these coordinates alpha is
+nonzero, with its sign fixed by the chosen orientation. Contact and seam data
+meeting at a corner must be derivatives of the same map. A quintic spline with
+interior multiplicity at most three is C2, but this alone imposes neither those
+support constraints nor regularity or fidelity to a prescribed section family.
+
+Salvi, Varady and Rockwood, *Transfinite surface interpolation over specific
+curvenet configurations* (2013), section 3.2, equation (3.1), uses parabolic
+ribbons `P(s)+d T(s)+d^2 C(s)/2` for curvature continuity; sections 3.2 and 4
+distinguish compatible corner data from rational correction terms:
+<https://3dgeo.iit.bme.hu/papers/multisided/transfinite-g2.pdf>.
+This supplies a construction framework, not a convergence or error theorem for
+the current section interpolation. In particular a fit's positional error does
+not bound its second derivatives.
+
+**Derived negative control:** the graphs `(u,v,0)` and
+`(u,v,.032 u^2 v^3(1-v)^3)` share a tangent plane along u=0, but their normal
+curvatures across that seam differ by .001 at v=.5. Their contact ribbons at
+v=0 and v=1 agree through order two. Reparameterization cannot remove this
+geometric curvature jump while preserving the entire piecewise surface.
+A native tensor-product polynomial evaluation gives normal jump zero,
+curvature jump .001 and maximum sampled contact-jet roundoff 3.13e-17.
+The compatible planar target gives zero curvature jump. This control validates
+the distinction; it is not a classification of arbitrary blend requests.
+
 ## BRepPatchExt: boundary-first fill
 
 *Problem.* Given a closed loop of edges, each optionally asked to meet a neighbouring face to G0, G1 or
