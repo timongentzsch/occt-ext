@@ -350,6 +350,37 @@ curvature jump .001 and maximum sampled contact-jet roundoff 3.13e-17.
 The compatible planar target gives zero curvature jump. This control validates
 the distinction; it is not a classification of arbitrary blend requests.
 
+### A remaining degree of freedom in symmetric quintic sections
+
+For contacts A and B and tangent intersection T, let d=1-rho. Consider the
+polynomial quintic basis with knots (0,.5,1), multiplicities (6,2,6), endpoint
+poles A,B, adjacent poles `T+(1-.3 rho)(A-T)` and its symmetric counterpart,
+and second poles `T+q(A-T)` and `T+q(B-T)`. Write the central pair as
+`T+z(A-T)+b(B-T)` and its symmetric counterpart. **Derived here:** midpoint
+interpolation gives `q+3(z+b)=4d`; the chosen reflected-pole relation
+`b=(q-2d)/120` then fixes z, but leaves q free. Endpoint zero curvature,
+symmetry and midpoint position therefore do not uniquely specify this family.
+The reflected-pole relation is a construction choice, not a continuity theorem.
+
+The endpoint derivative identities are `C'(0)=10(P1-P0)` and
+`C''(0)=80(P2-2P1+P0)`. They follow from the standard B-spline derivative
+recurrence: Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer
+Aided Design and Manufacturing* (2009), section 1.4.2, equations (1.65)-(1.68):
+<https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html>.
+Collinearity of the first three poles gives zero endpoint curvature; a curved
+support requires different endpoint jet data.
+
+Lian Fang, *G3 approximation of conic sections by quintic polynomial curves*
+(1999), section 2, equations (1)-(2), constructs a quintic Hermite approximant
+to a rational quadratic with endpoint G3 conditions:
+<https://numerika.fmf.uni-lj.si/bib2html/e-documents/clanki/FangG3approximationofconicsectionsbyquinticpolynomialcurves.pdf>.
+Those endpoint conditions differ from the zero-curvature contacts above, so
+that published construction does not determine the free q here. Equating
+midpoint curvature to a rational quadratic with the same contacts, tangent
+intersection and midpoint is a separate, derived condition; it can have an
+inadmissible root outside the contact triangle. No such rule is adopted.
+A general generator and its existence conditions remain open.
+
 ## BRepPatchExt: boundary-first fill
 
 *Problem.* Given a closed loop of edges, each optionally asked to meet a neighbouring face to G0, G1 or
