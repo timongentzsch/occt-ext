@@ -272,8 +272,9 @@ Known limits and what remains:
    unproven. A complete circular tube's outward parallel body closes its hole by revolving its clipped
    meridian. Offsetting solids whose blends meet the wall thickness exactly has no exactness proof. In the face offset
    the largest angle between the faces along a tangent edge is found by sampling, not bounded.
-   Continuing an approximately tangent contact past its trim and bounding vertex-to-edge endpoint
-   gaps remain open: shape validity can accept a large endpoint gap when its vertex tolerance grows.
+   Continuing an approximately tangent contact past its trim remains open. Endpoint gaps are checked
+   independently of result tolerances, including both seam pcurves; chart cuts follow their
+   junctions and closed nonperiodic section curves use independent endpoint stations.
    See [the endpoint certificate limits](dox/extensions/operations.md#face-offset-endpoint-certificate-limits).
 5. **Speed.** Measured against stock followed by the same check: a single circular edge 1.05 times, the round
    blended into earlier rounds 1.19 times, the curve offset 1.5 times, the hollow 2.6 to 3.2 times, the smooth skin

@@ -1694,7 +1694,47 @@ experimental SVD Gauss--Newton vertex refinement returned otherwise valid bodies
 gaps of 0.0034 to 0.0052 model units; the input tolerances were at most about 5e-6. That experiment
 was discarded. Independent endpoint measurements also found a pre-existing 0.1478 gap on an
 inward offset with cylindrical and toroidal supports, despite sampled edge/support gaps below
-1e-6 and a valid shape. No production construction, refusal or tolerance was changed by this audit.
+1e-6 and a valid shape. That audit made no production change. The endpoint certificate now
+checks every oriented vertex/edge occurrence against `max(operation tolerance, input vertex
+tolerance, carried input vertex tolerance + incident normal spread)`, assigned before any
+incident curve is fitted. Both lifted seam pcurves are checked after rebuilding and optional
+surface approximation. Inflating result metadata can no longer satisfy this independent check.
+The inherited normal-spread estimate is still sampled, not an interval enclosure.
+
+Two representation defects caused six measured invalid deliveries. First, an inward junction
+on a cylindrical support moved in azimuth while its chart seam stayed fixed. A seam is not a
+physical intersection: carry both pcurves through the projected endpoint UVs with the same
+linear endpoint correction, then fit their common lift. Derived here: if the original pcurves
+differ by a period vector kP, adding the same correction delta(t) preserves
+`S(q(t)+delta(t)) = S(q(t)+kP+delta(t))` on a periodic carrier. The support and physical trims
+stay fixed. This argument requires regular endpoint projections and a valid cut in the retained
+region; validity, normal distance and interference remain separate checks. It is not a general
+existence proof for arbitrary seam routing. The 0.147808 gap falls below 3.03e-9 in the first
+measured body, including both lifted pcurves.
+
+Second, a closed topological edge need not have a periodic curve parameter. Reusing its old
+parameter width for a moved endpoint put its final section off the junction, although its first
+section hit it. Where that candidate final section exceeds the preassigned endpoint budget,
+solve the final occurrence's section parameter independently. Four sphere/toroid directions
+had 2.57e-6 to 2.63e-6 gaps. The relevant vertex's input tolerance is 1.000000022e-7 and its
+incident retained cut is a seam (normal spread exactly zero), so the operation's 1e-6 allowance
+applies: these four are defects, not unresolved angular-budget cases. The first measured repair
+falls below 2.91e-9. Every other completed construction in the measured sweep keeps its existing representation.
+
+OCCT, *BRep_Tool reference manual* (8.0.1, accessed 2026),
+[`IsClosed` and `CurveOnSurface`](https://occt3d.com/dev/doc/refman/html/class_b_rep___tool.html),
+defines topological edge closure by shared vertices and distinguishes the two pcurves of a
+seam. Neither definition implies periodicity of the stored curve's parameter.
+
+A revolution-extension hypothesis was independently refuted on 85 generated revolution faces:
+8,500 evaluations, including extrapolated parameters, agree with homogeneous de Casteljau
+continuation of the end profile span, followed by rotation, within 7.80e-15 model units.
+Offset evaluation agrees with `S+d n` within floating-point error. On the first refused contact,
+the two independently continued *source* lifts already differ by 3.23e-5 and their unit normals
+by 0.001617, although they agree at the old vertex to 8.71e-15. The triangle inequality gives
+`gap_after <= gap_before + |d| |n1-n2|` (derived here). This explains why an old trimmed-contact
+bound does not automatically certify the continued contact. It does not authorize a larger
+output tolerance or prove that a jointly constructed continuation cannot exist.
 
 Closest-point stationarity follows the same book's [section 7.2.1, equations (7.8)-(7.9)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node135.html).
 SVD least squares and Gauss--Newton are described by Nocedal and Wright, *Numerical Optimization*,

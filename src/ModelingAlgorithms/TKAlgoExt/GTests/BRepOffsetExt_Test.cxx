@@ -17,6 +17,10 @@
 #include "BRepExtTest_Support.hxx"
 
 #include <BRepOffsetExt_Kept.hxx>
+#include <BRepBlendExt_Request.hxx>
+#include <BRepAlgoAPI_Common.hxx>
+#include <NCollection_IndexedDataMap.hxx>
+#include <gp_Ax2.hxx>
 #include <BRepOffsetExt_Parts.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepOffsetExt_Focal.hxx>
@@ -1019,4 +1023,129 @@ TEST(BRepOffsetExt, OpeningExclusionKeepsSharedWallDescendants)
   EXPECT_TRUE(measured.resolved);
   EXPECT_FALSE(measured.satisfies(0.2));
   EXPECT_NEAR(measured.minimum, 0.1, Precision::Confusion());
+}
+
+namespace
+{
+// Independent of output tolerance metadata. Traverse each oriented use so a closed edge's
+// final occurrence and the second pcurve of a periodic seam cannot disappear in a shape map.
+void checkEndpointOccurrences(const TopoDS_Shape& shape, double bound)
+{
+  for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next())
+  {
+    const auto face    = TopoDS::Face(f.Current());
+    const auto surface = BRep_Tool::Surface(face);
+    for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+    {
+      const auto edge = TopoDS::Edge(e.Current());
+      double     first, last;
+      const auto curve  = BRep_Tool::Curve(edge, first, last);
+      const auto pcurve = BRep_Tool::CurveOnSurface(edge, face, first, last);
+      ASSERT_FALSE(pcurve.IsNull());
+      for (TopExp_Explorer v(edge, TopAbs_VERTEX); v.More(); v.Next())
+      {
+        const auto   vertex = TopoDS::Vertex(v.Current());
+        const auto   point  = BRep_Tool::Pnt(vertex);
+        const double t      = BRep_Tool::Parameter(vertex, edge);
+        if (!curve.IsNull())
+        {
+          EXPECT_LE(point.Distance(curve->Value(t)), bound);
+        }
+        const auto uv = pcurve->Value(t);
+        EXPECT_LE(point.Distance(surface->Value(uv.X(), uv.Y())), bound);
+      }
+    }
+  }
+}
+
+void checkJunctionFamily(bool spherical)
+{
+  // The closed-contact test varies distance, size and pose on one supported blended source.
+  // Wider carrier-placement diagnostics include source blends that are not constructible.
+  const std::vector<double> centers =
+    spherical ? std::vector<double>{5.7} : std::vector<double>{5.7, 6.0, 6.3};
+  for (const double dx : centers)
+    for (const double scale : {0.1, 1.0, 10.0})
+      for (const bool turned : {false, true})
+      {
+        SCOPED_TRACE(::testing::Message()
+                     << spherical << " " << dx << " " << scale << " " << turned);
+        const TopoDS_Shape left =
+          spherical ? BRepPrimAPI_MakeSphere(11).Shape()
+                    : BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -10), gp::DZ()), 10, 20).Shape();
+        const TopoDS_Shape right =
+          BRepPrimAPI_MakeTorus(gp_Ax2(gp_Pnt(dx, 3, 2), gp::DZ()), 9, 4).Shape();
+        const TopoDS_Shape joined = spherical ? BRepAlgoAPI_Common(left, right).Shape()
+                                              : BRepAlgoAPI_Fuse(left, right).Shape();
+        TopExp_Explorer    solids(joined, TopAbs_SOLID);
+        ASSERT_TRUE(solids.More());
+        const TopoDS_Shape body = solids.Current();
+        NCollection_IndexedDataMap<TopoDS_Shape,
+                                   NCollection_List<TopoDS_Shape>,
+                                   TopTools_ShapeMapHasher>
+          adjacent;
+        TopExp::MapShapesAndUniqueAncestors(body, TopAbs_EDGE, TopAbs_FACE, adjacent);
+        TopoDS_Shape chosen;
+        for (int j = 1; j <= adjacent.Extent(); ++j)
+        {
+          if (adjacent(j).Size() != 2)
+            continue;
+          const auto a    = BRepAdaptor_Surface(TopoDS::Face(adjacent(j).First())).GetType();
+          const auto b    = BRepAdaptor_Surface(TopoDS::Face(adjacent(j).Last())).GetType();
+          const auto kind = spherical ? GeomAbs_Sphere : GeomAbs_Cylinder;
+          if ((a == kind && b == GeomAbs_Torus) || (b == kind && a == GeomAbs_Torus))
+          {
+            chosen = adjacent.FindKey(j);
+            break;
+          }
+        }
+        ASSERT_FALSE(chosen.IsNull());
+        BRepExt::blending::Request request;
+        request.body        = body;
+        request.edges       = {chosen};
+        request.first       = 0.5;
+        TopoDS_Shape source = BRepExt::blending::blend(request).shape;
+        gp_Trsf      scaling;
+        scaling.SetScale(gp::Origin(), scale);
+        source = BRepBuilderAPI_Transform(source, scaling, true).Shape();
+        if (turned)
+        {
+          gp_Trsf pose;
+          pose.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), 0.7);
+          source = BRepBuilderAPI_Transform(source, pose, true).Shape();
+        }
+        ASSERT_TRUE(BRepCheck_Analyzer(source).IsValid());
+        const double tolerance = 1e-6 * scale;
+        // Keep planar end caps fixed. This isolates junction/contact reconstruction from
+        // the separate global all-face clearance enclosure on large trimmed spline faces.
+        BRepExt::FaceSet moved;
+        for (TopExp_Explorer f(source, TopAbs_FACE); f.More(); f.Next())
+          if (spherical
+              || BRepAdaptor_Surface(TopoDS::Face(f.Current())).GetType() != GeomAbs_Plane)
+            moved.Add(f.Current());
+        const std::vector<double> distances =
+          spherical ? std::vector<double>{-0.025, -0.05, -0.1} : std::vector<double>{-0.05};
+        for (const double distance : distances)
+        {
+          BRepExt::Lineage   lineage(source);
+          std::string        why;
+          const TopoDS_Shape result =
+            BRepExt::keptOffset(source, moved, distance * scale, tolerance, lineage, why);
+          ASSERT_FALSE(result.IsNull()) << why;
+          EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
+          EXPECT_EQ(faceCount(result), faceCount(source));
+          checkEndpointOccurrences(result, tolerance);
+        }
+      }
+}
+} // namespace
+
+TEST(BRepOffsetExt, PeriodicChartCutsFollowTheirIncidentJunctions)
+{
+  checkJunctionFamily(false);
+}
+
+TEST(BRepOffsetExt, ClosedIntersectionOccurrencesShareTheirJunction)
+{
+  checkJunctionFamily(true);
 }

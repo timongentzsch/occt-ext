@@ -261,6 +261,7 @@ struct NewVertex
 {
   gp_Pnt point;
   double tolerance = 0.0;
+  double endpointBudget = 0.0; //!< Assigned from the input before any incident edge is fitted.
 };
 
 //! The modification that BRepTools_Modifier applies: everything is worked out beforehand.
@@ -1443,7 +1444,10 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       off = std::max(off, at.Distance(point));
     }
     // No finer than the input's: its edges meet within that.
-    plan->vertices.Bind(vertex, {point, std::max(BRep_Tool::Tolerance(vertex), 1.001 * off)});
+    plan->vertices.Bind(vertex,
+                        {point,
+                         std::max(BRep_Tool::Tolerance(vertex), 1.001 * off),
+                         std::max({tolerance, BRep_Tool::Tolerance(vertex), carried})});
   }
 
   // Edges.
@@ -1489,6 +1493,74 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       }
       if (closed)
         made.last = made.first + (last - first);
+      // A periodic seam is a chart cut, not a physical contact. If a junction moves across
+      // that cut, carry both copies of the cut through the same junction. Their parameter
+      // separation stays unchanged. Endpoint budgets come from the input, never the fitted gap.
+      bool moveCut = false;
+      if (one.IsSame(other))
+        for (const auto& [v, t] : {std::pair(start, made.first), std::pair(end, made.last)})
+          if (const NewVertex* nv = plan->vertices.Seek(v))
+            moveCut = moveCut
+                      || nv->point.Distance(along(*plan, edge, one, t, nullptr))
+                           > std::max(tolerance, BRep_Tool::Tolerance(v));
+      if (moveCut)
+      {
+        double     c0, c1;
+        const auto on       = BRep_Tool::CurveOnSurface(edge, one, c0, c1);
+        const auto opposite = BRep_Tool::CurveOnSurface(TopoDS::Edge(edge.Reversed()), one, c0, c1);
+        gp_Vec2d   correction[2];
+        int        endpoint = 0;
+        for (const auto& [v, t] : {std::pair(start, made.first), std::pair(end, made.last)})
+        {
+          const auto uv = on->Value(t);
+          double     u = uv.X(), vpar = uv.Y();
+          gp_Pnt     footPoint;
+          const auto nv    = plan->vertices.Seek(v);
+          const auto point = nv ? nv->point : BRep_Tool::Pnt(v);
+          if (!nearest(a.surface, point, u, vpar, footPoint)
+              || point.Distance(footPoint) > std::max(tolerance, BRep_Tool::Tolerance(v)))
+          {
+            why = "a junction cannot be carried by its periodic chart cut";
+            return {};
+          }
+          if (a.surface->IsUPeriodic())
+            u += a.surface->UPeriod() * std::round((uv.X() - u) / a.surface->UPeriod());
+          if (a.surface->IsVPeriodic())
+            vpar += a.surface->VPeriod() * std::round((uv.Y() - vpar) / a.surface->VPeriod());
+          correction[endpoint++] = gp_Vec2d(uv, gp_Pnt2d(u, vpar));
+        }
+        std::vector<Handle(Geom2d_Curve)> curves;
+        double                            error  = 0.0;
+        const bool                        fitted = interpolate(
+          made.first,
+          made.last,
+          {},
+          [&](double t, gp_Pnt& p, std::vector<gp_Pnt2d>& uvs) {
+            const double   w     = (t - made.first) / (made.last - made.first);
+            const gp_Vec2d shift = correction[0] * (1.0 - w) + correction[1] * w;
+            uvs = {on->Value(t).Translated(shift), opposite->Value(t).Translated(shift)};
+            p   = a.surface->Value(uvs[0].X(), uvs[0].Y());
+            return p.Distance(a.surface->Value(uvs[1].X(), uvs[1].Y())) <= tolerance;
+          },
+          [&](size_t, const gp_Pnt2d& uv) { return a.surface->Value(uv.X(), uv.Y()); },
+          2,
+          true,
+          0.1 * tolerance,
+          made.curve,
+          curves,
+          error);
+        if (!fitted)
+        {
+          why = "a periodic chart cut could not be fitted within its assigned tolerance";
+          return {};
+        }
+        made.onFace.Bind(one, curves[0]);
+        made.seamOther       = curves[1];
+        made.seamOrientation = edge.Orientation();
+        made.tolerance       = std::max(BRep_Tool::Tolerance(edge), error);
+        plan->edges.Bind(edge, made);
+        continue;
+      }
       // The curves on the faces stay unless the edge now runs past their ends; then they are
       // interpolated too, through their own continuation.
       double                     c0, c1;
@@ -1621,6 +1693,25 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
         z(4)              = w2.Y();
         return section(old, t, a.surface, b.surface, z, accuracy);
       };
+      // A closed topological edge need not have a periodic spline parameter. Its two
+      // endpoint occurrences must both belong to the junction. Reusing the old parameter
+      // width is allowed only while its final section still meets that assigned budget.
+      if (closed && endMoves)
+      {
+        math_Vector atEnd(1, 4);
+        const auto& point = plan->vertices.Find(end).point;
+        if (station(made.last, atEnd)
+            && a.surface->Value(atEnd(1), atEnd(2)).Distance(point)
+                 > std::max(tolerance, BRep_Tool::Tolerance(end)))
+        {
+          made.last = last;
+          if (!stationAt(end, made.last))
+          {
+            why = "the final occurrence of a closed edge misses its junction";
+            return {};
+          }
+        }
+      }
       // Two elementary surfaces cross along a line or a conic: that, exactly.
       std::vector<Handle(Geom2d_Curve)> curves;
       double                            error = 0.0;
@@ -1772,6 +1863,47 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
   for (TopExp_Explorer all(body, TopAbs_FACE); all.More(); all.Next())
     lineage.set(all.Current(), {modifier.ModifiedShape(all.Current())});
   lineage.within(result);
+
+  // Every endpoint occurrence, including both ends of closed edges and both pcurves of a
+  // seam. Output metadata cannot enlarge this budget: it was assigned before fitting.
+  for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
+  {
+    const TopoDS_Face sourceFace = TopoDS::Face(f.Current());
+    const TopoDS_Face madeFace   = TopoDS::Face(modifier.ModifiedShape(sourceFace));
+    const auto        surface    = BRep_Tool::Surface(madeFace);
+    for (TopExp_Explorer e(sourceFace, TopAbs_EDGE); e.More(); e.Next())
+    {
+      const TopoDS_Edge sourceEdge = TopoDS::Edge(e.Current());
+      TopoDS_Edge       madeEdge   = TopoDS::Edge(modifier.ModifiedShape(sourceEdge));
+      madeEdge.Orientation(sourceEdge.Orientation());
+      double     first, last;
+      const auto curve  = BRep_Tool::Curve(madeEdge, first, last);
+      const auto pcurve = BRep_Tool::CurveOnSurface(madeEdge, madeFace, first, last);
+      if (pcurve.IsNull())
+      {
+        why = "an endpoint has no curve on its face";
+        return {};
+      }
+      for (TopExp_Explorer v(sourceEdge, TopAbs_VERTEX); v.More(); v.Next())
+      {
+        const auto    sourceVertex = TopoDS::Vertex(v.Current());
+        TopoDS_Vertex madeVertex   = TopoDS::Vertex(modifier.ModifiedShape(sourceVertex));
+        madeVertex.Orientation(sourceVertex.Orientation());
+        const NewVertex* assigned = plan->vertices.Seek(sourceVertex);
+        const double     bound = assigned ? assigned->endpointBudget
+                                          : std::max(tolerance, BRep_Tool::Tolerance(sourceVertex));
+        const double     t     = BRep_Tool::Parameter(madeVertex, madeEdge);
+        const auto       point = BRep_Tool::Pnt(madeVertex);
+        const auto       uv    = pcurve->Value(t);
+        if ((!curve.IsNull() && point.Distance(curve->Value(t)) > bound)
+            || point.Distance(surface->Value(uv.X(), uv.Y())) > bound)
+        {
+          why = "an incident edge misses its junction's assigned endpoint tolerance";
+          return {};
+        }
+      }
+    }
+  }
 
   // The certificate.
   if (!BRepCheck_Analyzer(result).IsValid())
