@@ -261,9 +261,10 @@ Known limits and what remains:
    `BRepPatchExt_Chain` (nearest-end growth, gaps closed with straight segments); a general theory of which
    chain a user means is not attempted. A loop that is a height over no plane is filled over a faired
    disc laid flat conformally (Boundary First Flattening); the net over that chart is a tensor net, so a
-   loop that needs fine spans in one place needs them right across: the steep wing tip asks for at least
-   980 poles against the 640 allowed, where a net finer only where needed would take about 190 cells
-   (open: local refinement or several faces). Not yet supported: curvature-continuous fills between plates
+   loop that needs fine spans in one place needs them right across. Its 640-pole forecast is a
+   computation policy based on osculating-circle derivatives, not a general approximation bound or
+   a necessary pole count. Complete curvature enforcement, converged geometric feasibility and
+   support-derived collar initialization remain open. Not yet supported: curvature-continuous fills between plates
    meeting at three or more edges at once, strips with bending flows, flow-direction modes on steep
    supports, and profile-curve panels.
 4. **Offsets and thickening.** Strict local focal crossings on non-periodic rational spline sheets are

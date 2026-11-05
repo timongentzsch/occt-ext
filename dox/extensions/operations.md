@@ -293,7 +293,7 @@ endpoint fixes the constant, so `sum xi_i N_i,p = u`. Partition of unity then re
 any affine height, and tensor products reproduce its two-variable form.
 
 This construction is not enabled. In a three-direction planar-rim experiment, 4,761, 17,689
-and 68,121 coefficients met the unchanged boundary conditions, but the interior-curvature
+and 68,121 coefficients met the surface-side rim checks before sewing, but the interior-curvature
 ratios were approximately 15, 11 and 10 against the existing allowance of 4. These are failed
 candidates, not a proof of infeasibility. Exact planar jets alone do not establish interior
 fairness, topology, or agreement with the intended shape. The original routes and their
@@ -404,46 +404,35 @@ times the size; read by projection onto the strips they meet every edge, the str
 within 0.005 degrees and their bends within a share of 0.004 (95th percentile), and stand within 0.009 of
 the cylinder (the 200-degree window 0.0024, on 11 x 8 poles, in 0.34 s of CPU time natively; 300 degrees
 1.4 s).
-How fine a net over the chart has to be is known before any net is fitted, and a loop that needs more
-poles than a net free in space is let have (`freePoles`, 640) is refused at once. A spline of degree p on
-even knots of span h comes within K (h / pi)^(p + 1 - k) |f^(p + 1)| of a function in its k-th derivative
-[Favard 1937; de Boor, A Practical Guide to Splines, 2001, XII], with the Favard constant K between 1 and
-pi / 2. A surface that bends by k at a place is there, to the order that matters, a circle of radius
-1 / k, whose (p + 1)-th derivative by length is k^p. Held to a quarter (`fitShare`) of the tolerance in
-place, of the angle's sine in its tangent plane and of the share asked in its bend, the span may be no
-more than pi (s tol / (K k^p))^(1 / (p + 1)) for the place, pi (s sin g1 / K)^(1 / p) / k for the tangent
-plane and pi (s g2 / K)^(1 / (p - 1)) / k for the bend, the finest of what each place asks (`netSpacing`;
-for degree 5 and Patch's limits k h <= 0.61 at G1 and 0.94 at G2). The bend is read inside from the disc
-(the discrete operators of Meyer, Desbrun, Schroeder and Barr 2003, no tighter than one over the mean edge
-of a node's triangles, which is as tight as they can show) and along the rim from the circle through the
-side's places at even steps of its length, and from the face's own principal curvatures where tangency is
-asked: a parameter that slows to nothing at a trailing edge makes the curve's own derivatives say nothing
-of its bend. Each node's span, times how the chart stretches there, is the span the net needs at its place
-in the chart; the finest of them across each way, summed over the chart's extent with its margins,
-counts the spans of the coarsest net of graded knots that meets every place, and the poles that come of
-them. The window of 200 degrees asks for 8 x 3 spans (104 poles; it is met on 6 x 3), that of 300 degrees
-for 12 x 3. The wing tip asks for 65 x 9 spans, 980 poles: it is refused after the disc is made, in 63 to
-70 ms of CPU time natively (a fill over its chart took 3.3 s before, 2 ms before there was one; in
-WASM 80 to 130 ms per tip against 2.4 to 3.3 s and 12 to 36 ms, read by the application's test), at rest,
-turned and at five times the size, as are tips held out from the design (thickness 9 % and 15 % of the
-chord with the guide 6 and 12 out, a cambered tip of 70 by 15 %, and a tip of 70 with 2 % camber): 930 to
-1050 poles. Where the spans asked are: round the nose (0.6 for its radius of 1.27 at G1 and G2) and at
-the narrow fin that the guide asks near the trailing edge (the disc bends there by about 1 / 1.2). A net
-whose every cell were of the span asked where it lies would need 167 to 191 cells; it is the tensor net,
-whose fine spans run right across the chart, that needs five times that. A chart whose scale along the rim
-was set to stretch every place to the span an even net of 640 poles affords (Boundary First Flattening with
-the boundary's scale prescribed, the inside extended conformally by the harmonic conjugate, as a chart
-stretched so is not convex and the two coordinates extended each on its own fold it) needed more, 1050:
-stretching the nose widens the chart both ways. Nor does the net the bound asks for, its knots graded
-strip by strip as the spans asked there: on the wing tip at rest 65 x 9 spans (980 poles) took 7.5 s to
-fit, missed its place by 0.0034 (the limit 0.001) and its bend by a share of 0.46 (0.05), and folded;
-graded on through the margins, 78 x 11 (1328 poles) took 11.2 s, met its places and missed its bend by a
-share of about 0.29, and bent ten times more tightly inside than its rim. More than nine tenths of that
-time is in the band solves of the multipliers' passes, which stall short of the conditions. A fold or
-such a bend is no surface to deliver with its misses reported, so the tip is refused as before. Open:
-the multipliers, solved as a constrained problem instead of by passes that stall (an active-set or
-interior-point solve of the band), are what the wing needs first; then a net finer only where it has
-to be, or several faces. The cap of a cone standing 80 degrees or more against its circle, refused as too steep
+Before fitting, `netSpacing` predicts a chart's cost by replacing higher derivatives by those
+of the osculating circle: a circle of curvature k has arc-length derivative magnitude k^p at
+order p+1. This substitution is exact for the circle. Curvature at a point of a general curve
+or surface does not bound its higher derivatives or those of its chart. Consequently the
+forecast and its 640-pole cutoff are computation policy, not an approximation-error theorem,
+a proof of a necessary pole count, or a proof that a refused fill does not exist.
+
+Sande, Manni and Speleers, *Explicit error estimates for spline approximation of arbitrary
+smoothness in isogeometric analysis* (2020), [section 1.2, equations (2)--(3), sections 6--7](https://arxiv.org/html/1909.03559v3),
+give upper error estimates using the actual appropriate-order Sobolev seminorm and, for mapped
+geometry, derivatives of the map. Their L2/Ritz estimates are not pointwise geometric curvature
+bounds and cannot be inverted into a lower bound on a feasible pole count. The production
+forecast still uses the circle surrogate; replacing it requires measured constructions and
+unchanged final geometry checks.
+
+An unconstrained spatial fit currently enforces one transverse curvature equation, with five
+outer linearizations. G0 and G1 tolerance do not bound the omitted tangent and mixed second
+fundamental-form components. A complete correction must check the actual nonlinear form and
+the delivered parameter curves, including places between its fitting samples, and establish
+regularity and interior acceptance. Support-derived second-order ribbons provide local jets
+(Salvi and Varady 2014, section 3.3.2 above), not a convergence theorem for a single fitted
+spline. Globalized constrained iterations and feasibility restoration are described by
+Nocedal and Wright, *Numerical Optimization*, second edition (2006), section 18.4,
+[Algorithm 18.3](https://mcube.lab.nycu.edu.tw/~cfung/docs/books/nocedal2006.pdf); their hypotheses and actual convergence must be verified for the assembled
+problem. Merely adding three frozen curvature rows does not establish either.
+
+Open:
+a constrained feasibility solve with complete curvature conditions and measured convergence,
+then refinement where the verified geometric residual requires it. The cap of a cone standing 80 degrees or more against its circle, refused as too steep
 before, asks for 529 to 576 poles at a tolerance of 1e-4, within the 640: it is tried, and its coarse nets
 are not shown regular, so that it is refused as before at about 0.4 s more per loop (the steep
 cones' GTest 23.4 s against 17.8 before there was a chart). That is not foreseen from the chart: the

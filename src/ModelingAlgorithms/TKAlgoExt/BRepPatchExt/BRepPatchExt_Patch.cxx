@@ -3947,12 +3947,9 @@ std::function<gp_XY(double)> laidThrough(const std::vector<gp_XY>&  places,
 //! pi / 2 (Favard 1937; de Boor, A Practical Guide to Splines, 2001, XII). The larger is taken.
 constexpr double favard = M_PI / 2;
 
-//! The largest span of a net of degree `degree` that, by that bound, follows a surface bending by
-//! `bend` as `order` asks it: a surface that bends by k at a place is there, to the order that
-//! matters, a circle of radius 1/k, whose (p + 1)-th derivative by length is k^p. Its place is then
-//! met within `fitShare` of the tolerance, its tangent plane (the first derivative) within that
-//! share of the angle's sine, and its bend (the second, as a share of k) within that share of the
-//! curvature's.
+//! A cost forecast using the higher derivatives of the osculating circle as a surrogate.
+//! Those derivatives are not bounded by curvature for a general surface or chart. This is
+//! a computation policy, not an approximation theorem or a necessary pole-count bound.
 double netSpacing(double bend, int order, int degree, const Limits& limits)
 {
   if (!(bend > 0))
