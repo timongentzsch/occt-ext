@@ -1256,3 +1256,10 @@ rejects nonconvex input. Final topology must pass the normal validity check.
 The construction is attempted only after the existing sweep rejects a slanted
 neighbour; previously successful sweep geometry is unchanged. Curved supports and
 nonconvex neighbour-bounded auxiliary volumes remain open.
+
+*Adjacent refinement (derived).* A rejected adjacent fit marks angular and
+complete-form curvature misses as well as positional misses. Between-row side
+checks call the same measurement and easing alternatives as acceptance. A fit
+already accepted retains its previous refinement decisions. This removes a
+position-only stop condition; finite refinement still does not prove existence
+or convergence for arbitrary boundary jets.

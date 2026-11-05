@@ -5981,23 +5981,39 @@ Built adjacentOver(const Asked&                                  asked,
       splitU[span(breaksU, uv.X())] = splitV[span(breaksV, uv.Y())] = 1;
     };
     for (const Target& target : targets)
-      if (surface->Value(target.uv.X(), target.uv.Y()).Distance(target.point)
-          > (target.soft ? wishedWithin : fitShare * asked.limits.g0))
-        mark(target.uv);
-    // Certification reads between fit rows. A miss there must refine the
-    // crossed spans too, even when every row used by the solver was met.
+    {
+      bool missed=surface->Value(target.uv.X(),target.uv.Y()).Distance(target.point)
+        >(target.soft?wishedWithin:fitShare*asked.limits.g0);
+      if(!built.measured.within && !missed && target.order>0)
+      {
+        const auto mine=surfaceJet(op,surface,target.uv.X(),target.uv.Y());
+        const double cosine=mine.n.Dot(target.jet->n);
+        missed=std::acos(std::min(1.,std::abs(cosine)))*180/M_PI>fitShare*asked.limits.g1;
+        if(!missed && target.order>1)
+        {
+          const auto [bend,relative]=bendDifference(*target.jet,mine,
+            target.jet->u/target.jet->u.Magnitude(),cosine<0?-1:1);
+          missed=relative>fitShare*asked.limits.g2
+            && bend*asked.size>fitShare*asked.limits.g2*flatShare;
+        }
+      }
+      if(missed)mark(target.uv);
+    }
+    // The complete certification reads between fit rows as well, with the same
+    // easing and flat-curvature alternatives as final acceptance.
     for (size_t s = 0; s < asked.sides.size(); ++s)
     {
       const Side& side = asked.sides[s];
-      if (side.free || built.measured.values[side.input * 4] <= asked.limits.g0)
+      if (side.free || built.measured.within)
         continue;
       const auto place = layout(s);
-      const int  count =
-        std::clamp(static_cast<int>(std::ceil(4 * placesPerSpan * side.length / smallest)),
-                   fewestRimPlaces,
-                   4 * mostRimPlaces);
-      for (int i = 0; i <= count; ++i)
-        mark(place(side.parameter(static_cast<double>(i) / count)));
+      const Miss miss=measure(surface,side,[&](const Side&,double f,const gp_Pnt&) {
+        return std::optional<Place>(Place{place(side.parameter(f)),true});
+      });
+      if(miss.within(asked.limits,side.order,asked.size))continue;
+      const int count=std::clamp(static_cast<int>(std::ceil(4*placesPerSpan*side.length/smallest)),
+        fewestRimPlaces,4*mostRimPlaces);
+      for(int i=0;i<=count;++i)mark(place(side.parameter(static_cast<double>(i)/count)));
     }
     for (size_t i = 0; i < checks.size(); ++i)
       if (folded[i])
