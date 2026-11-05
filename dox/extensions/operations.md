@@ -1030,8 +1030,8 @@ and cross no knot line of either surface, each local maximum refined by golden-s
 would need the faces' curvatures bounded along the edge, and the hull bound on curvature was three orders
 loose on blend sheets (above). Measured against 4 097 samples on every nearly tangent edge of the 22
 recorded rows, it found the larger maximum on all of them; 33 even samples fell short by up to 36 per
-cent. The certificate holds that edge to its carried tolerance and its vertices to the input vertex's
-plus the same spread; the result is never claimed more accurate than its input. Tested on a held-out family:
+cent. The intended budget is that edge's carried tolerance and the input vertex's
+plus the same spread (the endpoint gap limitation below is not covered); the result is never claimed more accurate than its input. Tested on a held-out family:
 prisms whose round meets its sides at θ from 1e-5 to 1e-3, at three scales. *Sharp edges:* the new edge is the crossing of the two offset surfaces, solved in the plane
 through c(t) normal to the old edge (four equations S1(u1, v1) = S2(u2, v2), (S1 − c(t))·c'(t) = 0 by
 Newton from the old edge's curves on the faces), so it keeps the old parameter t; the curve and the
@@ -1045,8 +1045,9 @@ and the residual stalls, a point within half the tolerance of both is accepted (
 around the vertex that meets it most steeply among those that meet another at a sharp edge there (all
 tangent: the vertex moves along the common normal); between two edges of the same two faces, in the
 section of one of them; else where three faces cross (the three whose normals are furthest from a common
-plane). A vertex that is then not on every face around it means the move changes the topology (four
-planes of an apex; a face that shrinks away), and the construction declines. *Certificate,* apart from
+plane). A vertex that is then not on every face around it is declined by this local construction.
+That failure does not prove that the topology must change; approximate contact continuations can
+also leave the other support. *Certificate,* apart from
 the construction: a valid solid; points inside every face and along every edge at the moved distance from
 their sources' unbounded surfaces, on the side moved to (foot point by Newton, Gauss–Newton where the
 Hessian is not positive definite); faces clear of each other (below); volume grown by an outward move and shrunk
@@ -1612,3 +1613,45 @@ curve-net configurations* (2013), sections 3.2-3.3, equation (3.1),
 [parabolic ribbons and corner compatibility](https://3dgeo.iit.bme.hu/papers/multisided/transfinite-g2.pdf).
 These sources establish the geometric continuity and ribbon compatibility
 framework; the coefficient reduction and proposed correction above are derived.
+
+
+### Face-offset endpoint certificate limits
+
+A normal-offset surface and a valid BREP do not by themselves establish a bounded face-offset
+result. The normal-offset definition is Patrikalakis, Maekawa and Cho, *Shape Interrogation for
+Computer Aided Design and Manufacturing* (2009), [section 11.3.1, equation (11.17)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html).
+The boundary must also realize the required incidences within an independently assigned budget.
+In particular, measure `|V-C(t_V)|` for every oriented endpoint occurrence, and compare 3D edge
+curves with both lifted pcurves. A metadata tolerance subsequently enlarged to cover a measured
+gap is not an independent result bound. Closed edges require both endpoint orientations.
+
+This matters in the current fixed-incidence construction. Continuing a pcurve beyond an
+approximately tangent seam's old trim need not keep it on the other offset support. A local
+point-on-support solve may locate a vertex while its incident curves still miss it. An
+experimental SVD Gauss--Newton vertex refinement returned otherwise valid bodies with endpoint
+gaps of 0.0034 to 0.0052 model units; the input tolerances were at most about 5e-6. That experiment
+was discarded. Independent endpoint measurements also found a pre-existing 0.1478 gap on an
+inward offset with cylindrical and toroidal supports, despite sampled edge/support gaps below
+1e-6 and a valid shape. No production construction, refusal or tolerance was changed by this audit.
+
+Closest-point stationarity follows the same book's [section 7.2.1, equations (7.8)-(7.9)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node135.html).
+SVD least squares and Gauss--Newton are described by Nocedal and Wright, *Numerical Optimization*,
+second edition (2006), sections 10.2-10.3, equations (10.20)-(10.26), pages 252-255
+([authors' contents](https://users.iems.northwestern.edu/~nocedal/book/toc.html)). Neither source
+establishes that a locally refined vertex connects to the desired intersection branch. A
+failed iteration is not an impossibility proof. Reconstructing nearby exact section intersections
+and minimizing contact distances in model space also failed the first measured continuation;
+these experiments do not establish nonexistence of an offset within the input uncertainty.
+
+A structural alternative is to construct each junction together with its incident contact curves,
+track intersection branches before trimming, and carry explicit endpoint and edge/support budgets
+through the fit. This is a proposed design, not an implemented solution. Mukundan, Ko, Maekawa,
+Sakkalis and Patrikalakis, *Tracing Surface Intersections with Validated ODE System Solver* (2004),
+[section 2.2, equations (4)-(6), sections 3-4 and Theorem 1](https://web.mit.edu/deslab/pubs/files/SM04.pdf),
+distinguish isolated tangential contacts, branching and higher-order contacts, then validate
+tracing and map continuous parameter enclosures to model-space enclosures. Their assumptions
+include an identified branch, a bounded starting point and regular rational interval surfaces;
+this is not a ready theorem for arbitrary normal-offset surfaces or approximate contact seams.
+The upstream [`BRepOffsetAPI_MakeOffsetShape::PerformByJoin` contract](https://occt3d.com/dev/doc/refman/html/class_b_rep_offset_a_p_i___make_offset_shape.html)
+also distinguishes intersection joins from added arc faces and does not promise self-intersection
+elimination. A general construction must establish its own existence conditions and final bounds.
