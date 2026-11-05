@@ -27,7 +27,8 @@
 //     normals. Where a neighbour is tangent that side is a step face, which is what is asked
 //     for there; a sharp neighbour has to run along the normals.
 //
-// A sharp neighbour that slants is neither: it is refused, naming the face.
+// Convex planar bodies with slanted neighbours are reconstructed from their support
+// halfspaces. Other slanted neighbours are refused, naming the face.
 
 #include <BRepOffsetExt_Reconstruct.hxx>
 #include <BRepToolsExt_GeomUtil.hxx>
@@ -37,6 +38,14 @@
 #include <BRepAdaptor_Curve2d.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Common.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepPrimAPI_MakeHalfSpace.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <GeomAlgoExt_Cancel.hxx>
+#include <gp_Pln.hxx>
+#include <NCollection_IndexedMap.hxx>
+#include <limits>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -101,6 +110,117 @@ std::pair<double, double> leanOf(const TopoDS_Face& face, const gp_Dir& directio
       high = std::max(high, normal.Dot(direction));
     }
   return {low, high};
+}
+
+// Derived convex specialisation of the neighbour-bounded construction (operations.md).
+// Reconstructing the original first is essential: halfspaces cannot represent a concavity.
+TopoDS_Shape planarNeighbours(const TopoDS_Shape& body, const FaceSet& moved,
+                             const gp_Vec& move, Lineage& lineage)
+{
+  const auto one = [](const TopoDS_Shape& shape) { NCollection_List<TopoDS_Shape> list; list.Append(shape); return list; };
+  struct Support { TopoDS_Shape face; gp_Vec normal; double constant; bool moving; };
+  std::vector<Support> supports;
+  for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
+  {
+    const auto face = TopoDS::Face(f.Current());
+    BRepAdaptor_Surface surface(face);
+    if (surface.GetType() != GeomAbs_Plane) return {};
+    gp_Vec normal(surface.Plane().Axis().Direction());
+    if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+    supports.push_back({face, normal, normal.Dot(gp_Vec(surface.Plane().Location().XYZ())),
+                        moved.Contains(face)});
+  }
+  const auto construct = [&](double fraction, std::vector<std::vector<TopoDS_Shape>>& images) {
+    const double inf = std::numeric_limits<double>::infinity();
+    gp_XYZ lo(inf,inf,inf), hi(-inf,-inf,-inf);
+    std::vector<double> constants;
+    for (const auto& support : supports)
+      constants.push_back(support.constant + (support.moving ? fraction*support.normal.Dot(move) : 0));
+    // Every vertex of a bounded polyhedron is an intersection of three independent
+    // supporting planes. Including extra intersections only enlarges this temporary box.
+    for (size_t i=0; i<supports.size(); ++i)
+      for (size_t j=i+1; j<supports.size(); ++j)
+        for (size_t k=j+1; k<supports.size(); ++k)
+        {
+          const auto& a=supports[i].normal; const auto& b=supports[j].normal;
+          const auto& c=supports[k].normal;
+          const double determinant=a.Dot(b.Crossed(c));
+          if (determinant==0) continue;
+          const gp_XYZ p=((b.Crossed(c)*constants[i]+c.Crossed(a)*constants[j]
+                           +a.Crossed(b)*constants[k])/determinant).XYZ();
+          for (int axis=1; axis<=3; ++axis)
+          {
+            if (!std::isfinite(p.Coord(axis))) return TopoDS_Shape();
+            lo.SetCoord(axis,std::min(lo.Coord(axis),p.Coord(axis)));
+            hi.SetCoord(axis,std::max(hi.Coord(axis),p.Coord(axis)));
+          }
+        }
+    const double margin=(hi-lo).Modulus();
+    if (!(margin>0) || !std::isfinite(margin)) return TopoDS_Shape();
+    TopoDS_Shape result=BRepPrimAPI_MakeBox(gp_Pnt(lo-gp_XYZ(margin,margin,margin)),
+                                           gp_Pnt(hi+gp_XYZ(margin,margin,margin))).Shape();
+    images.resize(supports.size());
+    for (size_t i=0; i<supports.size(); ++i)
+    {
+      checkCancelled("pushFace");
+      const gp_Vec& n=supports[i].normal;
+      const gp_Pnt point((n*constants[i]).XYZ());
+      const auto boundary=BRepBuilderAPI_MakeFace(gp_Pln(point,gp_Dir(n))).Face();
+      const auto halfspace=BRepPrimAPI_MakeHalfSpace(boundary,point.Translated(-n*margin)).Solid();
+      BRepAlgoAPI_Common common;
+      common.SetArguments(one(result)); common.SetTools(one(halfspace));
+      common.SetNonDestructive(true); common.Build();
+      if (!common.IsDone() || common.HasErrors()) return TopoDS_Shape();
+      images[i]={boundary};
+      for (auto& image : images)
+      {
+        std::vector<TopoDS_Shape> next;
+        for (const auto& face : image)
+        {
+          const auto& modified=common.Modified(face);
+          if (modified.IsEmpty() && !common.IsDeleted(face)) next.push_back(face);
+          for (const auto& product : modified)
+            if (product.ShapeType()==TopAbs_FACE) next.push_back(product);
+        }
+        image=std::move(next);
+      }
+      result=common.Shape();
+    }
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> covered;
+    for (const auto& image : images) for (const auto& face : image) covered.Add(face);
+    // An artificial bounding face is never accepted as a neighbour.
+    for (TopExp_Explorer f(result,TopAbs_FACE); f.More(); f.Next())
+      if (!covered.Contains(f.Current())) return TopoDS_Shape();
+    if (!BRepCheck_Analyzer(result).IsValid()) return TopoDS_Shape();
+    return result;
+  };
+  try
+  {
+    std::vector<std::vector<TopoDS_Shape>> images;
+    const auto original=construct(0,images);
+    if (original.IsNull()) return {};
+    for (bool reverse : {false,true})
+    {
+      BRepAlgoAPI_Cut difference;
+      difference.SetArguments(one(reverse ? original : body));
+      difference.SetTools(one(reverse ? body : original));
+      difference.SetNonDestructive(true); difference.Build();
+      if (!difference.IsDone() || difference.HasErrors()
+          || TopExp_Explorer(difference.Shape(),TopAbs_SOLID).More()) return {};
+    }
+    images.clear();
+    auto result=construct(1,images);
+    if (result.IsNull() || !TopExp_Explorer(result,TopAbs_SOLID).More()) return {};
+    result=singleSolid(result);
+    if (result.IsNull() || !(estimatedVolume(result)>0)) return {};
+    double signedDistance=0;
+    for (const auto& support : supports) if (support.moving) { signedDistance=support.normal.Dot(move); break; }
+    if ((estimatedVolume(result)-estimatedVolume(body))*signedDistance<=0) return {};
+    for (size_t i=0; i<supports.size(); ++i) lineage.set(supports[i].face,images[i]);
+    lineage.within(result);
+    return result;
+  }
+  catch (const Standard_Failure&) { return {}; }
 }
 
 } // namespace
@@ -186,6 +306,11 @@ TopoDS_Shape sweepFaces(const TopoDS_Shape&              solid,
         for (size_t i = 0; i < theirs.size() && i < ours.size(); i++)
           if (std::abs(theirs[i].Dot(flat ? direction : ours[i])) > alongSlack)
           {
+            if (flat)
+            {
+              const auto result=planarNeighbours(solid,chain,gp_Vec(direction)*distance,faces);
+              if (!result.IsNull()) return result;
+            }
             why = "a face beside the moved one slants against the move, and the move changes "
                   "which faces the body has; such a neighbour cannot be extended through that";
             at  = {other};

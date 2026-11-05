@@ -818,32 +818,34 @@ TEST(BRepOffsetExt, ClearanceIncludesTheTrimmedBoundaryBetweenSampleSites)
   EXPECT_FALSE(measured.satisfies(1));
 }
 
-TEST(BRepOffsetExt, ClearanceUsesSurfaceTrimsInsteadOfTolerancedSpatialEdges)
+TEST(BRepOffsetExt, SweptFaceUsesSlantedNeighbourSupports)
 {
   for (const double scale : {0.1, 1.0, 10.0})
   {
-    auto source = BRepBuilderAPI_MakeFace(gp_Pln(gp::Origin(), gp::DZ()),
-                                         0, 10 * scale, 0, 10 * scale).Face();
-    const auto target = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, scale), gp::DZ()),
-                                               0, 10 * scale, 0, 10 * scale).Face();
-    BRep_Builder builder;
-    for (TopExp_Explorer e(source, TopAbs_EDGE); e.More(); e.Next())
+    BRepBuilderAPI_MakePolygon outline;
+    for (const auto& p : {gp_Pnt(0,0,0), gp_Pnt(20,0,0), gp_Pnt(20,0,19),
+                          gp_Pnt(19,0,20), gp_Pnt(0,0,20)})
+      outline.Add(gp_Pnt(p.X()*scale, p.Y()*scale, p.Z()*scale));
+    outline.Close();
+    const auto body = BRepPrimAPI_MakePrism(BRepBuilderAPI_MakeFace(outline.Wire()).Face(),
+                                            gp_Vec(0, 20*scale, 0)).Shape();
+    const auto moved = facesWhere(body, [&](const double* b) {
+      return std::abs(b[0]-20*scale) < 1e-5 && std::abs(b[3]-20*scale) < 1e-5;
+    });
+    ASSERT_EQ(moved.size(), 1u);
+    for (const double distance : {-2.0, -1.0, 1.0, 3.0})
     {
-      const auto edge = TopoDS::Edge(e.Current());
-      double first, last;
-      const auto curve = Handle(Geom_Curve)::DownCast(BRep_Tool::Curve(edge, first, last)->Copy());
-      curve->Translate(gp_Vec(0, 0, 0.25 * scale));
-      builder.UpdateEdge(edge, curve, 0.3 * scale);
-    }
-    const auto measured = BRepExt::clearance({target}, source, {}, 0, 0.9 * scale);
-    EXPECT_TRUE(measured.satisfies(0.9 * scale)) << measured.issue;
-    EXPECT_NEAR(measured.minimum, scale, Precision::Confusion());
-    // Measurement copies must not repair or otherwise mutate caller geometry.
-    for (TopExp_Explorer e(source, TopAbs_EDGE); e.More(); e.Next())
-    {
-      double first, last;
-      const auto curve = BRep_Tool::Curve(TopoDS::Edge(e.Current()), first, last);
-      EXPECT_NEAR(curve->Value((first + last) / 2).Z(), 0.25 * scale, Precision::Confusion());
+      BRepExt::Lineage lineage(body);
+      std::string why;
+      std::vector<TopoDS_Shape> at;
+      const auto result = BRepExt::sweepFaces(body, {moved[0]}, distance*scale,
+                                             1e-6*scale, lineage, why, at);
+      ASSERT_FALSE(result.IsNull()) << why;
+      EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
+      const double width=20+distance;
+      const double area=width<=19 ? 20*width : 380+39*(width-19)-(width*width-361)/2;
+      EXPECT_NEAR(volume(result),20*area*std::pow(scale,3),1e-7*std::pow(scale,3));
+      EXPECT_EQ(lineage.of(moved[0]).size(),1u);
     }
   }
 }

@@ -1140,3 +1140,27 @@ first derivatives are needed, so second derivative nets are not evaluated.
 Local-immersion queries have no work-count cutoff; the existing finite
 subdivision precision limit still reports unresolved, never regular.
 
+### Neighbour-bounded planar push-pull
+
+Zou and Feng, *Push-Pull Direct Modeling of Solid CAD Models*, preprint (2018),
+[section 5.2, Algorithm 3](https://arxiv.org/pdf/1811.04036), construct auxiliary
+volumes bounded by the neighbours' extended underlying surfaces and the moved
+face's start and end supports. A prism is unsuitable for a slanted neighbour.
+
+The convex planar specialization here is derived: write the body as an
+intersection of outward support inequalities `n_i dot x <= c_i`. Translating the
+selected faces by v changes only their constants to `c_i+n_i dot v`. The result
+is their new halfspace intersection. This is exactly the neighbour-bounded volume
+update; active constraints may appear or disappear without a special topology
+rule. Moving constants leaves the recession cone unchanged, hence a bounded
+original intersection stays bounded whenever the target is nonempty. Triples of
+independent support planes contain every vertex, providing the temporary box.
+No artificial box face may survive in the result. Each surviving face is tracked
+through Boolean history back to its defining original support.
+
+Before using this construction, both Boolean differences between the original
+body and its reconstructed support intersection must contain no solid. This
+rejects nonconvex input. Final topology must pass the normal validity check.
+The construction is attempted only after the existing sweep rejects a slanted
+neighbour; previously successful sweep geometry is unchanged. Curved supports and
+nonconvex neighbour-bounded auxiliary volumes remain open.
