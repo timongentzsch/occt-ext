@@ -224,6 +224,17 @@ normal-curvature characterization in Patrikalakis, Maekawa and Cho,
 [sections 3.3--3.4, equations (3.26)--(3.43)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node30.html).
 The normalization formula is derived here; it is not an approximation-error bound.
 
+*Parameter units (derived).* Surface-jet rank is tested on independently normalized
+tangent columns. Their cross product is the sine of their angle; zero length
+columns or a sine at floating-point resolution are unresolved. Coordinates use
+the cross-product dual basis when the Gram determinant is poorly scaled; the
+well-scaled path retains its previous arithmetic. This removes absolute UV-unit
+cutoffs without asserting regularity of near-dependent columns. The numerical
+resolution is eight machine epsilons, a roundoff policy, not a geometric tolerance.
+The dual identities are derived from `x.(y cross (x cross y)) = |x cross y|^2`
+for unit columns. The second fundamental form then acts on physical tangent
+vectors as in Patrikalakis, Maekawa and Cho (2009), section 3.3 above.
+
 *Energy assembly (derived).* A quadrature cell touches local poles `(a, b)` in order
 `p = (firstU + a) countV + firstV + b`. These indices increase strictly, so an element's
 lower triangle is already in the global lower triangle. The assembly reads the given

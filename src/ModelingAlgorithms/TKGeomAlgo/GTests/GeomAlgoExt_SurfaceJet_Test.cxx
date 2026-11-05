@@ -100,3 +100,23 @@ TEST(GeomAlgoExtSurfaceJet, MixedCurvatureRelativeDeviation)
       EXPECT_EQ(BRepExt::bendDifference(plane, plane, t).second, 0.);
     }
 }
+
+// The graph z=.15*x*x+.2*x*y-.1*y*y at its origin, with independently
+// rescaled UV units. II is evaluated on physical unit tangent directions.
+TEST(GeomAlgoExtSurfaceJet, IndependentParameterUnits)
+{
+  for (double su : {1e-12, 1e-7, 1., 1e7, 1e12})
+    for (double sv : {1e-12, 1e-7, 1., 1e7, 1e12})
+    {
+      BRepExt::SurfaceJet jet{"test", {}, {su, 0, 0}, {0, sv, 0},
+                             {0, 0, .3 * su * su}, {0, 0, -.2 * sv * sv},
+                             {0, 0, .2 * su * sv}, {}};
+      ASSERT_NO_THROW(jet.orient(false));
+      EXPECT_NEAR(jet.n.Z(), 1., 1e-14);
+      EXPECT_NEAR(jet.curvature({1, 0, 0}, {1, 0, 0}), .3, 1e-13);
+      EXPECT_NEAR(jet.curvature({0, 1, 0}, {0, 1, 0}), -.2, 1e-13);
+      EXPECT_NEAR(jet.curvature({1, 0, 0}, {0, 1, 0}), .2, 1e-13);
+    }
+  BRepExt::SurfaceJet collapsed{"test", {}, {1, 0, 0}, {2, 0, 0}, {}, {}, {}, {}};
+  EXPECT_THROW(collapsed.orient(false), BRepExt::Failure);
+}

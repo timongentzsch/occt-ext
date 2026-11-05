@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace BRepExt
@@ -45,11 +46,25 @@ struct SurfaceJet
   {
     const double E = u.SquareMagnitude(), F = u.Dot(v), G = v.SquareMagnitude(),
                  det = E * G - F * F;
-    if (det <= 1e-24)
+    // Independent column scaling removes parameter units from the rank test.
+    // Cross-product dual coordinates avoid cancellation in E*G-F*F.
+    const double lu = std::hypot(u.X(), u.Y(), u.Z()),
+                 lv = std::hypot(v.X(), v.Y(), v.Z());
+    if (!(lu > 0) || !(lv > 0) || !std::isfinite(lu) || !std::isfinite(lv))
+      fail(operation, no_solution, "singular surface differential");
+    const gp_Vec x = u / lu, y = v / lv, z = x.Crossed(y);
+    const double sine2 = z.SquareMagnitude();
+    constexpr double rankTolerance = 8 * std::numeric_limits<double>::epsilon();
+    if (!(sine2 > rankTolerance * rankTolerance))
       fail(operation, no_solution, "singular surface differential");
     auto coordinates = [&](gp_Vec t) {
-      return std::pair<double, double>((G * t.Dot(u) - F * t.Dot(v)) / det,
-                                       (E * t.Dot(v) - F * t.Dot(u)) / det);
+      // Preserve the arithmetic of the well-scaled path. For extreme UV units,
+      // use the dual of the normalized tangent columns instead.
+      if (det > 1e-24 && std::isfinite(det) && sine2 > 1e-8)
+        return std::pair<double, double>((G * t.Dot(u) - F * t.Dot(v)) / det,
+                                         (E * t.Dot(v) - F * t.Dot(u)) / det);
+      return std::pair<double, double>(t.Dot(y.Crossed(z)) / sine2 / lu,
+                                       t.Dot(z.Crossed(x)) / sine2 / lv);
     };
     auto [au, av] = coordinates(a);
     auto [bu, bv] = coordinates(b);
@@ -58,10 +73,20 @@ struct SurfaceJet
 
   void orient(bool reversed)
   {
-    n = u.Crossed(v);
-    if (n.Magnitude() < 1e-15)
+    const double lu = std::hypot(u.X(), u.Y(), u.Z()),
+                 lv = std::hypot(v.X(), v.Y(), v.Z());
+    if (!(lu > 0) || !(lv > 0) || !std::isfinite(lu) || !std::isfinite(lv))
       fail(operation, no_solution, "surface normal is singular");
-    n.Normalize();
+    const gp_Vec scaled = (u / lu).Crossed(v / lv);
+    const double sine = scaled.Magnitude();
+    if (!(sine > 8 * std::numeric_limits<double>::epsilon()))
+      fail(operation, no_solution, "surface normal is singular");
+    n = u.Crossed(v);
+    const double length = n.Magnitude();
+    if (length >= 1e-15 && std::isfinite(length))
+      n.Normalize();
+    else
+      n = scaled / sine;
     if (reversed)
       n.Reverse();
   }
