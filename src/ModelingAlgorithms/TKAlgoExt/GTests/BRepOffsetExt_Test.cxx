@@ -17,6 +17,8 @@
 #include "BRepExtTest_Support.hxx"
 
 #include <BRepOffsetExt_Kept.hxx>
+#include <BRepOffsetExt_Parts.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepOffsetExt_Focal.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <Geom_BezierSurface.hxx>
@@ -42,6 +44,8 @@
 #include <BRep_Tool.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <Geom_CylindricalSurface.hxx>
+#include <Geom_ConicalSurface.hxx>
+#include <Geom_ToroidalSurface.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -766,5 +770,45 @@ TEST(BRepOffsetExt, FiniteSeamBranchesExtendWithTheirEndPlanes)
       EXPECT_NEAR(volume(result) / (scale * scale * scale),
                   M_PI * (radius + d) * (radius + d) * (height + 2 * d), 1e-7);
     }
+  }
+}
+
+TEST(BRepOffsetExt, ExactSphereKeepsEveryPositiveRadiusBeforeItsFocalDistance)
+{
+  for (const double radius : {100.0, 10000.0, 1000000.0})
+  {
+    const auto sphere = BRepPrimAPI_MakeSphere(radius).Shape();
+    const auto fate = BRepExt::classifyForOffset(sphere, -radius * (1 - 5e-5));
+    EXPECT_TRUE(fate.vanish.empty());
+    EXPECT_TRUE(fate.partial.empty());
+    const auto made=BRepExt::offsetSolid(session(),keep(sphere),-radius*(1-5e-5),
+                                         1e-6,2,{},BRepExt::failureHashBound);
+    const auto result=BRepExt::get(session(),made.resultId);
+    EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
+    const double expectedRadius=radius*5e-5;
+    EXPECT_NEAR(volume(result),4*std::acos(-1.0)*std::pow(expectedRadius,3)/3,
+                std::max(1e-10,1e-7*std::pow(expectedRadius,3)));
+    const auto collapsed = BRepExt::classifyForOffset(sphere, -radius);
+    EXPECT_EQ(collapsed.vanish.size(), 1u);
+  }
+}
+
+TEST(BRepOffsetExt, ElementaryFocalClassificationIncludesTrimExtrema)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+  {
+    const double alpha = 0.4;
+    const Handle(Geom_Surface) cone = new Geom_ConicalSurface(gp::XOY(), alpha, 10 * scale);
+    const auto coneFace = BRepBuilderAPI_MakeFace(cone, 0, 2 * M_PI, 0, 100 * scale,
+                                                Precision::Confusion()).Face();
+    const auto coneFate = BRepExt::classifyForOffset(coneFace, -10.1 * scale / std::cos(alpha));
+    EXPECT_EQ(coneFate.partial.size(), 1u);
+    EXPECT_TRUE(coneFate.vanish.empty());
+    const Handle(Geom_Surface) torus = new Geom_ToroidalSurface(gp::XOY(), 10 * scale, 2 * scale);
+    const auto torusFace = BRepBuilderAPI_MakeFace(torus, 0, 2 * M_PI, 0, M_PI,
+                                                 Precision::Confusion()).Face();
+    const auto torusFate = BRepExt::classifyForOffset(torusFace, 8.001 * scale);
+    EXPECT_EQ(torusFate.partial.size(), 1u);
+    EXPECT_TRUE(torusFate.vanish.empty());
   }
 }

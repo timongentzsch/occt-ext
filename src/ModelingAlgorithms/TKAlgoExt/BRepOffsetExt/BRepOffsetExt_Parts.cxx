@@ -78,8 +78,65 @@ OffsetFate classifyForOffset(const TopoDS_Shape& body, double distance)
     if (surface.GetType() == GeomAbs_Plane)
       continue;
     // Along the surface's own normal the offset is this far.
-    const double along     = face.Orientation() == TopAbs_REVERSED ? -distance : distance;
-    int          collapsed = 0, measured = 0;
+    const double along = face.Orientation() == TopAbs_REVERSED ? -distance : distance;
+    // Elementary radii are exact data, not fitted blend estimates. Compare
+    // physical focal distances directly to avoid the relative collapse allowance.
+    if (surface.GetType() == GeomAbs_Sphere || surface.GetType() == GeomAbs_Cylinder)
+    {
+      const double radius = surface.GetType() == GeomAbs_Sphere ? surface.Sphere().Radius()
+                                                                : surface.Cylinder().Radius();
+      if (-along >= radius)
+        fate.vanish.push_back(face);
+      continue;
+    }
+    if (surface.GetType() == GeomAbs_Cone)
+    {
+      const auto   cone = surface.Cone();
+      const double r0   = cone.RefRadius() + surface.FirstVParameter() * std::sin(cone.SemiAngle());
+      const double r1   = cone.RefRadius() + surface.LastVParameter() * std::sin(cone.SemiAngle());
+      const double minimum = r0 * r1 <= 0 ? 0 : std::min(std::abs(r0), std::abs(r1));
+      const double maximum = std::max(std::abs(r0), std::abs(r1));
+      const double reached = -along * std::cos(cone.SemiAngle());
+      if (reached >= maximum)
+        fate.vanish.push_back(face);
+      else if (reached >= minimum)
+        fate.partial.push_back(face);
+      continue;
+    }
+    if (surface.GetType() == GeomAbs_Torus
+        && surface.Torus().MajorRadius() > surface.Torus().MinorRadius())
+    {
+      const double major = surface.Torus().MajorRadius(), minor = surface.Torus().MinorRadius();
+      if (-along >= minor)
+        fate.vanish.push_back(face);
+      else if (along > 0)
+      {
+        const double v0 = surface.FirstVParameter(), v1 = surface.LastVParameter();
+        double       low  = std::min(std::cos(v0), std::cos(v1));
+        double       high = std::max(std::cos(v0), std::cos(v1));
+        const double turn = 2 * M_PI;
+        if (v1 - v0 >= turn)
+        {
+          low  = -1;
+          high = 1;
+        }
+        else
+        {
+          if (std::ceil(v0 / turn) <= std::floor(v1 / turn))
+            high = 1;
+          if (std::ceil((v0 - M_PI) / turn) <= std::floor((v1 - M_PI) / turn))
+            low = -1;
+        }
+        const double threshold = -major / (minor + along);
+        if (high <= threshold)
+          fate.vanish.push_back(face);
+        else if (low <= threshold)
+          fate.partial.push_back(face);
+      }
+      continue;
+    }
+    const bool elementary = surface.GetType() == GeomAbs_Torus;
+    int        collapsed = 0, measured = 0;
     // 9 x 9: a blend is the same all along, and a spline face that is tight in a part
     // smaller than a ninth of its width is left to the checks on the result.
     for (const gp_Pnt2d& uv : parametersInside(face, 9))
@@ -89,7 +146,8 @@ OffsetFate classifyForOffset(const TopoDS_Shape& body, double distance)
         continue;
       measured++;
       // A principal curvature k becomes k / (1 - along * k): gone where along * k is 1.
-      if (std::max(along * at.MaxCurvature(), along * at.MinCurvature()) >= 1.0 - collapseSlack)
+      if (std::max(along * at.MaxCurvature(), along * at.MinCurvature())
+          >= (elementary ? 1.0 : 1.0 - collapseSlack))
         collapsed++;
     }
     if (collapsed == 0)

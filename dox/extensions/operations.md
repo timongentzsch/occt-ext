@@ -1045,3 +1045,34 @@ Representations whose correspondence cannot be established are both retained.
 Degree elevation and knot insertion use OCCT's floating-point implementations;
 the enclosure bounds the resulting common-basis representations, with the usual
 rounding limitations of those representation conversions.
+
+### Elementary focal distances
+
+The offset Jacobian loses rank at a principal focal distance. Patrikalakis,
+Maekawa and Cho, *Shape Interrogation for Computer Aided Design and Manufacturing*,
+hyperbook (2009), [section 11.3.1, equations (11.24)-(11.25)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html)
+and [section 11.3.2, equation (11.28)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node225.html),
+give the offset curvature and singularity conditions. With this implementation's
+normal convention, the factor is `1-d*k`. For a sphere or cylinder of radius R,
+the inward focal distance is exactly R. These two elementary supports are classified
+by comparing the signed physical distance to their stored radius, without the
+relative allowance used for fitted blends.
+
+For a cone with semi-angle alpha, `r(v)=R+v*sin(alpha)` and principal
+curvatures are `0` and `-cos(alpha)/abs(r(v))`. Endpoint radii and a possible
+zero crossing give the full focal range over the trimmed v interval, without
+interior sampling. For a ring torus (`R>r`), the principal curvatures are
+`-1/r` and `-cos(v)/(R+r*cos(v))`. Inward focal crossing is at r everywhere;
+for an outward distance d the other crossing is `cos(v) <= -R/(r+d)`.
+Endpoints and the contained multiples of pi give the cosine extrema over the
+complete v interval. These reductions are derived here from the parametrizations
+and the first and second fundamental forms. See Malakhaltsev and Vankerschaver,
+*Sage Reference Manual: Differential Geometry of Parametrized Surfaces* (2010,
+Sage 9.3 edition), [`principal_directions`, torus example](https://sporadic.stanford.edu/reference/riemannian_geometry/sage/geometry/riemannian_manifolds/parametrized_surface3d.html),
+which gives these ring-torus curvatures with the same normal convention.
+Arithmetic and trigonometric evaluation retain floating-point rounding limits.
+Horn and spindle tori retain strict sampled classification.
+A radius-10000 sphere moved inward by 9999.5 therefore remains a radius-0.5 sphere.
+Classification of general fitted supports remains sampled with the existing
+approximation allowance; it is not a proven curvature-error enclosure. A general
+enclosure that separates uncertainty from a strict crossing remains open.
