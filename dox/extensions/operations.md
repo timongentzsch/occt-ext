@@ -1560,3 +1560,55 @@ or assert that any arbitrary-gap closure is the delivered trim. The test family
 varies endpoint gaps, UV scale and rigid pose, and independently checks the seed
 with the face classifier. The ordinary interior-curvature classifier, all
 construction arithmetic and all result tolerances are unchanged.
+
+
+### Internal curvature joins and boundary-ribbon compatibility
+
+A quintic spline knot of multiplicity four permits a second-derivative jump;
+retaining such a knot from an approximate intersection curve does not establish
+that the underlying supports require a curvature break. Conversely, a curvature-
+driven section law can lose rail smoothness when it crosses a merely C2 support
+knot, although the support's curvature itself is continuous. Inspect the raw
+section fit, joined sheet and retained trim separately before assigning a cause.
+A positional knot-removal tolerance alone is not a curvature or contact bound.
+
+For two regular polynomial patches with identical position and first derivatives
+at a common seam, write D = S_u, T = S_v, N = D cross T and
+J = S_uu(right) - S_uu(left). The mixed and along-seam second derivatives agree.
+Equality of the second fundamental forms therefore requires N dot J = 0, not
+J = 0. In a common orthonormal tangent frame the operator-norm difference is
+abs(n dot J)/(E - F*F/G), where n = N/abs(N), E = D dot D,
+F = D dot T and G = T dot T. This reduction is derived here from the fundamental
+forms; it requires G > 0 and E*G - F*F > 0. It does not apply unchanged to a seam
+whose first derivatives differ.
+
+A possible fixed-space correction preserves position and first jets at every
+seam and solves this scalar normal equation. With polynomial transverse degree
+q, N has degree at most 2*q-1 and J degree q, so their scalar product has degree
+at most 3*q-1 on each transverse span. Matching its Bernstein coefficients
+provides an identity, whereas collocation only supplies sampled evidence.
+Solvability still requires the right-hand side to belong to the constrained
+coefficient map's range; more coefficients alone are not an existence proof.
+Rational patches require the corresponding positive-denominator treatment.
+
+Preserving both endpoint two-jets fixes the first and last three transverse
+control rows of a clamped patch (after common knot refinement). A correction
+vanishing to order two there cannot repair an existing nonzero endpoint
+normal-curvature mismatch. Construct compatible, support-derived ideal ribbons
+before freezing boundary constraints: freezing inaccurate fitted ribbons also
+freezes their error. A merely G1 seam requires the full reparameterisation
+conditions first. These are derived necessary conditions and a solver design,
+not a new construction or an acceptance certificate.
+
+Sources: Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided
+Design and Manufacturing* (2009), section 3.3, equations (3.26)-(3.28),
+[normal curvature](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node29.html),
+and section 8.1.3.5,
+[linkage theorem](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node156.html);
+Peters, *Geometric Continuity* (2001), sections 2-3,
+[author manuscript](https://www.cise.ufl.edu/research/SurfLab/papers/01handbook.pdf);
+Salvi, Varady and Rockwood, *Transfinite surface interpolation over specific
+curve-net configurations* (2013), sections 3.2-3.3, equation (3.1),
+[parabolic ribbons and corner compatibility](https://3dgeo.iit.bme.hu/papers/multisided/transfinite-g2.pdf).
+These sources establish the geometric continuity and ribbon compatibility
+framework; the coefficient reduction and proposed correction above are derived.
