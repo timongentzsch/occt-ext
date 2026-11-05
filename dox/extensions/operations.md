@@ -1757,3 +1757,59 @@ this is not a ready theorem for arbitrary normal-offset surfaces or approximate 
 The upstream [`BRepOffsetAPI_MakeOffsetShape::PerformByJoin` contract](https://occt3d.com/dev/doc/refman/html/class_b_rep_offset_a_p_i___make_offset_shape.html)
 also distinguishes intersection joins from added arc faces and does not promise self-intersection
 elimination. A general construction must establish its own existence conditions and final bounds.
+
+
+### Transported contact uncertainty is confined to its measured domain
+
+Let `p(t), q(t)` be corresponding lifts of a source edge and `n(t), m(t)` their
+outward unit normals. From the normal-offset definition in Patrikalakis, Maekawa
+and Cho, *Shape Interrogation for Computer Aided Design and Manufacturing* (2009),
+[section 11.3.1, equation (11.17)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html),
+the triangle inequality gives the following **derived** bound for equal signed
+moves `d`:
+
+`|(p+d n)-(q+d m)| <= |p-q| + |d| |n-m|`.
+
+For unequal signed moves, replace the second term by `|d1 n-d2 m|`. If the
+representative 3D curve, rather than the other lift, is used, its discrepancy must
+also be included. A bound on the original closed parameter interval does not bound
+an extrapolation outside that interval. In particular, a large continued residual
+cannot be substituted for the original source uncertainty to justify itself.
+Nor does a measured nonzero input error provide a necessary lower limit on output
+accuracy: the inequality is an upper bound, not a nonexistence theorem.
+
+On 47 generated sources with approximate tangent contact against revolution
+supports, 4,097 samples on each of 79 relevant edges gave maximum source lift
+disagreement `5.243e-8`, and maximum pointwise transported bound `5.478e-8` for
+`d=0.05`, in model units. Their input edge tolerances were `1e-7`. These measurements
+do not support replacing the operation's `1e-6` allowance with a constant near
+`1e-5`. The sample maxima are diagnostics, not certified supremum bounds. The
+existing endpoint and paired-pcurve checks remain necessary.
+
+A reference modeller preserved the complete face-edge-vertex incidence graph on
+four corresponding outward requests, without a vertex patch. That observation
+alone does not establish a strictly bounded construction. Two results had curve
+endpoints within `7.59e-10`, but their junction points were approximately
+`2.287e-5` from the original exact offset revolution support; two further returned
+bodies had endpoint discrepancies above `5e-5`. No reference result is accepted
+as a strict geometric oracle from topology or return status alone.
+
+An independent diagnostic reduces distance to a regular offset revolution to a
+meridian calculation. Write the generating curve as `(r(v),h(v))` about the axis,
+with `r>0` and `L=sqrt(r'^2+h'^2)>0`. For surface-normal offset `d`, its offset
+meridian is `(r+d h'/L, h-d r'/L)`. For query cylindrical coordinates `(rho,z)`,
+minimize the Euclidean distance to that curve; angular minimization aligns the
+radial directions when the offset radius remains positive. This formula is
+**derived** by evaluating `S_u cross S_v` for a revolution. Numerical scalar
+minimization over an enlarged parameter interval agrees with direct 3D projection
+to about `2.1e-15` on the first rejected junction. It is a cross-check of that
+measurement, not a whole-domain existence or global-minimum certificate.
+
+The distinction between exact and approximated offsets also appears in the same
+book's [section 11.3.7](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node230.html).
+A continuous contact construction still needs branch ownership and endpoint
+compatibility; the initial-component assumptions of Mukundan, Ko, Maekawa,
+Sakkalis and Patrikalakis, *Tracing Surface Intersections with Validated ODE System
+Solver* (2004), [sections 1, 2.2 and 4](https://web.mit.edu/deslab/pubs/files/SM04.pdf),
+are not supplied by an independently continued approximate contact. Neither the
+reference observation nor the finite-point bound closes that construction problem.
