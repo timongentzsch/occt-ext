@@ -30,6 +30,8 @@
 #include <BRep_Builder.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
+#include <GeomAPI_IntCS.hxx>
+#include <Geom_Plane.hxx>
 #include <NCollection_Array1.hxx>
 #include <TopoDS.hxx>
 #include <gp_Pnt2d.hxx>
@@ -257,26 +259,52 @@ EvolutionData filletStations(OcctKernel&                  kernel,
     {
       const auto        edge = maker.Edge(1, j);
       BRepAdaptor_Curve curve(edge);
-      for (int sample = 0; sample < 257; ++sample)
+      std::vector<double> events{curve.FirstParameter(), curve.LastParameter()};
+      double first, last;
+      const auto geometry = BRep_Tool::Curve(edge, first, last);
+      for (const auto& stop : stops)
       {
-        const double f = (sample + .5) / 257;
-        const double t =
-          edge.Orientation() == TopAbs_REVERSED
-            ? curve.LastParameter() - (curve.LastParameter() - curve.FirstParameter()) * f
-            : curve.FirstParameter() + (curve.LastParameter() - curve.FirstParameter()) * f;
-        const auto p      = curve.Value(t);
-        bool       inside = true;
+        // Intersect the boundary of the retained halfspace, including its existing
+        // length tolerance. Every root bounds an interval of constant membership.
+        const gp_Pnt boundary = stop.point.Translated(-stop.direction * tolerance::length);
+        const Handle(Geom_Plane) plane = new Geom_Plane(gp_Pln(boundary, gp_Dir(stop.direction)));
+        const GeomAPI_IntCS intersection(geometry, plane);
+        if (!intersection.IsDone())
+          fail(op, no_solution, "a stopping plane's contour crossings could not be located");
+        for (int i = 1; i <= intersection.NbPoints(); ++i)
+        {
+          double u, v, t;
+          intersection.Parameters(i, u, v, t);
+          if (t > curve.FirstParameter() && t < curve.LastParameter())
+            events.push_back(t);
+        }
+        for (int i = 1; i <= intersection.NbSegments(); ++i)
+        {
+          const auto segment = intersection.Segment(i);
+          for (double t : {segment->FirstParameter(), segment->LastParameter()})
+            if (t > curve.FirstParameter() && t < curve.LastParameter())
+              events.push_back(t);
+        }
+      }
+      std::sort(events.begin(), events.end());
+      events.erase(std::unique(events.begin(), events.end()), events.end());
+      if (edge.Orientation() == TopAbs_REVERSED)
+        std::reverse(events.begin(), events.end());
+      for (size_t i = 1; i < events.size(); ++i)
+      {
+        const auto p = curve.Value((events[i - 1] + events[i]) / 2);
+        bool inside = true;
         for (const auto& stop : stops)
-          inside &= gp_Vec(stop.point, p).Dot(stop.direction) > -BRepExt::tolerance::length;
+          inside &= gp_Vec(stop.point, p).Dot(stop.direction) > -tolerance::length;
         kept.push_back(inside);
       }
     }
-    int transitions = 0;
+    int runs = !kept.empty() && kept.front();
     for (size_t i = 1; i < kept.size(); ++i)
-      transitions += kept[i] != kept[i - 1];
-    if (!kept.empty() && maker.Closed(1) && kept.front() != kept.back())
-      ++transitions;
-    if (transitions > 2)
+      runs += kept[i] && !kept[i - 1];
+    if (runs > 1 && maker.Closed(1) && kept.front() && kept.back())
+      --runs;
+    if (runs > 1)
       fail(op, unsupported_geometry, "limited spline chain re-enters its stopping planes");
     if (!stops.empty() && std::none_of(kept.begin(), kept.end(), [](bool value) { return value; }))
       fail(op, invalid_input, "limits leave no interval on the selected chain");

@@ -22,6 +22,11 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <Geom_BezierCurve.hxx>
 #include <TopExp.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_List.hxx>
@@ -246,4 +251,36 @@ TEST(BRepFilletExt, AngleChamferWhoseSetbackGrowsRemovesItsSections)
                 1e-9 * a * b * c)
       << start << " " << end;
   }
+}
+
+// An open parabolic rim has both ends in y>5 and its middle outside it.
+// The retained portions are two runs, although there are only two crossings.
+TEST(BRepFilletExt, OpenLimitedContourCannotRetainTwoRuns)
+{
+  for (double level : {1.0, 5.0, 9.0})
+  {
+  SCOPED_TRACE(level);
+  NCollection_Array1<gp_Pnt> poles(1, 3);
+  poles(1) = gp_Pnt(0, 10, 0); poles(2) = gp_Pnt(10, -10, 0); poles(3) = gp_Pnt(20, 10, 0);
+  const Handle(Geom_BezierCurve) curve = new Geom_BezierCurve(poles);
+  BRepBuilderAPI_MakeWire wire;
+  wire.Add(BRepBuilderAPI_MakeEdge(curve).Edge());
+  wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(20, 10, 0), gp_Pnt(20, 20, 0)).Edge());
+  wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(20, 20, 0), gp_Pnt(0, 20, 0)).Edge());
+  wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 20, 0), gp_Pnt(0, 10, 0)).Edge());
+  const TopoDS_Shape body = BRepPrimAPI_MakePrism(BRepBuilderAPI_MakeFace(wire.Wire()).Face(), gp_Vec(0,0,10));
+  const auto selected = edgesWhere(body, [](const double* b) { return near(b[2],10) && near(b[5],10) && b[1]<1; });
+  ASSERT_EQ(selected.size(), 1);
+  const auto id = BRepExt::store(session(), body), edge = BRepExt::store(session(), selected[0]);
+  try
+  {
+    BRepExt::filletStations(session(), id, {edge}, .5, {}, {}, {edge},
+      {10 * (1 - std::sqrt(level / 10)), level, 10, 0, 1, 0}, {}, BRepExt::failureHashBound);
+    ADD_FAILURE() << "an open limited contour retained two disconnected runs";
+  }
+  catch (const BRepExt::Failure& failure)
+  {
+    EXPECT_EQ(failure.reason, BRepExt::unsupported_geometry) << failure.what();
+  }
+}
 }

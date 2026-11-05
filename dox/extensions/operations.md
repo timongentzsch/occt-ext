@@ -95,7 +95,7 @@ Fuenfzig, Michelucci and Foufou, [*Polytope-Based Computation of Polynomial Rang
 bounds. The existing interval primitives enclose arithmetic on stored binary64
 inputs under round-to-nearest without fast-math. These bounds concern the stored
 spline, not uncertainty in the input data or the linear solve. Native checks cover
-a narrow negative natural-spline span, 54 quadratic extrema across independent
+a narrow negative natural-spline span, 18 quadratic extrema across independent
 span widths and signs, three multiple derivative roots and a constant law.
 
 *Steep and flat wedges.* In a wedge of opening psi between two planes the ball's centre lies
@@ -187,6 +187,17 @@ to the other body's mesh (deflection 2e-3): a constant size between two limit pl
 sizes 1, 2, 3 at three stations 0.046 mm and 0.53 mm^3 apart (`Law_Interpol` is not the natural spline);
 sizes at four stations within two limits 4.5e-3 mm one way; a constant size round an oval rim of four
 Bezier edges 1.6e-3 mm, at 1.5 times the CPU time. G1 and G2 of these pairs were not measured.
+
+*Connected limited contours.* Plane intersections of each contour edge partition
+its parameter range into intervals of constant halfspace membership. The existing
+length tolerance shifts the classification plane by that distance; topology is
+judged at the same tolerance as before. Intersections use OCCT's [GeomAPI_IntCS](https://dev.opencascade.org/doc/refman/html/class_geom_a_p_i___int_c_s.html)
+(Open CASCADE 8.0.1, 2026; `Parameters` and `Segment`), which reports the curve parameters of intersection points. This remains a numerical
+intersection solve, not an interval certificate. Count retained runs explicitly;
+merge the first and last only on a closed contour. This connectivity argument is
+derived here. Two transitions alone do not imply one run on an open contour: its
+ends can both lie inside. Native negative controls use the parabolic rim y=10(2t-1)^2,
+at three stopping heights 1, 5 and 9; each leaves two separated end intervals.
 
 *Over a side narrower than the blend, and a pinched body.* Where the contact on a face lies past the
 face's far edge along the whole edge, the face is used up: a round's ball rests on the far edge instead
