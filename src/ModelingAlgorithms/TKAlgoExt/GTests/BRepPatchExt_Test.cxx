@@ -1771,3 +1771,123 @@ TEST(BRepPatchExt, PositionalGuideToleranceDoesNotRequireExactEndpointTangency)
     EXPECT_NEAR(area(BRepExt::get(session(),made.evolution.resultId)),10000.,1e-8);
   }
 }
+
+TEST(BRepPatchExt, TrimInteriorCellsRespectDiagonalBoundaryEnclosures)
+{
+  BRepBuilderAPI_MakePolygon wire;
+  for(const gp_Pnt& p:{gp_Pnt(-1,0,0),gp_Pnt(0,-1,0),gp_Pnt(1,0,0),gp_Pnt(0,1,0)})wire.Add(p);
+  wire.Close();
+  const auto face=BRepBuilderAPI_MakeFace(gp_Pln(gp::XOY()),wire.Wire()).Face();
+  const auto interior=BRepExt::trimmedInteriorCells(face);
+  EXPECT_TRUE(interior(-.1,.1,-.1,.1));
+  EXPECT_FALSE(interior(.7,.8,.7,.8));
+  EXPECT_FALSE(interior(.45,.55,.45,.55));
+}
+
+TEST(BRepPatchExt, InteriorRequestsAreMeasuredAgainstTheDeliveredTrim)
+{
+  for(double outside : {.1,.5,1.})
+  {
+    const auto face=BRepBuilderAPI_MakeFace(gp_Pln(gp::XOY()),0.,100.,0.,100.).Face();
+    std::vector<uint32_t> edges;
+    for(TopExp_Explorer it(face,TopAbs_EDGE);it.More();it.Next())edges.push_back(BRepExt::store(session(),it.Current()));
+    const gp_Pnt p(100+outside,50,0);
+    const uint32_t guide=BRepExt::store(session(),BRepBuilderAPI_MakeEdge(p,gp_Pnt(100+outside,60,0)).Edge());
+    for(bool curve : {false,true})
+    {
+      try
+      {
+        BRepExt::patch(session(),edges,{0,0,0,0},{0,0,0,0},curve?std::vector<uint32_t>{guide}:std::vector<uint32_t>{},curve?std::vector<double>{}:std::vector<double>{p.X(),p.Y(),p.Z()},.001,.1,.05,0);
+        FAIL() << "an exterior constraint was accepted " << outside << " guide " << curve;
+      }
+      catch(const BRepExt::Failure& f){EXPECT_EQ(f.reason,BRepExt::no_solution);}
+    }
+  }
+}
+
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <gp_Circ.hxx>
+
+TEST(BRepPatchExt, InteriorWitnessesResolveCurvedTrimsNearTheirBoundary)
+{
+  for (double radius : {1., 10., 100.})
+  {
+    const auto edge = BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(gp::Origin(),gp::DZ()),radius)).Edge();
+    const auto face = BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakeWire(edge).Wire()).Face();
+    const auto interior = BRepExt::trimmedInteriorCells(face);
+    for (double angle : {0., .13, 1.7, 3.8, 6.})
+      for (double fraction : {1e-3, 1e-5, 1e-7})
+        for (bool inside : {false, true})
+        {
+          const double r = radius*(1+(inside ? -fraction : fraction));
+          const double u = r*std::cos(angle), v = r*std::sin(angle);
+          EXPECT_EQ(interior(u,u,v,v),inside) << radius << " " << angle << " " << fraction;
+        }
+  }
+}
+
+TEST(BRepPatchExt, QuadraticGuideRemainsOwnedUpToACircularRim)
+{
+  for (double scale : {.1, 1., 10.})
+  {
+    const double radius = 6*scale;
+    const auto edge = BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(gp::Origin(),gp::DZ()),radius)).Edge();
+    NCollection_Array1<gp_Pnt> poles(1,3);
+    poles(1)=gp_Pnt(-radius,0,0); poles(2)=gp_Pnt(0,0,4*scale); poles(3)=gp_Pnt(radius,0,0);
+    Handle(Geom_Curve) curve = new Geom_BezierCurve(poles);
+    const auto guide = BRepBuilderAPI_MakeEdge(curve).Edge();
+    const auto made = BRepExt::patch(session(),{BRepExt::store(session(),edge)},{0},{0},
+      {BRepExt::store(session(),guide)},{},1e-6*scale,.1,.05,0);
+    const auto face = onlyFace(BRepExt::get(session(),made.evolution.resultId));
+    for (double t : {1e-7,1e-6,.1,.5,.9,1-1e-6,1-1e-7})
+      EXPECT_LE(GeomAPI_ProjectPointOnSurf(curve->Value(t),BRep_Tool::Surface(face)).LowerDistance(),1e-6*scale);
+  }
+}
+
+#include <BRepClass_FaceClassifier.hxx>
+#include <BRepTools_WireExplorer.hxx>
+#include <BRep_Builder.hxx>
+#include <Geom2d_Curve.hxx>
+
+TEST(BRepPatchExt, TrimCellOwnershipIsLocalToPcurveEndpointGaps)
+{
+  for (double scale : {.001, 1., 1000.})
+    for (double fraction : {1e-7, 1e-5, .01})
+      for (bool turned : {false, true})
+      {
+        const double gap = scale * fraction;
+        gp_Pln       plane(gp::XOY());
+        if (turned)
+        {
+          gp_Trsf pose;
+          pose.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, -2, .5)), .9);
+          plane.Transform(pose);
+        }
+        const auto face = BRepBuilderAPI_MakeFace(plane, 0., scale, 0., scale).Face();
+        // The vertices remain shared, while the right pcurve has a local gap
+        // at each end. No geometric closure is substituted for the owned face.
+        bool moved = false;
+        for (BRepTools_WireExplorer edge(BRepTools::OuterWire(face), face); edge.More();
+             edge.Next())
+        {
+          double     from, to;
+          const auto curve = BRep_Tool::CurveOnSurface(edge.Current(), face, from, to);
+          if (std::abs(curve->Value((from + to) / 2).X() - scale) > scale * 1e-12)
+            continue;
+          auto shifted = occ::down_cast<Geom2d_Curve>(curve->Copy());
+          shifted->Translate(gp_Vec2d(-gap, 0));
+          BRep_Builder().UpdateEdge(edge.Current(), shifted, face, gap);
+          moved = true;
+        }
+        ASSERT_TRUE(moved);
+        const auto interior = BRepExt::trimmedInteriorCells(face);
+        EXPECT_TRUE(interior(.4 * scale, .6 * scale, .4 * scale, .6 * scale));
+        EXPECT_FALSE(interior(scale + gap, scale + 2 * gap, .4 * scale, .6 * scale));
+        EXPECT_FALSE(interior(scale - gap, scale, -gap, gap));
+        for (double x : {.4, .5, .6})
+          for (double y : {.4, .5, .6})
+            EXPECT_EQ(BRepClass_FaceClassifier(face, gp_Pnt2d(x * scale, y * scale), 1e-10).State(),
+                      TopAbs_IN);
+      }
+}

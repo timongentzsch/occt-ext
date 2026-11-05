@@ -270,6 +270,51 @@ G1 request. The exact-interpolation endpoint veto is removed; construction and
 final measurements decide feasibility at the requested tolerance. This does not
 assert existence for arbitrary guides.
 
+*Interior-cell witnesses (derived).* A parameter rectangle is used as an owned
+surface witness only if its center is inside the delivered trim and no boundary
+arc enclosure can intersect it. Positive-weight Bezier hull tubes enclose the
+owned pcurves; unresolved conversions or offset approximations yield no interior
+witness. This uses the local convex-hull property in Patrikalakis, Maekawa and
+Cho, *Shape Interrogation for Computer Aided Design and Manufacturing* (2009),
+[section 1.4.2](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
+The rectangle selection argument is derived here. It neither changes the cells
+selected for surface regularity checks nor proves injectivity of a fitted face.
+
+*Interior trim checks (derived).* Requested points are measured against the
+delivered face, including its boundary. Positive-weight guide splines are
+subdivided until their control hull has a tolerance-ball cover about a measured
+face witness. If `d` is the witness distance and `r` bounds the hull radius,
+`d+r` bounds every point by the triangle inequality. For a convex planar trim,
+its tolerance neighborhood is convex, so checking every hull pole suffices.
+This uses the convex-hull property in Patrikalakis, Maekawa and Cho (2009),
+[section 1.4.2](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
+For polynomial guide and surface pieces, an alternative paired cover avoids
+subdividing to tolerance-sized balls: restrict surface cells to an in-trim
+UV rectangle and follow its diagonal. Partition the certificate at the guide's
+knots and at every crossing of a surface knot by the UV chord. Exact knot
+insertion and restriction give polynomial intervals on which the comparison
+below applies (Patrikalakis, Maekawa and Cho, 2009,
+[section 1.4.3, equations 1.74-1.76](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node18.html)).
+This does not force dyadic geometric subdivision to converge on
+non-dyadic knot parameters. Already validated point witnesses are reused only
+for exactly equal spatial coordinates on the immutable delivered face.
+For bidegree `(p,q)`, its diagonal poles
+are `R_k = sum_(i+j=k) C(p,i) C(q,j) P_ij / C(p+q,k)`. This follows by
+multiplying Bernstein basis polynomials in the tensor-product representation
+(Patrikalakis, Maekawa and Cho, 2009,
+[section 1.3.6, equation 1.56](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node14.html)).
+After degree elevation, the largest distance between paired guide and trace
+poles bounds the whole difference curve by the convex-hull property. This
+bound and the rectangle argument are derived in exact arithmetic; floating-point
+conversion and pole calculations are not interval certificates. A local
+projection is used only to supply an actual in-trim upper-distance witness;
+failure to find one falls back to the global trimmed-face distance query.
+For non-spline curves requiring approximation, the converter's reported maximum
+error is reserved in the budget; that reported error is not an independently
+validated interval bound. Unresolved coverage is refused, never accepted from
+finite guide samples alone. Coverage can be costly on curved faces at tight
+tolerances; this is an optimization item rather than a guide pole-count limit.
+
 *Energy assembly (derived).* A quadrature cell touches local poles `(a, b)` in order
 `p = (firstU + a) countV + firstV + b`. These indices increase strictly, so an element's
 lower triangle is already in the global lower triangle. The assembly reads the given
@@ -1267,3 +1312,43 @@ or convergence for arbitrary boundary jets.
 Endpoint jet information is retained as a hint after a fit has already failed its
 result checks. It explains the failed fit and never rejects a delivered fit or
 acts as a feasibility condition for positional-tolerance guides.
+
+### Owned point witnesses near curved trims
+
+A fixed-resolution trim polygon can misclassify points near a curved rim. An
+interior-distance witness now uses parity of boundary arcs certified to avoid
+the query point. Positive-weight Bezier hulls enclose each arc in a convex tube
+about its chord. If that tube excludes the point, straightening the arc to its
+chord cannot cross the point and preserves crossing parity. Subdivide only
+uncertain arcs; retain uncertainty once hull deviation reaches the existing
+numerical enclosure guard. For a rectangle witness, additionally require that
+no boundary enclosure intersects the rectangle. Surface construction, result
+bounds and the ordinary surface-interior checks remain unchanged.
+
+The hull property is Patrikalakis, Maekawa and Cho, *Shape Interrogation for
+Computer Aided Design and Manufacturing* (2009), section 1.4.2. Polygon crossing
+parity and its relation to winding number are given by Hormann and Agathos,
+*The Point in Polygon Problem for Arbitrary Polygons* (2001), sections 1-2,
+equations (1)-(3), [author manuscript](https://www.inf.usi.ch/hormann/papers/Hormann.2001.TPI.pdf).
+The adaptive arc-to-chord restriction is derived here. This is not interval
+arithmetic: it retains the established floating-point enclosure guard and treats
+unresolved curves or near-boundary points conservatively.
+
+Adjacent owned pcurves can have different representations of their common
+vertex. A parity chain includes connecting segments only when each gap fits
+within the unchanged enclosure guard. For larger gaps, point ownership comes
+from `BRepClass_FaceClassifier` on the delivered face, rather than an invented
+closing curve. Before propagating that ownership across a nonzero rectangle,
+exclude every boundary-arc tube and the entire coordinate box of every endpoint
+gap, enlarged only by the existing guard. Unsupported pcurves cannot supply a
+cell certificate. A remote endpoint gap therefore does not invalidate an
+otherwise resolved local cell. Points classified on the rim remain unresolved.
+
+This local propagation is derived: an open connected rectangle disjoint from
+the delivered boundary lies in one component of its complement, so its ownership
+is constant and one authoritative interior point suffices. It assumes the face's
+own ownership semantics; it does not certify a malformed wire's missing geometry
+or assert that any arbitrary-gap closure is the delivered trim. The test family
+varies endpoint gaps, UV scale and rigid pose, and independently checks the seed
+with the face classifier. The ordinary interior-curvature classifier, all
+construction arithmetic and all result tolerances are unchanged.

@@ -17,6 +17,7 @@
 #include <Standard_Macro.hxx>
 #include <TopoDS_Face.hxx>
 #include <optional>
+#include <functional>
 #include <string>
 
 namespace BRepExt
@@ -40,6 +41,10 @@ Standard_EXPORT std::optional<std::string> insideFault(
   double                         rimBend,
   const std::optional<Crossing>& crossing = std::nullopt,
   bool                           resolveNormalRotation = true);
+
+//! A cell wholly inside the trim; unresolved boundary overlap returns false.
+Standard_EXPORT std::function<bool(double, double, double, double)> trimmedInteriorCells(
+  const TopoDS_Face& face);
 
 struct InsideCurvature
 {

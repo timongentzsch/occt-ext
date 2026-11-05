@@ -23,6 +23,7 @@
 #include <TopoDS.hxx>
 #include <TopExp_Explorer.hxx>
 #include <Geom2d_Curve.hxx>
+#include <Geom2dAdaptor_Curve.hxx>
 #include <Geom2d_BSplineCurve.hxx>
 #include <Geom2d_Line.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
@@ -30,7 +31,9 @@
 #include <Geom2dConvert.hxx>
 #include <Geom2dConvert_BSplineCurveToBezierCurve.hxx>
 #include <optional>
+#include <memory>
 #include <BRepTopAdaptor_FClass2d.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <GeomLProp_SLProps.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <NCollection_Array2.hxx>
@@ -210,24 +213,30 @@ public:
 // Uncertain points and unsupported curves use OCCT, on the same acceptance grid.
 class FinalTrim
 {
+  TopoDS_Face             ownedFace;
   BRepTopAdaptor_FClass2d exact;
   std::vector<gp_XY>      polygon;
 
   struct Segment
   {
-    gp_XY  a, b;
-    double bound;
+    gp_XY                           a, b;
+    double                          bound;
+    occ::handle<Geom2d_BezierCurve> curve;
   };
 
-  std::vector<Segment> segments;
-  double               guard = 0;
+  std::vector<Segment>                 segments;
+  std::vector<std::pair<gp_XY, gp_XY>> joins;
+  bool                                 closed         = true;
+  double                               guard          = 0;
+  double                               enclosureGuard = 0;
 
   void approximate(const TopoDS_Face& face)
   {
     double u0, u1, v0, v1;
     BRepTools::UVBounds(face, u0, u1, v0, v1);
     const double goal = 1e-4 * std::max(u1 - u0, v1 - v0);
-    const auto   append =
+    enclosureGuard    = BRepExt::tolerance::uv + 1e-10 * std::max(u1 - u0, v1 - v0);
+    const auto append =
       [&](auto&& self, const occ::handle<Geom2d_BezierCurve>& curve, int depth) -> bool {
       const gp_XY  a = curve->StartPoint().XY(), b = curve->EndPoint().XY(), ab = b - a;
       const double squared = ab.SquareModulus();
@@ -245,8 +254,7 @@ class FinalTrim
       {
         // Positive rational Bezier weights keep the entire boundary within
         // this control-hull tube, including excursions past either endpoint.
-        segments.push_back(
-          {a, b, bound + BRepExt::tolerance::uv + 1e-10 * std::max(u1 - u0, v1 - v0)});
+        segments.push_back({a, b, bound + enclosureGuard, curve});
         return true;
       }
       auto left  = occ::down_cast<Geom2d_BezierCurve>(curve->Copy());
@@ -258,12 +266,22 @@ class FinalTrim
     try
     {
       for (TopExp_Explorer it(face, TopAbs_WIRE); it.More(); it.Next())
+      {
+        const size_t firstSegment = segments.size();
         for (BRepTools_WireExplorer edge(TopoDS::Wire(it.Current()), face); edge.More();
              edge.Next())
         {
           double     from, to;
           const auto curve = BRep_Tool::CurveOnSurface(edge.Current(), face, from, to);
           if (curve.IsNull())
+          {
+            segments.clear();
+            return;
+          }
+          const auto type = Geom2dAdaptor_Curve(curve, from, to).GetType();
+          // Offset conversion can approximate at a fixed allowance. It cannot
+          // supply a proven enclosure of the actual owned trim.
+          if (type == GeomAbs_OffsetCurve || type == GeomAbs_OtherCurve)
           {
             segments.clear();
             return;
@@ -280,6 +298,16 @@ class FinalTrim
               return;
             }
         }
+        const size_t lastSegment = segments.size();
+        for (size_t k = firstSegment; k < lastSegment; ++k)
+        {
+          const gp_XY a = segments[k].b;
+          const gp_XY b = segments[k + 1 == lastSegment ? firstSegment : k + 1].a;
+          if ((b - a).Modulus() > enclosureGuard)
+            closed = false;
+          joins.emplace_back(a, b);
+        }
+      }
     }
     catch (const Standard_Failure&)
     {
@@ -289,7 +317,8 @@ class FinalTrim
 
 public:
   explicit FinalTrim(const TopoDS_Face& face)
-      : exact(face, BRepExt::tolerance::uv)
+      : ownedFace(face),
+        exact(face, BRepExt::tolerance::uv)
   {
     approximate(face);
     int wires = 0;
@@ -365,6 +394,121 @@ public:
     }
   }
 
+  bool boundaryMayIntersect(double u0, double u1, double v0, double v1) const
+  {
+    if (segments.empty())
+      return true;
+    for (const auto& segment : segments)
+    {
+      double from = 0, to = 1;
+      for (int axis = 1; axis <= 2 && from <= to; ++axis)
+      {
+        const double low  = (axis == 1 ? u0 : v0) - segment.bound,
+                     high = (axis == 1 ? u1 : v1) + segment.bound, origin = segment.a.Coord(axis),
+                     direction = segment.b.Coord(axis) - origin;
+        if (direction == 0)
+        {
+          if (origin < low || origin > high)
+            from = 2;
+        }
+        else
+        {
+          const double a = (low - origin) / direction, b = (high - origin) / direction;
+          from = std::max(from, std::nextafter(std::min(a, b), -HUGE_VAL));
+          to   = std::min(to, std::nextafter(std::max(a, b), HUGE_VAL));
+        }
+      }
+      if (from <= to)
+        return true;
+    }
+    // A gap is local uncertainty, even though the stored pcurves do not close.
+    // Exclude its entire coordinate box, rather than inventing a closing curve.
+    for (const auto& join : joins)
+      if (std::max(join.first.X(), join.second.X()) + enclosureGuard >= u0
+          && std::min(join.first.X(), join.second.X()) - enclosureGuard <= u1
+          && std::max(join.first.Y(), join.second.Y()) + enclosureGuard >= v0
+          && std::min(join.first.Y(), join.second.Y()) - enclosureGuard <= v1)
+        return true;
+    return false;
+  }
+
+  std::optional<bool> pointMembership(double u, double v) const
+  {
+    if (segments.empty())
+      return std::nullopt;
+    if (!closed)
+    {
+      // A point needs only the delivered face's own classifier. A nonzero
+      // cell separately excludes all boundary and gap enclosures before using
+      // this point as its seed. No artificial closing curve is introduced.
+      const BRepClass_FaceClassifier classifier(ownedFace, gp_Pnt2d(u, v), BRepExt::tolerance::uv);
+      if (classifier.State() == TopAbs_IN)
+        return true;
+      if (classifier.State() == TopAbs_OUT)
+        return false;
+      return std::nullopt;
+    }
+    const gp_XY point(u, v);
+    const auto  parity = [&](auto&&                                 self,
+                            const occ::handle<Geom2d_BezierCurve>& curve) -> std::optional<bool> {
+      const gp_XY  a = curve->StartPoint().XY(), b = curve->EndPoint().XY(), ab = b - a;
+      const double squared = ab.SquareModulus();
+      const auto   gap     = [&](const gp_XY& p) {
+        return (p - a - ab * (squared > 0 ? std::clamp((p - a).Dot(ab) / squared, 0., 1.) : 0.))
+          .Modulus();
+      };
+      double bound = 0;
+      for (int k = 1; k <= curve->NbPoles(); ++k)
+        bound = std::max(bound, gap(curve->Pole(k).XY()));
+      if (gap(point) > std::nextafter(bound + enclosureGuard, HUGE_VAL))
+        return (a.Y() > v) != (b.Y() > v) && u < a.X() + ab.X() * (v - a.Y()) / ab.Y();
+      if (bound <= enclosureGuard)
+        return std::nullopt;
+      auto left  = occ::down_cast<Geom2d_BezierCurve>(curve->Copy());
+      auto right = occ::down_cast<Geom2d_BezierCurve>(curve->Copy());
+      left->Segment(0, .5);
+      right->Segment(.5, 1);
+      const auto l = self(self, left), r = self(self, right);
+      if (!l || !r)
+        return std::nullopt;
+      return *l != *r;
+    };
+    bool inside = false;
+    for (const auto& segment : segments)
+    {
+      const gp_XY  ab = segment.b - segment.a, to = point - segment.a;
+      const double squared = ab.SquareModulus();
+      const double distance =
+        (to - ab * (squared > 0 ? std::clamp(to.Dot(ab) / squared, 0., 1.) : 0.)).Modulus();
+      const auto crossing =
+        distance > std::nextafter(segment.bound, HUGE_VAL)
+          ? std::optional<bool>((segment.a.Y() > v) != (segment.b.Y() > v)
+                                && u < segment.a.X() + ab.X() * (v - segment.a.Y()) / ab.Y())
+          : parity(parity, segment.curve);
+      if (!crossing)
+        return std::nullopt;
+      inside = inside != *crossing;
+    }
+    for (const auto& join : joins)
+    {
+      const gp_XY  a = join.first, ab = join.second - a, to = point - a;
+      const double squared = ab.SquareModulus();
+      if ((to - ab * (squared > 0 ? std::clamp(to.Dot(ab) / squared, 0., 1.) : 0.)).Modulus()
+          <= enclosureGuard)
+        return std::nullopt;
+      if ((a.Y() > v) != (join.second.Y() > v) && u < a.X() + ab.X() * (v - a.Y()) / ab.Y())
+        inside = !inside;
+    }
+    return inside;
+  }
+
+  bool containsCell(double u0, double u1, double v0, double v1)
+  {
+    if ((u0 != u1 || v0 != v1) && boundaryMayIntersect(u0, u1, v0, v1))
+      return false;
+    return pointMembership(u0 + (u1 - u0) / 2, v0 + (v1 - v0) / 2).value_or(false);
+  }
+
   bool contains(double u, double v)
   {
     if (!polygon.empty())
@@ -402,6 +546,14 @@ public:
   }
 };
 } // namespace
+
+std::function<bool(double, double, double, double)> trimmedInteriorCells(const TopoDS_Face& face)
+{
+  auto trim = std::make_shared<FinalTrim>(face);
+  return [trim](double u0, double u1, double v0, double v1) {
+    return trim->containsCell(u0, u1, v0, v1);
+  };
+}
 
 double InsideCurvature::wrongSign() const
 {
@@ -587,8 +739,9 @@ std::optional<std::string> insideFault(const TopoDS_Face&             face,
   // Opposite normals at separated places do not establish a fold. Subdivide
   // their parameter segment until the rotation is resolved or rank is lost.
   // This remains a sampled regularity check, not a global injectivity proof.
-  const auto resolve = [&](auto&& self, double ua, double va, const gp_Vec& na,
-                           double ub, double vb, const gp_Vec& nb) -> bool {
+  const auto resolve =
+    [&](auto&& self, double ua, double va, const gp_Vec& na, double ub, double vb, const gp_Vec& nb)
+    -> bool {
     if (na.Dot(nb) >= 0)
       return true;
     if (!resolveNormalRotation)
@@ -622,10 +775,14 @@ std::optional<std::string> insideFault(const TopoDS_Face&             face,
       {
         if (i + di >= grid || j + dj >= grid || !seen[(i + di) * grid + j + dj])
           continue;
-        const double u = u0 + (u1-u0)*(i+.5)/grid, v = v0 + (v1-v0)*(j+.5)/grid;
-        if (!resolve(resolve, u, v, normals[i * grid + j],
-                     u0 + (u1-u0)*(i+di+.5)/grid, v0 + (v1-v0)*(j+dj+.5)/grid,
-                     normals[(i+di)*grid+j+dj]))
+        const double u = u0 + (u1 - u0) * (i + .5) / grid, v = v0 + (v1 - v0) * (j + .5) / grid;
+        if (!resolve(resolve,
+                     u,
+                     v,
+                     normals[i * grid + j],
+                     u0 + (u1 - u0) * (i + di + .5) / grid,
+                     v0 + (v1 - v0) * (j + dj + .5) / grid,
+                     normals[(i + di) * grid + j + dj]))
           return "its differential regularity is unresolved inside the loop";
       }
     }
