@@ -939,7 +939,9 @@ bool asSpline(const TopoDS_Shape&         shape,
   try
   {
     // Judgement: degree 9 and 1000 segments each way at most (AdvApp2Var's own scale).
-    GeomConvert_ApproxSurface approx(new Geom_RectangularTrimmedSurface(exact, u0, u1, v0, v1),
+    // A moved crease can extend the face beyond a bounded spline support. Evaluate its
+    // polynomial continuation, as the edges do, rather than rejecting it in a trimming wrapper.
+    GeomConvert_ApproxSurface approx(new GeomAdaptor_Surface(exact, u0, u1, v0, v1),
                                      bound,
                                      GeomAbs_C0,
                                      GeomAbs_C0,

@@ -807,3 +807,22 @@ This is a trimmed parallel **body**, whereas thickening retains the input sheet'
 Trimming arbitrary spline offsets requires tracing all self-intersection components; the distinction
 is described by Patrikalakis, Maekawa and Cho (2009),
 [section 11.3.2, equations (11.28)–(11.29)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node225.html).
+
+### Extending the approximation domain of a moved crease face
+
+The kept-face offset approximates the exact normal offset on the UV rectangle of the
+constructed face, including any extension needed to intersect adjacent moved supports.
+It supplies that rectangle through `GeomAdaptor_Surface`, whose bounds select an evaluation
+domain, rather than `Geom_RectangularTrimmedSurface`, which rejects bounds outside a bounded
+basis surface. The approximation tolerance, degree and segment limits are unchanged.
+
+Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided Design and
+Manufacturing* (2009), [section 11.3.1, equation (11.17)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html)
+defines the normal offset used here; [section 1.4.2, equation (1.62)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html)
+expresses a spline as polynomial spans. **Derived here:** evaluating the end span beyond
+its knot interval continues the same parametric support used by the extended edge curves;
+it does not change the normal-offset definition or justify extrapolating a fitted result
+outside its certified rectangle. The existing approximation-error, topology, clearance
+and self-interference checks still apply to that rectangle. A generated family varies
+scale, pose and signed distance on a valid near-planar C0 support, checking face lineage,
+volume and independently evaluated normal-offset samples.

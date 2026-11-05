@@ -27,6 +27,7 @@
 
 #include <BRepAdaptor_Surface.hxx>
 #include <Geom_BSplineSurface.hxx>
+#include <Geom2d_Curve.hxx>
 #include <NCollection_Array2.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -616,4 +617,105 @@ TEST(BRepOffsetExt, RingParallelBodyClosesItsHoleWithoutKeepingTheCrossingSheet)
         EXPECT_NEAR(volume(made), expected, expected * 1e-8);
         EXPECT_EQ(volume(source), before);
       }
+}
+
+
+// A valid imported C0 support may already agree with its ideal plane within the input
+// tolerance, while its normal changes slightly at a knot. The offset must extend that support
+// to meet the adjacent moved planes. A trimming wrapper rejects the extended UV box before
+// approximation starts; an adaptor evaluates the same end-span continuation used by the edges.
+TEST(BRepOffsetExt, NormalOffsetApproximationCoversTheExtendedFaceDomain)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+  {
+    const double side = 20 * scale, ridge = 1e-8 * scale, tolerance = 1e-6 * scale;
+    TopoDS_Shape body = BRepPrimAPI_MakeBox(side, side, side).Shape();
+    BRep_Builder builder;
+    for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
+    {
+      const TopoDS_Face face = TopoDS::Face(f.Current());
+      const Handle(Geom_Surface) plane = BRep_Tool::Surface(face);
+      if (std::abs(plane->Value(side / 2, side / 2).Z() - side) > tolerance)
+        continue;
+      NCollection_Array2<gp_Pnt> poles(1, 3, 1, 2);
+      NCollection_Array1<double> uk(1, 3), vk(1, 2);
+      NCollection_Array1<int> um(1, 3), vm(1, 2);
+      uk(1) = vk(1) = 0.0;
+      uk(2) = side / 2;
+      uk(3) = vk(2) = side;
+      um(1) = um(3) = vm(1) = vm(2) = 2;
+      um(2) = 1;
+      for (int i = 1; i <= 3; ++i)
+        for (int j = 1; j <= 2; ++j)
+        {
+          gp_Pnt p = plane->Value(uk(i), vk(j));
+          if (i == 2)
+            p.SetZ(p.Z() + ridge);
+          poles(i, j) = p;
+        }
+      const Handle(Geom_Surface) support = new Geom_BSplineSurface(poles, uk, vk, um, vm, 1, 1);
+      struct OnFace
+      {
+        TopoDS_Edge edge;
+        Handle(Geom2d_Curve) curve;
+        double first, last;
+      };
+      std::vector<OnFace> curves;
+      for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+      {
+        OnFace on;
+        on.edge = TopoDS::Edge(e.Current());
+        on.curve = BRep_Tool::CurveOnSurface(on.edge, face, on.first, on.last);
+        curves.push_back(on);
+      }
+      builder.UpdateFace(face, support, TopLoc_Location(), 1e-7 * scale);
+      for (const OnFace& on : curves)
+      {
+        builder.UpdateEdge(on.edge, on.curve, face, 1e-7 * scale);
+        builder.Range(on.edge, face, on.first, on.last);
+      }
+    }
+    gp_Trsf pose;
+    pose.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), 0.7);
+    body = BRepBuilderAPI_Transform(body, pose, true).Shape();
+    ASSERT_TRUE(BRepCheck_Analyzer(body).IsValid());
+    for (const double d : {-0.5 * scale, 0.05 * scale, 0.5 * scale})
+    {
+      BRepExt::FaceSet selected;
+      for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
+        selected.Add(f.Current());
+      BRepExt::Lineage lineage(body);
+      std::string why;
+      const TopoDS_Shape result = BRepExt::keptOffset(body, selected, d, tolerance, lineage, why);
+      ASSERT_FALSE(result.IsNull()) << why << " scale=" << scale << " d=" << d;
+      EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
+      EXPECT_EQ(faceCount(result), faceCount(body));
+      // The input differs from the exact cube by at most ridge; its parallel boundary differs
+      // by ridge plus |d| times the normal's change, below tolerance. The resulting volume is
+      // therefore within its area times tolerance of the expanded/contracted cube.
+      EXPECT_NEAR(volume(result), std::pow(side + 2 * d, 3),
+                  6 * std::pow(side + 2 * d, 2) * tolerance);
+      for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
+      {
+        const TopoDS_Face source = TopoDS::Face(f.Current());
+        const auto successors = lineage.of(source);
+        ASSERT_EQ(successors.size(), 1u);
+        const TopoDS_Face made = TopoDS::Face(successors[0]);
+        double u0, u1, v0, v1;
+        BRepTools::UVBounds(made, u0, u1, v0, v1);
+        const Handle(Geom_Surface) before = BRep_Tool::Surface(source), after = BRep_Tool::Surface(made);
+        for (const double x : {0.1, 0.3, 0.7, 0.9})
+          for (const double y : {0.1, 0.3, 0.7, 0.9})
+          {
+            const double u = u0 + x * (u1 - u0), v = v0 + y * (v1 - v0);
+            gp_Pnt p;
+            gp_Vec su, sv;
+            before->D1(u, v, p, su, sv);
+            const double along = source.Orientation() == TopAbs_REVERSED ? -d : d;
+            const gp_Pnt exact = p.Translated(su.Crossed(sv).Normalized() * along);
+            EXPECT_LE(after->Value(u, v).Distance(exact), tolerance);
+          }
+      }
+    }
+  }
 }
