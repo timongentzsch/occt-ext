@@ -1263,3 +1263,7 @@ checks call the same measurement and easing alternatives as acceptance. A fit
 already accepted retains its previous refinement decisions. This removes a
 position-only stop condition; finite refinement still does not prove existence
 or convergence for arbitrary boundary jets.
+
+Endpoint jet information is retained as a hint after a fit has already failed its
+result checks. It explains the failed fit and never rejects a delivered fit or
+acts as a feasibility condition for positional-tolerance guides.

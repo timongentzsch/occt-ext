@@ -1567,6 +1567,49 @@ std::optional<gp_Trsf> rebasedSplineRim(Asked& asked, gp_Trsf& anchor)
   return placement;
 }
 
+//! Endpoint jet information for an already rejected fit; never a feasibility veto.
+std::optional<std::string> guideEndHint(const Asked& asked, double size)
+{
+  for (const Side& guide : asked.guides)
+    for (double fraction : {0.0, 1.0})
+    {
+      const gp_Pnt point = guide.at(fraction);
+      for (const Side& side : asked.sides)
+      {
+        if (side.order < 1)
+          continue;
+        GeomAPI_ProjectPointOnCurve project(point,
+                                            side.curve,
+                                            std::min(side.from, side.to),
+                                            std::max(side.from, side.to));
+        if (!project.NbPoints() || project.LowerDistance() > asked.limits.g0)
+          continue;
+        const double t = project.LowerDistanceParameter();
+        const double f =
+          std::clamp((t - side.from) / (side.to - side.from), cornerInset, 1 - cornerInset);
+        const SurfaceJet jet     = side.jet(f);
+        const gp_Vec     tangent = guide.tangent(fraction).Normalized();
+        const double angle = std::asin(std::min(1.0, std::abs(jet.n.Dot(tangent)))) * 180 / M_PI;
+        const std::string where = "guide " + std::to_string(guide.input + 1)
+                                  + " ends on boundary edge " + std::to_string(side.input + 1);
+        if (angle > asked.limits.g1)
+          return where + " with tangent plane angle " + number(angle) + " degrees";
+        if (side.order < 2)
+          continue;
+        gp_Pnt at;
+        gp_Vec first, second;
+        guide.curve->D2(guide.parameter(fraction), at, first, second);
+        const double mine       = second.Dot(jet.n) / first.SquareMagnitude(),
+                     theirs     = jet.curvature(tangent, tangent);
+        const double difference = std::abs(mine - theirs),
+                     scale = std::max({std::abs(mine), std::abs(theirs), flatShare / size});
+        if (difference > asked.limits.g2 * scale)
+          return where + " with normal-curvature difference share " + number(difference / scale);
+      }
+    }
+  return std::nullopt;
+}
+
 //! The tightest bend on the rim of what is asked: of its curves and guides, of the faces
 //! that it is to run on from, and of a ball as large as the loop.
 double rimBend(const Asked& asked)
@@ -6406,7 +6449,12 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
          no_solution,
          "the surface that meets the edges is not one to keep: " + built->measured.worst);
   if (!built->measured.within)
-    fail(op, no_solution, "no Patch candidate meets what was asked: " + built->measured.worst);
+  {
+    std::string reason = "no Patch candidate meets what was asked: " + built->measured.worst;
+    if (const auto hint = guideEndHint(input, asked.size))
+      reason += "; " + *hint;
+    fail(op, no_solution, reason);
+  }
   if (!BRepCheck_Analyzer(built->face).IsValid())
     fail(op, no_solution, "the patch is not a valid face");
   // Within every limit along its edges is not yet a patch: see BRepPatchExt_Inside.hxx. Points
