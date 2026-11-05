@@ -162,8 +162,9 @@ public:
   void within(const TopoDS_Shape& result);
 
   const std::vector<TopoDS_Shape>& of(const TopoDS_Shape& face) const;
-  //! Every face that descends from any face of the input.
-  std::vector<TopoDS_Shape> all() const;
+  //! Every descendant, except those reached only from the listed input faces.
+  //! Exclusion is by source identity; a shared descendant of a retained input stays.
+  std::vector<TopoDS_Shape> all(const std::vector<TopoDS_Shape>& excluded = {}) const;
 
   //! Into the history: as what each tracked face was modified to (a face that is itself is
   //! left out, one with nothing left is deleted), or as what it generated.

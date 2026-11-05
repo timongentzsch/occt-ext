@@ -101,7 +101,7 @@ std::optional<EvolutionData> quickShell(OcctKernel&                      kernel,
     Lineage walls(source);
     walls.images(maker);
     walls.within(maker.Shape());
-    if (!clearance(walls.all(), source, removed, std::abs(thickness),
+    if (!clearance(walls.all(removed), source, removed, std::abs(thickness),
                    std::abs(thickness) - clearanceSlack * tolerance)
            .satisfies(std::abs(thickness) - clearanceSlack * tolerance))
       return {};
@@ -352,7 +352,10 @@ EvolutionData shell(OcctKernel&                  kernel,
   // Apart from the kernel's own word: the wall is nowhere thinner than asked. With Local, the
   // wall is that of the faces round the openings: what lies behind the faces left alone is
   // the body's own, which may come nearer or meet the inside.
-  const auto measured=clearance(walls.all(), closed, openedInClosed, thickness,
+  // Opening descendants form the rim, not an inward offset wall. They intentionally
+  // meet the retained source skin at zero distance. Keep them in the public history,
+  // but measure the inward descendants of every retained source face.
+  const auto measured=clearance(walls.all(removed), closed, openedInClosed, thickness,
                                 thickness-clearanceSlack*tolerance);
   if (!measured.satisfies(thickness-clearanceSlack*tolerance))
     fail(op, no_solution, "the wall clearance is unresolved or below the requested thickness"

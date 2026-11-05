@@ -34,6 +34,8 @@
 #include <Geom2dConvert.hxx>
 #include <NCollection_Array2.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeTorus.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -898,4 +900,123 @@ TEST(BRepOffsetExt, ElementaryFocalClassificationIncludesTrimExtrema)
     EXPECT_EQ(torusFate.partial.size(), 1u);
     EXPECT_TRUE(torusFate.vanish.empty());
   }
+}
+
+TEST(BRepOffsetExt, PocketedBodyOpeningClearance)
+{
+  auto body =
+    BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(10, 10, 10).Shape(),
+                    BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(5, 5, 0), gp::DZ()), 2, 10).Shape())
+      .Shape();
+  auto edges = edgesWhere(body, [](const double* b) {
+    return near(b[0], 0) && near(b[3], 0) && near(b[1], 0) && near(b[4], 0);
+  });
+  ASSERT_EQ(edges.size(), 1u);
+  BRepFilletAPI_MakeFillet fillet(body);
+  fillet.Add(1, edges[0]);
+  body  = fillet.Shape();
+  body  = BRepAlgoAPI_Cut(body, BRepPrimAPI_MakeBox(gp_Pnt(9, 3, -5), 2, 4, 20).Shape()).Shape();
+  edges = edgesWhere(body, [](const double* b) {
+    return near(b[1], 10) && near(b[4], 10) && near(b[2], 10) && near(b[5], 10);
+  });
+  ASSERT_EQ(edges.size(), 1u);
+  BRepFilletAPI_MakeChamfer chamfer(body);
+  chamfer.Add(1, edges[0]);
+  body = chamfer.Shape();
+  body = BRepAlgoAPI_Cut(body, BRepPrimAPI_MakeBox(gp_Pnt(1, 7, -1), 2, 2, 2).Shape()).Shape();
+  for (const double scale : {0.1, 1.0, 10.0})
+    for (const double angle : {0.0, 0.47})
+      for (const double wall : {0.1, 0.2, 0.3})
+      {
+        SCOPED_TRACE(::testing::Message() << scale << ", " << angle << ", " << wall);
+        gp_Trsf turn, shift, size;
+        turn.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), angle);
+        shift.SetTranslation(gp_Vec(2, -3, 5));
+        size.SetScale(gp::Origin(), scale);
+        const auto input = BRepBuilderAPI_Transform(body, size * shift * turn, true).Shape();
+        const auto hash  = [](const TopoDS_Shape& shape) {
+          return static_cast<int>(TopTools_ShapeMapHasher{}(shape) % BRepExt::failureHashBound);
+        };
+        std::vector<int> hashes;
+        TopoDS_Shape     opened;
+        TopoDS_Compound  skin;
+        BRep_Builder     builder;
+        builder.MakeCompound(skin);
+        for (TopExp_Explorer f(input, TopAbs_FACE); f.More(); f.Next())
+        {
+          opened = f.Current();
+          hashes.push_back(hash(f.Current()));
+        }
+        for (TopExp_Explorer f(input, TopAbs_FACE); f.More(); f.Next())
+          if (!f.Current().IsSame(opened))
+            builder.Add(skin, f.Current());
+        const auto made   = BRepExt::shell(session(),
+                                           keep(input),
+                                           {keep(opened)},
+                                           wall * scale,
+                                           1e-6 * scale,
+                                           2,
+                                           hashes,
+                                           BRepExt::failureHashBound,
+                                           false);
+        const auto result = BRepExt::get(session(), made.resultId);
+        EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
+        EXPECT_LT(volume(result), 0.45 * volume(input));
+        size_t walls = 0, rims = 0;
+        double minimum = 1e100;
+        for (size_t i = 0; i < made.generated.size();)
+        {
+          const bool rim   = made.generated[i++] == hash(opened);
+          const int  count = made.generated[i++];
+          for (int j = 0; j < count; ++j)
+          {
+            const int image = made.generated[i++];
+            bool      found = false;
+            for (TopExp_Explorer f(result, TopAbs_FACE); f.More(); f.Next())
+              if (hash(f.Current()) == image)
+              {
+                found = true;
+                BRepExtrema_DistShapeShape distance(f.Current(), skin);
+                ASSERT_TRUE(distance.IsDone());
+                if (rim)
+                {
+                  ++rims;
+                  EXPECT_NEAR(distance.Value(), 0, 1e-6 * scale);
+                }
+                else
+                {
+                  ++walls;
+                  minimum = std::min(minimum, distance.Value());
+                  EXPECT_GE(distance.Value(), wall * scale - 1e-6 * scale);
+                }
+              }
+            EXPECT_TRUE(found);
+          }
+        }
+        EXPECT_EQ(walls, 17u);
+        EXPECT_EQ(rims, 1u);
+        EXPECT_NEAR(minimum, wall * scale, 1e-6 * scale);
+      }
+}
+
+TEST(BRepOffsetExt, OpeningExclusionKeepsSharedWallDescendants)
+{
+  const auto      box = BRepPrimAPI_MakeBox(10, 10, 10).Shape();
+  TopExp_Explorer f(box, TopAbs_FACE);
+  const auto      opened = f.Current();
+  f.Next();
+  const auto       retained = f.Current();
+  BRepExt::Lineage lineage(box);
+  lineage.set(opened, {opened, retained});
+  const auto walls = lineage.all({opened});
+  EXPECT_EQ(walls.size(), 5u);
+  EXPECT_TRUE(
+    std::any_of(walls.begin(), walls.end(), [&](const auto& s) { return s.IsSame(retained); }));
+  // A known thin retained wall cannot be hidden by an opening's provenance.
+  const auto thin = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0.1), gp::DZ()), 1, 9, 1, 9).Face();
+  lineage.set(retained, {thin});
+  const auto measured = BRepExt::clearance(lineage.of(retained), box, {}, 0, 0.2);
+  EXPECT_TRUE(measured.resolved);
+  EXPECT_FALSE(measured.satisfies(0.2));
+  EXPECT_NEAR(measured.minimum, 0.1, Precision::Confusion());
 }

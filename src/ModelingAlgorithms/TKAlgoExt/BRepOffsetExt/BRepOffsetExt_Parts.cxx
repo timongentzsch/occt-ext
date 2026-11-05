@@ -522,11 +522,17 @@ const std::vector<TopoDS_Shape>& Lineage::of(const TopoDS_Shape& face) const
   return index == 0 ? none : now_[index - 1];
 }
 
-std::vector<TopoDS_Shape> Lineage::all() const
+std::vector<TopoDS_Shape> Lineage::all(const std::vector<TopoDS_Shape>& excluded) const
 {
   std::vector<TopoDS_Shape> out;
-  for (const auto& faces : now_)
-    out.insert(out.end(), faces.begin(), faces.end());
+  for (int i = 1; i <= input_.Extent(); ++i)
+  {
+    bool omit = false;
+    for (const auto& face : excluded)
+      omit = omit || face.IsSame(input_.FindKey(i));
+    if (!omit)
+      out.insert(out.end(), now_[i - 1].begin(), now_[i - 1].end());
+  }
   return out;
 }
 

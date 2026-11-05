@@ -1114,6 +1114,39 @@ of the approximation. OCCT's *Boolean Operations* specification, section
 "Interferences", describes the stored-tolerance model; a stored edge tolerance
 is not a justified allowance to reduce the requested wall thickness.
 
+### Walls and opening rims
+
+A shell's clearance domain is the inward descendants of the retained input
+faces. Descendants reached only from removed input faces close the opening;
+they are rims, not offset walls. This follows the construction in Open Cascade,
+*Open CASCADE Technology Reference Manual* (2026, version 8.0.1),
+[`BRepOffsetAPI_MakeThickSolid`, Detailed Description and `MakeThickSolidByJoin`](https://occt3d.com/dev/doc/refman/html/class_b_rep_offset_a_p_i___make_thick_solid.html):
+the first shell contains the input faces except the removed faces; the second
+is its offset. Track this distinction by input-face identity through construction,
+not by surface type, coordinates, a distance threshold or a hash. A descendant
+shared with any retained input face is still measured. Opening descendants
+remain in the reported history. An empty retained domain still fails coverage.
+
+For example, an opening in a rectangular pocket can produce an annular rim
+slightly beyond the removed face, with an outer trim at the requested offset
+and an inner trim touching the original pocket walls. Independent whole-face
+distances give zero against those walls. No positive lower distance bound
+exists on this rim. A uniform interior lattice can miss that zero.
+For a plane separation h and an in-plane distance r from the rectangular
+opening, `d_open^2 = r^2 + h^2`, while the adjacent trimmed wall can be at r.
+Thus a spherical opening exclusion of radius t retains distances down to
+`sqrt(t^2-h^2)`, not t (derived here by Pythagoras, where h < t).
+Subdivision cannot repair this difference of domains.
+
+The regression test uses a pocketed body with a bore, a round and a chamfer,
+at three scales, two poses and three wall thicknesses. Separate trimmed-face
+extrema measure all 17 retained wall descendants at the requested thickness;
+the opening descendant has minimum zero and remains in the history. A separate
+thin retained face fails. The numerical solver and its tolerance are documented
+by Open Cascade, *Open CASCADE Technology Reference Manual* (2026, version
+8.0.1), [`BRepExtrema_DistShapeShape`, Detailed Description and `Perform`](https://occt3d.com/dev/doc/refman/html/class_b_rep_extrema___dist_shape_shape.html).
+These are numerical distance checks, not interval proofs of extrema.
+
 ### Regularity of network surfaces
 
 A lattice sized from the number of knots does not cover short knot intervals.
