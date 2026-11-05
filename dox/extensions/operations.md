@@ -267,6 +267,38 @@ The section-plane acceleration correction and this restricted reference route ar
 The interior curvature allowance remains the same unproven judgement; a compatible guide can
 therefore still be refused by it.
 
+*Planar collars and graph directions (open construction).* A planar support with unit normal
+`n` is locally a height over a plane with unit normal `d` exactly when `n.d != 0`.
+**Derived:** orthogonal projection restricted to its tangent plane has singular values
+`1` and `|n.d|`, so its inverse condition number is `1/|n.d|`; the height gradient has norm
+`sqrt(1/(n.d)^2 - 1)`. The existing `0.8` graph-selection threshold is therefore a conditioning
+policy, not an existence condition. Three mutually perpendicular support normals have best
+common margin `1/sqrt(3)`, which is nonzero. A simple projected boundary and a global
+single-valued interior must also be established; a local inverse alone does not give them.
+
+For a polynomial tensor graph, affine reproduction gives exact planar boundary jets by setting
+every height coefficient whose closed basis support meets a planar rim to that plane's affine
+height at the tensor Greville abscissae. Local support makes the value and its first two
+derivatives planar at the rim; degree five and simple knots give the needed C2 continuity.
+Incompatible planes must not prescribe the same coefficient. Refinement separates disjoint
+collars; it cannot resolve inconsistent jets at a shared corner. The identities follow from
+Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided Design and Manufacturing*
+(2009), [section 1.4.1, equations (1.58)--(1.61)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node16.html),
+by applying polynomial reproduction in both tensor directions. The coefficient prescription
+and projection singular-value calculation above are derived here.
+For completeness, `xi_i = (t_(i+1)+...+t_(i+p))/p` gives
+`p (xi_i-xi_(i-1))/(t_(i+p)-t_i) = 1`. Substitution in the derivative identity (1.61)
+therefore gives `(sum xi_i N_i,p)' = sum N_i,p-1 = 1`; its value at the clamped left
+endpoint fixes the constant, so `sum xi_i N_i,p = u`. Partition of unity then reproduces
+any affine height, and tensor products reproduce its two-variable form.
+
+This construction is not enabled. In a three-direction planar-rim experiment, 4,761, 17,689
+and 68,121 coefficients met the unchanged boundary conditions, but the interior-curvature
+ratios were approximately 15, 11 and 10 against the existing allowance of 4. These are failed
+candidates, not a proof of infeasibility. Exact planar jets alone do not establish interior
+fairness, topology, or agreement with the intended shape. The original routes and their
+acceptance limits remain in force.
+
 Where two sides asked for G2 meet at a corner whose faces bend differently (an arm of a round meeting a
 strip whose edge bends across the arm's axis), no surface that is twice differentiable at the corner has
 both bends there. It has the one bend that the two edges and the tangent planes along them leave it: four
