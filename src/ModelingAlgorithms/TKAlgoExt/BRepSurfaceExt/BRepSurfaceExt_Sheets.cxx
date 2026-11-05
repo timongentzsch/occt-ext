@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #include <GeomAlgoExt_ModelTolerance.hxx>
+#include <GeomAlgoExt_ParameterRectangle.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
 #include <BRepToolsExt_History.hxx>
 #include <BRepFilletExt_Untouched.hxx>
@@ -161,6 +162,9 @@ EvolutionData extendSheet(OcctKernel& kernel,
   auto   surface = BRep_Tool::Surface(face);
   double u0, u1, v0, v1;
   BRepTools::UVBounds(face, u0, u1, v0, v1);
+  // Boundary pole hulls, rather than area agreement, establish trim equivalence.
+  if (!GeomAlgoExt::parameterRectangle(face, u0, u1, v0, v1))
+    fail(op, unsupported_geometry, "extend requires an untrimmed rectangular sheet");
   // Verify the face really is its UV rectangle, rather than quietly discarding
   // trims.
   const auto rectangle = BRepBuilderAPI_MakeFace(surface, u0, u1, v0, v1, tolerance).Face();

@@ -1016,3 +1016,15 @@ These checks follow OPEN CASCADE, *OCCT Reference Manual* (8.0, 2026),
 and [`BRepLib::OrientClosedSolid`](https://dev.opencascade.org/doc/refman/html/class_b_rep_lib.html).
 They establish topological closure and the kernel's validity conditions, not a
 proof against geometric self-intersection. Nonplanar end-cap construction remains open.
+
+### Rectangular sheet extension preserves trims
+
+Extension requires a valid single-wire face whose boundary is its parameter
+rectangle. `GeomAlgoExt::parameterRectangle` checks all boundary curves against
+the four sides: line endpoints, or the complete positive-weight spline pole hull.
+Area agreement cannot establish this condition, since a narrow notch can have
+arbitrarily small area and finite depth. The pole-hull implication follows from
+Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided Design and
+Manufacturing*, hyperbook (2009), [section 1.4.2, convex hull property](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
+Applying that property to each constant coordinate is derived here. Unrecognized
+boundary representations are not assumed rectangular.

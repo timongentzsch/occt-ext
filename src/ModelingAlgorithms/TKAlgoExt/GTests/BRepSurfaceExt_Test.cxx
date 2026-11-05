@@ -28,6 +28,7 @@
 #include <gp_Ax1.hxx>
 #include <limits>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepSurfaceExt_FaceSeparation.hxx>
@@ -747,4 +748,29 @@ TEST(BRepSurfaceExt, CollinearStillRejectsOpposingRowsAtEveryScale)
                                            1e-7),
                    BRepExt::Failure);
     }
+}
+
+TEST(BRepSurfaceExt, ExtendSheetDoesNotDiscardSmallNotchesOnLargeFaces)
+{
+  for (const double size : {100.0, 1000.0, 10000.0})
+  {
+    const gp_Pnt points[] = {gp_Pnt(0, 0, 0), gp_Pnt(size, 0, 0),
+      gp_Pnt(size, size, 0), gp_Pnt(size / 2 + .01, size, 0),
+      gp_Pnt(size / 2 + .01, size - 1, 0), gp_Pnt(size / 2, size - 1, 0),
+      gp_Pnt(size / 2, size, 0), gp_Pnt(0, size, 0)};
+    BRepBuilderAPI_MakeWire wire;
+    for (int i = 0; i < 8; ++i)
+      wire.Add(BRepBuilderAPI_MakeEdge(points[i], points[(i + 1) % 8]).Edge());
+    const auto face = BRepBuilderAPI_MakeFace(wire.Wire(), true).Face();
+    const auto id = BRepExt::store(session(), face);
+    try
+    {
+      BRepExt::extendSheet(session(), id, 1, 1, 1, 1e-6);
+      FAIL() << "nonrectangular trim accepted at size " << size;
+    }
+    catch (const BRepExt::Failure& failure)
+    {
+      EXPECT_EQ(failure.reason, BRepExt::unsupported_geometry);
+    }
+  }
 }
