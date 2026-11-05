@@ -261,6 +261,15 @@ products and accumulated additions gives this conservative first-order roundoff
 policy. It is not a lower bound on geometric area or on the existence of a fill;
 all later geometric and tolerance checks remain required.
 
+*Guides with positional tolerance (derived).* A guide is a positional constraint,
+not an exact endpoint two-jet. An endpoint tangent or normal-curvature mismatch
+therefore cannot veto construction. For example `(x,y,z)=(.01*t,50,h*t)` on
+`0<=t<=1` lies within `h` of the planar square for every `h<=tolerance`, regardless
+of its endpoint angle. Its exact planar fill meets the positional and supported
+G1 request. The exact-interpolation endpoint veto is removed; construction and
+final measurements decide feasibility at the requested tolerance. This does not
+assert existence for arbitrary guides.
+
 *Energy assembly (derived).* A quadrature cell touches local poles `(a, b)` in order
 `p = (firstU + a) countV + firstV + b`. These indices increase strictly, so an element's
 lower triangle is already in the global lower triangle. The assembly reads the given

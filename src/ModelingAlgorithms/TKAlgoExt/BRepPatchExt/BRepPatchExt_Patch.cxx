@@ -1567,55 +1567,6 @@ std::optional<gp_Trsf> rebasedSplineRim(Asked& asked, gp_Trsf& anchor)
   return placement;
 }
 
-//! A guide ending on a supported edge must leave in that face's tangent plane, and at G2
-//! have its normal curvature. Test this before any fit, using the same jet as the joint.
-void agreeAtGuideEnds(const Asked& asked)
-{
-  for (const Side& guide : asked.guides)
-    for (double fraction : {0.0, 1.0})
-    {
-      const gp_Pnt point = guide.at(fraction);
-      for (const Side& side : asked.sides)
-      {
-        if (side.order < 1)
-          continue;
-        GeomAPI_ProjectPointOnCurve project(point,
-                                            side.curve,
-                                            std::min(side.from, side.to),
-                                            std::max(side.from, side.to));
-        if (!project.NbPoints() || project.LowerDistance() > asked.limits.g0)
-          continue;
-        const double t = project.LowerDistanceParameter();
-        const double f =
-          std::clamp((t - side.from) / (side.to - side.from), cornerInset, 1 - cornerInset);
-        const SurfaceJet jet     = side.jet(f);
-        const gp_Vec     tangent = guide.tangent(fraction).Normalized();
-        const double angle = std::asin(std::min(1.0, std::abs(jet.n.Dot(tangent)))) * 180 / M_PI;
-        const std::string where = "guide " + std::to_string(guide.input + 1)
-                                  + " ends on boundary edge " + std::to_string(side.input + 1);
-        if (angle > asked.limits.g1)
-          fail(op,
-               unsupported_geometry,
-               where + " but leaves its tangent plane by " + number(angle)
-                 + " degrees: no surface holds the guide and is tangent to that face there");
-        if (side.order < 2)
-          continue;
-        gp_Pnt at;
-        gp_Vec first, second;
-        guide.curve->D2(guide.parameter(fraction), at, first, second);
-        const double mine       = second.Dot(jet.n) / first.SquareMagnitude(),
-                     theirs     = jet.curvature(tangent, tangent);
-        const double difference = std::abs(mine - theirs),
-                     scale = std::max({std::abs(mine), std::abs(theirs), flatShare / asked.size});
-        if (difference > asked.limits.g2 * scale)
-          fail(op,
-               unsupported_geometry,
-               where + " but has a different normal curvature, by a share of "
-                 + number(difference / scale) + ": G2 cannot hold there (G1 may be met)");
-      }
-    }
-}
-
 //! The tightest bend on the rim of what is asked: of its curves and guides, of the faces
 //! that it is to run on from, and of a ball as large as the loop.
 double rimBend(const Asked& asked)
@@ -6286,7 +6237,6 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
   // The delivered face is held to what the sides ask near their corners as well.
   for (size_t i = 0; i < input.sides.size(); ++i)
     std::copy_n(asked.sides[i].eases, 2, input.sides[i].eases);
-  agreeAtGuideEnds(asked);
 
   // A plane in the mean-plane coordinates has orthogonal UV everywhere, so all
   // nonquad flow choices described as Normal can be satisfied exactly there.

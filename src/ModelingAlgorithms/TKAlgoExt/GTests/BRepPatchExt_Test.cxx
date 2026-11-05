@@ -1757,3 +1757,17 @@ TEST(BRepPatchExt, PlanarFillsDoNotHaveAnAspectRatioLimit)
     EXPECT_NEAR(area(BRepExt::get(session(),made.evolution.resultId)),length*width,1e-8*length*width);
   }
 }
+TEST(BRepPatchExt, PositionalGuideToleranceDoesNotRequireExactEndpointTangency)
+{
+  for(double height : {.0001,.0005,.0009})
+  {
+    const auto support=BRepBuilderAPI_MakeFace(gp_Pln(gp::XOY()),0.,100.,0.,100.).Face();
+    std::vector<uint32_t> edges,supports;
+    for(TopExp_Explorer it(support,TopAbs_EDGE);it.More();it.Next())
+    {edges.push_back(BRepExt::store(session(),it.Current()));supports.push_back(BRepExt::store(session(),support));}
+    const auto guide=BRepBuilderAPI_MakeEdge(gp_Pnt(0,50,0),gp_Pnt(.01,50,height)).Edge();
+    const uint32_t id=BRepExt::store(session(),guide);
+    const auto made=BRepExt::patch(session(),edges,supports,{1,1,1,1},{id},{},.001,.1,.05,0);
+    EXPECT_NEAR(area(BRepExt::get(session(),made.evolution.resultId)),10000.,1e-8);
+  }
+}
