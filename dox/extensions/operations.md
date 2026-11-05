@@ -1003,3 +1003,16 @@ The scale tests multiply both coordinates and the positional allowance by the
 same factor, while checking boundary equality more tightly (1e-12 times scale)
 and unit-normal agreement independently. Both planar and curved cases are tested
 at scales 1e-3, 1 and 3e9, at rest and in a rotated, translated pose.
+
+### Skin solid publication
+
+Planar end caps are the only cap construction used by the smooth section skin.
+A failed cap is a construction failure for a solid request; an open sheet request
+continues to return its sheet. Before publication, closure is checked with
+`BRepCheck_Shell::Closed`, orientation with `BRepLib::OrientClosedSolid`, and
+validity with `BRepCheck_Analyzer`. Disconnected shells are not silently discarded.
+These checks follow OPEN CASCADE, *OCCT Reference Manual* (8.0, 2026),
+[`BRepCheck_Shell::Closed`](https://dev.opencascade.org/doc/refman/html/class_b_rep_check___shell.html)
+and [`BRepLib::OrientClosedSolid`](https://dev.opencascade.org/doc/refman/html/class_b_rep_lib.html).
+They establish topological closure and the kernel's validity conditions, not a
+proof against geometric self-intersection. Nonplanar end-cap construction remains open.

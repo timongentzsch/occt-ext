@@ -36,6 +36,7 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepCheck_Shell.hxx>
 #include <BRepLib.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <Bnd_Box.hxx>
@@ -1663,22 +1664,22 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
     BRepBuilderAPI_MakeFace cap(wire.Wire(), true);
     return cap.IsDone() ? cap.Face() : TopoDS_Face();
   };
-  bool capped = solid && !loops;
+  const bool capped = solid && !loops;
   if (capped)
   {
     if (!start)
     {
       const auto cap = capOf(0);
-      capped         = !cap.IsNull();
-      if (capped)
-        sewing.Add(cap);
+      if (cap.IsNull())
+        fail(skinOp, no_solution, "a nonplanar end cannot be closed by a planar cap");
+      sewing.Add(cap);
     }
-    if (capped && !end)
+    if (!end)
     {
       const auto cap = capOf(rings - 1);
-      capped         = !cap.IsNull();
-      if (capped)
-        sewing.Add(cap);
+      if (cap.IsNull())
+        fail(skinOp, no_solution, "a nonplanar end cannot be closed by a planar cap");
+      sewing.Add(cap);
     }
   }
   sewing.Perform();
@@ -1686,7 +1687,12 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
   TopoDS_Shell    shell;
   TopExp_Explorer found(sewn, TopAbs_SHELL);
   if (found.More())
+  {
     shell = TopoDS::Shell(found.Current());
+    found.Next();
+    if (found.More())
+      fail(skinOp, no_solution, "the skin contains disconnected shells");
+  }
   else
   {
     BRep_Builder builder;
@@ -1696,11 +1702,14 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
   }
   if (!solid)
     return shell;
+  if (BRepCheck_Shell(shell).Closed() != BRepCheck_NoError)
+    fail(skinOp, no_solution, "the skin and its ends leave an open shell");
   BRepBuilderAPI_MakeSolid made(shell);
   if (!made.IsDone())
     fail(skinOp, no_solution, "the skin and its ends do not close into a solid");
   TopoDS_Solid body = made.Solid();
-  BRepLib::OrientClosedSolid(body);
+  if (!BRepLib::OrientClosedSolid(body) || !BRepCheck_Analyzer(body).IsValid())
+    fail(skinOp, no_solution, "the skin does not bound a valid oriented solid");
   return body;
 }
 } // namespace
@@ -1726,7 +1735,11 @@ EvolutionData skinThrough(OcctKernel&                  kernel,
     const TopoDS_Shape skinned =
       skin(ringsInLine(wires), startVertex ? &start : nullptr, endVertex ? &end : nullptr, solid);
     if (!skinned.IsNull())
+    {
+      if (!BRepCheck_Analyzer(skinned).IsValid())
+        fail("skin", no_solution, "the skin is invalid");
       return stored(kernel, skinned);
+    }
   }
   BRepOffsetAPI_ThruSections maker(solid, ruled);
   if (startVertex != 0)
@@ -1738,6 +1751,15 @@ EvolutionData skinThrough(OcctKernel&                  kernel,
   maker.Build();
   if (!maker.IsDone())
     fail("skin", no_solution, "operation failed");
-  return stored(kernel, maker.Shape());
+  const auto result = maker.Shape();
+  if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid())
+    fail("skin", no_solution, "the skin is invalid");
+  if (solid)
+  {
+    for (TopExp_Explorer shells(result, TopAbs_SHELL); shells.More(); shells.Next())
+      if (BRepCheck_Shell(TopoDS::Shell(shells.Current())).Closed() != BRepCheck_NoError)
+        fail("skin", no_solution, "the skin leaves an open shell");
+  }
+  return stored(kernel, result);
 }
 } // namespace BRepExt

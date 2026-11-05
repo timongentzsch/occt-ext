@@ -559,3 +559,33 @@ TEST(BRepSkinExt, GuidedSkinRetainsAnAcceptedPlate)
 
   }
 }
+
+// A nonplanar closed end cannot be capped by the planar-cap construction.
+TEST(BRepSkinExt, NonplanarEndsCannotPublishAnInvalidSolid)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+  {
+    std::vector<uint32_t> sections;
+    for (const double h : {0.0, 5.0, 10.0})
+    {
+      const gp_Pnt p[] = {gp_Pnt(0, 0, h * scale), gp_Pnt(10 * scale, 0, h * scale),
+                          gp_Pnt(10 * scale, 10 * scale, (h + 1) * scale),
+                          gp_Pnt(0, 10 * scale, h * scale)};
+      BRepBuilderAPI_MakeWire wire;
+      for (int i = 0; i < 4; ++i)
+        wire.Add(BRepBuilderAPI_MakeEdge(p[i], p[(i + 1) % 4]).Edge());
+      sections.push_back(BRepExt::store(session(), wire.Wire()));
+    }
+    try
+    {
+      const auto result = BRepExt::skinThrough(session(), sections, 0, 0, true, false);
+      EXPECT_TRUE(BRepCheck_Analyzer(BRepExt::get(session(), result.resultId)).IsValid());
+    }
+    catch (const BRepExt::Failure& failure)
+    {
+      EXPECT_EQ(failure.reason, BRepExt::no_solution);
+    }
+    const auto sheet = BRepExt::skinThrough(session(), sections, 0, 0, false, false);
+    EXPECT_TRUE(BRepCheck_Analyzer(BRepExt::get(session(), sheet.resultId)).IsValid());
+  }
+}
