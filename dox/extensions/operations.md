@@ -1873,3 +1873,57 @@ Sakkalis and Patrikalakis, *Tracing Surface Intersections with Validated ODE Sys
 Solver* (2004), [sections 1, 2.2 and 4](https://web.mit.edu/deslab/pubs/files/SM04.pdf),
 are not supplied by an independently continued approximate contact. Neither the
 reference observation nor the finite-point bound closes that construction problem.
+
+### Ordering, chart covariance and symmetric requests
+
+Permutation invariance of an annotated boundary is distinct from isometry
+covariance of its fill. The latter requires `F(g X) = g F(X)`, with support
+faces, guides and continuity orders transformed together. If `g X = X`, a
+covariant construction preserves that symmetry. A unique minimizer supplies
+this conclusion only when its feasible space and complete objective are also
+preserved; convergence of a penalized local solve does not prove uniqueness.
+
+A unique directed frame cannot be covariantly selected at every symmetric
+request: if `h X = X` and `Q(h X) = h Q(X)`, then an invertible frame would
+satisfy `Q(X) = h Q(X)`, forcing `h` to be the identity. This elementary
+stabilizer argument is derived here. A chart defined up to an orthogonal
+coordinate change can instead work when all subsequent stages respect that
+change. Dym, Lawrence and Siegel, *Equivariant Frames and the Impossibility of
+Continuous Canonicalization* (2024), sections 2.2-3, discuss additional
+continuity obstructions and weighted frames
+([paper](https://proceedings.mlr.press/v235/dym24a.html)).
+
+The current proxy is not such a complete construction. Changing its seam
+rotates its initial circular boundary against a regenerated triangular lattice.
+Even a mesh whose connectivity respects cyclic shifts and reversal does not
+resolve an ambiguous guide preimage: selecting one of two equally close
+triangles can break a symmetry. A diagnostic concentric-ring mesh with four
+triangles per annular quadrilateral removes the arbitrary diagonal; it is only
+valid when its homothetic rings do not fold. It is not a general replacement
+mesher.
+
+An experimental guide initializer averages triangle-foot chart coordinates
+with weights `area * exp(-(distanceSquared - minimumSquared)/meanArea)`.
+Normalized weights are invariant under spatial isometries and uniform scale;
+the average transforms under affine chart-coordinate changes. This covariance
+statement is derived. The mean-area bandwidth is an empirical initialization
+choice, not an error bound. The average need not be a nearest preimage or lie
+inside a nonconvex chart; the resulting surface still needs independent guide,
+trim, regularity and continuity checks. Neither initializer is a production
+caller here. Sawhney and Crane, *Boundary First Flattening* (2017), sections
+4.2 and 5, supply the flattening construction, not a guarantee for these
+preceding mesh or correspondence choices
+([paper](https://www.cs.cmu.edu/~kmcrane/Projects/BoundaryFirstFlattening/paper.pdf)).
+
+A fixed tensor spline space is also generally not closed under arbitrary
+chart reflections. For example, reflecting `u^5 v^5` about an axis at pi/8
+produces `(u^2-v^2)^5/32`, outside bidegree (5,5). Coordinate reversal requires
+reversal-symmetric knot vectors; arbitrary adaptive knots do not ensure this.
+Complete total-degree disk polynomial spaces, including complete real Zernike
+levels, are closed under orthogonal chart changes. See Greengard and Serkh,
+*Zernike Polynomials: Evaluation, Quadrature, and Interpolation* (2018),
+sections 2.3 and 4
+([manuscript](https://arxiv.org/abs/1811.02720)). A separate spline approximation
+would need its own geometric budget: approximating an exactly reflection-symmetric
+surface within Hausdorff error e implies mirror distance at most 2e by the
+triangle inequality (derived); it gives no derivative or regularity bound.
