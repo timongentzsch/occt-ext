@@ -105,6 +105,7 @@ Standard_EXPORT EvolutionData alignSurface(OcctKernel&,
                                            double = 1,
                                            bool   = false,
                                            double = 0,
+                                           double = 0,
                                            double = 0);
 Standard_EXPORT EvolutionData bridgeSurface(OcctKernel&,
                                             uint32_t,

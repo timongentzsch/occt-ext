@@ -35,7 +35,8 @@ EvolutionData alignSurface(OcctKernel& k,
                            double      partialEnd,
                            bool        skewed,
                            double      skewStart,
-                           double      skewEnd)
+                           double      skewEnd,
+                           double      inputShapeInfluence)
 {
   const char* op = "alignSurface";
   if (!std::isfinite(tolerance) || tolerance <= 0 || order < 0 || order > 2)
@@ -49,6 +50,8 @@ EvolutionData alignSurface(OcctKernel& k,
   if (extraRows < 0 || extraRows > 9 || pu < 0 || pu > 5 || pv < 0 || pv > 5 || su < 0 || su > 9
       || sv < 0 || sv > 9)
     fail(op, invalid_input, "extra rows 0..9, optional degrees 1..5 and spans 1..9 are required");
+  if (!std::isfinite(inputShapeInfluence) || inputShapeInfluence < 0 || inputShapeInfluence > 1)
+    fail(op, invalid_input, "input shape influence must be finite and within 0 to 1");
   const auto face = surfacing::faceOf(k, op, faceId);
   const auto own  = surfacing::boundaryOf(k, op, edgeId, faceId);
   const auto ref  = surfacing::boundaryOf(k, op, referenceId, supportId);
@@ -122,6 +125,8 @@ EvolutionData alignSurface(OcctKernel& k,
     if (failure.reason != no_solution)
       throw;
   }
+  const bool usePrior = extraRows > 0 && inputShapeInfluence > 0;
+  const auto originalPoles = usePrior ? net.poles : std::vector<gp_XYZ>{};
   for (int pass = 0; pass < (order == 2 || skewed ? 8 : 1); ++pass)
   {
     fitNet(op,
@@ -129,7 +134,13 @@ EvolutionData alignSurface(OcctKernel& k,
            fixed,
            surfacing::conditions(op, targets, surface, tolerance, normalFlow),
            {1e-11, 1e-13},
-           {});
+           {},
+           nullptr,
+           {},
+           false,
+           nullptr,
+           usePrior ? &originalPoles : nullptr,
+           usePrior ? inputShapeInfluence : 0);
     surface = surfaceOf(net);
   }
   const auto made = surfacing::makeFace(op, surface, tolerance, face.Orientation());

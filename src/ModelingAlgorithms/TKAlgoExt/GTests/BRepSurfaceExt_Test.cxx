@@ -23,6 +23,10 @@
 #include <BRepToolsExt_Operations.hxx>
 #include <GeomAlgoExt_Failure.hxx>
 
+#include <BRepAdaptor_Curve.hxx>
+#include <BRep_Tool.hxx>
+#include <gp_Ax1.hxx>
+#include <limits>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
@@ -414,4 +418,102 @@ TEST(BRepSurfaceExt, SeparationNeverProvesFacesThatTouchOrCross)
   }
   EXPECT_GT(proven, 0);
   EXPECT_GT(unproven, 0);
+}
+
+// A non-planar quintic/cubic net beside a plane. Only the first continuity rows
+// and one extra row may move; compare its regularisation path at several poses/scales.
+TEST(BRepSurfaceExt, AlignmentPolePriorPreservesTheInputWithoutRelaxingTheSeam)
+{
+  for (const double scale : {0.01, 1.0, 100.0})
+    for (const bool posed : {false, true})
+      for (const int order : {1, 2})
+      {
+        gp_Trsf pose;
+        if (posed)
+        {
+          pose.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 2, 3)), 0.7);
+          pose.SetTranslationPart(gp_Vec(7 * scale, -3 * scale, 5 * scale));
+        }
+        const auto point = [&](double x, double y, double z) {
+          return gp_Pnt(scale * x, scale * y, scale * z).Transformed(pose);
+        };
+        NCollection_Array2<gp_Pnt> poles(1, 6, 1, 4);
+        for (int i = 1; i <= 6; ++i)
+          for (int j = 1; j <= 4; ++j)
+            poles(i, j) = point(10 + 2 * (i - 1), 2 * (j - 1),
+                               0.3 * (i - 1) + 0.04 * (i - 1) * (i - 1)
+                                 + 0.02 * (i - 1) * (j - 1));
+        NCollection_Array1<double> knots(1, 2);
+        NCollection_Array1<int> mu(1, 2), mv(1, 2);
+        knots(1) = 0; knots(2) = 1;
+        mu(1) = mu(2) = 6;
+        mv(1) = mv(2) = 4;
+        const occ::handle<Geom_BSplineSurface> input =
+          new Geom_BSplineSurface(poles, knots, knots, mu, mv, 5, 3);
+        const TopoDS_Face patch = BRepBuilderAPI_MakeFace(input, 1e-8 * scale).Face();
+        const gp_Dir normal = gp_Dir(0, 0, 1).Transformed(pose);
+        const TopoDS_Face floor = planeFace(point(0, 0, 0), normal,
+                                           gp_Dir(1, 0, 0).Transformed(pose),
+                                           0, 10 * scale, 0, 6 * scale);
+        const auto seam = [&](const TopoDS_Face& face) {
+          for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next())
+          {
+            BRepAdaptor_Curve c(TopoDS::Edge(it.Current()));
+            const gp_Pnt mid = c.Value((c.FirstParameter() + c.LastParameter()) / 2);
+            if (mid.Distance(point(10, 3, 0)) < 1e-6 * scale)
+              return TopoDS::Edge(it.Current());
+          }
+          return TopoDS_Edge();
+        };
+        const auto faceId = BRepExt::store(session(), patch),
+                   edgeId = BRepExt::store(session(), seam(patch)),
+                   refId = BRepExt::store(session(), seam(floor)),
+                   supportId = BRepExt::store(session(), floor);
+        const auto run = [&](int extra, double w) {
+          const auto result = BRepExt::alignSurface(session(), faceId, edgeId, refId, supportId,
+            order, 1e-7 * scale, extra, 0, 0, 0, 0, false, 0, 1, false, 0, 0, w);
+          const auto face = TopoDS::Face(BRepExt::get(session(), result.resultId));
+          EXPECT_TRUE(BRepExt::invalidity(face).empty());
+          return occ::down_cast<Geom_BSplineSurface>(BRep_Tool::Surface(face));
+        };
+        const auto baseline = run(0, 0), inert = run(0, 1);
+        for (int i = 1; i <= 6; ++i)
+          for (int j = 1; j <= 4; ++j)
+            EXPECT_TRUE(baseline->Pole(i, j).IsEqual(inert->Pole(i, j), 0));
+        double previous = std::numeric_limits<double>::infinity();
+        double first = 0, last = 0;
+        for (const double w : {0.0, 0.1, 0.5, 1.0})
+        {
+          const auto made = run(1, w);
+          double movement = 0;
+          for (int i = 1; i <= 6; ++i)
+            for (int j = 1; j <= 4; ++j)
+            {
+              movement += made->Pole(i, j).SquareDistance(poles(i, j));
+              EXPECT_TRUE(input->Pole(i, j).IsEqual(poles(i, j), 0));
+              if (i > order + 2)
+                EXPECT_TRUE(made->Pole(i, j).IsEqual(poles(i, j), 0));
+            }
+          EXPECT_LE(movement, previous + 1e-9 * scale * scale);
+          previous = movement;
+          if (w == 0) first = movement;
+          last = movement;
+          for (int j = 0; j <= 32; ++j)
+          {
+            gp_Pnt p;
+            gp_Vec du, dv, duu, dvv, duv;
+            made->D2(0, j / 32.0, p, du, dv, duu, dvv, duv);
+            EXPECT_LT(std::abs(gp_Vec(point(0, 0, 0), p).Dot(gp_Vec(normal))), 1e-6 * scale);
+            EXPECT_LT(du.Crossed(dv).Normalized().Crossed(gp_Vec(normal)).Magnitude(), 1e-6);
+            if (order == 2)
+              EXPECT_LT(std::abs(duu.Dot(gp_Vec(normal))), 1e-5 * scale);
+          }
+        }
+        EXPECT_LT(last, first * 0.999);
+        EXPECT_THROW(run(1, -0.1), BRepExt::Failure);
+        EXPECT_THROW(run(1, std::numeric_limits<double>::quiet_NaN()), BRepExt::Failure);
+        for (int i = 1; i <= 6; ++i)
+          for (int j = 1; j <= 4; ++j)
+            EXPECT_TRUE(input->Pole(i, j).IsEqual(poles(i, j), 0));
+      }
 }

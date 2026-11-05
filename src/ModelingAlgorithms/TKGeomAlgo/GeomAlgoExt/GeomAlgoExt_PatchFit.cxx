@@ -110,7 +110,9 @@ std::vector<int> fitNet(const char*                                  op,
                         const gp_XYZ*                                along,
                         const std::vector<FitJump>&                  jumps,
                         bool                                         leastSquares,
-                        FitEnergies*                                 again)
+                        FitEnergies*                                 again,
+                        const std::vector<gp_XYZ>*                    polePrior,
+                        double                                       poleInfluence)
 {
   PatchPhase phase("fit");
   if (leastSquares && !along)
@@ -375,6 +377,32 @@ std::vector<int> fitNet(const char*                                  op,
     again->matrix   = matrix;
     again->constant = constant;
     again->separate = separate;
+  }
+
+  if (polePrior && poleInfluence > 0)
+  {
+    if (polePrior->size() != net.poles.size() || !std::isfinite(poleInfluence))
+      fail(op, invalid_input, "the pole prior must match the net and have finite influence");
+    double diagonal = 0;
+    int freePoles = 0;
+    for (int p = 0; p < nu * nv; ++p)
+      if (!fixed[p])
+      {
+        const int row = unknown(p, 0);
+        diagonal += matrix.row(row)[row];
+        ++freePoles;
+      }
+    // Trace normalisation makes influence dimensionless. Unknowns are displacements
+    // from this iteration's net, whereas the prior stays at the original net.
+    const double weight = freePoles ? poleInfluence * (diagonal / freePoles) : 0;
+    for (int p = 0; p < nu * nv; ++p)
+      if (!fixed[p])
+        for (int c = 0; c < dim; ++c)
+        {
+          const int row = unknown(p, c);
+          matrix.add(row, row, weight);
+          constant[row] += weight * part((*polePrior)[p] - net.poles[p], c);
+        }
   }
 
   std::vector<Row> rows, watched;

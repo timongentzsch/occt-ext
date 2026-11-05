@@ -130,6 +130,9 @@ struct FitEnergies
 //! boundary and certify all delivered geometry. The default retains the multiplier correction used
 //! by supported surfaces. `again`, where given, keeps the energies as assembled for the next fit of
 //! the same net from the same poles with other conditions (see FitEnergies).
+//! Optional pole prior: add influence times the mean free-pole energy diagonal times
+//! sum |P - prior|^2. The prior has the same basis and ordering as net. It is applied
+//! after cached energies, so iterative fits may keep one original reference.
 Standard_EXPORT std::vector<int> fitNet(const char*                                  operation,
                                         SplineNet&                                   net,
                                         const std::vector<char>&                     fixed,
@@ -139,7 +142,9 @@ Standard_EXPORT std::vector<int> fitNet(const char*                             
                                         const gp_XYZ*               along        = nullptr,
                                         const std::vector<FitJump>& jumps        = {},
                                         bool                        leastSquares = false,
-                                        FitEnergies*                again        = nullptr);
+                                        FitEnergies*                again        = nullptr,
+                                        const std::vector<gp_XYZ>* polePrior    = nullptr,
+                                        double                     poleInfluence = 0);
 
 Standard_EXPORT occ::handle<Geom_BSplineSurface> surfaceOf(const SplineNet& net);
 

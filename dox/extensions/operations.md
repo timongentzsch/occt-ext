@@ -589,6 +589,50 @@ from the C2 cubic interpolation error 5 h^4 max|f| / 384 and the end-slope term 
 face-separation proofs by Bernstein bounds and, for a plane beside a surface of revolution about its normal,
 in closed form (the surface meets the plane in circles; a band of width gap / sin t).
 
+### Alignment input-shape prior
+
+`alignSurface` accepts `inputShapeInfluence` in the closed interval [0, 1], finite,
+with default zero. It acts only when extra blend rows are requested. Zero influence,
+or zero extra rows, executes the previous solve without adding any matrix entries.
+The moving surface and reference are copied; only a certified result is stored.
+
+The construction is Tikhonov regularisation of the free poles around their original
+positions, following Akil Narayan, *Regularization and relaxation* (University of Utah,
+22 February 2022), slides 6–7, “Tikhonov regularization” and “Tikhonov regularization
+for least squares” ([lecture](https://www.sci.utah.edu/~akil/docs/courses/2022spring/math6880/slides09.pdf)).
+Let P0 be the pole vector after exact degree/knot refinement and before alignment.
+Let F(P) be the existing bending-plus-variation quadratic, with scalar-coordinate
+matrix H on the n free poles. The objective is
+
+    F(P) + w a sum_free ||P_i - P0_i||^2,  a = trace(H) / n,
+
+subject to the existing continuity conditions and fixed remaining poles. Trace
+normalisation and the [0, 1] control domain are design choices derived here, not a
+published surface-specific weighting law. The trace is computed before constraint
+rows or the prior are added. This makes w dimensionless and preserves rigid-motion
+and uniform geometric scale covariance for a fixed basis. It does not make the
+pole metric invariant to changing basis or arbitrary UV reparameterisation.
+
+For displacement unknowns d from the current iteration Pc, add w a to each free
+coordinate's diagonal and w a (P0 - Pc) to its right-hand side. Keep P0 unchanged
+through all nonlinear continuity iterations. This costs O(N) time and O(N) saved
+coordinates for N total poles, adds no poles, and keeps the matrix band unchanged. The generic fit
+applies this term after its optional energy cache, so no prior is cached accidentally.
+The unchanged condition/multiplier solve and final seam check still apply; the
+prior cannot authorise a seam miss. If a surface already meets the requested
+continuity, the existing unchanged-surface path still returns it.
+
+**Derived bounds.** H is positive semidefinite, since it integrates squared spline
+derivatives. For a > 0 and w > 0, H + w a I is positive definite on the free
+coordinates. Thus a nonempty affine constraint set has a unique minimiser.
+For minimisers P1 and P2 at w1 < w2 on the same feasible set, adding their two
+optimality inequalities gives (w2 - w1)(D(P2) - D(P1)) <= 0, where D is the
+squared pole displacement. Thus total displacement is nonincreasing; individual
+poles or curvature need not vary monotonically. Nonlinear G2/skew iterations have
+changing linearised feasible sets: the inequality proves each fixed-row problem,
+not global convergence or a universal monotonicity theorem for those iterations.
+The final seam certification remains sampled, not a whole-domain Hausdorff proof.
+
 *Unproven.* Work budgets and halving depths of the separation proofs, the crease threshold, interpolation
 grid sizes, and the choice of pole counts "twenty-one for any target". The sampled checks are not Hausdorff
 certificates.
