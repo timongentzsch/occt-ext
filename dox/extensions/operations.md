@@ -1076,3 +1076,41 @@ A radius-10000 sphere moved inward by 9999.5 therefore remains a radius-0.5 sphe
 Classification of general fitted supports remains sampled with the existing
 approximation allowance; it is not a proven curvature-error enclosure. A general
 enclosure that separates uncertainty from a strict crossing remains open.
+
+### Clearance coverage
+
+Clearance carries separate coverage and resolution states. Empty input, failed
+extrema, or exclusion of every region cannot become successful infinite clearance.
+Distances are measured between whole trimmed regions and the original skin,
+including boundaries; an interior lattice alone provides no lower bound.
+Near openings, a region is either measured clear, or wholly inside the opening
+exclusion, or subdivided. Work exhaustion is unresolved, never a measurement.
+
+The exclusion bound is derived here: for a closed set A, the triangle inequality
+gives `d(x,A) <= d(c,A)+|x-c|`. A containing box supplies c and a radius covering
+the complete trimmed region. Thus `d(c,A)+radius < wall` excludes the entire
+region. The radius is rounded upwards and the modelling confusion is added.
+Trimming and distance computations still have OCCT's numerical tolerances; this
+is a coverage check using those solvers, not interval certification of their
+extrema. The existing distance allowance is unchanged.
+
+A failed whole-region solve can instead use the derived lower bound
+`d(x,skin) >= d(c,skin)-radius`, subdividing until that bound resolves the
+requested clearance. This uses the same triangle inequality. A failed point
+solve or exhausted subdivision stays unresolved.
+
+Distance queries use independent copies of each trimmed surface. Spatial edge
+curves inherited from an import can deviate from that surface within their
+stored tolerance. Measuring those curves would measure their representation
+error as wall thickness. Rebuild query curves from each face's own pcurves and
+support, retaining the published surfaces and trims. `GeomLib::BuildCurve3d`
+returns a maximum approximation deviation; unresolved or excessive deviation
+fails the query. For query curve error at most e on either shape, the triangle
+inequality gives `|d(A,B)-d(A',B')| <= 2e` (derived here). Subtract this amount
+from the numerical distance; add it to an opening exclusion upper bound.
+Here e is one tenth of the existing modelling confusion. This remains a
+numerical approximation/error estimate, not a Bernstein-certified enclosure
+of the approximation. OCCT's *Boolean Operations* specification, section
+"Interferences", describes the stored-tolerance model; a stored edge tolerance
+is not a justified allowance to reduce the requested wall thickness.
+

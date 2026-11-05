@@ -75,8 +75,8 @@ EvolutionData hollow(OcctKernel&             kernel,
     fail(op, no_solution, "no enclosed cavity was created");
   walls.through(cut);
   walls.within(cut.Shape());
-  // Apart from the kernel's own word: the wall is nowhere thinner than asked.
-  if (clearance(walls.all(), shape) < thickness - clearanceSlack * tolerance)
+  // Whole trimmed-face clearance, independently of offset lineage construction.
+  if (!clearance(walls.all(), shape, {}, 0, thickness-clearanceSlack*tolerance).satisfies(thickness - clearanceSlack * tolerance))
     fail(op, no_solution, "the wall comes out thinner than asked; the inside meets itself");
   walls.generated(history);
   return history.finish(store(kernel, cut.Shape()));

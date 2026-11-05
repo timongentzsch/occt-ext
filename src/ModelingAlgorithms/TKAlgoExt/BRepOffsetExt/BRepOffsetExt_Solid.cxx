@@ -263,12 +263,12 @@ EvolutionData offsetSolid(OcctKernel&             kernel,
   std::vector<TopoDS_Shape> skin;
   for (TopExp_Explorer all(result, TopAbs_FACE); all.More(); all.Next())
     skin.push_back(all.Current()); // Arc joins need not descend from an input face.
-  const double nearest = clearance(skin, solid, {}, 0.0, !work.IsSame(solid));
-  if (!std::isfinite(nearest))
+  const auto nearest = clearance(skin, solid, {}, 0, std::abs(distance)-clearanceSlack*tolerance);
+  if (!nearest.resolved || nearest.covered != nearest.expected || !std::isfinite(nearest.minimum))
     fail(op,
          no_solution,
          "the minimum clearance of the reconstructed offset could not be measured");
-  if (nearest < std::abs(distance) - clearanceSlack * tolerance)
+  if (!nearest.satisfies(std::abs(distance) - clearanceSlack * tolerance))
     fail(op,
          no_solution,
          "the offset comes nearer to the body than the distance; its reconstructed faces or joins "

@@ -1883,9 +1883,11 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
     std::vector<TopoDS_Shape> skin;
     for (TopExp_Explorer all(result, TopAbs_FACE); all.More(); all.Next())
       skin.push_back(all.Current());
-    if (clearance(skin, body) < std::abs(distance) - clearanceSlack * tolerance)
+    const auto measured=clearance(skin, body, {}, 0, std::abs(distance)-clearanceSlack*tolerance);
+    if (!measured.satisfies(std::abs(distance)-clearanceSlack*tolerance))
     {
-      why = "the offset comes nearer to the body than the distance";
+      why = "the offset clearance is unresolved or too small: "+std::to_string(measured.minimum)
+            +"; "+measured.issue;
       return {};
     }
   }

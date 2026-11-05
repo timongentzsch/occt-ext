@@ -17,6 +17,21 @@
 
 #include <BOPAlgo_ArgumentAnalyzer.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Common.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
+#include <GeomLib.hxx>
+#include <Geom2dAdaptor_Curve.hxx>
+#include <GeomAdaptor_Surface.hxx>
+#include <Adaptor3d_CurveOnSurface.hxx>
+#include <Geom_Curve.hxx>
+#include <Geom2d_Curve.hxx>
+#include <TopExp_Explorer.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepTools.hxx>
+#include <Bnd_Box.hxx>
+#include <GeomAlgoExt_Cancel.hxx>
+#include <deque>
 #include <BRepLProp_SLProps.hxx>
 #include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRep_Builder.hxx>
@@ -64,6 +79,61 @@ NCollection_List<TopoDS_Shape> listOf(const std::vector<TopoDS_Shape>& faces)
   for (const TopoDS_Shape& face : faces)
     list.Append(face);
   return list;
+}
+
+//! A distance query must use the trimmed surface, not an inherited spatial
+//! edge curve which may lie anywhere inside its input tolerance tube.
+TopoDS_Shape surfaceTrims(const TopoDS_Shape& input)
+{
+  TopoDS_Compound out;
+  BRep_Builder    builder;
+  builder.MakeCompound(out);
+  for (TopExp_Explorer ff(input, TopAbs_FACE); ff.More(); ff.Next())
+  {
+    BRepBuilderAPI_Copy copy(ff.Current(), true, false);
+    const auto          face    = TopoDS::Face(copy.Shape());
+    const auto          support = BRep_Tool::Surface(face);
+    for (TopExp_Explorer ee(face, TopAbs_EDGE); ee.More(); ee.Next())
+    {
+      const auto edge = TopoDS::Edge(ee.Current());
+      if (BRep_Tool::Degenerated(edge))
+        continue;
+      double     first, last;
+      const auto on = BRep_Tool::CurveOnSurface(edge, face, first, last);
+      if (on.IsNull())
+        throw Standard_ConstructionError("missing surface trim");
+      TopoDS_Vertex a, b;
+      TopExp::Vertices(edge, a, b);
+      const auto move = [&](const TopoDS_Vertex& vertex, double t) {
+        if (vertex.IsNull())
+          return;
+        const auto uv = on->Value(t);
+        builder.UpdateVertex(vertex, support->Value(uv.X(), uv.Y()), Precision::Confusion());
+      };
+      move(a, first);
+      move(b, last);
+      const Handle(Geom2dAdaptor_Curve) curve2d = new Geom2dAdaptor_Curve(on, first, last);
+      const Handle(GeomAdaptor_Surface) surface = new GeomAdaptor_Surface(support);
+      Adaptor3d_CurveOnSurface          trim(curve2d, surface);
+      Handle(Geom_Curve)                curve3d;
+      double                            maximum = 0, average = 0;
+      GeomLib::BuildCurve3d(0.1 * Precision::Confusion(),
+                            trim,
+                            first,
+                            last,
+                            curve3d,
+                            maximum,
+                            average,
+                            GeomAbs_C1,
+                            14,
+                            1000);
+      if (curve3d.IsNull() || !std::isfinite(maximum) || maximum > 0.1 * Precision::Confusion())
+        throw Standard_ConstructionError("surface trim approximation unresolved");
+      builder.UpdateEdge(edge, curve3d, Precision::Confusion());
+    }
+    builder.Add(out, face);
+  }
+  return out;
 }
 
 } // namespace
@@ -184,59 +254,206 @@ std::vector<gp_Pnt> pointsInside(const TopoDS_Face& face, int perSide)
   return out;
 }
 
-double clearance(const std::vector<TopoDS_Shape>& faces,
-                 const TopoDS_Shape&              body,
-                 const std::vector<TopoDS_Shape>& opened,
-                 double                           wall,
-                 bool                             wholeFaces)
+Clearance clearance(const std::vector<TopoDS_Shape>& faces,
+                    const TopoDS_Shape&              body,
+                    const std::vector<TopoDS_Shape>& opened,
+                    double                           wall,
+                    double                           required)
 {
-  // To its faces: a point inside a solid is at no distance from the solid itself.
   TopoDS_Compound skin, openings;
-  BRep_Builder().MakeCompound(skin);
-  BRep_Builder().MakeCompound(openings);
+  BRep_Builder    builder;
+  builder.MakeCompound(skin);
+  builder.MakeCompound(openings);
   for (TopExp_Explorer all(body, TopAbs_FACE); all.More(); all.Next())
   {
     bool open = false;
-    for (const TopoDS_Shape& face : opened)
+    for (const auto& face : opened)
       open = open || face.IsSame(all.Current());
-    BRep_Builder().Add(open ? openings : skin, all.Current());
+    builder.Add(open ? openings : skin, all.Current());
   }
-  double     least = std::numeric_limits<double>::infinity();
-  DistanceTo toSkin(skin), toOpening(openings);
-  if (wholeFaces && opened.empty())
+  Clearance result;
+  result.expected = faces.size();
+  if (faces.empty() || !TopExp_Explorer(skin, TopAbs_FACE).More())
   {
-    // Measure whole trimmed faces, including their boundaries. Cell-centre samples miss
-    // narrow clearance failures at a vanished concave blend or at an arc join.
-    for (const TopoDS_Shape& face : faces)
-    {
-      try
-      {
-        const auto distance = toSkin.from(face);
-        if (!distance)
-          return std::numeric_limits<double>::quiet_NaN();
-        least = std::min(least, *distance);
-      }
-      catch (const Standard_Failure&)
-      {
-        return std::numeric_limits<double>::quiet_NaN();
-      }
-    }
-    return least;
+    result.resolved = false;
+    result.issue    = "empty skin or request";
+    return result;
   }
-  for (const TopoDS_Shape& face : faces)
-    for (const gp_Pnt& point : pointsInside(TopoDS::Face(face), 3))
+  try
+  {
+    skin     = TopoDS::Compound(surfaceTrims(skin));
+    openings = TopoDS::Compound(surfaceTrims(openings));
+  }
+  catch (const Standard_Failure& error)
+  {
+    result.resolved = false;
+    result.issue    = std::string("surface trims: ") + error.what();
+    return result;
+  }
+  DistanceTo toSkin(skin), toOpening(openings);
+
+  struct Cell
+  {
+    double u0, u1, v0, v1;
+    int    depth = 0;
+  };
+
+  for (const auto& shape : faces)
+  {
+    TopoDS_Face face;
+    try
     {
-      if (!opened.empty())
+      const auto      copy = surfaceTrims(shape);
+      TopExp_Explorer ff(copy, TopAbs_FACE);
+      if (!ff.More())
       {
-        // Beside an opening the wall ends, and a blend around the opening comes nearer.
-        const auto beside = toOpening.from(point);
-        if (beside && *beside < wall)
-          continue;
+        result.resolved = false;
+        result.issue    = "missing face";
+        return result;
       }
-      if (const auto distance = toSkin.from(point))
-        least = std::min(least, *distance);
+      face = TopoDS::Face(ff.Current());
     }
-  return least;
+    catch (const Standard_Failure& error)
+    {
+      result.resolved = false;
+      result.issue    = std::string("surface trim: ") + error.what();
+      return result;
+    }
+    double u0, u1, v0, v1;
+    BRepTools::UVBounds(face, u0, u1, v0, v1);
+    std::deque<Cell> pending{{u0, u1, v0, v1}};
+    int              visited = 0;
+    const char*      stage   = "initialization";
+    try
+    {
+      while (!pending.empty())
+      {
+        checkCancelled("clearance");
+        if (++visited > 4096)
+        {
+          result.resolved = false;
+          result.issue    = "subdivision work limit";
+          return result;
+        }
+        const auto cell = pending.front();
+        pending.pop_front();
+        TopoDS_Shape region = face;
+        if (cell.depth)
+        {
+          stage                = "trim rectangle";
+          const auto rectangle = BRepBuilderAPI_MakeFace(BRep_Tool::Surface(face),
+                                                         cell.u0,
+                                                         cell.u1,
+                                                         cell.v0,
+                                                         cell.v1,
+                                                         Precision::Confusion())
+                                   .Face();
+          stage                = "trim intersection";
+          BRepAlgoAPI_Common common;
+          common.SetArguments(listOf({face}));
+          common.SetTools(listOf({rectangle}));
+          common.SetNonDestructive(true);
+          common.Build();
+          if (!common.IsDone() || common.HasErrors())
+          {
+            result.resolved = false;
+            result.issue    = "trim intersection failed";
+            return result;
+          }
+          region = common.Shape();
+          if (!TopExp_Explorer(region, TopAbs_FACE).More())
+            continue;
+        }
+        stage = "skin distance";
+        std::optional<double> distance;
+        try
+        {
+          distance = toSkin.from(region);
+        }
+        catch (const Standard_Failure&)
+        {
+        }
+        if (distance)
+          *distance = std::max(0.0, *distance - 0.2 * Precision::Confusion());
+        if (distance && std::isfinite(*distance) && (opened.empty() || *distance >= required))
+        {
+          result.minimum = std::min(result.minimum, *distance);
+          continue;
+        }
+        // Distance to a closed set is 1-Lipschitz. A box containing the entire
+        // trimmed region bounds its distance above by d(center, openings)+radius.
+        stage = "region box";
+        Bnd_Box box;
+        BRepBndLib::AddOptimal(region, box, false, true);
+        if (box.IsVoid() || box.IsOpen())
+        {
+          result.resolved = false;
+          result.issue    = "unbounded region";
+          return result;
+        }
+        double x0, y0, z0, x1, y1, z1;
+        box.Get(x0, y0, z0, x1, y1, z1);
+        const gp_Pnt center((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+        const double radius = std::nextafter(std::hypot(std::hypot(x1 - x0, y1 - y0), z1 - z0) / 2,
+                                             std::numeric_limits<double>::infinity());
+        // A point distance supplies a conservative lower bound even when the
+        // whole-region extremum solver cannot handle this trimmed support.
+        if (!distance || !std::isfinite(*distance))
+        {
+          stage               = "skin point distance";
+          const auto atCenter = toSkin.from(center);
+          if (atCenter && std::isfinite(*atCenter))
+          {
+            const double lower = std::nextafter(*atCenter - radius - Precision::Confusion(),
+                                                -std::numeric_limits<double>::infinity());
+            if (lower >= required)
+            {
+              result.minimum = std::min(result.minimum, lower);
+              continue;
+            }
+          }
+        }
+        if (!opened.empty())
+        {
+          stage             = "opening distance";
+          const auto beside = toOpening.from(center);
+          if (beside && std::isfinite(*beside)
+              && *beside + radius + 1.1 * Precision::Confusion() < wall)
+            continue;
+        }
+        const double um = cell.u0 + (cell.u1 - cell.u0) / 2, vm = cell.v0 + (cell.v1 - cell.v0) / 2;
+        if (cell.depth >= 32 || !(um > cell.u0 && um < cell.u1 && vm > cell.v0 && vm < cell.v1))
+        {
+          result.resolved = false;
+          result.issue    = "subdivision precision limit";
+          return result;
+        }
+        Cell lo = cell, hi = cell;
+        ++lo.depth;
+        ++hi.depth;
+        if ((cell.u1 - cell.u0) / (u1 - u0) >= (cell.v1 - cell.v0) / (v1 - v0))
+        {
+          lo.u1 = um;
+          hi.u0 = um;
+        }
+        else
+        {
+          lo.v1 = vm;
+          hi.v0 = vm;
+        }
+        pending.push_back(lo);
+        pending.push_back(hi);
+      }
+    }
+    catch (const Standard_Failure& error)
+    {
+      result.resolved = false;
+      result.issue    = std::string(stage) + ": " + error.ExceptionType() + ": " + error.what();
+      return result;
+    }
+    ++result.covered;
+  }
+  return result;
 }
 
 bool tangentAlong(const TopoDS_Edge& edge, const TopoDS_Face& a, const TopoDS_Face& b)

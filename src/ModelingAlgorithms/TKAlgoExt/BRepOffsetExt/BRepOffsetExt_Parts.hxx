@@ -25,6 +25,8 @@
 #include <TopoDS_Face.hxx>
 
 #include <vector>
+#include <limits>
+#include <cmath>
 
 namespace BRepExt
 {
@@ -64,14 +66,29 @@ Standard_EXPORT bool intersectsItself(const TopoDS_Shape& shape);
 //! Points inside `face`, away from its boundary: up to `perSide` squared of them.
 Standard_EXPORT std::vector<gp_Pnt> pointsInside(const TopoDS_Face& face, int perSide);
 
-//! The minimum distance to the skin of `body`: samples inside `faces`, or whole trimmed
-//! faces for a reconstructed solid offset. With openings, exclude samples nearer than
-//! `wall` to an opened face. Whole-face extrema are not supported for every fitted surface.
-Standard_EXPORT double clearance(const std::vector<TopoDS_Shape>& faces,
-                                 const TopoDS_Shape&              body,
-                                 const std::vector<TopoDS_Shape>& opened     = {},
-                                 double                           wall       = 0.0,
-                                 bool                             wholeFaces = false);
+//! Coverage and the least measured distance are separate: an empty or unresolved
+//! region cannot masquerade as infinite clearance.
+struct Clearance
+{
+  double minimum = std::numeric_limits<double>::infinity();
+  size_t covered = 0, expected = 0;
+  bool resolved = true;
+  std::string issue;
+  bool satisfies(double required) const
+  {
+    return resolved && expected > 0 && covered == expected
+           && std::isfinite(minimum) && minimum >= required;
+  }
+};
+
+//! Whole trimmed-face distances. Near openings, subdivide the trimmed domain
+//! until each region is measured clear or proved inside the opening exclusion.
+//! A work limit leaves coverage unresolved; it never counts as a measurement.
+Standard_EXPORT Clearance clearance(const std::vector<TopoDS_Shape>& faces,
+                                    const TopoDS_Shape&              body,
+                                    const std::vector<TopoDS_Shape>& opened = {},
+                                    double wall = 0.0,
+                                    double required = 0.0);
 
 //! Push-pull by how much the far side of a face may lean from the direction it moves in and
 //! still count as running along it, as a cosine: 1e-7 is an angle of 1e-7 radians, which

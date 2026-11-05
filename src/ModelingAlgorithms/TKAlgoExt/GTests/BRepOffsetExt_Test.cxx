@@ -793,6 +793,91 @@ TEST(BRepOffsetExt, ExactSphereKeepsEveryPositiveRadiusBeforeItsFocalDistance)
   }
 }
 
+TEST(BRepOffsetExt, UnmeasuredClearanceIsNeverAnInfiniteSuccess)
+{
+  const auto box = BRepPrimAPI_MakeBox(10, 10, 10).Shape();
+  EXPECT_FALSE(BRepExt::clearance({}, box).satisfies(1));
+  EXPECT_FALSE(BRepExt::clearance({}, box, {}, 0, 1).satisfies(1));
+  TopoDS_Face face = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                                               0, 1, 0, 1).Face();
+  EXPECT_FALSE(BRepExt::clearance({face}, box, {face}, 100, 1).satisfies(1));
+}
+
+TEST(BRepOffsetExt, ClearanceIncludesTheTrimmedBoundaryBetweenSampleSites)
+{
+  const auto body=BRepPrimAPI_MakeBox(gp_Pnt(0,0,-10),10,10,10).Shape();
+  BRepBuilderAPI_MakePolygon boundary;
+  for (const auto& point : {gp_Pnt(0,0,0),gp_Pnt(10,0,10),gp_Pnt(10,10,10),gp_Pnt(0,10,0)})
+    boundary.Add(point);
+  boundary.Close();
+  const auto face=BRepBuilderAPI_MakeFace(boundary.Wire()).Face();
+  const auto measured=BRepExt::clearance({face},body,{},0,1);
+  EXPECT_TRUE(measured.resolved);
+  EXPECT_EQ(measured.covered,1u);
+  EXPECT_NEAR(measured.minimum,0,1e-9);
+  EXPECT_FALSE(measured.satisfies(1));
+}
+
+TEST(BRepOffsetExt, ClearanceUsesSurfaceTrimsInsteadOfTolerancedSpatialEdges)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+  {
+    auto source = BRepBuilderAPI_MakeFace(gp_Pln(gp::Origin(), gp::DZ()),
+                                         0, 10 * scale, 0, 10 * scale).Face();
+    const auto target = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, scale), gp::DZ()),
+                                               0, 10 * scale, 0, 10 * scale).Face();
+    BRep_Builder builder;
+    for (TopExp_Explorer e(source, TopAbs_EDGE); e.More(); e.Next())
+    {
+      const auto edge = TopoDS::Edge(e.Current());
+      double first, last;
+      const auto curve = Handle(Geom_Curve)::DownCast(BRep_Tool::Curve(edge, first, last)->Copy());
+      curve->Translate(gp_Vec(0, 0, 0.25 * scale));
+      builder.UpdateEdge(edge, curve, 0.3 * scale);
+    }
+    const auto measured = BRepExt::clearance({target}, source, {}, 0, 0.9 * scale);
+    EXPECT_TRUE(measured.satisfies(0.9 * scale)) << measured.issue;
+    EXPECT_NEAR(measured.minimum, scale, Precision::Confusion());
+    // Measurement copies must not repair or otherwise mutate caller geometry.
+    for (TopExp_Explorer e(source, TopAbs_EDGE); e.More(); e.Next())
+    {
+      double first, last;
+      const auto curve = BRep_Tool::Curve(TopoDS::Edge(e.Current()), first, last);
+      EXPECT_NEAR(curve->Value((first + last) / 2).Z(), 0.25 * scale, Precision::Confusion());
+    }
+  }
+}
+
+TEST(BRepOffsetExt, ClearanceUsesSurfaceTrimsInsteadOfTolerancedSpatialEdges)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+  {
+    auto source = BRepBuilderAPI_MakeFace(gp_Pln(gp::Origin(), gp::DZ()),
+                                         0, 10 * scale, 0, 10 * scale).Face();
+    const auto target = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, scale), gp::DZ()),
+                                               0, 10 * scale, 0, 10 * scale).Face();
+    BRep_Builder builder;
+    for (TopExp_Explorer e(source, TopAbs_EDGE); e.More(); e.Next())
+    {
+      const auto edge = TopoDS::Edge(e.Current());
+      double first, last;
+      const auto curve = Handle(Geom_Curve)::DownCast(BRep_Tool::Curve(edge, first, last)->Copy());
+      curve->Translate(gp_Vec(0, 0, 0.25 * scale));
+      builder.UpdateEdge(edge, curve, 0.3 * scale);
+    }
+    const auto measured = BRepExt::clearance({target}, source, {}, 0, 0.9 * scale);
+    EXPECT_TRUE(measured.satisfies(0.9 * scale)) << measured.issue;
+    EXPECT_NEAR(measured.minimum, scale, Precision::Confusion());
+    // Measurement copies must not repair or otherwise mutate caller geometry.
+    for (TopExp_Explorer e(source, TopAbs_EDGE); e.More(); e.Next())
+    {
+      double first, last;
+      const auto curve = BRep_Tool::Curve(TopoDS::Edge(e.Current()), first, last);
+      EXPECT_NEAR(curve->Value((first + last) / 2).Z(), 0.25 * scale, Precision::Confusion());
+    }
+  }
+}
+
 TEST(BRepOffsetExt, ElementaryFocalClassificationIncludesTrimExtrema)
 {
   for (const double scale : {0.1, 1.0, 10.0})

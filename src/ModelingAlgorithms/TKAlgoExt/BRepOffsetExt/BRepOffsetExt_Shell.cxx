@@ -101,8 +101,9 @@ std::optional<EvolutionData> quickShell(OcctKernel&                      kernel,
     Lineage walls(source);
     walls.images(maker);
     walls.within(maker.Shape());
-    if (clearance(walls.all(), source, removed, std::abs(thickness))
-        < std::abs(thickness) - clearanceSlack * tolerance)
+    if (!clearance(walls.all(), source, removed, std::abs(thickness),
+                   std::abs(thickness) - clearanceSlack * tolerance)
+           .satisfies(std::abs(thickness) - clearanceSlack * tolerance))
       return {};
     Lineage changed(source);
     changed.through(maker);
@@ -351,9 +352,12 @@ EvolutionData shell(OcctKernel&                  kernel,
   // Apart from the kernel's own word: the wall is nowhere thinner than asked. With Local, the
   // wall is that of the faces round the openings: what lies behind the faces left alone is
   // the body's own, which may come nearer or meet the inside.
-  if (clearance(walls.all(), closed, openedInClosed, thickness)
-      < thickness - clearanceSlack * tolerance)
-    fail(op, no_solution, "the wall comes out thinner than asked; the inside meets itself");
+  const auto measured=clearance(walls.all(), closed, openedInClosed, thickness,
+                                thickness-clearanceSlack*tolerance);
+  if (!measured.satisfies(thickness-clearanceSlack*tolerance))
+    fail(op, no_solution, "the wall clearance is unresolved or below the requested thickness"
+         "; minimum="+std::to_string(measured.minimum)+"; covered="+std::to_string(measured.covered)
+         +"/"+std::to_string(measured.expected)+"; "+measured.issue);
   // Compose through the initial division: public history is keyed by the caller's faces.
   Lineage originalOuter = divided, originalWalls = divided;
   originalOuter.then(outer);

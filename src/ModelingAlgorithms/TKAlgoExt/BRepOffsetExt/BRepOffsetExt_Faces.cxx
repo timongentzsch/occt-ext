@@ -265,7 +265,7 @@ Moved moveFaces(const TopoDS_Shape&              body,
            "collapses or folds",
            fate.partial.empty() ? fate.vanish : fate.partial);
   }
-  std::string why;
+  std::string why, keptWhy;
   bool every = true;
   for (TopExp_Explorer all(body, TopAbs_FACE); all.More() && every; all.Next())
     every = set.Contains(all.Current());
@@ -283,6 +283,7 @@ Moved moveFaces(const TopoDS_Shape&              body,
     }
     if (!same.IsNull())
       return {same, kept};
+    keptWhy=why;
   }
   if (!tangent)
   {
@@ -311,7 +312,8 @@ Moved moveFaces(const TopoDS_Shape&              body,
                 ? std::string("the solid that it sweeps could not be joined to the body")
                 : refused),
          at.empty() ? std::vector<TopoDS_Shape>{tangent->first, tangent->second} : at);
-  fail(op, no_solution, refused.empty() ? why : why + "; and " + refused, at.empty() ? moved : at);
+  const std::string earlier=keptWhy.empty() ? "" : keptWhy+"; ";
+  fail(op, no_solution, earlier+(refused.empty() ? why : why+"; and "+refused), at.empty() ? moved : at);
 }
 
 //! Whether two sets of faces have a face or an edge in common.
