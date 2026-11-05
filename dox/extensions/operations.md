@@ -73,6 +73,31 @@ from trimming and integration into a valid body: that paper addresses the former
 by itself proves ownership of every retained trimmed region or that a coupled section satisfies
 its prescribed law; those remain separate acceptance requirements.
 
+*Radius-law extrema.* Positivity and the scale used by the tolerances now come
+from outward-rounded enclosures of every cubic span, rather than uniform samples.
+Writing a span over x in [0,1], with h its parameter width, endpoints y0,y1 and
+stored second derivatives m0,m1, its Bernstein controls are derived here as
+b0=y0, b1=y0+(y1-y0-h^2(2m0+m1)/6)/3,
+b2=y1-(y1-y0+h^2(m0+2m1)/6)/3, b3=y1.
+The derivative controls are 3(b1-b0), 3(b2-b1), 3(b3-b2). Their interval signs
+certify monotone subspans, whose extrema are endpoints. Otherwise de Casteljau
+subdivision isolates every possible derivative root, including multiple roots,
+until the coefficient intervals overlap or the parameter interval has no
+representable midpoint. The remaining coefficient hull encloses its stationary
+values. Thus every span endpoint and stationary region contributes to both bounds;
+no fixed sampling width can miss an excursion. Nonfinite bounds or an unresolved
+positive sign report a radius-law failure before any ball construction.
+
+The range enclosure follows the nonnegative partition of unity of the Bernstein
+basis; the derivative and subdivision argument above is derived here. Read:
+Fuenfzig, Michelucci and Foufou, [*Polytope-Based Computation of Polynomial Ranges*](https://cfuenfzig.lima-city.de/Publications/PolytopeBasedComputationOfPolynomialRanges_CAGD2012.pdf)
+(2012; preprint 2011), sections 3.1-3.2: interval extensions and Bernstein convex-hull
+bounds. The existing interval primitives enclose arithmetic on stored binary64
+inputs under round-to-nearest without fast-math. These bounds concern the stored
+spline, not uncertainty in the input data or the linear solve. Native checks cover
+a narrow negative natural-spline span, 54 quadratic extrema across independent
+span widths and signs, three multiple derivative roots and a constant law.
+
 *Steep and flat wedges.* In a wedge of opening psi between two planes the ball's centre lies
 r / sin(psi / 2) from the edge (the centre is r from both planes, on the bisector), and its contacts
 r cot(psi / 2) from it. Past an edge's end the blend is carried on while the ball goes on with the rail;

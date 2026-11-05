@@ -26,6 +26,7 @@
 #include <BRepBlendExt_Request.hxx>
 #include <GeomAlgoExt_Timing.hxx>
 #include <GeomAlgoExt_Cancel.hxx>
+#include <GeomAlgoExt_Interval.hxx>
 #include <BRepAlgoExt_Geometry.hxx>
 #include <Geom_ElementarySurface.hxx>
 #include <Geom_RectangularTrimmedSurface.hxx>
@@ -254,6 +255,76 @@ struct SizeLaw
       bends[i] = m(i + 1);
     if (periodic)
       bends[n - 1] = bends[0];
+  }
+
+  //! Enclose every span's extrema. Bernstein derivative signs isolate all stationary
+  //! points by subdivision, without an absolute parameter sampling scale. Outward
+  //! interval arithmetic includes coefficient and subdivision roundoff.
+  GeomAlgoExt::interval::Range bounds() const
+  {
+    using namespace GeomAlgoExt::interval;
+    Range result{values.front(), values.front()};
+    using Cubic = std::array<Range, 4>;
+    struct Span { Cubic b; double lo, hi; };
+    std::vector<Span> pending;
+    const auto half = [](Range a, Range b) { return multiply(add(a, b), point(0.5)); };
+    const auto include = [&](Range range) {
+      result.low = std::min(result.low, range.low);
+      result.high = std::max(result.high, range.high);
+    };
+    for (size_t i = 0; i + 1 < places.size(); ++i)
+    {
+      const Range h = subtract(point(places[i + 1]), point(places[i]));
+      const Range h2 = multiply(h, h), y0 = point(values[i]), y1 = point(values[i + 1]);
+      const Range m0 = point(bends[i]), m1 = point(bends[i + 1]);
+      const Range delta = subtract(y1, y0);
+      const Range left = subtract(delta, dividePositive(
+        multiply(h2, add(multiply(point(2), m0), m1)), point(6)));
+      const Range right = add(delta, dividePositive(
+        multiply(h2, add(m0, multiply(point(2), m1))), point(6)));
+      pending.push_back({{y0, add(y0, dividePositive(left, point(3))),
+                             subtract(y1, dividePositive(right, point(3))), y1}, 0, 1});
+      while (!pending.empty())
+      {
+        const Span span = pending.back();
+        pending.pop_back();
+        const auto& b = span.b;
+        bool increasing = true, decreasing = true;
+        double low = b[0].low, high = b[0].high;
+        double commonLow = low, commonHigh = high;
+        for (int j = 0; j < 4; ++j)
+        {
+          if (!valid(b[j])) return invalid();
+          low = std::min(low, b[j].low); high = std::max(high, b[j].high);
+          commonLow = std::max(commonLow, b[j].low);
+          commonHigh = std::min(commonHigh, b[j].high);
+          if (j < 3)
+          {
+            const Range derivative = subtract(b[j + 1], b[j]);
+            increasing &= derivative.low >= 0;
+            decreasing &= derivative.high <= 0;
+          }
+        }
+        if (increasing || decreasing)
+        {
+          include({std::min(b[0].low, b[3].low), std::max(b[0].high, b[3].high)});
+          continue;
+        }
+        const double middle = (span.lo + span.hi) / 2;
+        if (commonLow <= commonHigh || middle == span.lo || middle == span.hi)
+        {
+          // The remaining stationary region is enclosed at arithmetic resolution.
+          // Keeping its hull remains conservative, including a multiple derivative root.
+          include({low, high});
+          continue;
+        }
+        const Range a0 = half(b[0], b[1]), a1 = half(b[1], b[2]), a2 = half(b[2], b[3]);
+        const Range c0 = half(a0, a1), c1 = half(a1, a2), mid = half(c0, c1);
+        pending.push_back({{mid, c1, a2, b[3]}, middle, span.hi});
+        pending.push_back({{b[0], a0, c0, mid}, span.lo, middle});
+      }
+    }
+    return result;
   }
 
   double value(double t) const

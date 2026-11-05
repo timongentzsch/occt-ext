@@ -1019,3 +1019,64 @@ TEST(BRepBlendExt, ExtendedRailKeepsKnotsOutsideTheEdgeTrim)
       }
   }
 }
+
+TEST(BRepBlendExt, RadiusLawCannotHideANegativeSpanBetweenSamples)
+{
+  for (double scale : {0.001, 1.0, 1000.0})
+  {
+    const TopoDS_Shape body = BRepPrimAPI_MakeBox(20 * scale, 20 * scale, 20 * scale).Shape();
+    const auto edge = edgesWhere(body, [](const double*) { return true; }).front();
+    auto request = roundOf(body, {edge}, scale);
+    request.radii = {{{0, scale}, {.5001, .01 * scale}, {.5002, .001 * scale},
+                       {.5003, scale}, {1, scale}}};
+    try
+    {
+      BRepExt::blending::blend(request);
+      ADD_FAILURE() << "a negative radius law reached construction";
+    }
+    catch (const BRepExt::Failure& failure)
+    {
+      EXPECT_EQ(failure.kind, BRepExt::FailureKind::RadiusLaw) << failure.what();
+    }
+  }
+}
+
+TEST(BRepBlendExt, RadiusSpanBoundsEncloseStationaryValues)
+{
+  using BRepExt::blending::detail::SizeLaw;
+  // Quadratics with an interior minimum, their negatives, and a monotone cubic
+  // with an interior stationary point. Vary span parameter widths independently.
+  for (double width : {1e-6, 1.0, 1e6})
+    for (double at : {0.1, 0.5, 0.9})
+      for (double sign : {-1.0, 1.0})
+      {
+        SizeLaw law;
+        law.places = {2 * width, 3 * width};
+        law.values = {sign * (at * at + .01), sign * ((1 - at) * (1 - at) + .01)};
+        law.bends = {2 * sign / (width * width), 2 * sign / (width * width)};
+        const auto range = law.bounds();
+        const double end = std::max(at * at, (1 - at) * (1 - at)) + .01;
+        const double low = sign > 0 ? .01 : -end, high = sign > 0 ? end : -.01;
+        ASSERT_TRUE(GeomAlgoExt::interval::valid(range));
+        EXPECT_LE(range.low, low + 1e-14);
+        EXPECT_GE(range.high, high - 1e-14);
+        EXPECT_NEAR(range.low, low, 1e-12);
+        EXPECT_NEAR(range.high, high, 1e-12);
+      }
+  for (double at : {0.1, 0.5, 0.9})
+  {
+    SizeLaw cubic;
+    cubic.places = {0, 1};
+    cubic.values = {1 - at * at * at, 1 + std::pow(1 - at, 3)};
+    cubic.bends = {-6 * at, 6 * (1 - at)};
+    const auto range = cubic.bounds();
+    EXPECT_NEAR(range.low, cubic.values[0], 1e-12);
+    EXPECT_NEAR(range.high, cubic.values[1], 1e-12);
+  }
+  SizeLaw flat;
+  flat.places = {0, 1}; flat.values = {1, 1}; flat.bends = {0, 0};
+  const auto constant = flat.bounds();
+  EXPECT_GT(constant.low, 0);
+  EXPECT_NEAR(constant.low, 1, 1e-14);
+  EXPECT_NEAR(constant.high, 1, 1e-14);
+}

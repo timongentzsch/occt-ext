@@ -1834,20 +1834,14 @@ static void sizesOf(Rail& rail, const std::vector<std::pair<double, double>>& po
          {rail.edge},
          FailureKind::RadiusEndpoints);
   rail.sizes.solve();
-  constexpr int samples = 64;
-  double        most    = 0;
-  for (int k = 0; k <= samples; ++k)
-  {
-    const double f = rail.factor(rail.first + (rail.last - rail.first) * k / samples);
-    if (!(f > 0))
-      fail(op,
-           unsupported_geometry,
-           "the size law falls to zero between its places",
-           {rail.edge},
-           FailureKind::RadiusLaw);
-    most = std::max(most, f);
-  }
-  rail.scale *= most;
+  const auto bounds = rail.sizes.bounds();
+  if (!GeomAlgoExt::interval::valid(bounds) || !(bounds.low > 0))
+    fail(op,
+         unsupported_geometry,
+         "the size law falls to zero between its places or its sign is unresolved",
+         {rail.edge},
+         FailureKind::RadiusLaw);
+  rail.scale *= bounds.high;
 }
 
 void Blend::rails()
