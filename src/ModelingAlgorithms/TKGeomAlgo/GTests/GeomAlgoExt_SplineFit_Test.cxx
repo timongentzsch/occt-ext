@@ -133,6 +133,72 @@ class StopIndicator : public Message_ProgressIndicator
 };
 } // namespace
 
+// The squared second/third derivative energy is nonnegative. An affine plane
+// has zero energy and the four fixed corners determine it uniquely. This checks
+// both coordinate layouts and directional movement, with nonuniform knot spans
+// and fixed-pole elimination, against that independent minimum.
+TEST(GeomAlgoExtSplineFit, FairFitRecoversAnAffinePlaneFromPerturbedPoles)
+{
+  for (int degree : {3, 5})
+    for (double scale : {.01, 1., 100.})
+      for (int mode = 0; mode < 3; ++mode)
+      {
+        SCOPED_TRACE(testing::Message() << degree << ", " << scale << ", " << mode);
+        BRepExt::SplineNet net;
+        net.degreeU = net.degreeV = degree;
+        net.knotsU.assign(degree + 1, 0);
+        net.knotsU.insert(net.knotsU.end(), {.21, .63});
+        net.knotsU.insert(net.knotsU.end(), degree + 1, 1);
+        net.knotsV.assign(degree + 1, 0);
+        net.knotsV.insert(net.knotsV.end(), {.37});
+        net.knotsV.insert(net.knotsV.end(), degree + 1, 1);
+        const int nu = net.countU(), nv = net.countV();
+        const auto greville = [degree](const std::vector<double>& knots, int i) {
+          double sum = 0;
+          for (int k = 1; k <= degree; ++k)
+            sum += knots[i + k];
+          return sum / degree;
+        };
+        const auto exact = [scale](double u, double v) {
+          return gp_XYZ(scale * (1 + 2 * u - v),
+                        scale * (-2 + u + 3 * v),
+                        scale * (3 - u + 2 * v));
+        };
+        const gp_XYZ direction = gp_XYZ(1, 2, 3).Normalized();
+        std::vector<char> fixed(nu * nv, 0);
+        for (int i = 0; i < nu; ++i)
+          for (int j = 0; j < nv; ++j)
+          {
+            const bool corner = (i == 0 || i == nu - 1) && (j == 0 || j == nv - 1);
+            gp_XYZ p = exact(greville(net.knotsU, i), greville(net.knotsV, j));
+            if (!corner)
+              p += direction * (scale * std::sin(1.7 * i + .8 * j));
+            net.poles.push_back(p);
+            fixed[i * nv + j] = corner;
+          }
+        std::vector<BRepExt::FitCondition> conditions;
+        if (mode == 1)
+        {
+          BRepExt::FitCondition row{};
+          row.u = .31;
+          row.v = .59;
+          row.count = 1;
+          row.terms[0] = {0, 0, direction};
+          row.value = exact(row.u, row.v).Dot(direction);
+          row.weight = 1;
+          row.within = Precision::Confusion() * scale;
+          conditions.push_back(row);
+        }
+        BRepExt::fitNet("affine", net, fixed, conditions, {1, .1}, {},
+                        mode == 2 ? &direction : nullptr);
+        const auto surface = BRepExt::surfaceOf(net);
+        for (int i = 0; i <= 8; ++i)
+          for (int j = 0; j <= 8; ++j)
+            EXPECT_LE(surface->Value(i / 8., j / 8.).Distance(gp_Pnt(exact(i / 8., j / 8.))),
+                      Precision::Confusion() * scale);
+      }
+}
+
 // A wrong normal-system RHS or pole update fails the defining plane distances.
 TEST(GeomAlgoExtSplineFit, RimCorrectionToParallelPlane)
 {

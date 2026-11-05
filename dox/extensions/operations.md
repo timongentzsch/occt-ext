@@ -171,6 +171,20 @@ Weber and Zorin], which is why the result is looked at inside its loop before it
 corner compatibility at a vertex where several patches meet follows the vertex-enclosure condition
 [Hermann, Peters, Strotman 2009, all five pages read].
 
+*Energy assembly (derived).* A quadrature cell touches local poles `(a, b)` in order
+`p = (firstU + a) countV + firstV + b`. These indices increase strictly, so an element's
+lower triangle is already in the global lower triangle. The assembly reads the given
+pole's coordinate, or its dot product with the height direction, once per fit, and its
+local-to-global indices once per element. The given net is unchanged until the solve ends.
+The energy does not couple spatial coordinates, so visiting one coordinate at a time
+preserves each right-hand-side entry's sequence of subtractions. Each matrix entry
+likewise receives the same additions in the same order, including the original omission
+of zero entries from the skyline. This removes indexing and repeated projections rather
+than changing quadrature, arithmetic reductions, constraints, or refinement decisions.
+An independent generated family recovers the zero-energy affine plane from perturbed
+poles at degrees three and five, three scales, with separate, coupled and directional
+unknowns. Four fixed corners determine the affine nullspace uniquely.
+
 An open boundary asked for Quad sided whose runs and gaps make four sides with corners is filled by the
 four-sided surface untrimmed: the poles of a gap side are free like the inner ones, and nothing is asked
 along it (a side with more poles at degree 5 than a fitted net may have is first brought down to degree 5
@@ -659,6 +673,34 @@ order is six. That bound controls the conversion of each section, not which poin
 sections should be joined. Repeated bisection of three initial parameter regions can explain a
 knot pattern without determining that correspondence. No new pairing law is inferred from such
 a pattern here. Source: <https://numerika.fmf.uni-lj.si/bib2html/e-documents/clanki/FloaterAnO(h2n)Hermiteapproximationforconicsections.pdf>.
+
+Rational reparameterization does not supply a unique correspondence either. Hu, Wang and
+Wang, *Piecewise Möbius Reparameterization of Rational Bézier Curves* (2018), section 2.1,
+equation (3), changes weights by `w_i -> lambda^i w_i` under
+`t = lambda u / (1 - u + lambda u)`, with `lambda > 0`, preserving degree and geometry.
+Their section 2.2, equations (7), (9) and (12), uses curvature maxima as breakpoints,
+normalized arc lengths as new breakpoints, and matching derivatives between pieces.
+Those are choices for a single curve's speed, not a theorem selecting points to join
+between unlike curves. In particular, a three-region knot pattern alone does not establish
+that these regions are Möbius pieces. A numerical diagnostic fitting one such map through
+three places of each region, then checking thirty other places, misses the observed conics
+by 0.234 to 0.550 in model units across a five-set family (the maximum per section).
+This is evidence against that three-piece hypothesis, not a bound on arbitrary piecewise
+reparameterizations. The cross-section pairing remains unresolved; no new rule is installed.
+Source: <https://www.jcad.cn/cn/article/pdf/preview/10.3724/SP.J.1089.2018.16764.pdf>.
+
+The compatibility step must also be distinguished from choosing correspondence. Piegl and
+Tiller, *The NURBS Book*, second edition (1997), section 10.3, pages 458-459, equation
+(10.7), first assumes common section degree and knots, then interpolates their control
+points, in homogeneous space for rational sections. Engleitner and Juttler, G+S Report 73
+(2018), sections 2-4, permit incompatible section spaces through patchwork splines. Their
+Theorem 3 proves existence in the chosen space from a blending construction under the
+shadow-compatibility and smoothness-monotonicity assumptions; section 4.3 selects a solution
+by constrained energy minimization. The sections' parameterizations remain given in both
+constructions. These existence results therefore do not identify an unknown cross-section
+pairing from an output knot pattern.
+Sources: <https://home.zcu.cz/~bastl/GM1/the-nurbs-book.pdf>,
+<https://www.gs.jku.at/pubs/NFNreport73.pdf>.
 
 
 *Booleans.* Cell selection from one General Fuse with a ladder of fallbacks, each rung accepted only if

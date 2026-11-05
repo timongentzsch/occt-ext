@@ -180,27 +180,48 @@ std::vector<int> fitNet(const char*                                  op,
 
   const int           local = (pu + 1) * (pv + 1);
   std::vector<double> element(static_cast<size_t>(local) * local), values(local);
+  // The given poles and the local-to-global indices do not depend on the quadrature
+  // point. Read them once, preserving the order of every subsequent energy sum.
+  std::vector<double> given(size);
+  for (int p = 0; p < nu * nv; ++p)
+    for (int c = 0; c < dim; ++c)
+      given[unknown(p, c)] = part(net.poles[p], c);
+  std::vector<int> localPoles(local);
   const auto          addElement = [&](const SplineBasis& bu, const SplineBasis& bv) {
-    auto pole = [&](int i) { return (bu.first + i / (pv + 1)) * nv + bv.first + i % (pv + 1); };
+    for (int a = 0; a <= pu; ++a)
+      for (int b = 0; b <= pv; ++b)
+        localPoles[a * (pv + 1) + b] = (bu.first + a) * nv + bv.first + b;
     for (int i = 0; i < local; ++i)
-      for (int k = 0; k <= i; ++k)
+    {
+      const int p = localPoles[i], row = unknown(p, 0);
+      double* const matrixRow = matrix.row(row);
+      for (int c = 0; c < dim; ++c)
       {
-        const int    p = pole(i), q = pole(k);
-        const double e = element[static_cast<size_t>(i) * local + k];
-        for (int c = 0; c < dim; ++c)
+        const int pc = unknown(p, c);
+        const double givenP = given[pc];
+        for (int k = 0; k <= i; ++k)
         {
+          const int q = localPoles[k], qc = unknown(q, c);
+          const double e = element[static_cast<size_t>(i) * local + k];
           // What is looked for is how far each pole moves from where it was
           // given: what the given net bends goes to the other side.
           // Separate coordinates have one energy: it is added to the first.
-          if (!fixed[p] && !fixed[q] && c == 0)
-            matrix.add(unknown(p, c), unknown(q, c), e);
-          const double givenP = part(net.poles[p], c), givenQ = part(net.poles[q], c);
+          // Local poles increase with their index, so q <= p and this is already
+          // the lower triangle. Coordinates are independent: visiting one at a
+          // time retains the order of each matrix and right-hand-side entry.
+          if (!fixed[p] && !fixed[q] && c == 0 && e != 0)
+          {
+            matrixRow[qc] += e;
+            matrix.first[row] = std::min(matrix.first[row], qc);
+          }
+          const double givenQ = given[qc];
           if (!fixed[p])
-            constant[unknown(p, c)] -= e * givenQ;
+            constant[pc] -= e * givenQ;
           if (!fixed[q] && i != k)
-            constant[unknown(q, c)] -= e * givenP;
+            constant[qc] -= e * givenP;
         }
       }
+    }
   };
   // Independent SIMD lanes retain each entry's multiplication and addition order.
   const auto accumulate = [&](double scale) {
