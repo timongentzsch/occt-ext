@@ -234,7 +234,7 @@ Commit `a71c466051`. Upstream: applies; native toolkit build passed.
 
 Problem: A generic surface extremum solve ignores separability of transverse spline extrusions.
 
-Derivation and limits: For unit D and C(u).D=h constant, S(u,v)=C(u)+vD gives squared distance ||P-h_proj-C(u)||^2+(v-v0)^2. The interior minimum therefore separates into a curve projection and v=v0. Keep the generic path for boundary or unresolved cases. Existing capacity of four extrema is retained: this does not promise every boundary or non-nearest extremum. Existing tolerances are unchanged.
+Derivation and limits: For unit D and C(u).D=h constant, S(u,v)=C(u)+vD gives squared distance ||P-h_proj-C(u)||^2+(v-v0)^2. The interior minimum therefore separates into a curve projection and v=v0. Keep the generic path for boundary or unresolved cases. The spline branch keeps every extremum returned by the curve solver in dynamically sized storage; the conic branch alone retains its analytic bound of four. The separability argument applies to all interior stationary distances, not only the nearest minimum. Completeness remains limited by the underlying numerical curve-extremum solver; no returned extremum is intentionally truncated. Existing tolerances are unchanged.
 
 ### IntTools_BeanFaceIntersector-whole-range
 
@@ -328,3 +328,23 @@ wmin. Splitting the difference of the two rational sums and using partition of u
 `|Snew-Sold| <= dP + 2 R dw / wmin` over the entire parameter rectangle. For this network the
 bound is 2.26e-10. This bounds two-sided Hausdorff distance as well, since both surfaces have
 the same parameter domain. It does not claim bit-identical serialization.
+
+
+### Extrema_ExtPExtS-complete-spline-extrema
+
+Problem: retaining only four distances in the transverse spline shortcut discarded
+valid stationary distances (a family of six, eight and twelve quadratic lobes
+returns eleven, fifteen and twenty-three curve extrema).
+
+**Derived here:** for unit extrusion direction D and constant C(u).D=h,
+write P=P_parallel+(P.D)D. Then
+`|C(u)+vD-P|^2 = |C(u)-hD-P_parallel|^2 + (h+v-P.D)^2`.
+The two stationarity equations separate: every curve stationary parameter has
+`v=P.D-h`, provided that value and the curve parameter lie in the requested
+interior. Inline storage retains the first four results; dynamically allocated excess
+storage preserves the full curve solver result, in
+increasing squared distance order. The existing generic path remains in use when
+the shortcut's admissibility checks fail. This is the class's documented all-extrema
+contract (OPEN CASCADE, *OCCT Reference Manual*, 2026,
+[`Extrema_ExtPExtS`](https://dev.opencascade.org/doc/refman/html/class_extrema___ext_p_ext_s.html)).
+The constant-height test and root solves retain their existing numerical tolerances.

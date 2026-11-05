@@ -15,6 +15,7 @@ set(OCCT_TKGeomBase_GTests_FILES
   GeomBndLib_OffsetCurve2d_Test.cxx
   GeomBndLib_OffsetSurface_Test.cxx
   GeomBndLib_Surface_Test.cxx
+  Extrema_ExtPExtS_Test.cxx
   GeomBndLib_SurfaceOfExtrusion_Test.cxx
   GeomBndLib_SurfaceOfRevolution_Test.cxx
   Extrema_ExtPC_Test.cxx

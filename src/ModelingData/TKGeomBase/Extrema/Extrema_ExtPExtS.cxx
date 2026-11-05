@@ -278,10 +278,13 @@ void Extrema_ExtPExtS::Initialize(const occ::handle<GeomAdaptor_SurfaceOfLinearE
 //            surface are those of its projection along the direction onto the curve's plane to the
 //            curve, at the height of the point: found on the curve (Extrema_ExtPC), not on a grid
 //            over the surface. The curve's extrema are taken as the analytic branch takes a
-//            conic's, the four nearest. False, and the grid search is made as before, where the
-//            curve is not so, where none is found, or where the nearest lies within the tolerance
-//            of the bounds of the parameters or beyond them (the boundary keeps its answers).
+//            conic's, in increasing distance order. False, and the grid search is made as before,
+//            where the curve is not so, where none is found, or where the nearest lies within the
+//            tolerance of the bounds of the parameters or beyond them (the boundary keeps its
+//            answers).
 //=================================================================================================
+static constexpr int NbExtMax = 4; // Analytic capacity; spline results may exceed it.
+
 static bool PerformAcross(const gp_Pnt&                       P,
                           const occ::handle<Adaptor3d_Curve>& C,
                           const gp_Vec&                       D,
@@ -293,8 +296,9 @@ static bool PerformAcross(const gp_Pnt&                       P,
                           const double                        theTolV,
                           Extrema_POnSurf*                    thePoints,
                           double*                             theSqDist,
-                          int&                                theNbExt,
-                          const int                           theNbExtMax)
+                          std::vector<Extrema_POnSurf>&       theExtraPoints,
+                          std::vector<double>&                theExtraSqDist,
+                          int&                                theNbExt)
 {
   const gp_XYZ aD = D.XYZ();
   gp_Pnt       aFirstPole;
@@ -327,8 +331,8 @@ static bool PerformAcross(const gp_Pnt&                       P,
     return false;
   }
   // The point taken along the direction onto the curve's plane.
-  const double aHeight = (P.XYZ() - aFirstPole.XYZ()).Dot(aD);
-  const gp_Pnt aPp(P.XYZ() - aD * aHeight);
+  const double  aHeight = (P.XYZ() - aFirstPole.XYZ()).Dot(aD);
+  const gp_Pnt  aPp(P.XYZ() - aD * aHeight);
   Extrema_ExtPC anExt(aPp, *C, theUinf, theUsup, theTolU);
   if (!anExt.IsDone())
   {
@@ -355,24 +359,25 @@ static bool PerformAcross(const gp_Pnt&                       P,
     const Extrema_POnCurv& aPOC = anExt.Point(aBest);
     const double           aU   = aPOC.Parameter();
     const double           aV   = (P.XYZ() - aPOC.Value().XYZ()).Dot(aD);
-    const bool             isUInside =
-      C->IsPeriodic() || (aU > theUinf + theTolU && aU < theUsup - theTolU);
+    const bool isUInside = C->IsPeriodic() || (aU > theUinf + theTolU && aU < theUsup - theTolU);
     if (!isUInside || !(aV > theVinf + theTolV && aV < theVsup - theTolV))
     {
       return false;
     }
   }
-  theNbExt = 0;
+  theNbExt           = 0;
+  const size_t extra = aLeast.size() > NbExtMax ? aLeast.size() - NbExtMax : 0;
+  theExtraPoints.resize(extra);
+  theExtraSqDist.resize(extra);
   for (const auto& [aSqDist, i] : aLeast)
   {
-    if (theNbExt == theNbExtMax)
-    {
-      break;
-    }
     const Extrema_POnCurv& aPOC = anExt.Point(i);
     const double           aV   = (P.XYZ() - aPOC.Value().XYZ()).Dot(aD);
-    thePoints[theNbExt]         = Extrema_POnSurf(aPOC.Parameter(), aV, aPOC.Value().Translated(D * aV));
-    theSqDist[theNbExt]         = aSqDist;
+    auto& point = theNbExt < NbExtMax ? thePoints[theNbExt] : theExtraPoints[theNbExt - NbExtMax];
+    auto& distance =
+      theNbExt < NbExtMax ? theSqDist[theNbExt] : theExtraSqDist[theNbExt - NbExtMax];
+    point    = Extrema_POnSurf(aPOC.Parameter(), aV, aPOC.Value().Translated(D * aV));
+    distance = aSqDist;
     ++theNbExt;
   }
   return true;
@@ -380,15 +385,29 @@ static bool PerformAcross(const gp_Pnt&                       P,
 
 void Extrema_ExtPExtS::Perform(const gp_Pnt& P)
 {
-  const int NbExtMax = 4; // dimension of arrays
-                          // myPoint[] and mySqDist[]
-                          // For "analytical" case
+  // myPoint[] and mySqDist[]
+  // For "analytical" case
   myDone  = false;
   myNbExt = 0;
+  myExtraPoint.clear();
+  myExtraSqDist.clear();
 
   if (!myIsAnalyticallyComputable)
   {
-    if (PerformAcross(P, myC, myDirection, myuinf, myusup, myvinf, myvsup, mytolu, mytolv, myPoint, mySqDist, myNbExt, NbExtMax))
+    if (PerformAcross(P,
+                      myC,
+                      myDirection,
+                      myuinf,
+                      myusup,
+                      myvinf,
+                      myvsup,
+                      mytolu,
+                      mytolv,
+                      myPoint,
+                      mySqDist,
+                      myExtraPoint,
+                      myExtraSqDist,
+                      myNbExt))
     {
       myAcross = true;
       myDone   = true;
@@ -594,7 +613,7 @@ double Extrema_ExtPExtS::SquareDistance(const int N) const
   {
     // modified by NIZHNY-MKK  Thu Sep 18 14:48:39 2003.BEGIN
     //     return myValue[N];
-    return mySqDist[N - 1];
+    return N <= NbExtMax ? mySqDist[N - 1] : myExtraSqDist[N - NbExtMax - 1];
     // modified by NIZHNY-MKK  Thu Sep 18 14:48:42 2003.END
   }
   else
@@ -615,7 +634,7 @@ const Extrema_POnSurf& Extrema_ExtPExtS::Point(const int N) const
   {
     // modified by NIZHNY-MKK  Thu Sep 18 14:47:40 2003.BEGIN
     //     return myPoint[N];
-    return myPoint[N - 1];
+    return N <= NbExtMax ? myPoint[N - 1] : myExtraPoint[N - NbExtMax - 1];
   }
   // modified by NIZHNY-MKK  Thu Sep 18 14:47:43 2003.END
   else

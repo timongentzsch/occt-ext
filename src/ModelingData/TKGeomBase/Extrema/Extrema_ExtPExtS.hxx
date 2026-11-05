@@ -23,6 +23,7 @@
 #include <GeomAdaptor_SurfaceOfLinearExtrusion.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Vec.hxx>
+#include <vector>
 
 //! It calculates all the extremum (minimum and
 //! maximum) distances between a point and a linear
@@ -96,11 +97,15 @@ private:
   Extrema_GenExtPS                                  myExtPS;
   bool                                              myIsAnalyticallyComputable;
   //! The last Perform found the extrema along a spline basis curve across the direction.
-  bool                                              myAcross = false;
-  bool                                              myDone;
-  int                                               myNbExt;
-  double                                            mySqDist[4];
-  Extrema_POnSurf                                   myPoint[4];
+  bool            myAcross = false;
+  bool            myDone;
+  int             myNbExt;
+  double          mySqDist[4];
+  Extrema_POnSurf myPoint[4];
+  // Only the spline shortcut can exceed the analytic capacity. Keep its extra
+  // results separately, so the common four-result path needs no allocation.
+  std::vector<double>          myExtraSqDist;
+  std::vector<Extrema_POnSurf> myExtraPoint;
 };
 
 #endif // _Extrema_ExtPExtS_HeaderFile
