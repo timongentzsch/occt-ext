@@ -6344,17 +6344,36 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
       built = spherical(asked, frame);
     if (!built)
       built = ruledRound(asked, frame);
+    std::optional<Built> rotatingQuad;
     if (!built && asked.guides.empty() && asked.points.empty()
         && squarish(asked.sides, asked.limits.g1))
     {
       built = foursided(asked, frame);
-      // A quad that folds over is no fill: the trimmed one is tried, for four-sided loops
-      // whose corners turn the other way.
-      if (built && built->measured.within && insideFault(built->face, 0))
+      // Retain the established graph preference where a quad turns rapidly.
+      // This is candidate ordering, not a fold proof. A regular rotating quad
+      // remains available when the preferred trimmed construction cannot deliver.
+      if (built && built->measured.within && insideFault(built->face, 0, {}, false))
+      {
+        if (!insideFault(built->face, 0))
+          rotatingQuad = built;
         built.reset();
+      }
     }
     if (!built || !built->measured.within)
-      built = overPlane(asked, frame);
+    {
+      try
+      {
+        built = overPlane(asked, frame);
+      }
+      catch (const Failure& failure)
+      {
+        if (failure.reason == "cancelled" || !rotatingQuad)
+          throw;
+        built = rotatingQuad;
+      }
+      if (!built->measured.within && rotatingQuad)
+        built = rotatingQuad;
+    }
   }
   if (!built->measured.within && method != 2 && !gapped)
     if (const auto quad = chainedQuad(asked, frame))

@@ -1699,3 +1699,47 @@ TEST(BRepPatchExt, RegularityIsShownForASmoothSheetAndNotWhereItsNormalVanishes)
     poles(1, j) = gp_Pnt(1, 3.5, 0);
   EXPECT_FALSE(BRepExt::regularMargin(bowl(), all).has_value());
 }
+
+#include <Geom_SurfaceOfLinearExtrusion.hxx>
+#include <Geom_BSplineCurve.hxx>
+
+// Exact positive-weight rational representation of the stereographic circle,
+// split at t=0. S(u,v)=((1-t*t)/(1+t*t),2*t/(1+t*t),v), t=2*a*(u-.5).
+// Its Jacobian never vanishes; opposite normals across a coarse grid are not a fold.
+TEST(BRepPatchExt, RapidNormalRotationOnARegularCylinderIsNotAFold)
+{
+  for (double a : {25., 50., 100.})
+  {
+    NCollection_Array1<gp_Pnt> poles(1, 5);
+    NCollection_Array1<double> weights(1, 5), knots(1, 3);
+    NCollection_Array1<int> mult(1, 3);
+    const double w = 1 + a*a;
+    poles(1) = gp_Pnt((1-a*a)/w, -2*a/w, 0);
+    poles(2) = gp_Pnt(1, -a, 0);
+    poles(3) = gp_Pnt(1, 0, 0);
+    poles(4) = gp_Pnt(1, a, 0);
+    poles(5) = gp_Pnt((1-a*a)/w, 2*a/w, 0);
+    for (int i=1;i<=5;++i) weights(i) = (i==1 || i==5) ? w : 1.;
+    knots(1)=0;knots(2)=.5;knots(3)=1;
+    mult(1)=3;mult(2)=2;mult(3)=3;
+    Handle(Geom_Curve) curve = new Geom_BSplineCurve(poles, weights, knots, mult, 2);
+    Handle(Geom_Surface) surface = new Geom_SurfaceOfLinearExtrusion(curve, gp_Dir(0,0,1));
+    const TopoDS_Face face = BRepBuilderAPI_MakeFace(surface, 0., 1., 0., 1., 1e-9).Face();
+    EXPECT_FALSE(BRepExt::insideFault(face, 0).has_value()) << a;
+  }
+}
+
+TEST(BRepPatchExt, SampledNormalRotationResolvesShiftedSingularFolds)
+{
+  for (double shift : {.12345, .317, .5, .76321})
+  {
+    NCollection_Array2<gp_Pnt> poles(1, 3, 1, 2);
+    const double x[] = {shift*shift, shift*shift-shift, (1-shift)*(1-shift)};
+    for (int i=1;i<=3;++i)for(int j=1;j<=2;++j)poles(i,j)=gp_Pnt(x[i-1],j-1,0);
+    NCollection_Array1<double> knots(1,2);knots(1)=0;knots(2)=1;
+    NCollection_Array1<int> mu(1,2),mv(1,2);mu(1)=mu(2)=3;mv(1)=mv(2)=2;
+    Handle(Geom_Surface) surface = new Geom_BSplineSurface(poles,knots,knots,mu,mv,2,1);
+    const TopoDS_Face face=BRepBuilderAPI_MakeFace(surface,1e-9).Face();
+    EXPECT_TRUE(BRepExt::insideFault(face,0).has_value()) << shift;
+  }
+}

@@ -235,6 +235,23 @@ The dual identities are derived from `x.(y cross (x cross y)) = |x cross y|^2`
 for unit columns. The second fundamental form then acts on physical tangent
 vectors as in Patrikalakis, Maekawa and Cho (2009), section 3.3 above.
 
+*Sampled normal rotation.* Opposite normals at two separated observations trigger
+midpoint subdivision rather than a fold verdict. A regular cylinder can turn by
+more than a right angle between samples under a nonuniform chart. Subdivision
+continues until consecutive normals agree in sign, a sampled differential loses
+rank, or floating-point UV resolution is exhausted. Unresolved rank or rotation
+is reported as unresolved regularity. This is a derived diagnostic, not a
+certificate of local regularity everywhere or of global injectivity. The separate
+Bernstein regularity certificate on chart fills remains required. The test family
+uses the exact rational circle parameterization documented by Open CASCADE,
+[GeomConvert::CurveToBSplineCurve, 8.0.1](https://occt3d.com/dev/doc/refman/html/class_geom_convert.html).
+Automatic candidate selection retains its established preference for a graph
+when a four-sided surface has coarse opposed normals. This is a preference,
+not a fold verdict: the rotating candidate remains available if the preferred
+construction cannot deliver, and is then checked with adaptive resolution.
+This preserves previously delivered graph geometry. No interior-curvature
+allowance is changed.
+
 *Energy assembly (derived).* A quadrature cell touches local poles `(a, b)` in order
 `p = (firstU + a) countV + firstV + b`. These indices increase strictly, so an element's
 lower triangle is already in the global lower triangle. The assembly reads the given

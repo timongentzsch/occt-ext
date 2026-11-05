@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #include <GeomAlgoExt_Phase.hxx>
+#include <GeomAlgoExt_SurfaceJet.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepAlgoExt_Tolerance.hxx>
 #include <BRepPatchExt_Inside.hxx>
@@ -523,7 +524,8 @@ double bendingInside(const TopoDS_Face& face)
 
 std::optional<std::string> insideFault(const TopoDS_Face&             face,
                                        double                         rimBend,
-                                       const std::optional<Crossing>& crossing)
+                                       const std::optional<Crossing>& crossing,
+                                       bool                           resolveNormalRotation)
 {
   PatchPhase phase("interior-check");
   const auto surface = BRep_Tool::Surface(face);
@@ -582,7 +584,35 @@ std::optional<std::string> insideFault(const TopoDS_Face&             face,
         tighter           = std::max(tighter, here / std::max(rimBend, bridged[i * grid + j]));
       }
     }
-  // Folded over: two places side by side that face opposite ways.
+  // Opposite normals at separated places do not establish a fold. Subdivide
+  // their parameter segment until the rotation is resolved or rank is lost.
+  // This remains a sampled regularity check, not a global injectivity proof.
+  const auto resolve = [&](auto&& self, double ua, double va, const gp_Vec& na,
+                           double ub, double vb, const gp_Vec& nb) -> bool {
+    if (na.Dot(nb) >= 0)
+      return true;
+    if (!resolveNormalRotation)
+      return false;
+    const double u = ua + (ub - ua) / 2, v = va + (vb - va) / 2;
+    if ((u == ua && v == va) || (u == ub && v == vb))
+      return false;
+    if (!inside.contains(u, v))
+      return true;
+    gp_Vec normal;
+    try
+    {
+      normal = surfaceJet("patch", surface, u, v).n;
+    }
+    catch (const Failure&)
+    {
+      return false;
+    }
+    catch (const Standard_Failure&)
+    {
+      return false;
+    }
+    return self(self, ua, va, na, u, v, normal) && self(self, u, v, normal, ub, vb, nb);
+  };
   for (int i = 0; i < grid; ++i)
     for (int j = 0; j < grid; ++j)
     {
@@ -592,8 +622,11 @@ std::optional<std::string> insideFault(const TopoDS_Face&             face,
       {
         if (i + di >= grid || j + dj >= grid || !seen[(i + di) * grid + j + dj])
           continue;
-        if (normals[i * grid + j].Dot(normals[(i + di) * grid + j + dj]) < 0)
-          return "it folds over inside the loop";
+        const double u = u0 + (u1-u0)*(i+.5)/grid, v = v0 + (v1-v0)*(j+.5)/grid;
+        if (!resolve(resolve, u, v, normals[i * grid + j],
+                     u0 + (u1-u0)*(i+di+.5)/grid, v0 + (v1-v0)*(j+dj+.5)/grid,
+                     normals[(i+di)*grid+j+dj]))
+          return "its differential regularity is unresolved inside the loop";
       }
     }
   if (rimBend > 0 && tighter > tightest)
