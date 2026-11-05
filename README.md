@@ -233,8 +233,10 @@ Known limits and what remains:
    plane and cylinder, two cylinders). Where the angle turns along the edge so far that the balls' centre
    path bends more tightly than the ball (the rim of a hole leaning a with r >= (R + r) cos a: from about
    70 degrees), the rolling-ball surface crosses itself and is refused by name until it is trimmed there;
-   short of that the rim is the balls' envelope. Eleven cases of the blend matrix over pairs of support surfaces
-   (round and curvature-continuous sections) that were built on 31 October are refused now; the cause is being traced.
+   short of that the rim is the balls' envelope. Historical stored results over pairs of supports include
+   values from an earlier construction; they do not establish that this solver delivered those results.
+   Several curvature-continuous results recorded before the internal tangent-continuity check are also
+   refused by that check. Recovery requires meeting the current seam and section-law bounds.
 2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published
    bound for a curvature-continuous conic or quintic section as a function of the support's curvature is
    missing.
