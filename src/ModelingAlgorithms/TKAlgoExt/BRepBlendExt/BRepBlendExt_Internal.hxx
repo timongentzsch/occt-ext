@@ -1668,6 +1668,7 @@ struct ContinuationRequired : Failure
 Standard_EXPORT TopoDS_Shape attach(TopoDS_Shape                     body,
                                     const std::vector<Piece>&        pieces,
                                     const std::vector<Corner>&       cornersAt,
-                                    const Handle(BRepTools_History)& history);
+                                    const Handle(BRepTools_History)& history,
+                                    std::vector<Join>* joins = nullptr);
 
 } // namespace BRepExt::blending::detail

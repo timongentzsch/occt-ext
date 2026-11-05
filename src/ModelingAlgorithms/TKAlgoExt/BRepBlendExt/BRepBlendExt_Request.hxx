@@ -79,11 +79,27 @@ struct Request
 //! input); what became of every face, edge and vertex of the input (for the face history and the
 //! journal); the faces and edges the blends left as they were, each with its copy; and what was
 //! made: the pieces, the edges added as tangent to the picked ones and the pieces on exact sheets.
+//! Construction intent, independent of the mutable BRep continuity flags. A sharp
+//! join remains in the inventory with order zero; it is not a missing contact.
+enum class JoinRole
+{
+  Contact, UsedSupport, Joint, SupportBreak, Fold, Roll, Corner, Miter, Stop,
+  Trim, Ridge, Split
+};
+
+struct Join
+{
+  TopoDS_Shape edge;
+  JoinRole role;
+  int order; //!< Required geometric continuity: 0, 1 or 2; not a measured result.
+};
+
 struct Blended
 {
   TopoDS_Shape                                       shape;
   Handle(BRepTools_History)                          history = new BRepTools_History;
   std::vector<std::pair<TopoDS_Shape, TopoDS_Shape>> unchanged;
+  std::vector<Join> joins;
   int rails = 0, propagated = 0, analytic = 0, keptFaces = 0, keptEdges = 0;
 };
 

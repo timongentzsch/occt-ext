@@ -39,6 +39,31 @@ using namespace detail;
 
 static Blended blendStage(const Request& request, bool continuation);
 
+//! Carry edge intent only along modifications of that edge, never along generated
+//! faces or unrelated generated edges. Retention is resolved on the final topology.
+static std::vector<Join> carriedJoins(const std::vector<Join>& joins,
+                                     const Handle(BRepTools_History)& history,
+                                     const TopoDS_Shape& result)
+{
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> retained;
+  TopExp::MapShapes(result, TopAbs_EDGE, retained);
+  std::vector<Join> out;
+  for (const auto& join : joins)
+  {
+    const auto& modified = history->Modified(join.edge);
+    if (modified.IsEmpty())
+    {
+      if (retained.Contains(join.edge))
+        out.push_back(join);
+    }
+    else
+      for (const auto& edge : modified)
+        if (edge.ShapeType() == TopAbs_EDGE && retained.Contains(edge))
+          out.push_back({edge, join.role, join.order});
+  }
+  return out;
+}
+
 static Blended blendCopy(const Request&                   request,
                          BRepBuilderAPI_Copy&             copy,
                          const std::vector<TopoDS_Shape>& byCentre = {});
@@ -400,6 +425,8 @@ static std::optional<Blended> minorityFirst(const Request& request,
   Blended then = blendStage(second, continuation);
   Blended out;
   out.shape   = then.shape;
+  out.joins = carriedJoins(made.joins, then.history, then.shape);
+  out.joins.insert(out.joins.end(), then.joins.begin(), then.joins.end());
   out.history = made.history;
   out.history->Merge(then.history);
   for (const auto& [before, middle] : made.unchanged)
@@ -625,6 +652,7 @@ static std::optional<Blended> replayOverrun(const Request&                   req
     Handle(BRepTools_History) fromSharp = new BRepTools_History;
     fromSharp->Merge(made.history);
     TopoDS_Shape shape = made.shape;
+    out.joins = made.joins;
     int          rails = made.rails, propagated = made.propagated, analytic = made.analytic;
 
     // A round taken off, the faces put back, and the stages after them.
@@ -683,6 +711,8 @@ static std::optional<Blended> replayOverrun(const Request&                   req
         for (const auto& g : then.history->Generated(edge))
           if (g.ShapeType() == TopAbs_FACE)
             back.push_back(g);
+      out.joins = carriedJoins(out.joins, then.history, then.shape);
+      out.joins.insert(out.joins.end(), then.joins.begin(), then.joins.end());
       stages.push_back(then.history);
       fromSharp->Merge(then.history);
       putBack.push_back({rounds[r], back, stages.size()});
@@ -1139,6 +1169,7 @@ static std::optional<Blended> liftFeatures(const Request&                   requ
       return {};
     Blended out;
     out.shape   = singleSolid(put.shape);
+    out.joins = carriedJoins(made.joins, put.history, out.shape);
     out.history = composed(request.body, {lifting, made.history, put.history});
     // Where the feature's solid was cut from the bodies, its faces go on through that cut.
     if (!lifted->intoTools.IsNull())
@@ -3515,6 +3546,10 @@ void Blend::splitMeeting(Blended& out)
     solid = x.Current();
   if (solid.IsNull())
     fail(op, no_solution, "splitting the full round gave no solid", {piece.rail.edge});
+  out.joins = carriedJoins(out.joins, split.History(), solid);
+  for (const auto& made : split.Modified(edge))
+    if (made.ShapeType() == TopAbs_EDGE)
+      out.joins.push_back({made, JoinRole::UsedSupport, 1});
   out.history->Merge(split.History());
   out.shape = solid;
 }
@@ -3523,7 +3558,7 @@ Blended Blend::result()
 {
   Blended                         out;
   const Handle(BRepTools_History) made = new BRepTools_History;
-  out.shape = pieces.empty() ? body : attach(body, pieces, corners, made);
+  out.shape = pieces.empty() ? body : attach(body, pieces, corners, made, &out.joins);
   // The input's history: into the copy, then through the blends.
   NCollection_List<TopoDS_Shape> inputs;
   inputs.Append(request.body);

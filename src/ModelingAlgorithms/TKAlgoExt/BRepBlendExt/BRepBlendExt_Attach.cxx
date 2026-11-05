@@ -51,6 +51,7 @@ struct Attach
   void         contacts();
   void         blendFaces();
   void         continuity();
+  std::vector<Join> joins;
   void         tolerances();
   void         collisions();
   TopoDS_Shape assemble();
@@ -4732,60 +4733,95 @@ void Attach::continuity()
     }
     return false;
   };
+  const auto record = [&](const TopoDS_Shape& edge, JoinRole role, int order) {
+    if (!edge.IsNull())
+      joins.push_back({edge, role, order});
+  };
+  const auto mark = [&](const TopoDS_Edge& edge, const TopoDS_Face& a,
+                        const TopoDS_Face& b, JoinRole role, GeomAbs_Shape smooth) {
+    record(edge, role, smooth == GeomAbs_G2 ? 2 : 1);
+    builder.Continuity(edge, a, b, smooth);
+  };
   for (int k = 0; k < n; ++k)
   {
-    const Piece&        piece  = pieces[k];
+    const Piece& piece = pieces[k];
+    const bool bevel = piece.rail.law == Law::Chamfer;
     const GeomAbs_Shape smooth = piece.rail.law == Law::G2 ? GeomAbs_G2 : GeomAbs_G1;
-    if (piece.rail.law == Law::Chamfer)
-      continue;
-    // A blend that has no length: its corners meet across its section.
     if (vanished(k))
     {
-      builder.Continuity(section[k][0],
-                         patches[piece.joint[0].piece],
-                         patches[piece.joint[1].piece],
-                         smooth);
+      if (!bevel)
+        mark(section[k][0], patches[piece.joint[0].piece],
+             patches[piece.joint[1].piece], JoinRole::Corner, smooth);
+      else
+        record(section[k][0], JoinRole::Corner, 0);
       continue;
     }
     for (int side = 0; side < 2; ++side)
     {
-      // Across a face used up between two blends, the blends meet.
       if (usedUp.Contains(piece.rail.s[side].face))
       {
         for (int m = 0; m < n; ++m)
           for (int t = 0; t < 2; ++t)
             if (m != k && contact[m][t].IsSame(contact[k][side]))
-              builder.Continuity(contact[k][side], blends[k], blends[m], smooth);
+            {
+              if (!bevel)
+                mark(contact[k][side], blends[k], blends[m], JoinRole::UsedSupport, smooth);
+              else
+                record(contact[k][side], JoinRole::UsedSupport, 0);
+            }
         continue;
       }
-      if (!piece.rail.s[side].cliffCurve
-          && (piece.rail.s[side].trim.IsNull() || piece.rail.law == Law::Full))
-        for (const auto& edge : sideEdges(k, side))
-          if (std::none_of(ridged.begin(), ridged.end(), [&](const Ridge& r) {
-                return r.edge.IsSame(edge);
-              }))
-            builder.Continuity(edge,
-                               blends[k],
-                               piece.rail.s[side].trim.IsNull() ? piece.rail.s[side].face
-                                                                : piece.rail.s[side].trim,
-                               smooth);
+      for (const auto& edge : sideEdges(k, side))
+      {
+        if (std::any_of(ridged.begin(), ridged.end(), [&](const Ridge& r) {
+              return r.edge.IsSame(edge);
+            }))
+          continue;
+        if (!bevel && !piece.rail.s[side].cliffCurve
+            && (piece.rail.s[side].trim.IsNull() || piece.rail.law == Law::Full))
+          mark(edge, blends[k], piece.rail.s[side].trim.IsNull()
+                 ? piece.rail.s[side].face : piece.rail.s[side].trim,
+               JoinRole::Contact, smooth);
+        else
+          record(edge, JoinRole::Trim, 0);
+      }
     }
     for (int end = 0; end < 2; ++end)
     {
       const auto& joint = piece.joint[end];
+      if (bevel)
+      {
+        record(section[k][end], joint.meets == Meets::Stop ? JoinRole::Stop : JoinRole::Miter, 0);
+        continue;
+      }
       if (joint.meets == Meets::Joint)
-        builder.Continuity(section[k][end],
-                           blends[k],
-                           blends[joint.piece],
-                           smooth == GeomAbs_G2 && supportBreaks(k, end) ? GeomAbs_G1 : smooth);
+      {
+        const bool breaks = smooth == GeomAbs_G2 && supportBreaks(k, end);
+        mark(section[k][end], blends[k], blends[joint.piece],
+             breaks ? JoinRole::SupportBreak : JoinRole::Joint, breaks ? GeomAbs_G1 : smooth);
+      }
       else if (joint.meets == Meets::Fold)
-        builder.Continuity(section[k][end], blends[k], foldAt(k, end).patch, GeomAbs_G1);
+        mark(section[k][end], blends[k], foldAt(k, end).patch, JoinRole::Fold, GeomAbs_G1);
       else if (const Roll* roll = rollAt(k, end))
-        builder.Continuity(section[k][end], blends[k], roll->patch, GeomAbs_G1);
+        mark(section[k][end], blends[k], roll->patch, JoinRole::Roll, GeomAbs_G1);
       else if (joint.meets == Meets::Corner && !patches[joint.piece].IsNull())
-        builder.Continuity(section[k][end], blends[k], patches[joint.piece], smooth);
+        mark(section[k][end], blends[k], patches[joint.piece], JoinRole::Corner, smooth);
+      else
+        record(section[k][end], joint.meets == Meets::Stop ? JoinRole::Stop
+                             : joint.meets == Meets::Split ? JoinRole::Split : JoinRole::Miter, 0);
+      for (const auto& edge : chain[k][end])
+        record(edge, JoinRole::Stop, 0);
     }
   }
+  for (const auto& f : folded)
+    for (const auto& run : f.run)
+      record(run.edge, JoinRole::Fold, 1);
+  for (const auto& roll : rolls)
+    record(roll.arc, JoinRole::Roll, 1);
+  for (const auto& ridge : ridged)
+    record(ridge.edge, JoinRole::Ridge, 0);
+  for (const auto& notch : notches)
+    record(notch.edge, JoinRole::Stop, 0);
 }
 
 void Attach::tolerances()
@@ -5133,7 +5169,8 @@ TopoDS_Shape Attach::assemble()
 TopoDS_Shape attach(TopoDS_Shape                     body,
                     const std::vector<Piece>&        pieces,
                     const std::vector<Corner>&       cornersAt,
-                    const Handle(BRepTools_History)& history)
+                    const Handle(BRepTools_History)& history,
+                    std::vector<Join>* joins)
 {
   Attach a(std::move(body), pieces, cornersAt, history);
   // Each stage may be cancelled before it starts (Patch also checks within its own).
@@ -5152,7 +5189,16 @@ TopoDS_Shape attach(TopoDS_Shape                     body,
     checkCancelled(a.op);
     (a.*stage)();
   }
-  return a.assemble();
+  TopoDS_Shape result = a.assemble();
+  if (joins)
+  {
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> retained;
+    TopExp::MapShapes(result, TopAbs_EDGE, retained);
+    for (const auto& join : a.joins)
+      if (retained.Contains(join.edge))
+        joins->push_back(join);
+  }
+  return result;
 }
 
 } // namespace BRepExt::blending::detail

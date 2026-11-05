@@ -248,6 +248,32 @@ The final fitted-surface and contact checks remain unchanged. Very close
 but distinct events can still require an ill-conditioned or costly fit;
 this change does not identify them as the same event.
 
+### Construction boundary roles
+
+Construction roles are now retained separately in `Blended::joins`: contacts,
+used-support joins, joints, support breaks, folds, rolls, corners, sharp mitres,
+stopping ends, trimmed sides, ridges and split boundaries. Each carries its required
+continuity order, independently of `BRep_Builder::Continuity`. Recording an order is
+intent, not evidence that the delivered geometry attains it. Fold and roll contacts
+require tangency, while a support break does not claim curvature continuity.
+
+The inventory is filtered by final edge identity at attachment, and carried through
+subsequent modifications in staged blends and Boolean restoration. This follows
+OCCT, *Reference Manual* 8.0.1 (2026),
+[`BRepTools_History`, detailed description and `Merge`](https://occt3d.com/dev/doc/refman/html/class_b_rep_tools___history.html):
+modification, generation and removal are distinct relations. The edge-intent
+propagation rule is derived here: use retained edges and modified edge descendants,
+not unrelated generated shapes. The alternate face-envelope constructor has not yet
+supplied this inventory; absence must not be interpreted as a smoothness claim.
+
+For the geometric interpretation, Patrikalakis, Maekawa and Cho (2009),
+[section 8.1.3.5, Linkage Curve Theorem](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node156.html),
+assumes tangent-plane continuity along a first-order continuous boundary before
+curvature agreement in a transverse direction establishes second-order smoothness.
+It does not classify construction intent from the measured output angle. Native
+role checks cover twelve combinations of three scales, two noncircular sections,
+and single stopped edges versus closed mitred loops.
+
 ## BRepPatchExt: boundary-first fill
 
 *Problem.* Given a closed loop of edges, each optionally asked to meet a neighbouring face to G0, G1 or

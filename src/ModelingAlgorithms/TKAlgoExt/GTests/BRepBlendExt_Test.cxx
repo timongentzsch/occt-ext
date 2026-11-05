@@ -1124,3 +1124,45 @@ TEST(BRepBlendExt, LocatedFitEventsKeepTheirPhysicalStation)
       EXPECT_FALSE(raiseFitBreaks(knots, {{event, 5}}));
     }
 }
+
+// Intent survives independently of continuity metadata, for single stopped rails
+// and sharp mitred loops, across scale and section shape.
+TEST(BRepBlendExt, ConstructionRolesDistinguishContactsFromSharpEnds)
+{
+  using namespace BRepExt::blending;
+  for (double scale : {0.01, 1.0, 100.0})
+    for (double rho : {0.3, 0.7})
+      for (bool loop : {false, true})
+      {
+        const TopoDS_Shape box = BRepPrimAPI_MakeBox(20*scale, 20*scale, 20*scale).Shape();
+        const auto picked = edgesWhere(box, [&](const double* b) {
+          return near(b[2], 20*scale) && near(b[5], 20*scale)
+                 && (loop || (near(b[0], 0) && near(b[3], 0)));
+        });
+        Request request = roundOf(box, picked, scale);
+        request.rho = rho;
+        const Blended made = blend(request);
+        ASSERT_FALSE(made.joins.empty());
+        int contacts = 0, sharp = 0;
+        for (const auto& join : made.joins)
+        {
+          EXPECT_EQ(join.edge.ShapeType(), TopAbs_EDGE);
+          bool retained = false;
+          for (TopExp_Explorer e(made.shape, TopAbs_EDGE); e.More(); e.Next())
+            retained = retained || e.Current().IsSame(join.edge);
+          EXPECT_TRUE(retained);
+          if (join.role == JoinRole::Contact)
+          {
+            EXPECT_EQ(join.order, 1);
+            ++contacts;
+          }
+          if (join.role == (loop ? JoinRole::Miter : JoinRole::Stop))
+          {
+            EXPECT_EQ(join.order, 0);
+            ++sharp;
+          }
+        }
+        EXPECT_GE(contacts, loop ? 8 : 2);
+        EXPECT_GE(sharp, loop ? 4 : 2);
+      }
+}
