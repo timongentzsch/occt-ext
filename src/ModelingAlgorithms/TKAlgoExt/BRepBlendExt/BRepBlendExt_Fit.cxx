@@ -324,22 +324,6 @@ Fitted fit(const Rail&                      rail,
       fail(rail.op, no_solution, "a terminal fit jet is non-finite", {rail.edge});
     return row;
   };
-  // Breaks found while refining, on the knot they fall on where they fall on one.
-  const auto raise = [&](const std::map<double, int>& breaks) {
-    bool more = false;
-    for (const auto& [u, m] : breaks)
-    {
-      const auto near = knots.lower_bound(u - limit::knotMerge);
-      int&       slot =
-        near != knots.end() && near->first <= u + limit::knotMerge ? near->second : knots[u];
-      if (slot < m)
-      {
-        slot = m;
-        more = true;
-      }
-    }
-    return more;
-  };
   std::vector<double> worst;
   int                 bendRounds = 0;
   for (int refinement = 0; refinement < 16; ++refinement)
@@ -569,7 +553,7 @@ Fitted fit(const Rail&                      rail,
     // derivative at its limit (curvedG2): C0 in the poles there.
     if (refinement == 2)
     {
-      if (raise(breaksOf(rail, stations, true)))
+      if (raiseFitBreaks(knots, breaksOf(rail, stations, true)))
         continue;
     }
     if (refinement == 3 && !contactPilot && rail.law == Law::G2)
@@ -598,7 +582,7 @@ Fitted fit(const Rail&                      rail,
         }
         before = now;
       }
-      if (raise(changes))
+      if (raiseFitBreaks(knots, changes))
         continue;
     }
     // Halving the spans takes a smooth blend's error down some 64 times each

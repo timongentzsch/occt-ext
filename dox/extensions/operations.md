@@ -236,6 +236,18 @@ their normalized parameters, rather than a raw parameter difference. The
 arclength bounds the chord displacement and has physical length units; a
 parameter interval need not. The existing agreement bound is unchanged.
 
+### Located continuity events in a fitted blend
+
+A newly located break is inserted at its own parameter. Nearby optional
+simple fit knots may yield to it; a previous continuity event is retained.
+The existing knot-neighbourhood size only selects optional fit knots to remove,
+not a displacement allowance for an event. **Derived:** moving a true break
+by delta changes the physical station by the integral of rail speed over
+delta, so a normalized parameter threshold alone cannot bound that movement.
+The final fitted-surface and contact checks remain unchanged. Very close
+but distinct events can still require an ill-conditioned or costly fit;
+this change does not identify them as the same event.
+
 ## BRepPatchExt: boundary-first fill
 
 *Problem.* Given a closed loop of edges, each optionally asked to meet a neighbouring face to G0, G1 or

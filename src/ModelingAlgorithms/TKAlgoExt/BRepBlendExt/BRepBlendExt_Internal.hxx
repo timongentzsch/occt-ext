@@ -481,6 +481,32 @@ inline std::optional<double> railParameterAt(const Rail& rail, double t, double 
   }
 }
 
+//! Raise the multiplicity required by located continuity events.
+inline bool raiseFitBreaks(std::map<double, int>& knots, const std::map<double, int>& breaks)
+{
+  bool more = false;
+  for (const auto& [u, m] : breaks)
+  {
+    // An optional simple fit knot can yield to an event. Existing continuity
+    // events remain at their own stations; proximity is not geometric equality.
+    for (auto near = knots.lower_bound(u - limit::knotMerge);
+         near != knots.end() && near->first <= u + limit::knotMerge;)
+    {
+      if (near->first != u && near->second == 1)
+        near = knots.erase(near);
+      else
+        ++near;
+    }
+    int& slot = knots[u];
+    if (slot < m)
+    {
+      slot = m;
+      more = true;
+    }
+  }
+  return more;
+}
+
 //! A physical arclength step on a rail, expressed in the fit's normalized parameter.
 inline std::optional<double> railUAtDistance(const Rail& rail, double t, double distance)
 {

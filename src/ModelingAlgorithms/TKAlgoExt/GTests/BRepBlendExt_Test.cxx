@@ -1107,3 +1107,20 @@ TEST(BRepBlendExt, CornerStationDistanceUsesPhysicalUnits)
                     1e-10 * scale);
     }
 }
+
+TEST(BRepBlendExt, LocatedFitEventsKeepTheirPhysicalStation)
+{
+  using namespace BRepExt::blending::detail;
+  for (double offset : {-9e-7, -4e-7, 4e-7, 9e-7})
+    for (int existing : {1, 3, 5})
+    {
+      std::map<double, int> knots = {{0, 6}, {0.5, existing}, {1, 6}};
+      const double event = 0.5 + offset;
+      EXPECT_TRUE(raiseFitBreaks(knots, {{event, 5}}));
+      ASSERT_TRUE(knots.count(event));
+      EXPECT_EQ(knots.at(event), 5);
+      if (existing > 1)
+        EXPECT_EQ(knots.at(0.5), existing);
+      EXPECT_FALSE(raiseFitBreaks(knots, {{event, 5}}));
+    }
+}
