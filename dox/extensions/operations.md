@@ -315,6 +315,28 @@ validated interval bound. Unresolved coverage is refused, never accepted from
 finite guide samples alone. Coverage can be costly on curved faces at tight
 tolerances; this is an optimization item rather than a guide pole-count limit.
 
+*Reusing projections (derived).* A projection onto a construction's carrier is
+not yet an owned witness on the delivered trim. It can supply a UV seed, but
+the final surface value and trim ownership must still be checked. Finite guide
+samples do not bound the guide between samples. Positive clearance from the
+trim can establish ownership of an enclosed UV path; it does not bound the
+spatial distance from the requested guide to that path. Skipping the final
+cover therefore requires an already certified whole-guide cover on the same
+delivered surface and trim, or a proof that every subsequent operation preserves
+that cover. Merely retaining projection samples is insufficient.
+
+*Local extraction and cost.* Knot insertion preserves the polynomial image in
+exact arithmetic (Patrikalakis, Maekawa and Cho, 2009, section 1.4.3,
+equations 1.74-1.76, cited above). The whole-surface and bounded constructors of
+[`GeomConvert_BSplineSurfaceToBezierSurface`](https://occt3d.com/dev/doc/refman/html/class_geom_convert___b_spline_surface_to_bezier_surface.html)
+(Open CASCADE 8.0.1) both copy the input surface before restriction and knot
+insertion. A bounded conversion per visited cell is consequently not guaranteed
+to be cheaper than one whole conversion. A process-CPU profile of a guided
+polynomial panel found that ownership tests and local projections dominated the
+cover, while eager conversion was below one millisecond. Projection-seed reuse
+and lazy bounded extraction were investigated independently; neither established
+cost neutrality. These observations are measurements, not complexity bounds.
+
 *Energy assembly (derived).* A quadrature cell touches local poles `(a, b)` in order
 `p = (firstU + a) countV + firstV + b`. These indices increase strictly, so an element's
 lower triangle is already in the global lower triangle. The assembly reads the given
