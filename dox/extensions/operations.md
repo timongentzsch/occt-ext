@@ -1677,6 +1677,66 @@ compatibility conditions; they do not prove existence of an arbitrary
 support-constrained approximation in a fixed tensor space. The trace identities,
 Hermite diagnostic and preservation qualifications above are derived here.
 
+#### Normal-acceleration corrections and numerical evidence
+
+For a regular seam whose tangent planes agree, let t be its unit tangent and
+c = n cross t. A correction delta*n to S_uu changes II(c,c) by
+`delta/(S_u dot c)^2`, with the seam position and first derivatives held fixed.
+This identity is derived from the inverse surface metric. Matching this scalar
+alone is sufficient only if the along-seam and mixed second fundamental forms
+already agree. First-order coupling of independently fitted pieces does not
+establish those hypotheses; check the full form in one physical tangent frame.
+
+A derived compact acceleration function on a one-sided interval of width h is
+`h*h*x*x*x*(1-x)*(1-x)/2`, where x runs from zero at its outer boundary to one
+at the seam. It vanishes through order two at the outer boundary, has zero value
+and first derivative at the seam, and has second derivative one there.
+Its maximum is `54*h*h/3125`. Thus a coefficient field bounded by Q displaces
+the surface by at most `54*h*h*Q/3125` in exact arithmetic. This is a positional
+proposal bound, not a curvature or support-contact certificate. Transverse
+collocation of the field does not establish an identity between samples.
+Successive knot insertion and world-coordinate coefficient rounding can destroy
+the intended second derivative on very short spans. Adding more transverse
+sites cannot repair that independent longitudinal conditioning problem.
+
+Use independent, well-conditioned derivatives before judging a construction.
+For a degree-p spline with expanded knots U, its derivative coefficients are
+`p*(P[i+1]-P[i])/(U[i+p+1]-U[i+1])`, on the knot vector with the first and last
+knots removed. Apply the formula in each tensor direction and to homogeneous
+coordinates for rational surfaces, then apply the quotient rule. Translating
+positions by a fixed origin before evaluation leaves all physical derivatives
+unchanged in exact arithmetic. Form first homogeneous differences directly as
+`w_b*(P_b-P_a)+(P_a-O)*(w_b-w_a)` for a fixed origin O (derived identity);
+subtracting the origin from each pole before differencing can itself discard
+the small difference on a short span. Higher differences then act on derivative
+coefficients. Summing differentiated basis functions against large world positions
+can instead cancel terms proportional to the inverse square of a short span.
+Derivative control nets reduce evaluator cancellation; they do not recover
+information already lost in stored coefficients. Increased-precision evaluation
+of the same stored net distinguishes these two sources of error.
+
+A positional fit across an entire carried rail is likewise insufficient: making
+all internal knots structurally C2 can approximate a tangential parameter kink
+using very small spans while introducing severe support curvature. A structural
+alternative is to solve compatible contact ribbons and their parameter freedoms
+jointly, controlling the required derivative norms and the longitudinal
+conditioning before fixing a tensor partition. This is a design direction,
+not an existence claim for arbitrary boundary data.
+
+Sources: Nowacki, Kaklis and Weber, *Curve mesh fairing and GC2 surface
+interpolation* (1992), sections 3.2-3.3, equations (26)-(42),
+[quintic Hermite interpolation and compatibility](https://www.numdam.org/item/M2AN_1992__26_1_113_0.pdf);
+Peters, *Geometric Continuity* (2001), sections 2-3,
+[reparameterisation conditions](https://www.cise.ufl.edu/research/SurfLab/papers/01handbook.pdf);
+Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided Design
+and Manufacturing* (2009), section 1.4.2, equations (1.65)-(1.68),
+[derivative control coefficients](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html),
+and section 1.4.4,
+[tensor-product surfaces](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node19.html).
+The compact correction, its maximum and the conditioning conclusions above
+are derived here; the cited sources supply the interpolation and continuity
+framework, not a proof of convergence of this correction.
+
 ### Face-offset endpoint certificate limits
 
 A normal-offset surface and a valid BREP do not by themselves establish a bounded face-offset
