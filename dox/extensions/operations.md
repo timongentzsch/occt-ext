@@ -231,6 +231,11 @@ curvature difference) and refused if it misses; that measurement is sampled, not
 
 *Stock.* `BRepFilletAPI_MakeFillet` (ChFi3d). See the table below.
 
+Corner contact stations likewise compare the integral of rail speed between
+their normalized parameters, rather than a raw parameter difference. The
+arclength bounds the chord displacement and has physical length units; a
+parameter interval need not. The existing agreement bound is unchanged.
+
 ## BRepPatchExt: boundary-first fill
 
 *Problem.* Given a closed loop of edges, each optionally asked to meet a neighbouring face to G0, G1 or

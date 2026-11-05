@@ -436,6 +436,12 @@ inline double railLength(const Rail& rail, double t0, double t1)
   return GCPnts_AbscissaPoint::Length(*railRange(rail, lo, hi), lo, hi, rail.resolved(limit::solved));
 }
 
+//! Physical separation of two normalized rail stations used at a corner.
+inline double railStationSeparation(const Rail& rail, double a, double b)
+{
+  return railLength(rail, rail.t(a), rail.t(b));
+}
+
 //! The parameter `distance` of arclength from t. A regular curve's length is monotone in
 //! each direction, so enlarging the range until it contains that length brackets the inverse.
 //! This changes only the adaptor's range: point and derivative evaluation keep the same curve.

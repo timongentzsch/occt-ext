@@ -1080,3 +1080,30 @@ TEST(BRepBlendExt, RadiusSpanBoundsEncloseStationaryValues)
   EXPECT_NEAR(constant.low, 1, 1e-14);
   EXPECT_NEAR(constant.high, 1, 1e-14);
 }
+
+TEST(BRepBlendExt, CornerStationDistanceUsesPhysicalUnits)
+{
+  using namespace BRepExt::blending::detail;
+  for (double speed : {0.001, 1.0, 1000.0})
+    for (double scale : {0.001, 1.0, 1000.0})
+    {
+      NCollection_Array1<gp_Pnt> poles(1, 2);
+      poles(1) = gp_Pnt(0, 0, 0);
+      poles(2) = gp_Pnt(10 * scale, 0, 0);
+      NCollection_Array1<double> knots(1, 2);
+      knots(1) = 0;
+      knots(2) = 10 / speed;
+      NCollection_Array1<int> multiplicities(1, 2);
+      multiplicities.Init(2);
+      Handle(Geom_BSplineCurve) curve = new Geom_BSplineCurve(poles, knots, multiplicities, 1);
+      Rail rail;
+      rail.scale = scale;
+      rail.edge = BRepBuilderAPI_MakeEdge(curve);
+      rail.curve.Initialize(rail.edge);
+      rail.from = 0;
+      rail.to = 10 / speed;
+      for (double delta : {1e-7, 1e-5, 0.1})
+        EXPECT_NEAR(railStationSeparation(rail, 0.5, 0.5 + delta), 10 * scale * delta,
+                    1e-10 * scale);
+    }
+}

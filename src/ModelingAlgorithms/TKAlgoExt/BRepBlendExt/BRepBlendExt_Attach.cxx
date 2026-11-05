@@ -3645,7 +3645,7 @@ void Attach::cornerPatches()
           fail(op, no_solution, "a blend's contact misses the corner's ball", {piece.rail.edge});
         ends[side] = (along.LowerDistanceParameter() - piece.sheet.alpha) / piece.sheet.beta;
       }
-      if (std::abs(ends[0] - ends[1]) * (piece.rail.to - piece.rail.from)
+      if (railStationSeparation(piece.rail, ends[0], ends[1])
           > piece.rail.resolved(limit::together))
         fail(op,
              no_solution,
