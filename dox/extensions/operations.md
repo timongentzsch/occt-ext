@@ -252,6 +252,15 @@ construction cannot deliver, and is then checked with adaptive resolution.
 This preserves previously delivered graph geometry. No interior-curvature
 allowance is changed.
 
+*Mean-plane degeneracy (derived).* Polygon area is no longer compared with a
+fixed share of squared perimeter: that would impose an aspect-ratio limit on
+exact planar rectangles. The centered area sum is unresolved only below an
+arithmetic-scale allowance `8*n*epsilon*perimeter^2`, where `n` is its number of
+vertices. Each centered radius is bounded by the perimeter, so bounding cross
+products and accumulated additions gives this conservative first-order roundoff
+policy. It is not a lower bound on geometric area or on the existence of a fill;
+all later geometric and tolerance checks remain required.
+
 *Energy assembly (derived).* A quadrature cell touches local poles `(a, b)` in order
 `p = (firstU + a) countV + firstV + b`. These indices increase strictly, so an element's
 lower triangle is already in the global lower triangle. The assembly reads the given

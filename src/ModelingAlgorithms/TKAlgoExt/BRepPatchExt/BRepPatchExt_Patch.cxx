@@ -313,10 +313,6 @@ std::vector<gp_Pnt> polygon(const std::vector<Side>& sides)
   return points;
 }
 
-//! The least area a loop encloses seen along its mean direction, as a share of the square of
-//! its length (a circle has 0.08): below it the loop is a line there and back.
-constexpr double leastArea = 1e-6;
-
 //! Below this share of its size, the difference between the longer and the shorter axis of
 //! the area a loop encloses says nothing of a direction: the 32 chords that stand for a side
 //! are that far from its curve.
@@ -333,7 +329,11 @@ Frame meanPlane(const std::vector<gp_Pnt>& points, double perimeter)
     centre += point.XYZ() / static_cast<double>(points.size());
   for (size_t i = 0; i < points.size(); ++i)
     area += (points[i].XYZ() - centre).Crossed(points[(i + 1) % points.size()].XYZ() - centre) / 2;
-  if (area.Modulus() < leastArea * perimeter * perimeter)
+  // A small aspect ratio is not degeneracy. Only reject an area unresolved
+  // at the arithmetic scale of the centered polygon's accumulated cross products.
+  const double roundoff = 8 * points.size() * std::numeric_limits<double>::epsilon()
+                          * perimeter * perimeter;
+  if (!(area.Modulus() > roundoff))
     fail(op, unsupported_geometry, "the boundary encloses no area seen from any side");
   const gp_Dir z(area);
   // The two directions in the plane are the loop's own, so that a model turned in space gets

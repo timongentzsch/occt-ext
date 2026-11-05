@@ -1743,3 +1743,17 @@ TEST(BRepPatchExt, SampledNormalRotationResolvesShiftedSingularFolds)
     EXPECT_TRUE(BRepExt::insideFault(face,0).has_value()) << shift;
   }
 }
+
+TEST(BRepPatchExt, PlanarFillsDoNotHaveAnAspectRatioLimit)
+{
+  for (double length : {100., 1000., 10000.})
+  {
+    const double width = .001;
+    BRepBuilderAPI_MakePolygon wire;
+    for (const gp_Pnt& p : {gp_Pnt(0,0,0),gp_Pnt(length,0,0),gp_Pnt(length,width,0),gp_Pnt(0,width,0)})wire.Add(p);
+    wire.Close();std::vector<uint32_t> edges;
+    for(TopExp_Explorer it(wire.Wire(),TopAbs_EDGE);it.More();it.Next())edges.push_back(BRepExt::store(session(),it.Current()));
+    const auto made=BRepExt::patch(session(),edges,{0,0,0,0},{0,0,0,0},{},{},1e-6,.1,.05,0);
+    EXPECT_NEAR(area(BRepExt::get(session(),made.evolution.resultId)),length*width,1e-8*length*width);
+  }
+}
