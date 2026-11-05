@@ -211,6 +211,19 @@ Weber and Zorin], which is why the result is looked at inside its loop before it
 corner compatibility at a vertex where several patches meet follows the vertex-enclosure condition
 [Hermann, Peters, Strotman 2009, all five pages read].
 
+*Complete curvature normalization (derived).* A seam compares the two second
+fundamental forms in one orthonormal tangent frame. For a symmetric form
+`[[a,c],[c,b]]`, its spectral norm is `|a/2+b/2| + hypot(a/2-b/2,c)`.
+The absolute mismatch is the norm of the difference; the relative mismatch is
+that norm divided by the larger norm of the two complete forms (capped at one).
+Only two exactly zero forms have zero normalization. In particular, the saddle
+`z=k*x*y` at the origin has norm `|k|` even though both diagonal entries vanish.
+This follows by solving the two-dimensional symmetric eigenproblem, using the
+normal-curvature characterization in Patrikalakis, Maekawa and Cho,
+*Shape Interrogation for Computer Aided Design and Manufacturing* (2009),
+[sections 3.3--3.4, equations (3.26)--(3.43)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node30.html).
+The normalization formula is derived here; it is not an approximation-error bound.
+
 *Energy assembly (derived).* A quadrature cell touches local poles `(a, b)` in order
 `p = (firstU + a) countV + firstV + b`. These indices increase strictly, so an element's
 lower triangle is already in the global lower triangle. The assembly reads the given

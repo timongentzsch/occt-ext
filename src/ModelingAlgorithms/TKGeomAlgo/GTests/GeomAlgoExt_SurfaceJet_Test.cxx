@@ -78,3 +78,25 @@ TEST(GeomAlgoExtSurfaceJet, TrimmedPolynomialPlaneSlab)
   EXPECT_THROW(BRepExt::requirePlanarCurve("test", curve, 0, 1, plane, .2), BRepExt::Failure);
   EXPECT_NO_THROW(BRepExt::requirePlanarCurve("test", curve, 0, .1, plane, .2));
 }
+
+// At the origin z=k*x*y has principal curvatures +/-k. Rotating the
+// observation frame cannot change either the absolute or relative mismatch.
+TEST(GeomAlgoExtSurfaceJet, MixedCurvatureRelativeDeviation)
+{
+  for (double k : {1e-18, .01, 1., 100.})
+    for (double angle : {0., .13, .7, 1.2})
+    {
+      BRepExt::SurfaceJet saddle{"test", {}, {1, 0, 0}, {0, 1, 0}, {}, {}, {0, 0, k}, {}};
+      saddle.orient(false);
+      auto doubled = saddle;
+      doubled.uv *= 2;
+      auto plane = saddle;
+      plane.uv.SetCoord(0, 0, 0);
+      const gp_Vec t(std::cos(angle), std::sin(angle), 0);
+      const auto mismatch = BRepExt::bendDifference(saddle, doubled, t);
+      EXPECT_NEAR(mismatch.first, k, k * 1e-12);
+      EXPECT_NEAR(mismatch.second, .5, 1e-12);
+      EXPECT_NEAR(BRepExt::bendDifference(saddle, plane, t).second, 1., 1e-12);
+      EXPECT_EQ(BRepExt::bendDifference(plane, plane, t).second, 0.);
+    }
+}

@@ -139,7 +139,7 @@ inline SurfaceJet surfaceJet(const char*                      operation,
 
 //! How differently two jets with one tangent plane bend, as Measure Continuity reads it: the
 //! largest difference of normal curvature over all directions, and that as a share of the
-//! largest curvature along and across `tangent` on either side. A `sign` of -1 reads `b` from
+//! largest absolute principal curvature of either complete form. A `sign` of -1 reads `b` from
 //! the other side, for a surface whose normal is the opposite of its neighbour's.
 inline std::pair<double, double> bendDifference(const SurfaceJet& a,
                                                 const SurfaceJet& b,
@@ -147,15 +147,16 @@ inline std::pair<double, double> bendDifference(const SurfaceJet& a,
                                                 double            sign = 1)
 {
   const auto   across    = a.n.Crossed(tangent).Normalized();
-  const double aa        = a.curvature(tangent, tangent) - sign * b.curvature(tangent, tangent);
-  const double bb        = a.curvature(across, across) - sign * b.curvature(across, across);
-  const double ab        = a.curvature(tangent, across) - sign * b.curvature(tangent, across);
-  const double deviation = std::abs((aa + bb) / 2) + std::hypot((aa - bb) / 2, ab);
-  const double scale     = std::max({std::abs(a.curvature(tangent, tangent)),
-                                     std::abs(a.curvature(across, across)),
-                                     std::abs(b.curvature(tangent, tangent)),
-                                     std::abs(b.curvature(across, across))});
-  return {deviation, scale > 1e-15 ? std::min(1.0, deviation / scale) : 0};
+  const double ax = a.curvature(tangent, tangent), ay = a.curvature(across, across),
+               az = a.curvature(tangent, across), bx = b.curvature(tangent, tangent),
+               by = b.curvature(across, across), bz = b.curvature(tangent, across);
+  // The spectral norm of a symmetric 2x2 form, including its mixed term.
+  const auto norm = [](double x, double y, double z) {
+    return std::abs(x / 2 + y / 2) + std::hypot(x / 2 - y / 2, z);
+  };
+  const double deviation = norm(ax - sign * bx, ay - sign * by, az - sign * bz);
+  const double scale = std::max(norm(ax, ay, az), norm(bx, by, bz));
+  return {deviation, scale > 0 ? std::min(1.0, deviation / scale) : 0};
 }
 
 } // namespace BRepExt
