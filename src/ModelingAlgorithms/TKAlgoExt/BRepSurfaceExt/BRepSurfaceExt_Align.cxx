@@ -15,6 +15,7 @@
 #include <BRepSurfaceExt_Tools.hxx>
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
+#include <limits>
 
 namespace BRepExt
 {
@@ -180,6 +181,19 @@ struct SeamSide
       surface->SetPole(k, depth(row), p);
   }
 
+  double weight(int row, int k) const
+  {
+    return alongV() ? surface->Weight(depth(row), k) : surface->Weight(k, depth(row));
+  }
+
+  void setWeight(int row, int k, double w)
+  {
+    if (alongV())
+      surface->SetWeight(depth(row), k, w);
+    else
+      surface->SetWeight(k, depth(row), w);
+  }
+
   std::pair<double, double> range() const
   {
     double a, b, c, d;
@@ -262,10 +276,20 @@ EvolutionData alignCollinear(OcctKernel& k,
   const auto ref       = surfacing::boundaryOf(k, op, referenceId, supportId);
   if (faceShape.IsSame(ref.face))
     fail(op, invalid_input, "the reference must be a different face");
-  SeamSide   moving{surfacing::editable(op, faceShape),
+  SeamSide moving{surfacing::editable(op, faceShape, false),
                   surfacing::boundarySide(op, faceShape, own.edge)};
-  SeamSide   fixed{surfacing::editable(op, ref.face),
+  SeamSide fixed{surfacing::editable(op, ref.face, false),
                  surfacing::boundarySide(op, ref.face, ref.edge)};
+  for (const SeamSide* seam : {&moving, &fixed})
+  {
+    const auto& s = seam->surface;
+    if ((s->IsURational() || s->IsVRational())
+        && (s->UMultiplicity(1) != s->UDegree() + 1
+            || s->UMultiplicity(s->NbUKnots()) != s->UDegree() + 1
+            || s->VMultiplicity(1) != s->VDegree() + 1
+            || s->VMultiplicity(s->NbVKnots()) != s->VDegree() + 1))
+      fail(op, unsupported_geometry, "rational row alignment requires clamped boundary knots");
+  }
   const auto endPoint = [](const SeamSide& s, bool last) {
     const auto [a, b] = s.range();
     double u0, u1, v0, v1;
@@ -277,14 +301,14 @@ EvolutionData alignCollinear(OcctKernel& k,
   // Whether the reference runs the other way along the edge.
   const gp_Pnt a0 = endPoint(moving, false), a1 = endPoint(moving, true),
                b0 = endPoint(fixed, false), b1 = endPoint(fixed, true);
-  const bool opposed = a0.Distance(b1) + a1.Distance(b0) < a0.Distance(b0) + a1.Distance(b1);
+  const bool   opposed = a0.Distance(b1) + a1.Distance(b0) < a0.Distance(b0) + a1.Distance(b1);
   // A part of the reference is the whole of a copy: the moving row is laid on it.
   if (partial)
   {
     const auto [a, b] = fixed.range();
     const double from = opposed ? 1 - partialEnd : partialStart,
                  to   = opposed ? 1 - partialStart : partialEnd;
-    double u0, u1, v0, v1;
+    double       u0, u1, v0, v1;
     fixed.surface->Bounds(u0, u1, v0, v1);
     if (fixed.alongV())
       fixed.surface->Segment(u0, u1, a + from * (b - a), a + to * (b - a));
@@ -307,8 +331,30 @@ EvolutionData alignCollinear(OcctKernel& k,
   const int count = moving.rows();
   if (count != fixed.rows())
     fail(op, no_solution, "the two surfaces could not be brought to one basis along the edge");
-  const auto partner = [&](int i) { return opposed ? count + 1 - i : i; };
-  double     ratio   = 0;
+  const auto partner  = [&](int i) { return opposed ? count + 1 - i : i; };
+  const bool rational = moving.surface->IsURational() || moving.surface->IsVRational()
+                        || fixed.surface->IsURational() || fixed.surface->IsVRational();
+  // Euclidean constant row ratios imply proportional rational derivatives only
+  // if the reference's adjacent weight row is proportional to its boundary row.
+  // Otherwise the quotient derivative contains an additional, non-tangential
+  // term. Keep that unsupported case explicit rather than claim a tangent join.
+  if (matchRatio && rational)
+  {
+    const double weightRatio = fixed.weight(2, 1) / fixed.weight(1, 1);
+    if (!std::isfinite(weightRatio) || weightRatio <= 0)
+      fail(op, unsupported_geometry, "rational row weight ratios must be finite and positive");
+    for (int i = 2; i <= count; ++i)
+    {
+      const double r = fixed.weight(2, i) / fixed.weight(1, i);
+      if (!std::isfinite(r) || r <= 0
+          || std::abs(r - weightRatio)
+               > 64 * std::numeric_limits<double>::epsilon() * std::max(r, weightRatio))
+        fail(op,
+             unsupported_geometry,
+             "constant tangent row ratios require proportional reference weight rows");
+    }
+  }
+  double ratio = 0;
   if (matchRatio)
   {
     for (int i = 1; i <= count; ++i)
@@ -326,7 +372,10 @@ EvolutionData alignCollinear(OcctKernel& k,
     const gp_Vec fromFixed(f1, f0);
     const gp_Vec fromMoving(m0, m1);
     gp_Vec       way = symmetric ? fromFixed.Normalized() + fromMoving.Normalized() : fromFixed;
-    if (way.Magnitude() <= 1e-9 * fixedLength)
+    // In the symmetric case |a+b| = 2 cos(theta/2) for unit directions.
+    // This conditioning bound must therefore be dimensionless. Physical row
+    // degeneracy has already been tested separately above.
+    if (symmetric && way.Magnitude() <= 1e-9)
       fail(op, no_solution, "the two surfaces fold back on each other along the edge");
     way.Normalize();
     const gp_Pnt seam   = symmetric ? gp_Pnt((m0.XYZ() + f0.XYZ()) / 2) : f0;
@@ -342,6 +391,15 @@ EvolutionData alignCollinear(OcctKernel& k,
       running -= way * running.Dot(way);
       leaning = (way + running.Normalized() * lean).Normalized();
     }
+    // A rational boundary is determined by its weights as well as its poles.
+    // Copy both reference weight rows: the boundary denominators then agree,
+    // and a common pole-distance ratio makes the cross derivatives proportional
+    // even when the weights vary along the seam. Deeper rows keep their weights.
+    if (rational)
+    {
+      moving.setWeight(1, i, fixed.weight(1, partner(i)));
+      moving.setWeight(2, i, fixed.weight(2, partner(i)));
+    }
     moving.setPole(1, i, seam);
     moving.setPole(2, i, seam.Translated(leaning * length));
     if (symmetric)
@@ -350,14 +408,15 @@ EvolutionData alignCollinear(OcctKernel& k,
       fixed.setPole(2, partner(i), seam.Translated(way * -fixedLength));
     }
   }
-  const auto made = surfacing::makeFace(op, moving.surface, tolerance, faceShape.Orientation());
+  const auto made = surfacing::makeFace(op, moving.surface, tolerance, faceShape.Orientation(), true);
   if (!symmetric)
     return stored(k, made);
   TopoDS_Compound both;
   BRep_Builder    builder;
   builder.MakeCompound(both);
   builder.Add(both, made);
-  builder.Add(both, surfacing::makeFace(op, fixed.surface, tolerance, ref.face.Orientation()));
+  builder.Add(both,
+              surfacing::makeFace(op, fixed.surface, tolerance, ref.face.Orientation(), true));
   return stored(k, both);
 }
 } // namespace BRepExt

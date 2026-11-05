@@ -20,6 +20,7 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
+#include <BRep_Builder.hxx>
 #include <Geom2d_Curve.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
@@ -292,14 +293,31 @@ std::vector<FitCondition> conditions(const char*                             op,
 TopoDS_Face makeFace(const char*                             op,
                      const occ::handle<Geom_BSplineSurface>& s,
                      double                                  tolerance,
-                     TopAbs_Orientation                      orientation)
+                     TopAbs_Orientation                      orientation,
+                     bool                                    useTopologyTolerance)
 {
   if (!std::isfinite(tolerance) || tolerance <= 0)
     fail(op, invalid_input, "tolerance must be positive and finite");
   BRepBuilderAPI_MakeFace builder(s, Precision::Confusion());
-  if (!builder.IsDone() || !BRepCheck_Analyzer(builder.Face()).IsValid())
+  if (!builder.IsDone())
     fail(op, no_solution, "the result is not a valid face");
-  auto face = builder.Face();
+  auto face  = builder.Face();
+  bool valid = BRepCheck_Analyzer(face).IsValid();
+  if (!valid && useTopologyTolerance && tolerance > Precision::Confusion())
+  {
+    // The surface and its exact isocurves are unchanged. At large coordinates,
+    // their floating-point evaluations can disagree beyond OCCT's fixed default.
+    // Carry only the caller's existing positional allowance on the new topology.
+    BRep_Builder topology;
+    topology.UpdateFace(face, tolerance);
+    for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next())
+      topology.UpdateEdge(TopoDS::Edge(it.Current()), tolerance);
+    for (TopExp_Explorer it(face, TopAbs_VERTEX); it.More(); it.Next())
+      topology.UpdateVertex(TopoDS::Vertex(it.Current()), tolerance);
+    valid = BRepCheck_Analyzer(face).IsValid();
+  }
+  if (!valid)
+    fail(op, no_solution, "the result is not a valid face");
   face.Orientation(orientation);
   if (auto fault = insideFault(face, 0))
     fail(op, no_solution, *fault);

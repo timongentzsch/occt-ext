@@ -955,3 +955,51 @@ A fitted tensor spline through circular sections is not thereby certified to be 
 exact pipe. The kept-face operation has no retained spine/radius descriptor for a
 general spline support. Inferring one from a nominal size and replacing the support
 would change the input surface; this change does not do so.
+
+### Collinear alignment: units and rational boundary rows
+
+Collinear alignment uses exact degree elevation and the union of the two normalized
+boundary knot vectors, with the larger multiplicity at each knot. It edits rows
+directly and has no degree-five fitting restriction. Knot insertion preserves the
+parameterized surface: Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer
+Aided Design and Manufacturing*, hyperbook (2009), section 1.4.3, equations
+(1.74)-(1.76), <https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node18.html>.
+OCCT's `Geom_BSplineSurface::IncreaseDegree` preserves the geometry, while
+`InsertUKnot` and `InsertVKnot` with `Add=false` raise a knot to the requested
+multiplicity: <https://dev.opencascade.org/doc/refman/html/class_geom___b_spline_surface.html>.
+
+**Derived here:** for unit row directions a and b with angle theta,
+|a+b|=2 cos(theta/2). The symmetric fold check compares this dimensionless
+quantity with 1e-9, a conditioning choice retained from the unit-scale algorithm;
+physical short-row degeneracy is checked separately. Multiplying model lengths
+cannot change this angular verdict.
+
+Rational supports must have clamped boundary knots. Their rows carry weights as well as Euclidean poles. The moving boundary and
+next row receive the reference's corresponding weights, after exact refinement;
+deeper rows retain their weights. From the rational surface definition in the same
+authors' section 1.5, equation (1.91),
+<https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node20.html>, **derived here**:
+write the boundary as S=A0/W0. Its cross derivative is
+c (A1-S W1)/W0, where c is the positive endpoint degree/knot factor.
+If the reference next-row weights are a constant multiple of its boundary weights,
+then sum N_i w1_i P0_i = S W1. Consequently placing the moving next poles at
+P0_i+r(P0_i-P1_i), with common r>0, gives the opposite proportional derivative.
+This proves tangency for the constant-ratio option, including rational curved
+boundaries. The proportional-weight condition is checked to 64 machine epsilons
+relative (an arithmetic allowance); a nonproportional reference weight row with
+that option remains unsupported. Without the option, pole lines align but neither
+polynomial nor rational variable row ratios guarantee exact G1. Skew likewise
+changes the target lines and is not covered by the zero-skew tangency argument.
+
+At very large coordinates, independently evaluated exact isocurves and surface
+points can differ by more than OCCT's default absolute confusion tolerance. The
+Collinear face construction may carry the requested positional tolerance onto its
+new face, edges and vertices if the default metadata does not validate. It then
+rechecks BRep validity and the existing interior check. No poles, knots, weights,
+curves or parameter curves are fitted or moved by this step, and no tolerance
+larger than the caller's allowance is introduced. Already valid faces retain their
+original metadata; the option is disabled for other consumers of the face builder.
+The scale tests multiply both coordinates and the positional allowance by the
+same factor, while checking boundary equality more tightly (1e-12 times scale)
+and unit-normal agreement independently. Both planar and curved cases are tested
+at scales 1e-3, 1 and 3e9, at rest and in a rotated, translated pose.

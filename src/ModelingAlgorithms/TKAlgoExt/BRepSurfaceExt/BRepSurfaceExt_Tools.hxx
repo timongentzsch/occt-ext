@@ -68,7 +68,8 @@ Standard_EXPORT std::vector<FitCondition> conditions(const char*,
 Standard_EXPORT TopoDS_Face               makeFace(const char*,
                                                    const occ::handle<Geom_BSplineSurface>&,
                                                    double             tolerance,
-                                                   TopAbs_Orientation orientation = TopAbs_FORWARD);
+                                                   TopAbs_Orientation orientation = TopAbs_FORWARD,
+                                                   bool               useTopologyTolerance = false);
 Standard_EXPORT void                      measure(const char*,
                                                   const TopoDS_Face&,
                                                   const std::vector<Constraint>&,

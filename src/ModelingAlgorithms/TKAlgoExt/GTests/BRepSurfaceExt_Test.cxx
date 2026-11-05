@@ -517,3 +517,234 @@ TEST(BRepSurfaceExt, AlignmentPolePriorPreservesTheInputWithoutRelaxingTheSeam)
             EXPECT_TRUE(input->Pole(i, j).IsEqual(poles(i, j), 0));
       }
 }
+
+namespace
+{
+struct CollinearPair
+{
+  TopoDS_Face moving, reference;
+  TopoDS_Edge movingEdge, referenceEdge;
+};
+
+CollinearPair collinearPair(double scale,
+                            bool   posed,
+                            int    degree,
+                            bool   rational,
+                            bool   folded = false)
+{
+  gp_Trsf pose;
+  if (posed)
+  {
+    pose.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 2, 3)), 0.7);
+    pose.SetTranslationPart(gp_Vec(2 * scale, -3 * scale, 4 * scale));
+  }
+  const auto make = [&](bool moving) {
+    const int                  count = degree == 1 ? 2 : 4;
+    NCollection_Array2<gp_Pnt> poles(1, count, 1, count);
+    NCollection_Array2<double> weights(1, count, 1, count);
+    NCollection_Array1<double> knots(1, 2);
+    NCollection_Array1<int>    mult(1, 2);
+    knots(1) = 0;
+    knots(2) = 1;
+    mult(1) = mult(2) = count;
+    for (int i = 1; i <= count; ++i)
+      for (int j = 1; j <= count; ++j)
+      {
+        const double x = (moving && !folded ? 1 : -1) * (i - 1.0);
+        poles(i, j) =
+          gp_Pnt(
+            scale * x,
+            scale * (j - 1),
+            scale * (degree == 1 ? 0 : 0.1 * (j - 1) * (j - 1) + (moving && !folded ? 0.2 * x : 0)))
+            .Transformed(pose);
+        weights(i, j) = rational ? 1 + (moving ? 0.11 : 0.07) * j : 1;
+      }
+    occ::handle<Geom_BSplineSurface> s =
+      new Geom_BSplineSurface(poles, weights, knots, knots, mult, mult, count - 1, count - 1);
+    s->IncreaseDegree(degree, !moving && degree == 6 ? 9 : degree);
+    if (degree > 1)
+    {
+      if (moving)
+        s->InsertVKnot(0.37, 1, 1e-12);
+      else
+        s->InsertVKnot(0.61, 2, 1e-12);
+    }
+    if (posed)
+      s->UReverse();
+    if (!moving && posed)
+      s->VReverse();
+    if (degree == 9)
+      s->ExchangeUV();
+    auto face = BRepBuilderAPI_MakeFace(s, 1e-7).Face();
+    // The same relative positional allowance at every homothetic scale.
+    const double allowance = std::max(1e-7, 1e-7 * scale);
+    BRep_Builder topology;
+    topology.UpdateFace(face, allowance);
+    for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next())
+      topology.UpdateEdge(TopoDS::Edge(it.Current()), allowance);
+    for (TopExp_Explorer it(face, TopAbs_VERTEX); it.More(); it.Next())
+      topology.UpdateVertex(TopoDS::Vertex(it.Current()), allowance);
+    return face;
+  };
+  CollinearPair pair;
+  pair.moving     = make(true);
+  pair.reference  = make(false);
+  const auto edge = [&](const TopoDS_Face& f) {
+    for (TopExp_Explorer it(f, TopAbs_EDGE); it.More(); it.Next())
+      if (BRepExt::surfacing::boundarySide("test", f, TopoDS::Edge(it.Current()))
+          == (degree == 9 ? 2 : 0) + (posed ? 1 : 0))
+        return TopoDS::Edge(it.Current());
+    return TopoDS_Edge();
+  };
+  pair.movingEdge    = edge(pair.moving);
+  pair.referenceEdge = edge(pair.reference);
+  return pair;
+}
+
+void checkCollinear(double scale, bool posed, int degree, bool rational, bool symmetric)
+{
+  SCOPED_TRACE(::testing::Message()
+               << "scale=" << scale << " posed=" << posed << " degree=" << degree
+               << " rational=" << rational << " symmetric=" << symmetric);
+  const auto pair = collinearPair(scale, posed, degree, rational);
+  ASSERT_TRUE(BRepExt::invalidity(pair.moving).empty());
+  ASSERT_TRUE(BRepExt::invalidity(pair.reference).empty());
+  const auto result = BRepExt::alignCollinear(session(),
+                                              BRepExt::store(session(), pair.moving),
+                                              BRepExt::store(session(), pair.movingEdge),
+                                              BRepExt::store(session(), pair.referenceEdge),
+                                              BRepExt::store(session(), pair.reference),
+                                              symmetric,
+                                              true,
+                                              0,
+                                              1,
+                                              0,
+                                              0,
+                                              1e-7 * scale);
+  std::vector<TopoDS_Face> faces;
+  for (TopExp_Explorer it(BRepExt::get(session(), result.resultId), TopAbs_FACE); it.More();
+       it.Next())
+    faces.push_back(TopoDS::Face(it.Current()));
+  ASSERT_EQ(faces.size(), symmetric ? 2u : 1u);
+  for (const auto& face : faces)
+  {
+    EXPECT_TRUE(BRepExt::invalidity(face).empty());
+    const double allowance = std::max(1e-7, 1e-7 * scale);
+    EXPECT_LE(BRep_Tool::Tolerance(face), allowance);
+    for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next())
+      EXPECT_LE(BRep_Tool::Tolerance(TopoDS::Edge(it.Current())), allowance);
+    for (TopExp_Explorer it(face, TopAbs_VERTEX); it.More(); it.Next())
+      EXPECT_LE(BRep_Tool::Tolerance(TopoDS::Vertex(it.Current())), allowance);
+  }
+  const auto a = BRep_Tool::Surface(faces[0]);
+  const auto b = BRep_Tool::Surface(symmetric ? faces[1] : pair.reference);
+  for (int j = 0; j <= 40; ++j)
+  {
+    gp_Pnt       pa, pb;
+    gp_Vec       au, av, bu, bv;
+    const double across = posed ? 1 : 0;
+    const double t = j / 40.0, rt = posed ? 1 - t : t;
+    a->D1(degree == 9 ? t : across, degree == 9 ? across : t, pa, au, av);
+    b->D1(degree == 9 ? rt : across, degree == 9 ? across : rt, pb, bu, bv);
+    const auto   input = BRep_Tool::Surface(pair.moving);
+    const double far   = 1 - across;
+    EXPECT_LE(a->Value(degree == 9 ? t : far, degree == 9 ? far : t)
+                .Distance(input->Value(degree == 9 ? t : far, degree == 9 ? far : t)),
+              scale * 1e-12);
+    EXPECT_LE(pa.Distance(pb), scale * 1e-12);
+    EXPECT_LE(au.Crossed(av).Normalized().Crossed(bu.Crossed(bv).Normalized()).Magnitude(), 1e-11);
+  }
+}
+} // namespace
+
+TEST(BRepSurfaceExt, CollinearSymmetricUsesAnAngularFoldBoundAtEveryScale)
+{
+  for (double scale : {0.001, 1.0, 3e9})
+    for (bool posed : {false, true})
+      for (int degree : {1, 3})
+        EXPECT_NO_THROW(checkCollinear(scale, posed, degree, false, true))
+          << "scale=" << scale << " posed=" << posed << " degree=" << degree;
+}
+
+TEST(BRepSurfaceExt, CollinearHarmonisesHigherDegreesAndRationalRowsExactly)
+{
+  for (double scale : {0.01, 1.0, 100.0})
+    for (bool posed : {false, true})
+      for (int degree : {6, 9})
+        for (bool rational : {false, true})
+          for (bool symmetric : {false, true})
+            EXPECT_NO_THROW(checkCollinear(scale, posed, degree, rational, symmetric));
+}
+
+TEST(BRepSurfaceExt, CollinearConstantRatioChecksRationalDerivativeWeights)
+{
+  const auto pair = collinearPair(1, false, 6, true);
+  auto       s    = occ::down_cast<Geom_BSplineSurface>(BRep_Tool::Surface(pair.reference)->Copy());
+  s->SetWeight(2, 2, 2 * s->Weight(2, 2));
+  const auto  reference = BRepBuilderAPI_MakeFace(s, 1e-7).Face();
+  TopoDS_Edge edge;
+  for (TopExp_Explorer it(reference, TopAbs_EDGE); it.More(); it.Next())
+    if (BRepExt::surfacing::boundarySide("test", reference, TopoDS::Edge(it.Current())) == 0)
+      edge = TopoDS::Edge(it.Current());
+  try
+  {
+    BRepExt::alignCollinear(session(),
+                            BRepExt::store(session(), pair.moving),
+                            BRepExt::store(session(), pair.movingEdge),
+                            BRepExt::store(session(), edge),
+                            BRepExt::store(session(), reference),
+                            false,
+                            true,
+                            0,
+                            1,
+                            0,
+                            0,
+                            1e-7);
+    FAIL() << "a Euclidean row ratio does not certify general rational derivatives";
+  }
+  catch (const BRepExt::Failure& failure)
+  {
+    EXPECT_EQ(failure.reason, BRepExt::unsupported_geometry);
+  }
+  // General positive rational weights still admit the pole-collinearity option.
+  // Only its boundary equality is promised when the ratio is allowed to vary.
+  const auto result = BRepExt::alignCollinear(session(),
+                                              BRepExt::store(session(), pair.moving),
+                                              BRepExt::store(session(), pair.movingEdge),
+                                              BRepExt::store(session(), edge),
+                                              BRepExt::store(session(), reference),
+                                              false,
+                                              false,
+                                              0,
+                                              1,
+                                              0,
+                                              0,
+                                              1e-7);
+  const auto made   = TopoDS::Face(BRepExt::get(session(), result.resultId));
+  EXPECT_TRUE(BRepExt::invalidity(made).empty());
+  const auto surface = BRep_Tool::Surface(made);
+  for (int j = 0; j <= 40; ++j)
+    EXPECT_LE(surface->Value(0, j / 40.0).Distance(s->Value(0, j / 40.0)), 1e-12);
+}
+
+TEST(BRepSurfaceExt, CollinearStillRejectsOpposingRowsAtEveryScale)
+{
+  for (double scale : {0.001, 1.0, 3e9})
+    for (bool posed : {false, true})
+    {
+      const auto pair = collinearPair(scale, posed, 3, false, true);
+      EXPECT_THROW(BRepExt::alignCollinear(session(),
+                                           BRepExt::store(session(), pair.moving),
+                                           BRepExt::store(session(), pair.movingEdge),
+                                           BRepExt::store(session(), pair.referenceEdge),
+                                           BRepExt::store(session(), pair.reference),
+                                           true,
+                                           true,
+                                           0,
+                                           1,
+                                           0,
+                                           0,
+                                           1e-7),
+                   BRepExt::Failure);
+    }
+}
