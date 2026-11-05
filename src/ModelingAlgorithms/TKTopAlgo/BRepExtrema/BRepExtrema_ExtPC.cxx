@@ -38,7 +38,9 @@ void BRepExtrema_ExtPC::Initialize(const TopoDS_Edge& E)
   double U1, U2;
   myHC       = new BRepAdaptor_Curve(E);
   double Tol = std::min(BRep_Tool::Tolerance(E), Precision::Confusion());
-  Tol        = std::max(myHC->Resolution(Tol), Precision::PConfusion());
+  // Extrema_ExtPC expects TolF in length units: its stationary function is
+  // (C(u)-P).C'(u) / |C'(u)|. Converting it to parameter units can make
+  // the whole function fall below tolerance on short or slowly parameterized spans.
   BRep_Tool::Range(E, U1, U2);
   myExtPC.Initialize(*myHC, U1, U2, Tol);
 }

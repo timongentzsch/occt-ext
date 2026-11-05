@@ -18,8 +18,14 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepExtrema_ExtPC.hxx>
+#include <Geom_BSplineCurve.hxx>
 #include <Geom_Circle.hxx>
 #include <Geom_Line.hxx>
+#include <NCollection_Array1.hxx>
+#include <gp_Trsf.hxx>
+
+#include <cmath>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Dir.hxx>
@@ -91,4 +97,59 @@ TEST(BRepExtrema_DistShapeShapeTest, EdgeFace_Null3DCurve_NoCrash)
 
   BRepExtrema_DistShapeShape aDist(aEdge, aFace, 10.0);
   (void)aDist;
+}
+
+// The normalized stationary-distance function has length units. A parameter
+// tolerance must not make it "all null" on a short or slowly parameterized span.
+TEST(BRepExtrema_DistShapeShapeTest, LinearSplineProjectionIndependentOfParameterScale)
+{
+  for (const double aLength : {1.0, 0.01, 0.001, 0.0001})
+    for (const double aSpan : {1.0, 100.0, 10000.0})
+      for (const double anAngle : {0.0, 0.73, 2.17})
+        for (const bool isTrimmed : {false, true})
+          for (const bool isRational : {false, true})
+            {
+              SCOPED_TRACE(::testing::Message() << aLength << " " << aSpan << " " << anAngle
+                                               << " " << isTrimmed << " " << isRational);
+              gp_Trsf aPose;
+              aPose.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 2, 3)), anAngle);
+              aPose.SetTranslationPart(gp_Vec(2, -3, 5));
+              NCollection_Array1<gp_Pnt> aPoles(1, 3);
+              aPoles(1) = gp_Pnt(0, 0, 0);
+              aPoles(2) = gp_Pnt(aLength, 0, 0);
+              aPoles(3) = gp_Pnt(2 * aLength, aLength, 0);
+              for (auto& aPole : aPoles)
+                aPole.Transform(aPose);
+              NCollection_Array1<double> aKnots(1, 3);
+              aKnots(1) = 0;
+              aKnots(2) = aSpan;
+              aKnots(3) = 2 * aSpan;
+              NCollection_Array1<int> aMults(1, 3);
+              aMults(1) = aMults(3) = 2;
+              aMults(2) = 1;
+              NCollection_Array1<double> aWeights(1, 3);
+              aWeights(1) = aWeights(3) = 1;
+              aWeights(2) = 2;
+              const occ::handle<Geom_BSplineCurve> aCurve = isRational
+                ? new Geom_BSplineCurve(aPoles, aWeights, aKnots, aMults, 1)
+                : new Geom_BSplineCurve(aPoles, aKnots, aMults, 1);
+              const TopoDS_Edge anEdge = BRepBuilderAPI_MakeEdge(
+                aCurve, isTrimmed ? 0.1 * aSpan : 0.0, isTrimmed ? 0.8 * aSpan : 2 * aSpan);
+              const gp_Pnt aQuery = gp_Pnt(0.37 * aLength, 1e-7, 0).Transformed(aPose);
+              const TopoDS_Vertex aVertex = BRepBuilderAPI_MakeVertex(aQuery);
+              BRepExtrema_DistShapeShape aDistance(aVertex, anEdge);
+              ASSERT_TRUE(aDistance.IsDone());
+              EXPECT_NEAR(aDistance.Value(), 1e-7, 4e-15);
+              BRepExtrema_ExtPC anExtrema(aVertex, anEdge);
+              ASSERT_TRUE(anExtrema.IsDone());
+              ASSERT_GE(anExtrema.NbExt(), 1);
+              double aMinimum = 1.0;
+              for (int i = 1; i <= anExtrema.NbExt(); ++i)
+              {
+                aMinimum = std::min(aMinimum, std::sqrt(anExtrema.SquareDistance(i)));
+                EXPECT_GE(anExtrema.Parameter(i), isTrimmed ? 0.1 * aSpan : 0.0);
+                EXPECT_LE(anExtrema.Parameter(i), isTrimmed ? 0.8 * aSpan : 2 * aSpan);
+              }
+              EXPECT_NEAR(aMinimum, 1e-7, 4e-15);
+            }
 }
