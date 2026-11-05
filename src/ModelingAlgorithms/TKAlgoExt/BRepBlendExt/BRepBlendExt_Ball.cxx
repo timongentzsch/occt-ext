@@ -655,7 +655,7 @@ static bool frameTangents(const Rail&                      rail,
       if (frame.side == side)
       {
         const double distance =
-          GCPnts_AbscissaPoint::Length(rail.curve, std::min(s.t, frame.t), std::max(s.t, frame.t));
+          railLength(rail, s.t, frame.t);
         if (!(frame.reach > limit::degenerate * rail.scale))
           return false;
         const double x      = std::clamp(distance / frame.reach, 0.0, 1.0);

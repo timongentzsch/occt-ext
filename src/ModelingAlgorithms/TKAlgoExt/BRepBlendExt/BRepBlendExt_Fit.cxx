@@ -266,7 +266,7 @@ Fitted fit(const Rail&                      rail,
     for (const auto& frame : frames)
     {
       const double distance =
-        GCPnts_AbscissaPoint::Length(rail.curve, std::min(t, frame.t), std::max(t, frame.t));
+        railLength(rail, t, frame.t);
       if (!std::isfinite(distance) || !std::isfinite(frame.reach)
           || !(frame.reach > limit::degenerate * rail.scale))
         fail(rail.op, no_solution, "a section frame has no finite terminal distance", {rail.edge});

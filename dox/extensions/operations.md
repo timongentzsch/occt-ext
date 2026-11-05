@@ -33,6 +33,46 @@ results; Hermann 1995 and Lukacs 1998 are cited second-hand there); Salvi and VÃ
 surfaces with curvature continuity" (2014; statement of the Linkage Curve Theorem, appendix proof not
 read); Zang, Liu, Lai, GMP 2008, sections 1-3 (Hu's extension; Hu 2002 not obtained); de Boor 1972.
 
+*Arc length beyond a trimmed rail.* A rail can outlive the edge that supplied its parameter
+range: the adjoining supports still carry the ball beyond an endpoint. For a nonperiodic multi-span
+curve, `GCPnts_AbscissaPoint::Length` sums only the intersections with the adaptor's continuity
+intervals (`computeLength`, composite case); an interval wholly beyond the edge consequently has
+zero reported length. Expand a copy of the adaptor's parameter range before asking for arc
+length: its original spline and rigid transform are retained, including knots hidden by the edge
+trim. Integrating one supposed end span without exposing those hidden knots is insufficient.
+The curve itself is neither fitted nor extended by a new geometric construction.
+
+For the inverse, use the unchanged solver inside the edge's range. Outside, start with the local
+speed estimate `distance / |C'(t)|` and double the parameter interval until its integrated length
+brackets the requested distance. This bracketing argument is derived here: on a regular branch,
+`d(length)/dt = |C'(t)| > 0`, so the length is strictly monotone; if a finite parameter realizes the
+requested length, a finite number of doublings reaches it. Non-finite arithmetic and a step with no representable parameter progress do not supply a bracket
+and are refused. Outside the trim, integration and inversion use the existing scale-resolved
+`limit::solved` tolerance; no seam or construction bound changes. Integration and root solves remain numerical, without an interval certificate; no global existence claim is made past a
+singularity or where the continued curve has insufficient length.
+
+The closed-form check uses (t,t^2), whose primitive is
+`t sqrt(1+4t^2)/2 + asinh(2t)/4`, across both endpoints and an inserted knot, both directions,
+rotated and at scales 1e-3, 1 and 1e3 (294 interval/inverse checks). This primitive is derived here.
+A held-out rational quadratic circular arc, also with an inserted knot and trimmed endpoints,
+uses radius times the difference of endpoint `atan2` angles as its oracle (147 more interval/inverse
+checks at those scales). A C1 curve that is a line up to t=1/4 and (t,(t-1/4)^2) beyond it tests
+both trims that hide that knot, in both directions (98 interval/inverse checks); the earlier
+single-span extension integration fails this family. No oracle uses the integration code for its
+expected length.
+
+This is the arc length of the **rail**, not a replacement of the centre path by an arc-length
+march. Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided Design and
+Manufacturing*, hyperbook edition (2009), [section 5.8.2.3, equations (5.101)-(5.105)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node109.html),
+give the normalized intersection tangent and parameter ODEs; transverse intersection is required,
+and the normalized cross product fails at tangency. Their topology discussion also requires a start
+on every connected branch before marching. Jaiswal, Ghosal and Gurumoorthy,
+[*An Efficient Algorithm for Circular Blending of Edges*](https://mecheng.iisc.ac.in/~asitava/sharad.pdf)
+(2001), introduction and theoretical background, explicitly separate geometric spine construction
+from trimming and integration into a valid body: that paper addresses the former. Neither result
+by itself proves ownership of every retained trimmed region or that a coupled section satisfies
+its prescribed law; those remain separate acceptance requirements.
+
 *Steep and flat wedges.* In a wedge of opening psi between two planes the ball's centre lies
 r / sin(psi / 2) from the edge (the centre is r from both planes, on the bisector), and its contacts
 r cot(psi / 2) from it. Past an edge's end the blend is carried on while the ball goes on with the rail;

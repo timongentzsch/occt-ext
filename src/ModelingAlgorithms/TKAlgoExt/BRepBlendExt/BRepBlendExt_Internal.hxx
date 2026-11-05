@@ -344,15 +344,73 @@ struct Rail
   }
 };
 
-//! A physical arclength step on a rail, expressed in the fit's normalized parameter.
-inline std::optional<double> railUAtDistance(const Rail& rail, double t, double distance)
+//! A copy of the rail adaptor with a parameter range that includes [lo, hi]. Keep the
+//! underlying spline's knots even when they were outside the original edge trim. Trim() on
+//! BRepAdaptor_Curve temporarily changes the receiver, so operate on a local copy.
+inline Handle(Adaptor3d_Curve) railRange(const Rail& rail, double lo, double hi)
+{
+  BRepAdaptor_Curve copy(rail.curve);
+  return copy.Trim(std::min(lo, copy.FirstParameter()),
+                   std::max(hi, copy.LastParameter()),
+                   tol::parameter);
+}
+
+//! Arclength along the continued rail, including continuity intervals hidden by its edge trim.
+inline double railLength(const Rail& rail, double t0, double t1)
+{
+  const double lo = std::min(t0, t1), hi = std::max(t0, t1);
+  if (rail.curve.IsPeriodic()
+      || (lo >= rail.curve.FirstParameter() && hi <= rail.curve.LastParameter()))
+    return GCPnts_AbscissaPoint::Length(rail.curve, lo, hi);
+  return GCPnts_AbscissaPoint::Length(*railRange(rail, lo, hi), lo, hi, rail.resolved(limit::solved));
+}
+
+//! The parameter `distance` of arclength from t. A regular curve's length is monotone in
+//! each direction, so enlarging the range until it contains that length brackets the inverse.
+//! This changes only the adaptor's range: point and derivative evaluation keep the same curve.
+inline std::optional<double> railParameterAt(const Rail& rail, double t, double distance)
 {
   if (!std::isfinite(t) || !std::isfinite(distance))
     return {};
-  GCPnts_AbscissaPoint along(rail.curve, distance, t);
-  if (!along.IsDone())
+  if (distance == 0)
+    return t;
+  const double first = rail.curve.FirstParameter(), last = rail.curve.LastParameter();
+  if (rail.curve.IsPeriodic()
+      || (t >= first && t <= last
+          && std::abs(distance) <= railLength(rail, t, distance < 0 ? first : last)))
+  {
+    GCPnts_AbscissaPoint along(rail.curve, distance, t);
+    return along.IsDone() ? std::optional<double>(along.Parameter()) : std::nullopt;
+  }
+  gp_Pnt p;
+  gp_Vec d;
+  rail.curve.D1(t, p, d);
+  if (!(d.Magnitude() > 0))
     return {};
-  const double u = rail.u(along.Parameter());
+  double step = distance / d.Magnitude();
+  for (;; step *= 2)
+  {
+    const double end = t + step;
+    if (!std::isfinite(end) || end == t)
+      return {};
+    const auto curve = railRange(rail, std::min(t, end), std::max(t, end));
+    const double length = GCPnts_AbscissaPoint::Length(*curve, t, end, rail.resolved(limit::solved));
+    if (!std::isfinite(length))
+      return {};
+    if (length < std::abs(distance))
+      continue;
+    GCPnts_AbscissaPoint along(rail.resolved(limit::solved), *curve, distance, t);
+    return along.IsDone() ? std::optional<double>(along.Parameter()) : std::nullopt;
+  }
+}
+
+//! A physical arclength step on a rail, expressed in the fit's normalized parameter.
+inline std::optional<double> railUAtDistance(const Rail& rail, double t, double distance)
+{
+  const auto at = railParameterAt(rail, t, distance);
+  if (!at)
+    return {};
+  const double u = rail.u(*at);
   if (!std::isfinite(u))
     return {};
   return u;

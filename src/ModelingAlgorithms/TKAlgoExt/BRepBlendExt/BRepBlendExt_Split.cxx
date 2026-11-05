@@ -56,7 +56,7 @@ static CouplingWindow couplingWindow(const Handle(Geom_BSplineSurface)& surface,
                                      bool                               lift      = false)
 {
   CouplingWindow result;
-  const double   length = GCPnts_AbscissaPoint::Length(rail.curve, rail.from, rail.to);
+  const double   length = railLength(rail, rail.from, rail.to);
   const double   radius = std::max(std::abs(rail.s[0].distance), std::abs(rail.s[1].distance));
   if (!std::isfinite(radius) || !std::isfinite(length) || !std::isfinite(requested))
     return result;
@@ -476,8 +476,8 @@ static bool sectionJetBreak(const Rail& a,
                             Stations&   atB,
                             double      radius)
 {
-  const double length = std::min({GCPnts_AbscissaPoint::Length(a.curve, a.first, a.last),
-                                  GCPnts_AbscissaPoint::Length(b.curve, b.first, b.last),
+  const double length = std::min({railLength(a, a.first, a.last),
+                                  railLength(b, b.first, b.last),
                                   radius});
   if (!(length > limit::degenerate * std::max(a.scale, b.scale)))
     return false;
@@ -488,10 +488,10 @@ static bool sectionJetBreak(const Rail& a,
     double t = endpoint;
     if (distance != 0)
     {
-      GCPnts_AbscissaPoint along(rail.curve, distance, endpoint);
-      if (!along.IsDone())
+      const auto along = railParameterAt(rail, endpoint, distance);
+      if (!along)
         return {};
-      t = along.Parameter();
+      t = *along;
     }
     Station station;
     Section section;
@@ -628,8 +628,8 @@ static SplitRequirements splitFrames(const char*                                
     }
     // Compact geometric windows cannot overlap with a frame at the other
     // end. Ball radius and inherited support-curvature radius set the geometric reach.
-    const double lengthA = GCPnts_AbscissaPoint::Length(a.rail.curve, a.rail.first, a.rail.last);
-    const double lengthB = GCPnts_AbscissaPoint::Length(b.rail.curve, b.rail.first, b.rail.last);
+    const double lengthA = railLength(a.rail, a.rail.first, a.rail.last);
+    const double lengthB = railLength(b.rail, b.rail.first, b.rail.last);
     gp_Pnt       contact;
     gp_Vec       alongContact, acrossContact;
     sa->D1(1, side ? 1 : 0, contact, alongContact, acrossContact);
@@ -658,7 +658,7 @@ static SplitRequirements splitFrames(const char*                                
       {
         const auto& rail = pieces[index].rail;
         frame.reach      = std::min(frame.reach,
-                               GCPnts_AbscissaPoint::Length(rail.curve, rail.first, rail.last) / 2);
+                               railLength(rail, rail.first, rail.last) / 2);
       }
     }
   return requirements;
@@ -779,10 +779,10 @@ static double lawBreak(const Rail& a,
     double t = from;
     if (distance != 0)
     {
-      GCPnts_AbscissaPoint along(rail.curve, distance, from);
-      if (!along.IsDone())
+      const auto along = railParameterAt(rail, from, distance);
+      if (!along)
         return {};
-      t = along.Parameter();
+      t = *along;
     }
     Station station;
     Section section;

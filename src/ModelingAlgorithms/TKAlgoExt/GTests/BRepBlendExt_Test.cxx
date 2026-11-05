@@ -19,6 +19,10 @@
 #include "BRepExtTest_Support.hxx"
 
 #include <BRepBlendExt_Request.hxx>
+#include <BRepBlendExt_Internal.hxx>
+#include <GeomConvert.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepToolsExt_Checks.hxx>
 
@@ -893,4 +897,125 @@ TEST(BRepBlendExt, RoundOfASteepRimIsTheBallsWhereItDoesNotCrossItself)
             << refused.what();
       }
     }
+}
+
+// The rail can continue beyond a trimmed, multi-span edge. Compare its integral and inverse
+// with the closed form for (t,t^2): F(t) = t sqrt(1+4t^2)/2 + asinh(2t)/4.
+TEST(BRepBlendExt, ExtendedRailArcLength)
+{
+  using namespace BRepExt::blending::detail;
+  const auto primitive = [](double t) {
+    return t * std::sqrt(1 + 4 * t * t) / 2 + std::asinh(2 * t) / 4;
+  };
+  for (double scale : {0.001, 1.0, 1000.0})
+    for (bool turned : {false, true})
+    {
+      NCollection_Array1<gp_Pnt> poles(1, 3);
+      poles(1) = gp_Pnt(0, 0, 0);
+      poles(2) = gp_Pnt(0.5, 0, 0);
+      poles(3) = gp_Pnt(1, 1, 0);
+      auto curve = GeomConvert::CurveToBSplineCurve(new Geom_BezierCurve(poles));
+      curve->InsertKnot(0.5, 1);
+      gp_Trsf transform;
+      if (turned)
+        transform.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), 0.7);
+      gp_Trsf scaling;
+      scaling.SetScale(gp::Origin(), scale);
+      curve->Transform(scaling * transform);
+      Rail rail;
+      rail.scale = scale;
+      rail.magnitude = 4 * scale;
+      rail.edge = BRepBuilderAPI_MakeEdge(curve, 0.25, 0.75);
+      rail.curve.Initialize(rail.edge);
+      for (double start : {-0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5})
+        for (double end : {-0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5})
+        {
+          SCOPED_TRACE(::testing::Message() << scale << " " << turned << " " << start << " " << end);
+          const double distance = scale * (primitive(end) - primitive(start));
+          EXPECT_NEAR(railLength(rail, start, end), std::abs(distance), scale * 1e-7);
+          const auto parameter = railParameterAt(rail, start, distance);
+          ASSERT_TRUE(parameter.has_value());
+          EXPECT_NEAR(*parameter, end, 1e-6);
+        }
+    }
+}
+
+// Rational held-out family: a circular arc written as a quadratic rational spline. Length is
+// radius times the difference of atan2 angles of the exact evaluated endpoints, independent of
+// the spline parameter and the integrator. Its denominator stays positive on the tested extension.
+TEST(BRepBlendExt, ExtendedRationalRailArcLength)
+{
+  using namespace BRepExt::blending::detail;
+  for (double radius : {0.001, 1.0, 1000.0})
+  {
+    NCollection_Array1<gp_Pnt> poles(1, 3);
+    poles(1) = gp_Pnt(radius, 0, 0);
+    poles(2) = gp_Pnt(radius, radius, 0);
+    poles(3) = gp_Pnt(0, radius, 0);
+    NCollection_Array1<double> weights(1, 3), knots(1, 2);
+    weights(1) = weights(3) = 1;
+    weights(2) = std::sqrt(0.5);
+    knots(1) = 0;
+    knots(2) = 1;
+    NCollection_Array1<int> mults(1, 2);
+    mults(1) = mults(2) = 3;
+    Handle(Geom_BSplineCurve) curve = new Geom_BSplineCurve(poles, weights, knots, mults, 2);
+    curve->InsertKnot(0.5, 1);
+    Rail rail;
+    rail.scale = radius;
+    rail.magnitude = 2 * radius;
+    rail.edge = BRepBuilderAPI_MakeEdge(curve, 0.25, 0.75);
+    rail.curve.Initialize(rail.edge);
+    for (double start : {-0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5})
+      for (double end : {-0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5})
+      {
+        SCOPED_TRACE(::testing::Message() << radius << " " << start << " " << end);
+        const gp_Pnt a = curve->Value(start), b = curve->Value(end);
+        const double distance = radius * (std::atan2(b.Y(), b.X()) - std::atan2(a.Y(), a.X()));
+        EXPECT_NEAR(railLength(rail, start, end), std::abs(distance), radius * 1e-7);
+        const auto parameter = railParameterAt(rail, start, distance);
+        ASSERT_TRUE(parameter.has_value());
+        EXPECT_NEAR(*parameter, end, 1e-6);
+      }
+  }
+}
+
+// A trim can hide a continuity break of the underlying curve. This C1 curve is a line until
+// t=1/4, then (t,(t-1/4)^2); its length on either side has a closed form.
+TEST(BRepBlendExt, ExtendedRailKeepsKnotsOutsideTheEdgeTrim)
+{
+  using namespace BRepExt::blending::detail;
+  NCollection_Array1<gp_Pnt> poles(1, 4);
+  poles(1) = gp_Pnt(0, 0, 0);
+  poles(2) = gp_Pnt(0.125, 0, 0);
+  poles(3) = gp_Pnt(0.625, 0, 0);
+  poles(4) = gp_Pnt(1, 0.5625, 0);
+  NCollection_Array1<double> knots(1, 3);
+  knots(1) = 0;
+  knots(2) = 0.25;
+  knots(3) = 1;
+  NCollection_Array1<int> mults(1, 3);
+  mults(1) = mults(3) = 3;
+  mults(2) = 1;
+  Handle(Geom_BSplineCurve) curve = new Geom_BSplineCurve(poles, knots, mults, 2);
+  const auto primitive = [](double t) {
+    const double x = t - 0.25;
+    return x <= 0 ? t : 0.25 + x * std::sqrt(1 + 4 * x * x) / 2 + std::asinh(2 * x) / 4;
+  };
+  for (const auto ends : {std::pair{0.05, 0.2}, std::pair{0.4, 0.6}})
+  {
+    Rail rail;
+    rail.edge = BRepBuilderAPI_MakeEdge(curve, ends.first, ends.second);
+    rail.curve.Initialize(rail.edge);
+    for (double start : {-0.5, 0.0, 0.2, 0.4, 0.6, 1.0, 1.5})
+      for (double end : {-0.5, 0.0, 0.2, 0.4, 0.6, 1.0, 1.5})
+      {
+        SCOPED_TRACE(::testing::Message() << ends.first << " " << start << " " << end);
+        const double distance = primitive(end) - primitive(start);
+        EXPECT_NEAR(railLength(rail, start, end), std::abs(distance), 1e-7);
+        const auto parameter = railParameterAt(rail, start, distance);
+        ASSERT_TRUE(parameter.has_value());
+        EXPECT_NEAR(*parameter, end, 1e-6);
+      }
+  }
 }

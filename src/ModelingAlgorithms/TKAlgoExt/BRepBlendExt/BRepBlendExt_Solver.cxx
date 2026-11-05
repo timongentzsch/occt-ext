@@ -3260,7 +3260,7 @@ void Blend::crossFolds(const std::vector<std::pair<int, std::vector<Fold>>>& fol
   std::vector<Cross> crosses;
   const auto         length = [](const Piece& p, double u0, double u1) {
     const double t0 = p.rail.t(u0), t1 = p.rail.t(u1);
-    return GCPnts_AbscissaPoint::Length(p.rail.curve, std::min(t0, t1), std::max(t0, t1));
+    return railLength(p.rail, t0, t1);
   };
   // Whether a place of piece k lies in a crossing's loop.
   const auto inLoop = [](const Cross& c, int k, double at) {
