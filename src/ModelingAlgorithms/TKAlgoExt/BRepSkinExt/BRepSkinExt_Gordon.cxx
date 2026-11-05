@@ -37,6 +37,7 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepCheck_Shell.hxx>
+#include <BRepOffsetExt_Focal.hxx>
 #include <BRepLib.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <Bnd_Box.hxx>
@@ -81,9 +82,9 @@
 //
 // What comes back is checked apart from GeomFill_Gordon's own report: every profile and guide,
 // at eight places to each of its spans, has to lie on the surface to the tolerance; the
-// surface's normal may nowhere vanish or turn by a right angle between neighbours of a grid of
-// four to each span; and at every crossing it has to be on the same side of the two curves
-// there. Profiles that are closed and flat are capped, and the whole made a solid.
+// normals are sampled in every actual knot span for rejection witnesses. Interval
+// derivatives establish local regularity separately. At each crossing the normal must
+// agree with the crossing curves. Closed flat profiles are capped for a solid.
 
 namespace BRepExt
 {
@@ -276,20 +277,33 @@ void certify(const Handle(Geom_BSplineSurface)&            surface,
          no_solution,
          "the surface built misses the profiles or guides by " + std::to_string(off));
 
-  // The surface may not fold: its normal nowhere vanishes, nor turns by a right angle from
-  // one place of a grid of four to each span to the next.
+  // Sample each actual knot rectangle, including its interior. Knot counts
+  // cannot distribute samples over a nonuniform parameter domain.
+  // These samples are rejection witnesses; interval regularity is checked below.
   {
     double u0, u1, v0, v1;
     surface->Bounds(u0, u1, v0, v1);
-    const int nu = std::clamp(4 * (surface->NbUKnots() - 1), 32, 256),
-              nv = std::clamp(4 * (surface->NbVKnots() - 1), 32, 256);
+    const auto samples = [](const auto& knots) {
+      std::vector<double> result;
+      const double full = knots.Last() - knots.First();
+      for (int k = knots.Lower(); k < knots.Upper(); ++k)
+      {
+        const int count = std::max(4, int(std::ceil(32 * (knots(k + 1) - knots(k)) / full)));
+        for (int j = 0; j < count; ++j)
+          result.push_back(knots(k) + (knots(k + 1) - knots(k)) * j / count);
+      }
+      result.push_back(knots.Last());
+      return result;
+    };
+    const auto us = samples(surface->UKnots()), vs = samples(surface->VKnots());
+    const int nu = int(us.size()) - 1, nv = int(vs.size()) - 1;
     std::vector<gp_Vec> normals(size_t(nu + 1) * size_t(nv + 1));
     for (int i = 0; i <= nu; ++i)
       for (int j = 0; j <= nv; ++j)
       {
         gp_Pnt p;
         gp_Vec du, dv;
-        surface->D1(u0 + (u1 - u0) * i / nu, v0 + (v1 - v0) * j / nv, p, du, dv);
+        surface->D1(us[size_t(i)], vs[size_t(j)], p, du, dv);
         const gp_Vec n = du.Crossed(dv);
         if (n.Magnitude() <= 1e-9 * du.Magnitude() * dv.Magnitude())
           fail(op,
@@ -1089,7 +1103,11 @@ EvolutionData skinGordon(OcctKernel&                  kernel,
     BRepLib::OrientClosedSolid(body);
     result = body;
   }
-  // A check of the topology only: that the surface does not fold is established above.
+  // The zero-distance normal-sweep certificate proves a nonsingular first
+  // fundamental form on every knot rectangle using outward-rounded intervals.
+  // Unknown is not a regular verdict. This is a local immersion certificate.
+  if (focalSweep(face.Face(), 0) != FocalSweep::Regular)
+    fail(op, no_solution, "regularity of the network surface could not be established");
   if (!BRepCheck_Analyzer(result).IsValid())
     fail(op, no_solution, "the skin through the net is not a valid body");
   return stored(kernel, result);

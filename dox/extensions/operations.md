@@ -1114,3 +1114,29 @@ of the approximation. OCCT's *Boolean Operations* specification, section
 "Interferences", describes the stored-tolerance model; a stored edge tolerance
 is not a justified allowance to reduce the requested wall thickness.
 
+### Regularity of network surfaces
+
+A lattice sized from the number of knots does not cover short knot intervals.
+Rejection witnesses now include every actual knot interval. Acceptance additionally
+uses the outward-rounded Cox-de Boor derivative enclosure on every knot rectangle
+implemented by `focalSweep` at distance zero. The derived identity
+`det(I) = |Su cross Sv|^2` permits the cross-product enclosure to establish
+regularity directly without dependency loss in `E*G-F*F`. A zero-free interval
+normal proves local immersion; unresolved cells do not receive that verdict.
+The basis and convex-hull bounds are those of Patrikalakis, Maekawa and Cho,
+*Shape Interrogation for Computer Aided Design and Manufacturing*, hyperbook
+(2009), [sections 1.4.2 and 1.4.3](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
+Periodic finite covers use the stored extended flat knot sequence and cyclic pole
+copies, matching OCCT's BSplSLib evaluation without fitting. This proves local
+immersion only. A separate global injectivity certificate remains open; the
+argument analyzer can flag valid periodic boundary seams and does not establish
+self-intersection freedom within a single face. It is not an acceptance proof here.
+
+To reduce interval dependency for rational surfaces, translate homogeneous
+coordinates by a constant local anchor: `(X,W) -> (X-aW,W)`. This changes the
+surface to `S-a`; every first and second derivative is unchanged (derived here).
+All subtraction and multiplication are outward rounded. At distance zero only
+first derivatives are needed, so second derivative nets are not evaluated.
+Local-immersion queries have no work-count cutoff; the existing finite
+subdivision precision limit still reports unresolved, never regular.
+

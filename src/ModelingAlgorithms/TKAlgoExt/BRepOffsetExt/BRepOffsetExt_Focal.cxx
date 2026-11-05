@@ -119,8 +119,6 @@ bool readNet(Handle(Geom_Surface) surface, const gp_Trsf& location, Net& net)
   const auto bezier = Handle(Geom_BezierSurface)::DownCast(surface);
   if (spline.IsNull() && bezier.IsNull())
     return false;
-  if (!spline.IsNull() && (spline->IsUPeriodic() || spline->IsVPeriodic()))
-    return false;
   net.p  = spline.IsNull() ? bezier->UDegree() : spline->UDegree();
   net.q  = spline.IsNull() ? bezier->VDegree() : spline->VDegree();
   net.nu = spline.IsNull() ? bezier->NbUPoles() : spline->NbUPoles();
@@ -139,12 +137,21 @@ bool readNet(Handle(Geom_Surface) surface, const gp_Trsf& location, Net& net)
     net.v.insert(net.v.end(), net.q + 1, 0);
     net.v.insert(net.v.end(), net.q + 1, 1);
   }
+  // OCCT's flat periodic knot sequence already contains the shifted end knots.
+  // Its finite cover uses cyclic copies of the original poles (no fitting or
+  // knot insertion): the same basis used by BSplSLib's periodic evaluator.
+  const int originalNu = net.nu, originalNv = net.nv;
+  if (!spline.IsNull() && spline->IsUPeriodic())
+    net.nu = int(net.u.size()) - net.p - 1;
+  if (!spline.IsNull() && spline->IsVPeriodic())
+    net.nv = int(net.v.size()) - net.q - 1;
   const gp_Pnt origin = spline.IsNull() ? bezier->Pole(1, 1) : spline->Pole(1, 1);
   for (int i = 1; i <= net.nu; ++i)
     for (int j = 1; j <= net.nv; ++j)
     {
-      const gp_Pnt pole = spline.IsNull() ? bezier->Pole(i, j) : spline->Pole(i, j);
-      const double w    = spline.IsNull() ? bezier->Weight(i, j) : spline->Weight(i, j);
+      const int    iu = (i - 1) % originalNu + 1, jv = (j - 1) % originalNv + 1;
+      const gp_Pnt pole = spline.IsNull() ? bezier->Pole(iu, jv) : spline->Pole(iu, jv);
+      const double w    = spline.IsNull() ? bezier->Weight(iu, jv) : spline->Weight(iu, jv);
       if (!(w > 0) || !std::isfinite(w))
         return false;
       std::array<Range, 4> h;
@@ -221,7 +228,13 @@ Net derivative(const Net& source, bool alongU)
 FocalSweep enclose(const std::array<Net, 6>& jets, const Cell& cell, double distance)
 {
   std::array<std::array<Range, 4>, 6> h;
-  for (int d = 0; d < 6; ++d)
+  const auto&                         anchorPole =
+    jets[0].poles[(cell.uspan - jets[0].p) * jets[0].nv + cell.vspan - jets[0].q];
+  std::array<double, 3> anchor;
+  for (int k = 0; k < 3; ++k)
+    anchor[k] =
+      (anchorPole[k].low / anchorPole[3].low + anchorPole[k].high / anchorPole[3].high) / 2;
+  for (int d = 0; d < (distance == 0 ? 3 : 6); ++d)
   {
     const Net& net   = jets[d];
     const int  uspan = cell.uspan - (jets[0].p - net.p);
@@ -238,10 +251,12 @@ FocalSweep enclose(const std::array<Net, 6>& jets, const Cell& cell, double dist
         const Range b = multiply(u[i], v[j]);
         for (int k = 0; k < 4; ++k)
         {
-          const Range pole = net.poles[i * net.nv + j][k];
-          h[d][k]          = add(h[d][k], multiply(b, pole));
-          hull[k].low      = std::min(hull[k].low, pole.low);
-          hull[k].high     = std::max(hull[k].high, pole.high);
+          const auto& sourcePole = net.poles[i * net.nv + j];
+          const Range pole =
+            k == 3 ? sourcePole[k] : subtract(sourcePole[k], scaled(sourcePole[3], anchor[k]));
+          h[d][k]      = add(h[d][k], multiply(b, pole));
+          hull[k].low  = std::min(hull[k].low, pole.low);
+          hull[k].high = std::max(hull[k].high, pole.high);
         }
       }
     // On this span the basis is nonnegative and sums to one. The hull and the
@@ -257,7 +272,7 @@ FocalSweep enclose(const std::array<Net, 6>& jets, const Cell& cell, double dist
     s[0][k] = dividePositive(h[0][k], h[0][3]);
     for (int d = 1; d <= 2; ++d)
       s[d][k] = dividePositive(subtract(h[d][k], multiply(s[0][k], h[d][3])), h[0][3]);
-    for (int d = 3; d < 6; ++d)
+    for (int d = 3; distance != 0 && d < 6; ++d)
     {
       const int a = d == 5 ? 2 : 1, b = d == 3 ? 1 : 2;
       s[d][k] = dividePositive(subtract(subtract(subtract(h[d][k], multiply(s[0][k], h[d][3])),
@@ -270,6 +285,10 @@ FocalSweep enclose(const std::array<Net, 6>& jets, const Cell& cell, double dist
   const Range length = root(norm2(normal));
   if (!valid(length) || length.low <= 0)
     return FocalSweep::Unknown;
+  // At zero offset, det(I)=|S_u x S_v|^2 (Lagrange's identity).
+  // The cross-product enclosure is tighter than subtracting E*G-F*F.
+  if (distance == 0)
+    return FocalSweep::Regular;
   // I - d II is positive definite iff both 1 - d*k_i are positive.
   // Sylvester's criterion avoids subtracting nearly equal principal-curvature roots.
   const Range e =
@@ -333,7 +352,7 @@ FocalSweep focalSweep(const TopoDS_Face& face, double distance)
   // Work limits only turn a proof into Unknown. They never justify a refusal.
   bool unknown = false;
   int  visited = 0;
-  while (!pending.empty() && visited++ < 4096)
+  while (!pending.empty() && (distance == 0 || visited++ < 4096))
   {
     checkCancelled("thicken");
     const Cell c = pending.front();

@@ -589,3 +589,39 @@ TEST(BRepSkinExt, NonplanarEndsCannotPublishAnInvalidSolid)
     EXPECT_TRUE(BRepCheck_Analyzer(BRepExt::get(session(), sheet.resultId)).IsValid());
   }
 }
+
+TEST(BRepSkinExt, GordonNetworkCannotHideAReversalInANarrowKnotSpan)
+{
+  for (const double width : {1e-3, 1e-5, 1e-7})
+  {
+    std::vector<uint32_t> profiles, guides;
+    for (const double y : {0.0, 5.0, 10.0})
+    {
+      NCollection_Array1<gp_Pnt> poles(1, 5);
+      NCollection_Array1<double> knots(1, 5);
+      NCollection_Array1<int> mults(1, 5);
+      const double u[] = {0, .413, .413 + width, .413 + 2 * width, 1};
+      const double x[] = {0, .413, .413 - width, .413 + 2 * width, 1};
+      for (int i = 1; i <= 5; ++i)
+      {
+        poles(i) = gp_Pnt(x[i - 1], y, 0);
+        knots(i) = u[i - 1];
+        mults(i) = i == 1 || i == 5 ? 2 : 1;
+      }
+      auto curve = new Geom_BSplineCurve(poles, knots, mults, 1);
+      profiles.push_back(BRepExt::store(session(), BRepBuilderAPI_MakeEdge(curve).Edge()));
+    }
+    for (const double x : {0.0, .2, 1.0})
+      guides.push_back(BRepExt::store(session(),
+        BRepBuilderAPI_MakeEdge(gp_Pnt(x, 0, 0), gp_Pnt(x, 10, 0)).Edge()));
+    try
+    {
+      BRepExt::skinGordon(session(), profiles, guides, false, 1e-6);
+      FAIL() << "folded network accepted with span width " << width;
+    }
+    catch (const BRepExt::Failure& failure)
+    {
+      EXPECT_EQ(failure.reason, BRepExt::no_solution);
+    }
+  }
+}
