@@ -239,6 +239,34 @@ ripple or spike that leaves the rims unchanged leaves it unchanged; the fill may
 as the rim or as the bridge within a tenth of the crossing's length of the same place. With no gap, or gaps
 that are not opposite, the rule is the previous one.
 
+*A section as reference.* After a guided height fit fails, a planar section guide between two
+disconnected rims supplies a reference candidate. Its plane intersects each rim at an anchor.
+Quintic Hermite segments extend the unchanged guide to these anchors. At a smooth rim the
+extension's first and second derivatives come from the support jet, differentiated subject to
+the section-plane constraint. An unsupported rim asks for position alone. The reference is the
+single tensor spline `S(u,v) = R(u) + C(v) - R(u*)`, made by adding the two curves' poles and
+subtracting the anchor, without a pole-count refusal.
+
+*Derivation and scope.* This translation member of curve-network blending contains the section
+algebraically. If the support is `R(u) + Q(v)` with its transverse two-jet independent of `u`,
+matching the section's two-jet to `Q` at the anchor gives the same surface two-jet along the
+whole supported rim. A rail whose projection derivative on the section-plane normal stays
+away from zero and a simple regular planar section give a regular injective translation surface. These are sufficient
+conditions for this class, not an existence theorem for arbitrary networks. Independently
+parameterised opposite rims are still measured against their original curves. The candidate
+must pass the original delivered-rim, support, guide, validity, interior and sewing checks;
+a failed reference retains the earlier refusal. Existing deliveries are retained.
+
+The curve-network Boolean sum and its conversion to one tensor spline are described by
+Siggel, Kleinert, Stollenwerk and Maierl, *TiGL -- An Open Source Computational Geometry Library
+for Parametric Aircraft Design* (2018), [sections 3.2.1--3.2.2, equations (10), (14)](https://arxiv.org/html/1810.10795v1).
+Support-derived second-order ribbons and their continuity conditions are described by
+Salvi and Varady, *Multi-sided Surfaces with Curvature Continuity* (2014),
+[section 3.3.2 and Appendix](https://salvi.chaosnet.org/texts/ribbons.pdf).
+The section-plane acceleration correction and this restricted reference route are derived here.
+The interior curvature allowance remains the same unproven judgement; a compatible guide can
+therefore still be refused by it.
+
 Where two sides asked for G2 meet at a corner whose faces bend differently (an arm of a round meeting a
 strip whose edge bends across the arm's axis), no surface that is twice differentiable at the corner has
 both bends there. It has the one bend that the two edges and the tangent planes along them leave it: four

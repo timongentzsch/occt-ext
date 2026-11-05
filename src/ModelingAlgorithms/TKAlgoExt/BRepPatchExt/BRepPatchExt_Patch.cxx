@@ -4465,6 +4465,175 @@ std::optional<Built> overChart(const Asked& asked, const Frame& frame)
   return best;
 }
 
+//! A planar section guide carried along a rim, with support-derived Hermite extensions.
+//! This is the translation member of the curve-network Boolean-sum construction.
+//! It is only a candidate: all original rims, jets, guides and interior checks still apply.
+std::optional<Built> sectionReference(const Asked& asked, const Frame& frame)
+{
+  if (asked.guides.size() != 1 || !asked.points.empty() || asked.sides.size() != 4)
+    return {};
+  std::vector<const Side*> rims;
+  for (const Side& side : asked.sides)
+    if (!side.free)
+      rims.push_back(&side);
+  if (rims.size() != 2)
+    return {};
+  if (rims[1]->order > rims[0]->order)
+    std::swap(rims[0], rims[1]);
+  const Side &rim = *rims[0], &foot = *rims[1], &guide = asked.guides.front();
+  auto        profile = plain(guide, guide.length, false, asked.limits.g0);
+  auto        rail    = plain(rim, rim.length, false, asked.limits.g0);
+  if (profile.IsNull() || rail.IsNull())
+    return {};
+  std::vector<gp_Pnt> samples;
+  for (int i = 1; i <= profile->NbPoles(); ++i)
+    samples.push_back(profile->Pole(i));
+  const Frame section = meanPlane(samples, guide.length);
+  // The section must be planar; reject rather than moving any supplied guide.
+  for (int i = 1; i <= profile->NbPoles(); ++i)
+    if (std::abs(gp_Vec(section.origin, profile->Pole(i)).Dot(section.z)) > asked.limits.g0)
+      return {};
+  const auto intersect = [&](const Side& side) -> std::optional<double> {
+    const auto height = [&](double f) { return gp_Vec(section.origin, side.at(f)).Dot(section.z); };
+    double     a = 0, b = 1, ha = height(a), hb = height(b);
+    if (ha * hb >= 0)
+      return {};
+    for (int i = 0; i < std::numeric_limits<double>::digits; ++i)
+    {
+      const double m = (a + b) / 2, h = height(m);
+      if ((h >= 0) == (ha >= 0))
+      {
+        a  = m;
+        ha = h;
+      }
+      else
+        b = m;
+    }
+    return (a + b) / 2;
+  };
+  const auto ra = intersect(rim), rb = intersect(foot);
+  if (!ra || !rb)
+    return {};
+  const gp_Pnt a = rim.meet(*ra), b = foot.meet(*rb);
+  if (a.Distance(profile->Value(profile->FirstParameter()))
+        + b.Distance(profile->Value(profile->LastParameter()))
+      > a.Distance(profile->Value(profile->LastParameter()))
+          + b.Distance(profile->Value(profile->FirstParameter())))
+    profile->Reverse();
+  gp_Pnt g0, g1;
+  gp_Vec d0, d1, e0, e1;
+  profile->D2(profile->FirstParameter(), g0, d0, e0);
+  profile->D2(profile->LastParameter(), g1, d1, e1);
+  const double h0 = a.Distance(g0), h1 = b.Distance(g1);
+  if (h0 <= asked.limits.g0 || h1 <= asked.limits.g0)
+    return {};
+  const auto jet = [&](const Side&   side,
+                       double        f,
+                       const gp_Pnt& toward,
+                       const gp_Vec& fallback) -> std::pair<gp_Vec, gp_Vec> {
+    if (side.support.IsNull() || side.order == 0)
+      return {fallback, gp_Vec(0, 0, 0)};
+    const SurfaceJet j = side.jet(f);
+    gp_Vec           t = j.n.Crossed(section.z);
+    t.Normalize();
+    if (t.Dot(gp_Vec(side.meet(f), toward)) < 0)
+      t.Reverse();
+    const double E = j.u.SquareMagnitude(), F = j.u.Dot(j.v), G = j.v.SquareMagnitude();
+    const double u = (G * t.Dot(j.u) - F * t.Dot(j.v)) / (E * G - F * F),
+                 v = (E * t.Dot(j.v) - F * t.Dot(j.u)) / (E * G - F * F);
+    gp_Vec       e = j.uu * (u * u) + j.uv * (2 * u * v) + j.vv * (v * v);
+    // Differentiate the plane-intersection constraint, preserving the normal acceleration.
+    const gp_Vec w = section.z - j.n * section.z.Dot(j.n);
+    e -= w * (e.Dot(section.z) / w.SquareMagnitude());
+    return {t, e};
+  };
+  const auto [da, ea] = jet(rim, *ra, g0, d0);
+  auto [db, eb]       = jet(foot, *rb, g1, -d1);
+  if (foot.order > 0)
+    db.Reverse(); // The section arrives at the second rim.
+  else
+    db = d1;
+  const auto hermite = [](const gp_Pnt& p,
+                          const gp_Vec& d,
+                          const gp_Vec& e,
+                          const gp_Pnt& q,
+                          const gp_Vec& f,
+                          const gp_Vec& g,
+                          double        h) {
+    NCollection_Array1<gp_Pnt> poles(1, 6);
+    poles(1)   = p;
+    poles(2)   = p.Translated(d * (h / 5));
+    poles(3)   = p.Translated(d * (2 * h / 5) + e * (h * h / 20));
+    poles(4)   = q.Translated(f * (-2 * h / 5) + g * (h * h / 20));
+    poles(5)   = q.Translated(f * (-h / 5));
+    poles(6)   = q;
+    auto curve = GeomConvert::CurveToBSplineCurve(new Geom_BezierCurve(poles));
+    NCollection_Array1<double> knots = curve->Knots();
+    BSplCLib::Reparametrize(0, h, knots);
+    curve->SetKnots(knots);
+    return curve;
+  };
+  profile->IncreaseDegree(5);
+  GeomConvert_CompCurveToBSplineCurve joined(hermite(a, da, ea, g0, d0, e0, h0));
+  if (!joined.Add(profile, asked.limits.g0 * 1e-6, true, false, 3)
+      || !joined.Add(hermite(g1, d1, e1, b, db, eb, h1), asked.limits.g0 * 1e-6, true, false, 3))
+    return {};
+  const auto                 cross = joined.BSplineCurve();
+  NCollection_Array2<gp_Pnt> poles(1, rail->NbPoles(), 1, cross->NbPoles());
+  for (int i = 1; i <= rail->NbPoles(); ++i)
+    for (int j = 1; j <= cross->NbPoles(); ++j)
+      poles(i, j) = gp_Pnt(rail->Pole(i).XYZ() + cross->Pole(j).XYZ() - a.XYZ());
+  const occ::handle<Geom_BSplineSurface> surface = new Geom_BSplineSurface(poles,
+                                                                           rail->Knots(),
+                                                                           cross->Knots(),
+                                                                           rail->Multiplicities(),
+                                                                           cross->Multiplicities(),
+                                                                           rail->Degree(),
+                                                                           cross->Degree());
+  ShapeAnalysis_Surface                  project(surface);
+  const auto                             layout = [&](const gp_Pnt& p) {
+    return project.ValueOfUV(p, asked.limits.g0 * 1e-3).XY();
+  };
+  std::vector<Rim> traces(asked.sides.size());
+  for (size_t i = 0; i < asked.sides.size(); ++i)
+    if (!asked.sides[i].free)
+      traces[i] = preimage(surface, asked.sides[i], frame, asked.limits.g0, asked.size, layout);
+  patch_side::closeGaps(asked.sides, traces);
+  std::vector<gp_XY> loop;
+  for (size_t i = 0; i < asked.sides.size(); ++i)
+    loop.push_back(traces[i].onSurface->Value(asked.sides[i].from).XY());
+  Built built{
+    3,
+    {},
+    measureAll(surface,
+               asked,
+               [&](const Side& side, double f, const gp_Pnt&) -> std::optional<Place> {
+                 const auto i = asked.boundaryIndex(side);
+                 return i ? std::optional<Place>(
+                              Place{traces[*i].onSurface->Value(side.parameter(f)).XY(), true})
+                          : std::nullopt;
+               })};
+  if (!built.measured.within)
+    return {};
+  built.face     = trimmed(surface, asked, traces, enclosed(loop) < 0);
+  built.crossing = Crossing{true, rim.order, foot.order};
+  for (size_t i = 0; i < asked.sides.size(); ++i)
+  {
+    const Side& side = asked.sides[i];
+    if (!side.free)
+      built.spatialBoundary.push_back(
+        {side.input, traces[i].onSurface, side.from, side.to, side.originalReversed});
+    built.gaps.push_back(side.free ? traces[i].onSurface : occ::handle<Geom2d_Curve>());
+  }
+  measureSpatialBoundary(built, asked, false);
+  if (!built.measured.within
+      || !regularMargin(surface, [](double, double, double, double) { return true; })
+      || !BRepCheck_Analyzer(built.face).IsValid()
+      || insideFault(built.face, asked.points.empty() ? rimBend(asked) : 0, built.crossing))
+    return {};
+  return built;
+}
+
 Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
 {
   // Corners where the faces on both sides are tangent and bend differently (a rim that runs
@@ -5305,6 +5474,22 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
         throw;
     }
     graphMode = GraphFit::transverse;
+  }
+  if (!strict.measured.within && !asked.guides.empty())
+  {
+    try
+    {
+      if (const auto reference = sectionReference(asked, frame))
+        return *reference;
+    }
+    catch (const Failure& failure)
+    {
+      if (failure.reason == "cancelled")
+        throw;
+    }
+    catch (const Standard_Failure&)
+    {
+    }
   }
   if (order > 0)
   {
