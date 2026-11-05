@@ -1614,6 +1614,68 @@ curve-net configurations* (2013), sections 3.2-3.3, equation (3.1),
 These sources establish the geometric continuity and ribbon compatibility
 framework; the coefficient reduction and proposed correction above are derived.
 
+#### A common rail coordinate and support collars
+
+An approximate intersection curve's stored continuity is not a regularity
+requirement of its supports. A common rail coordinate can be inherited from the
+carried curve, with affine changes on its pieces; it need not be arclength.
+Lowering knot multiplicities in a positional section fit alone does not impose
+support contact, repair a later first-order coupling, or prove convergence within
+an iteration budget. A continuous target with a first-derivative break can need
+linear, rather than high-order, local refinement. This last observation is a
+limitation of applying smooth-target interpolation estimates, not a general
+convergence theorem.
+
+For a support parametrisation F and a contact parameter curve q, write a collar
+as P(s) + d T(s) + d*d A(s)/2. Compatible support data have the form
+P = F(q), T = DF(q) a, A = D2F(q)[a,a] + DF(q) b. The tangential fields a and b
+are reparametrisation freedoms, not extra normal curvature. Differentiation
+gives n dot P'' = II(P',P'), n dot T' = II(P',T), and
+n dot A = II(T,T). These identities are derived here, with II evaluated on
+physical tangent vectors and a regular support. The relevant traces of a C2
+sheet have P in C2, T in C1 and A in C0. Fitting all coefficient functions in
+the same derivative norm unnecessarily strengthens these trace conditions.
+Neither these identities nor independent knot-wise constraints establish
+contact between knots or compatibility at a shared corner.
+
+A local diagnostic construction can share coefficient value, first derivative
+and second derivative at every rail station. On a span of length h the quintic
+Bezier coefficients are P0, P0+h D0/5, P0+2 h D0/5+h*h A0/20,
+P1-2 h D1/5+h*h A1/20, P1-h D1/5, P1. Shared jets imply C2 in exact arithmetic,
+even when redundant knots are stored. Floating-point cancellation on small spans
+still needs a physical curvature check. For example, the endpoint second
+derivative is 20*(B2-2*B1+B0)/(h*h). If each stored coefficient component has
+absolute error at most e, its second-derivative error is at most 80*e/(h*h),
+before evaluator rounding; two independent sides can differ by 160*e/(h*h).
+These are derived componentwise bounds, not curvature bounds: the surface metric
+and normal also enter curvature. A genuinely C2 knot representation avoids
+independent endpoint storage, but cannot supply missing support constraints.
+In a common polynomial tensor Bezier
+basis, the maximum norm of corresponding control-point differences bounds
+same-parameter displacement by the convex-hull property. It bounds neither
+normal differences nor second fundamental forms. Knot insertion rounding must
+also be enclosed before calling this a numerical certificate.
+
+After changing a sheet, build its contact curves and stopping rims from that
+sheet. A projection fit's error in support parameters is not a world-space
+error bound when the support metric is poorly scaled. Check the composed
+support curve against the actual sheet in physical units, including endpoints;
+sampled checks remain sampled evidence. Exact one-sided jets where rail knots
+reach a retained contact can reveal errors missed by interior edge samples.
+Preserving a positional proposal allowance cannot replace the original contact,
+section, topology, regularity and internal-curvature acceptance tests.
+
+Sources: Hartmann, *Geometry and Algorithms for Computer Aided Design*
+(October 2003), sections 11.3.2 and 11.4, pages 133-135,
+[common offset-intersection parametrisation](https://www2.mathematik.tu-darmstadt.de/~ehartmann/cdgen.pdf);
+Salvi, Varady and Rockwood (2013), section 3.2, equations (3.1) and (3.3),
+[parabolic support ribbons](https://3dgeo.iit.bme.hu/papers/multisided/transfinite-g2.pdf);
+Patrikalakis, Maekawa and Cho (2009), section 1.4.3,
+[knot removal and continuity](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node18.html).
+These sources supply constructions under their stated regularity and
+compatibility conditions; they do not prove existence of an arbitrary
+support-constrained approximation in a fixed tensor space. The trace identities,
+Hermite diagnostic and preservation qualifications above are derived here.
 
 ### Face-offset endpoint certificate limits
 
