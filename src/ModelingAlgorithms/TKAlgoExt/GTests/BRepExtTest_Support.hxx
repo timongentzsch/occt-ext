@@ -42,6 +42,8 @@ namespace BRepExtTest
 {
 
 OcctKernel& session();
+//! Cumulative stores through the native host seam, including temporary shapes.
+size_t storedShapeCount();
 
 //! The volume by adaptive Gauss-Kronrod integration to 1e-8 relative accuracy. The default fixed
 //! rule is off by about 1e-5 of the volume on spline blend faces.

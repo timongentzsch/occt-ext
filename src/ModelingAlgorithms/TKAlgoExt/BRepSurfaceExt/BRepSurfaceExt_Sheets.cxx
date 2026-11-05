@@ -165,16 +165,6 @@ EvolutionData extendSheet(OcctKernel& kernel,
   // Boundary pole hulls, rather than area agreement, establish trim equivalence.
   if (!GeomAlgoExt::parameterRectangle(face, u0, u1, v0, v1))
     fail(op, unsupported_geometry, "extend requires an untrimmed rectangular sheet");
-  // Verify the face really is its UV rectangle, rather than quietly discarding
-  // trims.
-  const auto rectangle = BRepBuilderAPI_MakeFace(surface, u0, u1, v0, v1, tolerance).Face();
-  Untouched<BRepAlgoAPI_Common> common(face, rectangle);
-  if (!common.IsDone())
-    fail(op, no_solution, "could not verify rectangular support");
-  const auto rectangleId = store(kernel, rectangle);
-  if (std::abs(surfaceArea(kernel, faceId) - surfaceArea(kernel, rectangleId))
-      > tolerance * std::max(1.0, surfaceArea(kernel, faceId)))
-    fail(op, unsupported_geometry, "extend requires an untrimmed rectangular sheet");
   Handle(Geom_BoundedSurface) bounded = GeomConvert::SurfaceToBSplineSurface(
     new Geom_RectangularTrimmedSurface(surface, u0, u1, v0, v1));
   GeomLib::ExtendSurfByLength(bounded, distance, continuity, side < 2, side % 2 == 1);

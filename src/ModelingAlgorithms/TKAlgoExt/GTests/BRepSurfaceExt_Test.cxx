@@ -774,3 +774,17 @@ TEST(BRepSurfaceExt, ExtendSheetDoesNotDiscardSmallNotchesOnLargeFaces)
     }
   }
 }
+
+TEST(BRepSurfaceExt, ExtensionStoresOnlyTheReturnedShape)
+{
+  const auto face = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                                            0, 10, 0, 10).Face();
+  const auto id = BRepExt::store(session(), face);
+  for (int side = 0; side < 4; ++side)
+  {
+    const auto before = storedShapeCount();
+    const auto result = BRepExt::extendSheet(session(), id, side, 1, 1, 1e-6);
+    EXPECT_EQ(storedShapeCount(), before + 1);
+    EXPECT_GT(area(BRepExt::get(session(), result.resultId)), area(face));
+  }
+}

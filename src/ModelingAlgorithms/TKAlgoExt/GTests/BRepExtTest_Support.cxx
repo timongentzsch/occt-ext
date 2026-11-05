@@ -32,6 +32,8 @@ OcctKernel& BRepExtTest::session()
   return *reinterpret_cast<OcctKernel*>(token);
 }
 
+size_t BRepExtTest::storedShapeCount() { return shapes.size(); }
+
 namespace BRepExt
 {
 uint32_t store(OcctKernel&, const TopoDS_Shape& shape)
