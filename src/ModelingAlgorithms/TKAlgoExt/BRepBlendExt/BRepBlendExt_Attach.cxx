@@ -807,10 +807,28 @@ void Attach::chainEnds()
           int crossings = 0;
           for (const auto& p : pieces)
             crossings += p.joint[1].meets == Meets::Split && p.joint[1].crossed.IsSame(edge);
-          const TopoDS_Vertex from = atRail(a) && atRail(z)
+          // Two crossings retain the interval between them when the edge reaches
+          // the blended chain. Its two ends need not both belong to that chain.
+          double otherCrossing = crossing;
+          if (refineContacts && crossings == 2 && (atRail(a) || atRail(z)))
+            for (int m = 0; m < n; ++m)
+            {
+              const auto& joint = pieces[m].joint[1];
+              if (joint.meets != Meets::Split || !joint.crossed.IsSame(edge)
+                  || (m == k && end == 1) || (joint.piece == k && joint.end == end))
+                continue;
+              const auto& q = pieces[m];
+              const gp_Pnt point = q.sheet.contact(joint.side)->Value(q.sheet.rail(q.uAt(1)));
+              GeomAPI_ProjectPointOnCurve other(point, curve, f, l);
+              if (other.NbPoints() && other.LowerDistance() <= rail.resolved(limit::together)
+                  && std::abs(other.LowerDistanceParameter() - crossing) > tol::parameter)
+                otherCrossing = other.LowerDistanceParameter();
+            }
+          const TopoDS_Vertex from = refineContacts && otherCrossing != crossing
+                                       ? (crossing < otherCrossing ? a : z)
+                                     : atRail(a) && atRail(z)
                                        ? (crossings > 1 ? (crossing - f < l - crossing ? a : z)
-                                          : atOwn(z) && !atOwn(a) ? z
-                                                                  : a)
+                                          : atOwn(z) && !atOwn(a) ? z : a)
                                      : atRail(a) ? a
                                      : atRail(z) ? z
                                                  : TopoDS_Vertex();
@@ -1830,6 +1848,7 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
   TopoDS_Face stop;
   TopoDS_Edge beside[2], sliverEdge[2];
   TopoDS_Face sliverOf[2];
+  bool continuedSupport[2] = {false, false};
   for (const auto& shape : edges)
   {
     if (ownEdge(piece, shape))
@@ -1857,6 +1876,17 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
               sliverEdge[s] = TopoDS::Edge(shape);
               sliver        = true;
             }
+      if (!sliver && rail.parameterSupports)
+        for (int side = 0; side < 2 && !sliver; ++side)
+          if (piece.terminalContact[end][side]
+              && face.IsSame((*rail.parameterSupports)[side].face)
+              && !face.IsSame(rail.s[side].face))
+          {
+            sliverOf[side] = TopoDS::Face(face);
+            sliverEdge[side] = TopoDS::Edge(shape);
+            continuedSupport[side] = true;
+            sliver = true;
+          }
       if (sliver)
         continue;
       if (!stop.IsNull() && !stop.IsSame(face))
@@ -1887,14 +1917,26 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
              "an edge that ends among several faces is blended with the corner, which the blend "
              "does not do yet",
              {rail.edge});
-      for (TopExp_Explorer e(sliverOf[s], TopAbs_EDGE); e.More(); e.Next())
+      if (continuedSupport[s])
       {
-        if (facesOfEdge.Contains(e.Current()))
-          for (const auto& face : facesOfEdge.FindFromKey(e.Current()))
-            editOf(edits, face).replace.Bind(e.Current(), TopoDS_Edge());
-        swept.push_back(e.Current());
+        const auto& terminal = *piece.terminalContact[end][s];
+        if (!terminal.support.IsSame(rail.s[s].face) || !terminal.arc.IsSame(beside[s]))
+          fail(op, unsupported_geometry, "terminal contact lost its restriction arc", {rail.edge});
+        for (const auto& face : facesOfEdge.FindFromKey(sliverEdge[s]))
+          editOf(edits, face).replace.Bind(sliverEdge[s], TopoDS_Edge());
+        swept.push_back(sliverEdge[s]);
       }
-      removed.push_back(sliverOf[s]);
+      else
+      {
+        for (TopExp_Explorer e(sliverOf[s], TopAbs_EDGE); e.More(); e.Next())
+        {
+          if (facesOfEdge.Contains(e.Current()))
+            for (const auto& face : facesOfEdge.FindFromKey(e.Current()))
+              editOf(edits, face).replace.Bind(e.Current(), TopoDS_Edge());
+          swept.push_back(e.Current());
+        }
+        removed.push_back(sliverOf[s]);
+      }
       swept.push_back(far);
     }
   if (stop.IsNull() || beside[0].IsNull() || beside[1].IsNull())
@@ -1948,7 +1990,7 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
                          end == 0 ? middle : 1,
                          piece.uAt(end),
                          beside[side],
-                         vertex,
+                         from[side],
                          rail.s[side].face,
                          stop,
                          tolerance)
@@ -1957,7 +1999,7 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
                                end == 0 ? middle : 1,
                                piece.uAt(end),
                                beside[side],
-                               vertex,
+                               from[side],
                                rail.s[side].face,
                                stop,
                                tolerance)
@@ -2138,7 +2180,7 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
                      end == 0 ? middle : 1,
                      piece.uAt(end),
                      beside[side],
-                     vertex,
+                     from[side],
                      rail.s[side].face,
                      stop,
                      tolerance);
@@ -2149,7 +2191,7 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
                           end == 0 ? middle : 1,
                           piece.uAt(end),
                           beside[side],
-                          vertex,
+                          from[side],
                           rail.s[side].face,
                           stop,
                           tolerance);

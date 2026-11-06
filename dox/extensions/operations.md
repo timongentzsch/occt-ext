@@ -2235,3 +2235,53 @@ section 5.4, [quintic Hermite interpolation](https://developer.nvidia.com/gpugem
 This source establishes the scalar interpolation regularity, not feasibility of
 arbitrary G2 blend data. A host with C2 selections should return a constant
 section regime: changing labels would otherwise request unnecessary C0 fit knots.
+
+### Experimental terminal restriction continuation
+
+The last recovery construction can continue a displaced support's terminal
+contact along the identified two-offset branch. A local tangent carrier predicts
+the next centre; the existing exact-offset Newton equations correct it. A sign
+change against the stopping support is bisected and retained only when the exact
+contact also projects onto its finite boundary arc within the unchanged bounds.
+The endpoint records its support, arc, arc parameter and station parameter.
+The unchanged attachment and final solid checks still decide delivery.
+
+Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided Design
+and Manufacturing* (2009), section 5.8.2.3, equations (5.101)-(5.105), describe
+regular transverse-intersection marching and its component-seed requirement
+([chapter](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node109.html)).
+Isabelle Grignon, *ChFiDS_CommonPoint* (1993), `SetArc` and `SetParameter`,
+records separate restriction and spine parameters in OCCT
+([source](https://github.com/Open-Cascade-SAS/OCCT/blob/master/src/ModelingAlgorithms/TKFillet/ChFiDS/ChFiDS_CommonPoint.hxx)).
+The local predictor and signed-distance boundary search here are derived;
+the step size and finite exploration count are numerical policies, not existence
+bounds. This WIP does not certify unsampled regularity, all boundary roots,
+or consistent terminal face closure. The tested displaced contacts reach their
+restriction arcs; at this stage complete solid construction still requires the
+boundary arrangement described below.
+
+### Boundary intervals after two support crossings
+
+In the final contact-arrangement construction, a boundary edge incident to a blended
+chain can be crossed twice even when only one of its endpoints belongs to that chain.
+The retained interval is bounded by the two crossing parameters. Trimming both times
+from the chain endpoint loses one boundary vertex. Each cut now removes the endpoint
+on its own side of the other crossing, using the ordered geometric parameters rather
+than the parameter midpoint. This interval selection is **derived** for the isolated,
+two-crossing arrangement; it is not a general arrangement algorithm for overlapping
+contacts, tangencies or more crossings. Earlier constructions are unchanged.
+
+The generated torus/oval-prism test checks single-edge and connected-chain requests
+at two scales and two poses. It checks solid acceptance and, away from stopping
+planes, the rolling-ball defect independently by distances to the input skin.
+The larger-radius terminal intersection remains open: its contacts can meet a stop
+plane at different longitudinal stations, so replacing the trim by one iso-section
+would change the geometry.
+
+Jacques Goussard, *BRepFeat_SplitShape* (1995), OCCT 6.8.0 edition (2014),
+`Add(Compound, Face)`, requires geometrically connected splitting edges to share
+their topological vertices
+([source](https://github.com/Open-Cascade-SAS/OCCT/blob/V6_8_0/src/BRepFeat/BRepFeat_SplitShape.cdl)).
+That boundary-incidence requirement motivates retaining both crossing vertices; it
+supplies neither a complete topology proof nor a numerical error bound for this
+construction. The existing final validity, closure and contact bounds still apply.

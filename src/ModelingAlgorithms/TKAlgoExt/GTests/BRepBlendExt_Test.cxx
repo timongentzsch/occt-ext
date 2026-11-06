@@ -1562,3 +1562,91 @@ TEST(BRepBlendExt, CompactRoundingPreservesBoundsAndEndpointJets)
     EXPECT_NEAR(ll, rr, 5e-6);
   }
 }
+
+TEST(BRepBlendExt, ReenteredSupportRetainsTheIntervalBetweenCrossings)
+{
+  using namespace BRepExt::blending;
+  BRepBuilderAPI_MakeWire boundary;
+  const double q[4][2] = {{1,0},{1,.5522847498307936},{.5522847498307936,1},{0,1}};
+  for (int quadrant = 0; quadrant < 4; ++quadrant)
+  {
+    NCollection_Array1<gp_Pnt> poles(1,4);
+    const double a = quadrant * M_PI / 2;
+    for (int j = 0; j < 4; ++j)
+      poles(j+1) = gp_Pnt(10*(q[j][0]*std::cos(a)-q[j][1]*std::sin(a)),
+                           7*(q[j][0]*std::sin(a)+q[j][1]*std::cos(a)), -10);
+    boundary.Add(BRepBuilderAPI_MakeEdge(new Geom_BezierCurve(poles)).Edge());
+  }
+  const auto prism = BRepPrimAPI_MakePrism(BRepBuilderAPI_MakeFace(boundary.Wire()),gp_Vec(0,0,20)).Shape();
+  gp_Trsf turn;
+  turn.SetRotation(gp_Ax1(gp::Origin(),gp_Dir(1,.3,0)),.7);
+  turn.SetTranslationPart(gp_Vec(6,3,2));
+  const auto tool = BRepBuilderAPI_Transform(prism,turn,true).Shape();
+  BRepAlgoAPI_Common common(BRepPrimAPI_MakeTorus(9,4).Shape(),tool);
+  const auto body = unified(common.Shape());
+  NCollection_IndexedDataMap<TopoDS_Shape,NCollection_List<TopoDS_Shape>,TopTools_ShapeMapHasher> adjacent;
+  TopExp::MapShapesAndUniqueAncestors(body,TopAbs_EDGE,TopAbs_FACE,adjacent);
+  std::vector<TopoDS_Edge> junction;
+  TopoDS_Edge upper;
+  double highest = -HUGE_VAL;
+  for (int i=1;i<=adjacent.Extent();++i)
+  {
+    const auto& faces = adjacent.FindFromIndex(i);
+    if (faces.Extent()!=2) continue;
+    const auto a=BRepAdaptor_Surface(TopoDS::Face(faces.First())).GetType();
+    const auto b=BRepAdaptor_Surface(TopoDS::Face(faces.Last())).GetType();
+    if (!((a==GeomAbs_Torus && b==GeomAbs_SurfaceOfExtrusion)
+          ||(b==GeomAbs_Torus && a==GeomAbs_SurfaceOfExtrusion))) continue;
+    const auto edge=TopoDS::Edge(adjacent.FindKey(i));
+    junction.push_back(edge);
+    BRepAdaptor_Curve curve(edge);
+    const double z=curve.Value((curve.FirstParameter()+curve.LastParameter())/2).Z();
+    if (z>highest) { highest=z;upper=edge; }
+  }
+  ASSERT_FALSE(upper.IsNull());
+  std::vector<TopoDS_Edge> chain={upper};
+  for(bool grew=true;grew;)
+  {
+    grew=false;
+    for(const auto& candidate:junction)
+    {
+      if(std::any_of(chain.begin(),chain.end(),[&](const auto& e){return e.IsSame(candidate);}))continue;
+      if(std::any_of(chain.begin(),chain.end(),[&](const auto& e){
+        return TopExp::FirstVertex(e).IsSame(TopExp::FirstVertex(candidate))
+          ||TopExp::FirstVertex(e).IsSame(TopExp::LastVertex(candidate))
+          ||TopExp::LastVertex(e).IsSame(TopExp::FirstVertex(candidate))
+          ||TopExp::LastVertex(e).IsSame(TopExp::LastVertex(candidate));}))
+      {chain.push_back(candidate);grew=true;}
+    }
+  }
+  for(double scale:{.5,2.}) for(bool turned:{false,true}) for(bool all:{false,true})
+  {
+    SCOPED_TRACE(::testing::Message()<<scale<<" "<<turned<<" "<<all);
+    gp_Trsf transform;
+    transform.SetScale(gp::Origin(),scale);
+    if(turned)transform=posed(scale);
+    BRepBuilderAPI_Transform moved(body,transform,true);
+    std::vector<TopoDS_Edge> selected;
+    for(const auto& edge:all?chain:std::vector<TopoDS_Edge>{upper})
+      selected.push_back(TopoDS::Edge(moved.ModifiedShape(edge)));
+    auto request=roundOf(moved.Shape(),selected,.2*scale);
+    request.fitWork=FitWork::Deferred;
+    const auto made=blend(request);
+    EXPECT_NO_THROW(accepted("round",request.body,made.shape,request.first,&made));
+    // The ball is cut by a stopping plane near the ends. Away from those planes,
+    // compare its envelope to distances from the input skin, independently of the solver.
+    const auto rolls = [&](const gp_Pnt& centre) {
+      for (TopExp_Explorer f(request.body, TopAbs_FACE); f.More(); f.Next())
+      {
+        const BRepAdaptor_Surface support(TopoDS::Face(f.Current()));
+        if (support.GetType() == GeomAbs_Plane
+            && support.Plane().Distance(centre) <= request.first + 1e-6 * scale)
+          return false;
+      }
+      return true;
+    };
+    const auto defect = ballDefect(made.shape, request.body, request.first, rolls);
+    EXPECT_GT(defect.samples, 0);
+    EXPECT_LT(std::abs(defect.worst), 5e-6 * request.first);
+  }
+}

@@ -2472,6 +2472,136 @@ void Blend::carries()
   }
 }
 
+//! Continue an already identified terminal branch to its restriction arcs. The temporary
+//! tangent carrier is corrected on both exact offsets at every step; it is not an envelope.
+static void continueTerminal(Piece& piece, Stations& stations,
+                             const NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>& facesOfEdge,
+                             const NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>& edgesOfVertex)
+{
+  Rail& rail = piece.rail;
+  if (!rail.parameterSupports || rail.closed || !rail.sizes.places.empty()
+      || rail.law != Law::Conic || rail.s[0].cliffCurve || rail.s[1].cliffCurve)
+    return;
+  TopoDS_Vertex vertices[2];
+  TopExp::Vertices(TopoDS::Edge(rail.edge.Oriented(TopAbs_FORWARD)), vertices[0], vertices[1]);
+  for (int end = 0; end < 2; ++end)
+  {
+    if (piece.joint[end].meets != Meets::Stop || vertices[end].IsNull())
+      continue;
+    TopoDS_Edge arcs[2];
+    TopoDS_Face stop;
+    for (const auto& edge : edgesOfVertex.FindFromKey(vertices[end]))
+      for (const auto& face : facesOfEdge.FindFromKey(edge))
+      {
+        if (face.IsSame((*rail.parameterSupports)[0].face)
+            || face.IsSame((*rail.parameterSupports)[1].face)
+            || face.IsSame(rail.s[0].face) || face.IsSame(rail.s[1].face))
+          continue;
+        TopoDS_Edge found[2];
+        for (int side = 0; side < 2; ++side)
+          for (TopExp_Explorer e(rail.s[side].face, TopAbs_EDGE); e.More(); e.Next())
+            for (const auto& adjacent : facesOfEdge.FindFromKey(e.Current()))
+              if (adjacent.IsSame(face))
+                found[side] = TopoDS::Edge(e.Current());
+        if (!found[0].IsNull() && !found[1].IsNull())
+        {
+          stop = TopoDS::Face(face);
+          arcs[0] = found[0]; arcs[1] = found[1];
+        }
+      }
+    if (stop.IsNull())
+      continue;
+    const auto surface = BRep_Tool::Surface(stop);
+    const auto distance = [&](const Station& s, int side) {
+      GeomAPI_ProjectPointOnSurf onto(s.foot[side], surface);
+      if (onto.NbPoints() == 0) return std::numeric_limits<double>::quiet_NaN();
+      double u,v; onto.LowerDistanceParameters(u,v);
+      gp_Pnt p; gp_Vec du,dv; surface->D1(u,v,p,du,dv);
+      const gp_Vec n = du.Crossed(dv);
+      return n.Magnitude() > 0 ? gp_Vec(p,s.foot[side]).Dot(n.Normalized())
+                              : std::numeric_limits<double>::quiet_NaN();
+    };
+    const double start = end == 0 ? rail.from : rail.to;
+    Station current;
+    if (!stations.at(start,current)) continue;
+    double before[2] = {distance(current,0),distance(current,1)};
+    // March in length units; preserve orientation of the original parameter.
+    const double sign = end == 0 ? -1 : 1;
+    const double step = rail.scale / 16;
+    const auto original = rail.terminalCarrier[end];
+    std::vector<Station> trace{current};
+    bool crossed[2] = {rail.s[0].face.IsSame((*rail.parameterSupports)[0].face),
+                       rail.s[1].face.IsSame((*rail.parameterSupports)[1].face)};
+    std::optional<Piece::TerminalContact> witnesses[2];
+    // A finite exploration policy; reaching it is not a geometric nonexistence claim.
+    for (int count = 0; count < 256 && !(crossed[0] && crossed[1]); ++count)
+    {
+      gp_Vec tangent = current.along;
+      gp_Pnt p; gp_Vec oldDirection;
+      rail.stationD1(current.t,p,oldDirection);
+      if (tangent.Dot(oldDirection) < 0) tangent.Reverse();
+      tangent.Normalize();
+      bool solved = false;
+      Station next;
+      double h = step;
+      for (int cut = 0; cut < 24; ++cut, h /= 2)
+      {
+        const double t = current.t + sign*h;
+        const gp_Pnt origin = current.centre.Translated(tangent * (-current.t));
+        const Handle(Geom_Curve) line = new Geom_Line(origin,gp_Dir(tangent));
+        // The finite restriction keeps the carrier's active side explicit.
+        rail.terminalCarrier[end] = new Geom_TrimmedCurve(line,
+                                     std::min(start,t),std::max(start,t));
+        next = current;
+        if (contactAt(rail,t,next) && next.along.Dot(current.along) > 0
+            && next.centre.Distance(current.centre) <= 2*h)
+        { solved = true; break; }
+      }
+      if (!solved) break;
+      double after[2] = {distance(next,0),distance(next,1)};
+      for (int side = 0; side < 2; ++side)
+        if (!crossed[side] && before[side]*after[side] <= 0)
+        {
+          Station a = current, b = next, root;
+          double da = before[side];
+          for (int iteration = 0; iteration < 64; ++iteration)
+          {
+            const double t = (a.t+b.t)/2;
+            root = a;
+            if (!contactAt(rail,t,root)) break;
+            const double d = distance(root,side);
+            if (std::abs(d) <= rail.resolved(limit::solved)) break;
+            if (da*d <= 0) b=root;
+            else { a=root; da=d; }
+          }
+          double f,l; const auto arc = BRep_Tool::Curve(arcs[side],f,l);
+          GeomAPI_ProjectPointOnCurve on(root.foot[side],arc,f,l);
+          crossed[side] = std::abs(distance(root,side)) <= rail.resolved(limit::solved)
+                          && on.NbPoints() && on.LowerDistance() <= rail.resolved(limit::together);
+          if (crossed[side])
+            witnesses[side] = Piece::TerminalContact{
+              rail.s[side].face, arcs[side], on.LowerDistanceParameter(), root.t};
+        }
+      trace.push_back(next); current = next;
+      before[0]=after[0];before[1]=after[1];
+    }
+    rail.terminalCarrier[end] = original;
+    if (!(crossed[0] && crossed[1]) || trace.size() < 3) continue;
+    if (end == 0) std::reverse(trace.begin(),trace.end());
+    Handle(NCollection_HArray1<gp_Pnt>) points = new NCollection_HArray1<gp_Pnt>(1,int(trace.size()));
+    Handle(NCollection_HArray1<double>) parameters = new NCollection_HArray1<double>(1,int(trace.size()));
+    for (int i=0;i<int(trace.size());++i)
+    { points->SetValue(i+1,trace[i].centre); parameters->SetValue(i+1,trace[i].t); }
+    GeomAPI_Interpolate fit(points,parameters,false,rail.resolved(limit::solved));
+    fit.Perform();
+    if (!fit.IsDone()) continue;
+    rail.terminalCarrier[end] = fit.Curve();
+    for (int side = 0; side < 2; ++side)
+      piece.terminalContact[end][side] = witnesses[side];
+    if (end == 0) rail.from = trace.front().t; else rail.to = trace.back().t;
+  }
+}
+
 //! A chordal blend whose ball keeps one size along the edge (between planes, or round a rim
 //! whose wedge does not change) is that round: made as one, exact where a round is.
 static void roundOfChord(Rail& rail, Stations& stations)
@@ -2677,6 +2807,8 @@ void Blend::sheets()
         piece.rail.from = std::max(piece.rail.from, *reached);
       if (const auto reached = stations.reached(1))
         piece.rail.to = std::min(piece.rail.to, *reached);
+      if (request.intersectSpines)
+        continueTerminal(piece, stations, facesOfEdge, edgesOfVertex);
       // An exact sheet needs no fit: its contacts are its own.
       // A conic's corner patch takes its weights from fitted sheets: none extruded there (a
       // chamfer's corner takes none).

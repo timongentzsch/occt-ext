@@ -387,8 +387,15 @@ struct Rail
   double spineFirst = 0, spineLast = 0;
   double spineParameterFirst = 0, spineParameterLast = 0;
 
+  Handle(Geom_Curve) terminalCarrier[2];
+
   void stationD1(double t, gp_Pnt& point, gp_Vec& tangent) const
   {
+    for (int end = 0; end < 2; ++end)
+      if (!terminalCarrier[end].IsNull()
+          && (end == 0 ? t <= terminalCarrier[end]->LastParameter()
+                       : t >= terminalCarrier[end]->FirstParameter()))
+        return terminalCarrier[end]->D1(t, point, tangent);
     if (spine.IsNull())
       return curve.D1(t, point, tangent);
     const double rate = (spineLast - spineFirst) / (spineParameterLast - spineParameterFirst);
@@ -1554,6 +1561,15 @@ struct Piece
     int         side    = 0;
     TopoDS_Edge crossed;
   } joint[2];
+
+  struct TerminalContact
+  {
+    TopoDS_Face support;
+    TopoDS_Edge arc;
+    double parameter = 0, station = 0;
+  };
+  std::optional<TerminalContact> terminalContact[2][2]; // [end][side]
+
 
   //! A blend between two faces that meet only at this vertex of the body, where more than three
   //! blended edges meet and the corner parts into balls on three faces or more
