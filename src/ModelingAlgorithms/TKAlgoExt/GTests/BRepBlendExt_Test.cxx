@@ -19,6 +19,7 @@
 #include "BRepExtTest_Support.hxx"
 
 #include <BRepBlendExt_Request.hxx>
+#include <BRepBlendExt_Smooth.hxx>
 #include <BRepBlendExt_Internal.hxx>
 #include <GeomConvert.hxx>
 #include <Geom_Ellipse.hxx>
@@ -1518,4 +1519,46 @@ TEST(BRepBlendExt, CentreLengthIgnoresTangentialParameterBreaks)
         EXPECT_NEAR(arc->length(t), scale * xAt(t), scale * 1e-10);
       }
     }
+}
+
+TEST(BRepBlendExt, CompactRoundingPreservesBoundsAndEndpointJets)
+{
+  using namespace BRepExt::blending;
+  for (double scale : {0.001, 1.0, 1000.0})
+  {
+    for (int i = -200; i <= 200; ++i)
+    {
+      const double a = scale * i / 100;
+      const double upper = smoothMaximum(a, 0, scale);
+      const double lower = smoothMinimum(a, 0, scale);
+      EXPECT_GE(upper + 1e-14 * scale, std::max(a, 0.0));
+      EXPECT_LE(upper - std::max(a, 0.0), 3 * scale / 16 + 1e-14 * scale);
+      EXPECT_LE(lower - 1e-14 * scale, std::min(a, 0.0));
+      EXPECT_DOUBLE_EQ(upper, smoothMaximum(0, a, scale));
+      if (std::abs(a) >= scale)
+        EXPECT_DOUBLE_EQ(upper, std::max(a, 0.0));
+    }
+    const auto f = [&](double x) { return smoothMaximum(scale * x, 0, scale) / scale; };
+    for (double x : {-1.0, 1.0})
+    {
+      const double h = 1e-4;
+      const double left = (3 * f(x) - 4 * f(x-h) + f(x-2*h)) / (2*h);
+      const double right = (-3 * f(x) + 4 * f(x+h) - f(x+2*h)) / (2*h);
+      EXPECT_NEAR(left, right, 3e-8);
+      const double ll = (2*f(x) - 5*f(x-h) + 4*f(x-2*h) - f(x-3*h)) / (h*h);
+      const double rr = (2*f(x) - 5*f(x+h) + 4*f(x+2*h) - f(x+3*h)) / (h*h);
+      EXPECT_NEAR(ll, rr, 3e-7);
+    }
+  }
+  for (double x : {0.0, 1.0})
+  {
+    const double h = 1e-4;
+    const auto f = smoothActivation;
+    const double left = (3*f(x) - 4*f(x-h) + f(x-2*h)) / (2*h);
+    const double right = (-3*f(x) + 4*f(x+h) - f(x+2*h)) / (2*h);
+    EXPECT_NEAR(left, right, 3e-7);
+    const double ll = (2*f(x) - 5*f(x-h) + 4*f(x-2*h) - f(x-3*h)) / (h*h);
+    const double rr = (2*f(x) - 5*f(x+h) + 4*f(x+2*h) - f(x+3*h)) / (h*h);
+    EXPECT_NEAR(ll, rr, 5e-6);
+  }
 }

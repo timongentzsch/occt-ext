@@ -14,6 +14,7 @@
 // Blend: The ball resting on both supports at a place along the edge, and the section through
 // its feet.
 
+#include <BRepBlendExt_Smooth.hxx>
 #include <BRepBlendExt_Internal.hxx>
 #include <Geom_BezierSurface.hxx>
 #include <Geom_ConicalSurface.hxx>
@@ -821,7 +822,8 @@ bool sectionAt(const Rail&                      rail,
       bool   framed[2]  = {false, false};
       if (!frameTangents(rail, s, frames, tangent, framed))
         return false;
-      double bend[2] = {0, 0};
+      double bend[2]       = {0, 0};
+      double activation[2] = {0, 0};
       for (int i = 0; i < 2; ++i)
       {
         // Past a surface's end (runsOn) the ruled run-on is outside the faces: the section keeps
@@ -844,8 +846,11 @@ bool sectionAt(const Rail&                      rail,
         // A support is flat where its curvature moves the section by no more than the fit
         // tolerance (it shifts the third pole by (5/4) kappa h^2, h under the ball's radius):
         // a plane carried as a spline, whose curvature is rounding, gives the planar section.
-        if (std::abs(bend[i]) * std::pow(s.centre.Distance(s.foot[i]), 2) <= fitTolerance(rail))
-          bend[i] = 0;
+        const double relativeBend =
+          std::abs(bend[i]) * s.centre.SquareDistance(s.foot[i]) / fitTolerance(rail);
+        activation[i] = smoothActivation(relativeBend - 1);
+        // Each side must ease independently even while the other side is curved.
+        bend[i] *= activation[i];
       }
       for (const auto& [along, across] : rho::g2Poles(rail.rho))
         out.poles.push_back(
@@ -870,9 +875,19 @@ bool sectionAt(const Rail&                      rail,
                  {rail.edge},
                  FailureKind::Curvature);
       }
-      if ((activeFrame || bend[0] != 0 || bend[1] != 0)
-          && !SectionPolicy::curvedG2(rail.rho, s, apex, tangent, bend, out.poles, out.regime))
-        return false;
+      const double activity =
+        activeFrame ? 1 : activation[0] + activation[1] - activation[0] * activation[1];
+      if (activity > 0)
+      {
+        const auto planar = out.poles;
+        if (!SectionPolicy::curvedG2(rail.rho, s, apex, tangent, bend, out.poles, out.regime))
+          return false;
+        // Blend the entire profile, not just its curvature: host policies may have
+        // a different flat limit. Zero endpoint jets of activity make this C2 too.
+        if (activity < 1)
+          for (size_t j = 0; j < out.poles.size(); ++j)
+            out.poles[j] = planar[j].Translated(gp_Vec(planar[j], out.poles[j]) * activity);
+      }
       out.weights.assign(8, 1);
       out.knots.assign(rho::g2Knots.begin(), rho::g2Knots.end());
       out.multiplicities.assign(rho::g2Multiplicities.begin(), rho::g2Multiplicities.end());

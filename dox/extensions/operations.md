@@ -2189,3 +2189,28 @@ or derivatives. The regularity argument is conditional on regular transverse
 offset intersections and smooth support and section data; it does not establish
 convergence of this sampled reconstruction. Final contact, internal curvature,
 section-law, topology and preservation checks remain separate acceptance gates.
+### Smooth section-policy selections
+
+`BRepBlendExt_Smooth.hxx` provides compact C2 upper/lower rounding for policy
+maxima and minima. On `|x| < 1` replace `|x|` by
+`p(x)=3/8+3x^2/4-x^4/8`, retaining `|x|` outside. Values and the first two
+derivatives match at both endpoints. Thus
+`M(a,b,w)=(a+b+w*p((a-b)/w))/2` is C2 for positive width, is at least
+`max(a,b)`, and exceeds it by at most `3w/16`; `-M(-a,-b,w)` rounds a minimum
+downwards. These formulas and bounds are derived here by endpoint Hermite
+matching and differentiating the excess. They apply to smooth scalar inputs;
+a nonsmooth support-curvature field or a singular sweep is not repaired by them.
+
+The G2 flat-support cutoff now activates a whole section profile with
+`H(t)=6t^5-15t^4+10t^3`, between one and two fit-tolerance units of
+`abs(curvature)*radius^2`. Both endpoint derivatives through order two vanish.
+Whole-profile interpolation is necessary when a host's flat and curved laws
+have different zero-curvature limits. Contact points and tangent directions are
+shared by the two profiles; intermediate endpoint curvature is eased too.
+The band width is a policy choice, not a new accuracy allowance. Output contact,
+section, validity and collision checks remain independent requirements.
+Source: Ken Perlin, *Implementing Improved Perlin Noise*, GPU Gems (2004),
+section 5.4, [quintic Hermite interpolation](https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-5-implementing-improved-perlin-noise).
+This source establishes the scalar interpolation regularity, not feasibility of
+arbitrary G2 blend data. A host with C2 selections should return a constant
+section regime: changing labels would otherwise request unnecessary C0 fit knots.
