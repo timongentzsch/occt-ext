@@ -326,7 +326,10 @@ Fitted fit(const Rail&                      rail,
   };
   std::vector<double> worst;
   int                 bendRounds = 0;
-  for (int refinement = 0; refinement < 16; ++refinement)
+  // Local refinement can keep converging in a short interval long after sixteen rounds.
+  // The pole budget bounds the work; require a new representable knot at every ordinary
+  // refinement instead of imposing a second, unrelated iteration budget.
+  for (int refinement = 0;; ++refinement)
   {
     checkCancelled(rail.op);
     const auto flat  = flatten(knots);
@@ -593,8 +596,11 @@ Fitted fit(const Rail&                      rail,
     if (worst.size() > 3 && worstError > 1e3 * tolerance
         && worstError > worst[worst.size() - 4] / 2)
       break;
+    const auto previousKnots = knots.size();
     for (double u : refine)
       knots.emplace(u, 1);
+    if (knots.size() == previousKnots)
+      break;
   }
   fail(rail.op, no_solution, "the blend surface cannot meet the length tolerance", {rail.edge});
 }

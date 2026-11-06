@@ -25,11 +25,13 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepToolsExt_Checks.hxx>
+#include <BRepToolsExt_Operations.hxx>
 
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
@@ -40,6 +42,7 @@
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRepPrimAPI_MakeTorus.hxx>
 
 #include <gtest/gtest.h>
 
@@ -1165,4 +1168,99 @@ TEST(BRepBlendExt, ConstructionRolesDistinguishContactsFromSharpEnds)
         EXPECT_GE(contacts, loop ? 8 : 2);
         EXPECT_GE(sharp, loop ? 4 : 2);
       }
+}
+
+// Small intervals of a regular offset intersection can need many local refinements without
+// needing a large global net. Generate the supports, rather than retaining a serialized body;
+// repeat at nearby crossing angles and at different scales and placements.
+TEST(BRepBlendExt, LocalFitRefinementOfATorusAndASplineSkin)
+{
+  const auto oval = [](double z, double scale) {
+    constexpr double q[4][2] = {{1, 0}, {1, 0.5522847498307936},
+                                {0.5522847498307936, 1}, {0, 1}};
+    BRepBuilderAPI_MakeWire wire;
+    for (int quadrant = 0; quadrant < 4; ++quadrant)
+    {
+      NCollection_Array1<gp_Pnt> poles(1, 4);
+      const double a = quadrant * M_PI / 2;
+      for (int i = 0; i < 4; ++i)
+        poles(i + 1) = gp_Pnt(scale * 10 * (q[i][0] * std::cos(a) - q[i][1] * std::sin(a)),
+                              scale * 7 * (q[i][0] * std::sin(a) + q[i][1] * std::cos(a)), z);
+      wire.Add(BRepBuilderAPI_MakeEdge(new Geom_BezierCurve(poles)).Edge());
+    }
+    return wire.Wire();
+  };
+  std::vector<uint32_t> sections;
+  for (const auto zr : {std::pair{-10., .8}, std::pair{0., 1.1}, std::pair{10., .9}})
+    sections.push_back(BRepExt::store(session(), oval(zr.first, zr.second)));
+  const auto skin = BRepExt::get(session(),
+    BRepExt::skinThrough(session(), sections, 0, 0, true, false).resultId);
+  for (const auto angleRadius : {std::pair{.69, .55}, std::pair{.7, .5}})
+  {
+    gp_Trsf turn, move;
+    turn.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, .3, 0)), angleRadius.first);
+    move.SetTranslation(gp_Vec(6, 3, 2));
+    const auto support = BRepBuilderAPI_Transform(skin, move * turn, true).Shape();
+    const auto united = BRepExt::booleanChecked(session(), 0,
+      {BRepExt::store(session(), BRepPrimAPI_MakeTorus(9, 4).Shape())},
+      {BRepExt::store(session(), support)}, 0, 0, 0, {}, BRepExt::failureHashBound);
+    const auto whole = BRepExt::get(session(), united.resultId);
+    TopExp_Explorer solids(whole, TopAbs_SOLID);
+    ASSERT_TRUE(solids.More());
+    const auto body = solids.Current();
+    TopoDS_Edge seed;
+    double longest = 0;
+    for (const auto& edge : edgesWhere(body, [](const double*) { return true; }))
+    {
+      bool torus = false, spline = false;
+      for (TopExp_Explorer faces(body, TopAbs_FACE); faces.More(); faces.Next())
+        for (TopExp_Explorer boundary(faces.Current(), TopAbs_EDGE); boundary.More(); boundary.Next())
+          if (boundary.Current().IsSame(edge))
+          {
+            const auto type = BRepAdaptor_Surface(TopoDS::Face(faces.Current())).GetType();
+            torus = torus || type == GeomAbs_Torus;
+            spline = spline || type == GeomAbs_BSplineSurface;
+          }
+      const double size = length(edge);
+      if (torus && spline && size > longest)
+      {
+        seed = edge;
+        longest = size;
+      }
+    }
+    ASSERT_FALSE(seed.IsNull());
+    for (double scale : {.5, 1., 2.})
+      for (bool turned : {false, true})
+      {
+        SCOPED_TRACE(::testing::Message() << angleRadius.first << " " << scale << " " << turned);
+        gp_Trsf pose;
+        if (turned)
+          pose = posed(scale);
+        else
+          pose.SetScale(gp::Origin(), scale);
+        BRepBuilderAPI_Transform transform(body, pose, true);
+        const auto input = transform.Shape();
+        const auto edge = TopoDS::Edge(transform.ModifiedShape(seed));
+        const auto request = roundOf(input, {edge}, angleRadius.second * scale);
+        BRepExt::blending::Blended result;
+        try
+        {
+          result = BRepExt::blending::blend(request);
+        }
+        catch (const std::exception& error)
+        {
+          ADD_FAILURE() << error.what();
+          continue;
+        }
+        EXPECT_NO_THROW(BRepExt::blending::accepted("round", input, result.shape,
+                                                   request.first, &result));
+        EXPECT_TRUE(BRepExt::invalidity(result.shape).empty());
+        if (!turned && scale == 1)
+        {
+          const auto defect = ballDefect(result.shape, input, request.first);
+          ASSERT_GT(defect.samples, 0);
+          EXPECT_LE(std::abs(defect.worst), 1e-6);
+        }
+      }
+  }
 }

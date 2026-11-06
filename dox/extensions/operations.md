@@ -223,8 +223,8 @@ lower than the ball (h < r; the reference modeller refuses it), and a chamfer la
 
 *Unproven.* Every marching limit (step counts, stall windows, Newton tolerances), the carry's stray bound
 (4 r, or 4 / sqrt 2 times the ball's distance at the end in a sharper wedge), the radius/curvature
-refusal margins, the choice between arcs and spline sections at corners, and the number of fit
-refinements. There is no published bound for a G2 conic or quintic section as a function of the support's
+refusal margins, the choice between arcs and spline sections at corners, and the fit's pole and
+stagnation budgets. There is no published bound for a G2 conic or quintic section as a function of the support's
 curvature [searched; none found]; curvature-continuous requests therefore refuse in this tree until a caller
 supplies a policy. Where a result is delivered it is measured again from outside (seam gaps, tangent angle,
 curvature difference) and refused if it misses; that measurement is sampled, not a global certificate.
@@ -235,6 +235,32 @@ Corner contact stations likewise compare the integral of rail speed between
 their normalized parameters, rather than a raw parameter difference. The
 arclength bounds the chord displacement and has physical length units; a
 parameter interval need not. The existing agreement bound is unchanged.
+
+### Local refinement without an iteration budget
+
+The fit no longer stops after sixteen refinements. A short interval can still be
+converging then: the iteration count bounds neither the approximation error nor
+the number of poles. The existing interpolation, tolerance, continuity events,
+positive-weight check and downstream result checks remain authoritative.
+
+Carl de Boor, *Spline Basics* (2001 manuscript for the *CAGD Handbook*),
+[section 17, theorem 17.2 and equation 17.3](https://ftp.cs.wisc.edu/Approx/cagdhand.pdf),
+gives the Schoenberg-Whitney existence conditions for point interpolation;
+Greville sites satisfy them for the stated continuous spline spaces. This
+supports the existing collocation construction, not an arbitrary refinement
+count or a global error certificate for sampled data. Terminal Hermite rows
+keep their existing construction.
+
+Termination argument (derived): outside the two existing event-discovery rounds,
+a continued refinement must add at least one distinct representable knot.
+Otherwise the fit stops. Knot multiplicities are positive, so increasing the
+number of distinct knots increases the number of coefficients. The unchanged
+4,000-coefficient work budget therefore bounds the number of such rounds.
+Cancellation and the existing stagnation check still apply. No universal
+existence claim follows: singular contact data, numerical noise or a resource
+budget can still prevent a fit. Every previously successful fit exits along the
+same numerical path, before the former iteration limit; extra rounds are reached
+only by requests previously refused at that limit.
 
 ### Located continuity events in a fitted blend
 
