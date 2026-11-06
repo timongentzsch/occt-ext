@@ -1974,6 +1974,21 @@ Section 11.1.4 discusses separately generated edge and corner patches in solid
 offsets; it does not prove this strip's validity
 ([chapter](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node217.html)).
 
+Shell reconstruction retains the orientation of each source-face occurrence,
+including faces outside the split junction. The modifier's shape map identifies
+shapes independently of their occurrence orientation; its stored face is not a
+replacement for the oriented use in the shell. This follows the OCCT topology
+model (Open CASCADE, *Modeling Data*, 8.0.1, 2026,
+["Orientation"](https://occt3d.com/dev/doc/overview/html/occt_user_guides__modeling_data.html)) and the explicit
+orientation composition in `BRepTools_Modifier::Rebuild`, "copy the sub-elements"
+([source](https://github.com/Open-Cascade-SAS/OCCT/blob/b8f597c6/src/ModelingData/TKBRep/BRepTools/BRepTools_Modifier.cxx)).
+Using the stored orientation for an unchanged face can give a shared edge two
+identical uses, so a closed collection of individually valid faces is not an
+oriented boundary. The correction restores occurrence orientations without
+changing carriers, curve parameters or contact bounds. The generated regression
+varies concave cylinder and cone unions with cubic-profile revolutions in scale
+and rigid pose, checking validity and boundary lifts independently.
+
 The seam's two transported endpoints must agree within the operation tolerance.
 The rail fits use one tenth of that tolerance. The transverse chord must project
 to the third support within the unchanged operation bound. Every oriented endpoint

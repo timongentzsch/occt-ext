@@ -2143,8 +2143,10 @@ static TopoDS_Shape offsetWithContacts(const TopoDS_Shape& body,
     }
     TopoDS_Shell shell;
     builder.MakeShell(shell);
+    // The modifier stores canonical shapes, not the oriented occurrences in this
+    // shell. Keep the orientation of every face, including unaffected neighbours.
     for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
-      builder.Add(shell, modified(f.Current()));
+      builder.Add(shell, modified(f.Current()).Oriented(f.Current().Orientation()));
     for (auto& split : splits)
     {
       // Choose the strip orientation opposite its first rail's use on its neighbour.

@@ -58,6 +58,7 @@
 #include <Geom_ToroidalSurface.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
@@ -1156,7 +1157,10 @@ TEST(BRepOffsetExt, ClosedIntersectionOccurrencesShareTheirJunction)
 
 namespace
 {
-TopoDS_Shape separatedRevolutionContact(double bulge, double top)
+TopoDS_Shape separatedRevolutionContact(double bulge,
+                                        double top,
+                                        bool   concave = false,
+                                        bool   conical = false)
 {
   NCollection_Array1<gp_Pnt> pts(1, 4);
   pts(1)                           = gp_Pnt(6, 0, -10);
@@ -1175,8 +1179,10 @@ TopoDS_Shape separatedRevolutionContact(double bulge, double top)
   shift.SetTranslation(gp_Vec(6, 3, 2));
   right = BRepBuilderAPI_Transform(right, shift, true).Shape();
   const auto left =
-    BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -10), gp::DZ()), 10, 20).Shape();
-  auto            common = BRepAlgoAPI_Common(left, right).Shape();
+    conical ? BRepPrimAPI_MakeCone(gp_Ax2(gp_Pnt(0, 0, -10), gp::DZ()), 12, 6, 20).Shape()
+            : BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -10), gp::DZ()), 10, 20).Shape();
+  auto common =
+    concave ? BRepAlgoAPI_Fuse(left, right).Shape() : BRepAlgoAPI_Common(left, right).Shape();
   TopExp_Explorer solids(common, TopAbs_SOLID);
   if (!solids.More())
     throw std::runtime_error("no solid");
@@ -1186,7 +1192,7 @@ TopoDS_Shape separatedRevolutionContact(double bulge, double top)
   TopExp::MapShapesAndUniqueAncestors(body, TopAbs_EDGE, TopAbs_FACE, ef);
   TopoDS_Shape chosen;
   double       longest = 0;
-  const auto kind = GeomAbs_Cylinder;
+  const auto   kind    = conical ? GeomAbs_Cone : GeomAbs_Cylinder;
   for (int i = 1; i <= ef.Extent(); ++i)
   {
     if (ef(i).Size() != 2)
@@ -1214,6 +1220,31 @@ TopoDS_Shape separatedRevolutionContact(double bulge, double top)
 
   return source;
 }
+
+void checkContactBoundaryLifts(const TopoDS_Shape& result, double bound)
+{
+  for (TopExp_Explorer f(result, TopAbs_FACE); f.More(); f.Next())
+  {
+    const auto face = TopoDS::Face(f.Current());
+    for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+    {
+      const auto edge = TopoDS::Edge(e.Current());
+      double     first, last, lo, hi;
+      const auto curve = BRep_Tool::Curve(edge, first, last);
+      const auto pc    = BRep_Tool::CurveOnSurface(edge, face, lo, hi);
+      ASSERT_FALSE(pc.IsNull());
+      if (curve.IsNull())
+        continue;
+      for (int k = 0; k <= 128; ++k)
+      {
+        const double t  = first + (last - first) * k / 128.;
+        const auto   uv = pc->Value(t);
+        EXPECT_LE(curve->Value(t).Distance(BRep_Tool::Surface(face)->Value(uv.X(), uv.Y())), bound);
+      }
+    }
+  }
+}
+
 } // namespace
 
 TEST(BRepOffsetExt, SeparatedTangentContactsAddBoundedStrips)
@@ -1245,27 +1276,43 @@ TEST(BRepOffsetExt, SeparatedTangentContactsAddBoundedStrips)
           EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
           EXPECT_GT(volume(result), volume(body));
           checkEndpointOccurrences(result, bound);
-          for (TopExp_Explorer f(result, TopAbs_FACE); f.More(); f.Next())
-          {
-            const auto face = TopoDS::Face(f.Current());
-            for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
-            {
-              const auto edge = TopoDS::Edge(e.Current());
-              double     first, last, lo, hi;
-              const auto curve = BRep_Tool::Curve(edge, first, last);
-              const auto pc    = BRep_Tool::CurveOnSurface(edge, face, lo, hi);
-              ASSERT_FALSE(pc.IsNull());
-              if (curve.IsNull())
-                continue;
-              for (int k = 0; k <= 128; ++k)
-              {
-                const double t  = first + (last - first) * k / 128.;
-                const auto   uv = pc->Value(t);
-                EXPECT_LE(curve->Value(t).Distance(BRep_Tool::Surface(face)->Value(uv.X(), uv.Y())),
-                          bound);
-              }
-            }
-          }
+          checkContactBoundaryLifts(result, bound);
         }
     }
+}
+
+TEST(BRepOffsetExt, ContactShellRetainsUnchangedFaceOrientations)
+{
+  for (const double bulge : {12.0, 14.0})
+    for (const double top : {7.0, 9.0})
+      for (const bool conical : {false, true})
+      {
+        const auto source = separatedRevolutionContact(bulge, top, true, conical);
+        ASSERT_TRUE(BRepCheck_Analyzer(source).IsValid());
+        for (const double scale : (bulge == 12.0 && top == 7.0 ? std::vector<double>{0.1, 1.0, 10.0}
+                                                               : std::vector<double>{1.0}))
+          for (const bool turned : {false, true})
+          {
+            SCOPED_TRACE(::testing::Message()
+                         << bulge << " " << top << " " << conical << " " << scale << " " << turned);
+            gp_Trsf size;
+            size.SetScale(gp::Origin(), scale);
+            auto body = BRepBuilderAPI_Transform(source, size, true).Shape();
+            if (turned)
+            {
+              gp_Trsf pose;
+              pose.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), 0.6);
+              pose.SetTranslationPart(gp_Vec(13, -7, 19) * scale);
+              body = BRepBuilderAPI_Transform(body, pose, true).Shape();
+            }
+            const double bound  = 1e-6 * scale;
+            const auto   result = kept(body, 0.05 * scale, bound);
+            ASSERT_FALSE(result.IsNull());
+            EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
+            EXPECT_GT(faceCount(result), faceCount(body));
+            EXPECT_GT(volume(result), volume(body));
+            checkEndpointOccurrences(result, bound);
+            checkContactBoundaryLifts(result, bound);
+          }
+      }
 }
