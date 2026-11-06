@@ -32,5 +32,6 @@ Standard_EXPORT Blended blendStored(const OcctKernel&            kernel,
                                     uint32_t                     reference,
                                     const std::vector<int>&      counts = {},
                                     const std::vector<double>&   sizes  = {},
-                                    double                       angle  = 0);
+                                    double                       angle  = 0,
+                                    bool                         deferredFit = true);
 } // namespace BRepExt::blending

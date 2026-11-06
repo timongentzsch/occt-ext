@@ -65,7 +65,8 @@ Blended blendStored(const OcctKernel&            kernel,
                     uint32_t                     reference,
                     const std::vector<int>&      counts,
                     const std::vector<double>&   sizes,
-                    double                       angle)
+                    double                       angle,
+                    bool                         deferredFit)
 {
   if (law < 0 || law > 4)
     fail(op, invalid_input, "unknown section law");
@@ -73,6 +74,7 @@ Blended blendStored(const OcctKernel&            kernel,
     fail(op, invalid_input, "one count of size places for each edge");
   Request request;
   request.operation = op;
+  request.fitWork   = deferredFit ? FitWork::Deferred : FitWork::Bounded;
   request.body      = get(kernel, shape);
   for (const auto& edge : subShapes(kernel, op, request.body, edges, TopAbs_EDGE))
     request.edges.push_back(edge);

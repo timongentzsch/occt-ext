@@ -238,37 +238,39 @@ parameter interval need not. The existing agreement bound is unchanged.
 
 ### Local refinement without an iteration budget
 
-The fit no longer stops after sixteen refinements. A short interval can still be
-converging then: the iteration count bounds neither the approximation error nor
-the number of poles. The existing interpolation, tolerance, continuity events,
-positive-weight check and downstream result checks remain authoritative.
+A request's default `FitWork::Deferred` first runs the complete existing blend
+pipeline with its historical sixteen-round fitting policy (`FitWork::Bounded`).
+Only after all its constructions refuse geometrically does it repeat with
+`FitWork::Extended`, where short converging intervals may refine further.
+Requests made while reconstructing another blend inherit this policy. A host
+with additional public constructions must request Bounded first, try those other
+constructions, and only then request Deferred. Thus deferred work cannot replace
+a successful existing construction with a different representation. If both
+passes refuse, the original refusal is retained; cancellation propagates.
+This selection rule is derived from ordered choice, independent of geometry.
+
+The existing interpolation, tolerance, continuity events, positive-weight check
+and downstream result checks remain authoritative. The sixteen-round pass is
+retained for construction selection, not as an existence or error bound.
 
 Carl de Boor, *Spline Basics* (2001 manuscript for the *CAGD Handbook*),
-[section 17, theorem 17.2 and equation 17.3](https://ftp.cs.wisc.edu/Approx/cagdhand.pdf),
-gives the Schoenberg-Whitney existence conditions for point interpolation;
-Greville sites satisfy them for the stated continuous spline spaces. This
-supports the existing collocation construction, not an arbitrary refinement
-count or a global error certificate for sampled data. Terminal Hermite rows
-keep their existing construction.
+[sections 14 and 17, theorem 17.2 and equation 17.3](https://ftp.cs.wisc.edu/Approx/cagdhand.pdf),
+gives knot insertion and the Schoenberg-Whitney existence conditions for point
+interpolation. This supports collocation under those conditions, not convergence
+of adaptive rational or terminal Hermite fitting or a whole-domain certificate
+from sampled data.
 
-Termination argument (derived): outside the two existing event-discovery rounds,
-a continued refinement must add at least one distinct representable knot.
-Otherwise the fit stops. Knot multiplicities are positive, so increasing the
-number of distinct knots increases the number of coefficients. The unchanged
-4,000-coefficient work budget therefore bounds the number of such rounds.
-Cancellation and the existing stagnation check still apply. No universal
-existence claim follows: singular contact data, numerical noise or a resource
-budget can still prevent a fit. Every previously successful fit exits along the
-same numerical path, before the former iteration limit; extra rounds are reached
-only by fit requests previously refused at that limit.
-
-This work bound does not prove preservation of a public operation's result. A
-caller can select another construction when fitting refuses. Continuing the
-first fit can bypass that selection and exchange a compact result for a larger
-one, even while improving approximation error. Such callers require a separate
-identical-or-Pareto acceptance check; local convergence alone does not authorize
-that trade. Pending scheduled break and bend transitions also need review
-before treating a round without a new representable knot as stationary.
+Termination argument (derived): scheduled break discovery occurs at round 2,
+regime discovery at round 3, and bend-only checking expires before round 8 (or
+sooner at its existing bend-round budget). In the extended pass an insertion
+stall advances through these finite scheduled transitions. After round 8,
+a continued ordinary refinement must add at least one distinct representable
+knot. Otherwise the fit stops. Positive knot multiplicities imply that increasing
+distinct knot count increases coefficient count; the unchanged 4,000-coefficient
+budget therefore bounds continuing rounds. Event rounds may replace nearby
+optional knots, but occur only twice. Cancellation and stagnation still apply.
+This proves finite work, not convergence or existence for arbitrary contact data.
+No result bound is relaxed.
 
 ### Located continuity events in a fitted blend
 

@@ -695,6 +695,7 @@ static std::optional<Blended> replayOverrun(const Request&                   req
              "a round the blend runs over left no edge between its supports to put it back on",
              {rounds[r]});
       Request again;
+      again.fitWork = request.fitWork;
       again.operation = op;
       again.replays   = request.replays + 1;
       again.body      = shape;
@@ -1419,7 +1420,41 @@ static std::optional<Blended> islandEnvelope(const Request& request)
 
 Blended blend(const Request& request)
 {
-  return blendStage(request, true);
+  if (request.fitWork != FitWork::Deferred)
+    return blendStage(request, true);
+  Request bounded = request;
+  bounded.fitWork = FitWork::Bounded;
+  std::exception_ptr original;
+  try
+  {
+    return blendStage(bounded, true);
+  }
+  catch (const Failure& failure)
+  {
+    if (failure.reason != no_solution && failure.reason != unsupported_geometry)
+      throw;
+    original = std::current_exception();
+  }
+  catch (const Standard_Failure&)
+  {
+    original = std::current_exception();
+  }
+  Request extended = request;
+  extended.fitWork = FitWork::Extended;
+  try
+  {
+    return blendStage(extended, true);
+  }
+  catch (const Failure& failure)
+  {
+    if (failure.reason == std::string("cancelled"))
+      throw;
+    std::rethrow_exception(original);
+  }
+  catch (const Standard_Failure&)
+  {
+    std::rethrow_exception(original);
+  }
 }
 
 static Blended blendStage(const Request& request, bool continuation)
@@ -1905,6 +1940,7 @@ void Blend::rails()
     pieces.emplace_back();
     Rail& rail = pieces.back().rail;
     rail.op    = op;
+    rail.boundedFit = request.fitWork == FitWork::Bounded;
     rail.edge  = edge;
     rail.curve.Initialize(edge);
     rail.law = request.law;
@@ -1981,6 +2017,7 @@ void Blend::fullRail(const std::vector<TopoDS_Shape>& asked)
   pieces.emplace_back();
   Rail& rail = pieces.back().rail;
   rail.op    = op;
+  rail.boundedFit = request.fitWork == FitWork::Bounded;
   rail.edge  = rails[0];
   rail.curve.Initialize(rails[0]);
   rail.law       = Law::Full;
@@ -2291,6 +2328,7 @@ void Blend::vertexBlend(const TopoDS_Vertex&                    vertex,
     Piece piece;
     Rail& rail = piece.rail;
     rail.op    = op;
+    rail.boundedFit = request.fitWork == FitWork::Bounded;
     rail.edge  = edgeBetween(line, va, ta, vb, tb, on, tol::length);
     rail.curve.Initialize(rail.edge);
     rail.s[0]     = sides[i];

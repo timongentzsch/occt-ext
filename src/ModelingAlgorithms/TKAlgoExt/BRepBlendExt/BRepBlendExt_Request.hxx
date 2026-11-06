@@ -41,8 +41,13 @@ enum class Law
   Full    = 4
 };
 
+//! Deferred work follows the complete bounded construction pipeline. Hosts with other
+//! constructions may request Bounded first and defer further work until those also refuse.
+enum class FitWork { Deferred, Bounded, Extended };
+
 struct Request
 {
+  FitWork fitWork = FitWork::Deferred;
   const char*               operation = "blendEdges";
   TopoDS_Shape              body;
   std::vector<TopoDS_Shape> edges;

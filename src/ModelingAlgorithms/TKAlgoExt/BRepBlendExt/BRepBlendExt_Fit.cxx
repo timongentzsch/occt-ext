@@ -329,7 +329,7 @@ Fitted fit(const Rail&                      rail,
   // Local refinement can keep converging in a short interval long after sixteen rounds.
   // The pole budget bounds the work; require a new representable knot at every ordinary
   // refinement instead of imposing a second, unrelated iteration budget.
-  for (int refinement = 0;; ++refinement)
+  for (int refinement = 0; !rail.boundedFit || refinement < 16; ++refinement)
   {
     checkCancelled(rail.op);
     const auto flat  = flatten(knots);
@@ -599,8 +599,15 @@ Fitted fit(const Rail&                      rail,
     const auto previousKnots = knots.size();
     for (double u : refine)
       knots.emplace(u, 1);
-    if (knots.size() == previousKnots)
+    if (!rail.boundedFit && knots.size() == previousKnots)
+    {
+      // Break discovery (2), regime discovery (3), and bend testing (<8) can still
+      // change the next fit without an inserted knot. These are finite events.
+      // Round 8 has no bend check; after it no scheduled transition remains.
+      if (refinement < 8)
+        continue;
       break;
+    }
   }
   fail(rail.op, no_solution, "the blend surface cannot meet the length tolerance", {rail.edge});
 }

@@ -45,6 +45,8 @@
 #include <BRepPrimAPI_MakeTorus.hxx>
 
 #include <gtest/gtest.h>
+#include <BRepTools.hxx>
+#include <sstream>
 
 using namespace BRepExtTest;
 
@@ -1263,4 +1265,37 @@ TEST(BRepBlendExt, LocalFitRefinementOfATorusAndASplineSkin)
         }
       }
   }
+}
+
+// A deferred construction must preserve a successful bounded construction byte for byte.
+TEST(BRepBlendExt, DeferredFitPreservesBoundedDeliveries)
+{
+  using namespace BRepExt::blending;
+  const auto text = [](const TopoDS_Shape& shape) {
+    std::ostringstream out;
+    BRepTools::Write(shape, out);
+    return out.str();
+  };
+  for (double scale : {.5, 1., 2.})
+    for (bool turned : {false, true})
+      for (Law law : {Law::Conic, Law::Chamfer})
+      {
+        SCOPED_TRACE(::testing::Message() << scale << " " << turned << " " << int(law));
+        gp_Trsf pose;
+        if (turned)
+          pose = posed(scale);
+        else
+          pose.SetScale(gp::Origin(), scale);
+        const auto body = BRepBuilderAPI_Transform(BRepPrimAPI_MakeBox(10, 12, 14).Shape(),
+                                                   pose, true).Shape();
+        const auto edges = edgesWhere(body, [](const double*) { return true; });
+        auto request = roundOf(body, {edges.front()}, scale);
+        request.law = law;
+        request.fitWork = FitWork::Bounded;
+        const auto bounded = blend(request);
+        request.fitWork = FitWork::Deferred;
+        const auto deferred = blend(request);
+        EXPECT_EQ(text(bounded.shape), text(deferred.shape));
+        EXPECT_NO_THROW(accepted("round", body, deferred.shape, scale, &deferred));
+      }
 }

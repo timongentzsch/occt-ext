@@ -357,6 +357,7 @@ struct SizeLaw
 
 struct Rail
 {
+  bool boundedFit = false;
   const char*       op = "blendEdges";
   TopoDS_Edge       edge;
   BRepAdaptor_Curve curve;
