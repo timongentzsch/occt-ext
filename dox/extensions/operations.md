@@ -260,7 +260,15 @@ Cancellation and the existing stagnation check still apply. No universal
 existence claim follows: singular contact data, numerical noise or a resource
 budget can still prevent a fit. Every previously successful fit exits along the
 same numerical path, before the former iteration limit; extra rounds are reached
-only by requests previously refused at that limit.
+only by fit requests previously refused at that limit.
+
+This work bound does not prove preservation of a public operation's result. A
+caller can select another construction when fitting refuses. Continuing the
+first fit can bypass that selection and exchange a compact result for a larger
+one, even while improving approximation error. Such callers require a separate
+identical-or-Pareto acceptance check; local convergence alone does not authorize
+that trade. Pending scheduled break and bend transitions also need review
+before treating a round without a new representable knot as stationary.
 
 ### Located continuity events in a fitted blend
 
