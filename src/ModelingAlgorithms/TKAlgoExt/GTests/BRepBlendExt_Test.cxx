@@ -41,6 +41,7 @@
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepPrimAPI_MakeTorus.hxx>
 
@@ -1297,5 +1298,65 @@ TEST(BRepBlendExt, DeferredFitPreservesBoundedDeliveries)
         const auto deferred = blend(request);
         EXPECT_EQ(text(bounded.shape), text(deferred.shape));
         EXPECT_NO_THROW(accepted("round", body, deferred.shape, scale, &deferred));
+      }
+}
+
+TEST(BRepBlendExt, ContactOwnershipHasACommonPartitionOnANarrowSupport)
+{
+  using namespace BRepExt::blending;
+  const auto text = [](const TopoDS_Shape& shape) {
+    std::ostringstream out;
+    BRepTools::Write(shape, out);
+    return out.str();
+  };
+  for (double scale : {.5, 1., 2.})
+    for (bool turned : {false, true})
+      for (double factor : {.98, 1., 1.02})
+      {
+        SCOPED_TRACE(::testing::Message() << scale << " " << turned << " " << factor);
+        const auto box = BRepPrimAPI_MakeBox(gp_Pnt(-10, -10, -10), 20, 20, 20).Shape();
+        const auto cone = BRepPrimAPI_MakeCone(gp_Ax2(gp_Pnt(6, 3, -8), gp::DZ()), 12, 6, 20).Shape();
+        BRepAlgoAPI_Fuse fused(box, cone);
+        const auto body = fused.Shape();
+        NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> edges;
+        TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, edges);
+        TopoDS_Edge picked;
+        double longest = -1;
+        for (int i = 1; i <= edges.Extent(); ++i)
+        {
+          const auto& faces = edges.FindFromIndex(i);
+          if (faces.Extent() != 2)
+            continue;
+          const auto a = BRepAdaptor_Surface(TopoDS::Face(faces.First())).GetType();
+          const auto b = BRepAdaptor_Surface(TopoDS::Face(faces.Last())).GetType();
+          if (!((a == GeomAbs_Plane && b == GeomAbs_Cone) || (a == GeomAbs_Cone && b == GeomAbs_Plane)))
+            continue;
+          const auto plane = TopoDS::Face(a == GeomAbs_Plane ? faces.First() : faces.Last());
+          if (BRepAdaptor_Surface(plane).Plane().Distance(gp_Pnt(0, 0, 10)) > Precision::Confusion())
+            continue;
+          GProp_GProps length;
+          BRepGProp::LinearProperties(edges.FindKey(i), length);
+          if (length.Mass() > longest)
+          {
+            longest = length.Mass();
+            picked = TopoDS::Edge(edges.FindKey(i));
+          }
+        }
+        ASSERT_FALSE(picked.IsNull());
+        gp_Trsf scaling;
+        scaling.SetScale(gp::Origin(), scale);
+        gp_Trsf pose;
+        if (turned)
+        {
+          pose.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), .43);
+          pose.SetTranslationPart(gp_Vec(3*scale, -2*scale, 5*scale));
+        }
+        BRepBuilderAPI_Transform moved(body, pose*scaling, true);
+        const auto input = moved.Shape();
+        const auto before = text(input);
+        auto request = roundOf(input, {TopoDS::Edge(moved.ModifiedShape(picked))}, scale*factor);
+        const auto result = blend(request);
+        EXPECT_NO_THROW(accepted("round", input, result.shape, request.first, &result));
+        EXPECT_EQ(before, text(input));
       }
 }

@@ -225,7 +225,11 @@ review.
 
 Known limits and what remains:
 
-1. **Blend solver.** Some configurations where several blends meet are refused although a valid result exists:
+1. **Blend solver.** A final recovery construction partitions joined contact strips at isolated
+   shared-edge events, with matching pcurve restrictions and retained edge intervals; it keeps the
+   fitted sheet unchanged and follows every previous construction. Overlapping or simultaneous
+   boundary events still need a more general contact arrangement (see [operations.md](dox/extensions/operations.md#contact-ownership-on-a-joined-blend-sheet)).
+   Some configurations where several blends meet are refused although a valid result exists:
    trimming a blend group needs an owner for every retained region and contact before chain ends are cut, and
    the centre path must be parametrised by arc length along the marched curve, not by the edge's parameter.
    Curvature-continuous and conic sections at corners where four or more blends meet are also refused. An edge whose faces meet at a

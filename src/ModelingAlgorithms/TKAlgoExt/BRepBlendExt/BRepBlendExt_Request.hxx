@@ -48,6 +48,8 @@ enum class FitWork { Deferred, Bounded, Extended };
 struct Request
 {
   FitWork fitWork = FitWork::Deferred;
+  //! Final contact-arrangement construction, after both existing fit pipelines refuse.
+  bool refineContacts = false;
   const char*               operation = "blendEdges";
   TopoDS_Shape              body;
   std::vector<TopoDS_Shape> edges;

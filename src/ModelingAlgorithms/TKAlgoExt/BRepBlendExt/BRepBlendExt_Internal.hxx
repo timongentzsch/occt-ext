@@ -1670,6 +1670,7 @@ Standard_EXPORT TopoDS_Shape attach(TopoDS_Shape                     body,
                                     const std::vector<Piece>&        pieces,
                                     const std::vector<Corner>&       cornersAt,
                                     const Handle(BRepTools_History)& history,
-                                    std::vector<Join>* joins = nullptr);
+                                    std::vector<Join>* joins = nullptr,
+                                    bool refineContacts = false);
 
 } // namespace BRepExt::blending::detail

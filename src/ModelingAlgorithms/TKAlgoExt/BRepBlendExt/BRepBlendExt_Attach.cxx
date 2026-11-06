@@ -21,6 +21,7 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <GeomAPI_PointsToBSplineSurface.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <BndLib_AddSurface.hxx>
 #include <GeomLib_IsPlanarSurface.hxx>
 #include <ShapeAnalysis_Edge.hxx>
@@ -39,7 +40,10 @@ struct Attach
   Attach(TopoDS_Shape                     body,
          const std::vector<Piece>&        pieces,
          const std::vector<Corner>&       cornersAt,
-         const Handle(BRepTools_History)& history);
+         const Handle(BRepTools_History)& history,
+         bool refineContacts);
+
+  const bool refineContacts;
 
   // The stages, in order.
   //! Each end of each piece: a stop face cut back to the blend's end section, a joint or a
@@ -625,8 +629,10 @@ struct Attach
 Attach::Attach(TopoDS_Shape                     body_,
                const std::vector<Piece>&        pieces_,
                const std::vector<Corner>&       cornersAt_,
-               const Handle(BRepTools_History)& history_)
-    : body(std::move(body_)),
+               const Handle(BRepTools_History)& history_,
+               bool refineContacts_)
+    : refineContacts(refineContacts_),
+      body(std::move(body_)),
       pieces(pieces_),
       cornersAt(cornersAt_),
       history(history_),
@@ -720,10 +726,49 @@ void Attach::chainEnds()
           GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][joint.side][end]), curve, f, l);
           if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
             fail(op, no_solution, "a contact misses the far edge it runs off over", {rail.edge});
-          cut(edge,
-              keep.IsSame(a) ? z : a,
-              corner[k][joint.side][end],
-              on.LowerDistanceParameter());
+          // A bounded notch can remove an interior interval, leaving two edge components.
+          // Sequential cuts from the same original endpoint cannot represent that set.
+          const bool hereNotched = splitNotch(k, joint.side);
+          const int notchIndex = hereNotched ? k : joint.piece;
+          const int notchSide = hereNotched ? joint.side : joint.side ^ int(joint.swapped);
+          const auto& notchPiece = pieces[notchIndex];
+          const auto& beginJoint = notchPiece.joint[0];
+          const auto& finish = notchPiece.joint[1];
+          int crossings = 0;
+          for (const auto& p : pieces)
+            crossings += p.joint[1].meets == Meets::Split && p.joint[1].crossed.IsSame(edge);
+          const bool paired = refineContacts && crossings == 2
+            && beginJoint.meets == Meets::Split && finish.meets == Meets::Split
+            && beginJoint.side == notchSide && finish.side == notchSide
+            && beginJoint.crossed.IsSame(edge) && finish.crossed.IsSame(edge)
+            && pieces[beginJoint.piece].rail.s[notchSide ^ int(beginJoint.swapped)].trim.IsNull()
+            && pieces[finish.piece].rail.s[notchSide ^ int(finish.swapped)].trim.IsNull()
+            && !cuts.Contains(edge);
+          if (!paired)
+            cut(edge, keep.IsSame(a) ? z : a, corner[k][joint.side][end], on.LowerDistanceParameter());
+          else
+          {
+            const double crossing = on.LowerDistanceParameter();
+            if (const auto found = seamCrossed.find(edge.TShape().get()); found == seamCrossed.end())
+              seamCrossed[edge.TShape().get()] = {corner[k][joint.side][end], crossing};
+            else
+            {
+              const auto& [other, there] = found->second;
+              const double low = std::min(crossing, there), high = std::max(crossing, there);
+              if (!(low > f + tol::parameter && high < l - tol::parameter
+                    && high - low > tol::parameter))
+                fail(op, unsupported_geometry, "a contact interval does not lie inside its crossed edge", {edge});
+              const bool lower = crossing < there;
+              TopoDS_Vertex e0, e1;
+              TopExp::Vertices(TopoDS::Edge(edge.Oriented(TopAbs_FORWARD)), e0, e1);
+              TopoDS_Compound parts;
+              builder.MakeCompound(parts);
+              builder.Add(parts, trimmed(edge, e1, lower ? corner[k][joint.side][end] : other, low));
+              builder.Add(parts, trimmed(edge, e0, lower ? other : corner[k][joint.side][end], high));
+              for (const auto& face : facesOfEdge.FindFromKey(edge))
+                editOf(edits, face).replace.Bind(edge, parts);
+            }
+          }
         }
         else if (joint.meets == Meets::Split)
         {
@@ -1280,8 +1325,10 @@ const Attach::TrimCurve& Attach::trimOf(int k, int side)
       .first->second;
   const auto surface = BRep_Tool::Surface(piece.rail.s[side].trim);
   // Along the sheet's rail as its parameter rises, which interpolation needs.
-  const double s0             = std::min(sheet.rail(0), sheet.rail(1)),
-               s1             = std::max(sheet.rail(0), sheet.rail(1));
+  const double s0             = std::min(sheet.rail(refineContacts ? piece.uAt(0) : 0),
+                                                    sheet.rail(refineContacts ? piece.uAt(1) : 1)),
+               s1             = std::max(sheet.rail(refineContacts ? piece.uAt(0) : 0),
+                                         sheet.rail(refineContacts ? piece.uAt(1) : 1));
   const double lo             = std::min(sheet.across[0], sheet.across[1]),
                hi             = std::max(sheet.across[0], sheet.across[1]);
   constexpr int         count = 257;
@@ -5166,13 +5213,123 @@ TopoDS_Shape Attach::assemble()
   return body;
 }
 
+//! Common refinement of the final sheet, face ownership and contact-map domains.
+//! Finite isolated crossings on the witnessed far edge bound uniformly owned fragments.
+//! The surface is unchanged; Segment restricts copies of its fitted pcurves exactly.
+//! Outer tails remain available to the stopping-face continuation. Overlap segments and
+//! coincident crossings on distinct edges need a more general arrangement and are refused.
+static void refineOwnership(std::vector<Piece>& pieces, std::vector<Corner>& corners)
+{
+  const int count = int(pieces.size());
+  for (int k = 0; k < count; ++k)
+  {
+    checkCancelled(pieces[k].rail.op);
+    const Piece original = pieces[k];
+    const double low = original.uAt(0), high = original.uAt(1);
+    if (!(high > low + tol::parameter))
+      continue;
+    struct Event { double u; int side; TopoDS_Edge edge; };
+    std::vector<Event> events;
+    for (int side = 0; side < 2; ++side)
+    {
+      const auto& owner = original.rail.s[side];
+      if (owner.trim.IsNull() || owner.trimEdge.IsNull())
+        continue;
+      GeomAPI_IntCS crossing(original.sheet.contact(side), BRep_Tool::Surface(owner.trim));
+      if (!crossing.IsDone() || crossing.NbSegments() != 0)
+        fail(original.rail.op, unsupported_geometry, "contact ownership needs isolated boundary events", {original.rail.edge});
+      double first, last;
+      const auto curve = BRep_Tool::Curve(owner.trimEdge, first, last);
+      for (int j = 1; j <= crossing.NbPoints(); ++j)
+      {
+        double pu, pv, w;
+        crossing.Parameters(j, pu, pv, w);
+        const double u = (w - original.sheet.alpha) / original.sheet.beta;
+        if (!(u > low + tol::parameter && u < high - tol::parameter))
+          continue;
+        GeomAPI_ProjectPointOnCurve on(crossing.Point(j), curve, first, last);
+        if (on.NbPoints() != 0 && on.LowerDistance() <= original.rail.resolved(limit::together))
+          events.push_back({u, side, owner.trimEdge});
+      }
+    }
+    if (events.empty())
+      continue;
+    std::sort(events.begin(), events.end(), [](const Event& a, const Event& b) { return a.u < b.u; });
+    for (size_t j = 1; j < events.size(); ++j)
+      if (events[j].u - events[j-1].u <= tol::parameter
+          && (events[j].side != events[j-1].side || !events[j].edge.IsSame(events[j-1].edge)))
+        fail(original.rail.op, unsupported_geometry, "contact ownership has simultaneous boundary events", {original.rail.edge});
+    events.erase(std::unique(events.begin(), events.end(), [](const Event& a, const Event& b) {
+      return std::abs(a.u - b.u) <= tol::parameter;
+    }), events.end());
+    std::vector<double> bounds = {low};
+    for (const auto& event : events)
+      bounds.push_back(event.u);
+    bounds.push_back(high);
+    std::vector<int> indices = {k};
+    for (size_t j = 0; j < events.size(); ++j)
+    {
+      indices.push_back(int(pieces.size()));
+      pieces.push_back(original);
+    }
+    const auto outer = original.joint[1];
+    for (size_t j = 0; j < indices.size(); ++j)
+    {
+      auto& part = pieces[indices[j]];
+      part.rail.first = part.rail.t(bounds[j]);
+      part.rail.last = part.rail.t(bounds[j+1]);
+      for (int side = 0; side < 2; ++side)
+      {
+        if (!original.rail.s[side].trim.IsNull())
+        {
+          const auto point = original.sheet.contact(side)->Value(original.sheet.rail((bounds[j]+bounds[j+1])/2));
+          BRepClass_FaceClassifier on(original.rail.s[side].face, point, original.rail.resolved(limit::together));
+          if (on.State() == TopAbs_IN || on.State() == TopAbs_ON)
+          {
+            part.rail.s[side].trim.Nullify();
+            part.rail.s[side].trimEdge.Nullify();
+            part.rail.s[side].cliffWhole = false;
+          }
+        }
+        const auto map = Handle(Geom2d_BSplineCurve)::DownCast(original.fitted.contact[side]->Copy());
+        map->Segment(j == 0 ? map->FirstParameter() : bounds[j],
+                     j+1 == indices.size() ? map->LastParameter() : bounds[j+1]);
+        part.fitted.contact[side] = map;
+      }
+      if (j > 0)
+        part.joint[0] = {Meets::Split, indices[j-1], 1, false, events[j-1].side, events[j-1].edge};
+      if (j+1 < indices.size())
+        part.joint[1] = {Meets::Split, indices[j+1], 0, false, events[j].side, events[j].edge};
+    }
+    if (outer.meets == Meets::Joint || outer.meets == Meets::Miter || outer.meets == Meets::Split)
+    {
+      pieces[outer.piece].joint[outer.end].piece = indices.back();
+      pieces[outer.piece].joint[outer.end].end = 1;
+    }
+    if (outer.meets == Meets::Corner)
+      for (auto& entry : corners[outer.piece].ends)
+        if (entry.first == k && entry.second == 1)
+          entry.first = indices.back();
+  }
+}
+
 TopoDS_Shape attach(TopoDS_Shape                     body,
                     const std::vector<Piece>&        pieces,
                     const std::vector<Corner>&       cornersAt,
                     const Handle(BRepTools_History)& history,
-                    std::vector<Join>* joins)
+                    std::vector<Join>* joins,
+                    bool refineContacts)
 {
-  Attach a(std::move(body), pieces, cornersAt, history);
+  std::vector<Piece> fragments;
+  std::vector<Corner> fragmentCorners;
+  if (refineContacts)
+  {
+    fragments = pieces;
+    fragmentCorners = cornersAt;
+    refineOwnership(fragments, fragmentCorners);
+  }
+  Attach a(std::move(body), refineContacts ? fragments : pieces,
+           refineContacts ? fragmentCorners : cornersAt, history, refineContacts);
   // Each stage may be cancelled before it starts (Patch also checks within its own).
   for (const auto stage : {&Attach::chainEnds,
                            &Attach::miters,

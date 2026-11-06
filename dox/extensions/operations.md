@@ -1963,3 +1963,45 @@ sections 2.3 and 4
 would need its own geometric budget: approximating an exactly reflection-symmetric
 surface within Hausdorff error e implies mirror distance at most 2e by the
 triangle inequality (derived); it gives no derivative or regularity bound.
+
+### Contact ownership on a joined blend sheet
+
+A final construction, attempted only after the previous bounded and extended
+pipelines refuse, refines the **final joined sheet's** ownership intervals.
+An earlier rail split is insufficient when fitting and joining change the
+contact chart. Isolated original-contact/beyond-surface intersections are
+retained only when they project onto the actual shared boundary edge within
+the existing tolerance. They partition increasing active rail intervals;
+original-face IN/ON intervals retain that owner, other intervals retain the
+existing beyond-face owner. Adjacent pieces share a witnessed Split boundary.
+The 3D sheet is unchanged. Copied 2D fitted contact curves are restricted by
+`Segment` at interior events, retaining the original outer continuation tails.
+A bounded notch crossing one far edge twice retains the two outside edge
+intervals together rather than applying incompatible sequential endpoint cuts.
+
+The common-refinement and interval-set invariants are derived here. Carl de
+Boor, *Spline Basics* (2001), section 14, establishes exact knot insertion;
+restriction therefore does not approximate the contact curves
+([chapter](https://ftp.cs.wisc.edu/Approx/cagdhand.pdf)). Sections 6, 10 and 17
+also explain the nonnegative partition of unity, convex-hull bound and
+interpolation existence conditions used when diagnosing missing endpoints.
+Jaiswal, Ghosal and Gurumoorthy, *An Efficient Algorithm for Circular Blending
+of Edges* (2001), introduction, page 1, distinguish blend-sheet generation
+from trimming and topological integration; their local offset construction
+does not supply this arrangement
+([paper](https://mecheng.iisc.ac.in/~asitava/sharad.pdf)).
+
+This is a numerical construction for finitely many isolated boundary events
+on a regular contact strip, not a certified enumeration of every possible
+contact component. Overlap segments and coincident events on distinct edges
+are refused, and decreasing active charts are not refined. Midpoint ownership
+classification presupposes that the witnessed boundary events delimit the
+relevant owner changes; the unchanged final topology, tolerance, continuity
+and collision checks remain mandatory. Patrikalakis, Maekawa and Cho,
+*Shape Interrogation for Computer Aided Design and Manufacturing* (2009),
+section 5.8.2.3, equations 5.100--5.105, explain why marching requires starting
+points for every component and why tangencies require additional treatment
+([chapter](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node109.html)).
+The OCCT `GeomAPI_IntCS` interface separately exposes isolated points and
+tangential segments; a zero point count alone is not a complete empty-set
+oracle ([reference](https://occt3d.com/dev/doc/refman/html/class_geom_a_p_i___int_c_s.html)).

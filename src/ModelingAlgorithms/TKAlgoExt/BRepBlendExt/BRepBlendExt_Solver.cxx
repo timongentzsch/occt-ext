@@ -696,6 +696,7 @@ static std::optional<Blended> replayOverrun(const Request&                   req
              {rounds[r]});
       Request again;
       again.fitWork = request.fitWork;
+      again.refineContacts = request.refineContacts;
       again.operation = op;
       again.replays   = request.replays + 1;
       again.body      = shape;
@@ -1441,20 +1442,23 @@ Blended blend(const Request& request)
   }
   Request extended = request;
   extended.fitWork = FitWork::Extended;
-  try
+  for (const bool refine : {false, true})
   {
-    return blendStage(extended, true);
+    extended.refineContacts = refine;
+    try
+    {
+      return blendStage(extended, true);
+    }
+    catch (const Failure& failure)
+    {
+      if (failure.reason == std::string("cancelled"))
+        throw;
+    }
+    catch (const Standard_Failure&)
+    {
+    }
   }
-  catch (const Failure& failure)
-  {
-    if (failure.reason == std::string("cancelled"))
-      throw;
-    std::rethrow_exception(original);
-  }
-  catch (const Standard_Failure&)
-  {
-    std::rethrow_exception(original);
-  }
+  std::rethrow_exception(original);
 }
 
 static Blended blendStage(const Request& request, bool continuation)
@@ -3596,7 +3600,7 @@ Blended Blend::result()
 {
   Blended                         out;
   const Handle(BRepTools_History) made = new BRepTools_History;
-  out.shape = pieces.empty() ? body : attach(body, pieces, corners, made, &out.joins);
+  out.shape = pieces.empty() ? body : attach(body, pieces, corners, made, &out.joins, request.refineContacts);
   // The input's history: into the copy, then through the blends.
   NCollection_List<TopoDS_Shape> inputs;
   inputs.Append(request.body);
