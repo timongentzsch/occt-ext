@@ -1225,20 +1225,48 @@ version here fixes rotation]. Draft of walls that `BRepOffsetAPI_DraftAngle` doe
 cylinders and cones) uses the ruled isocline surface over the wall's neutral curve, whose every tangent plane
 makes the draft angle with the pull direction.
 
-Where a plate filling cannot meet the constraints, a guided skin through three or more profiles with
-G1 or G2 at an end is the Gordon skin of the net plus a correction across that end. Two surfaces that share an edge and their tangent planes along it meet G2 when
-their normal curvatures agree in one direction across the edge (the linkage curve theorem [Pegna, Wolter
-1992, J. Mech. Design 114]); the skin already holds the profile, so G1 needs only the way across, S_v, turned into the support's
-tangent plane, and G2 then only the normal part of S_vv set to the support's second fundamental form at
-S_v. Both moves are along the support's normal. The correction is h1(v) m1(u) + h2(v) m2(u), with h1 and h2
-the quintic Hermite functions of the end (h1' = 1, h2'' = 1 there, the rest nothing) that vanish to the second
-derivative at the nearest place of the next profile, so the other profiles are kept and the skin stays C2;
-m1 and m2 are the moves less their straight interpolation between the guides, so the guides are kept too.
-Where a guide leaves the end profile out of the support's plane, or with another bend, the surface follows
-the guide there, as between two profiles. The plate filling misses the bend limit or the boundary on 22 of 24 nets of a seeded family. Successful
-plate fillings are retained: exact net interpolation does not imply a smaller integral of squared principal
-curvatures. On one accepted net the correction raised that integral from 0.9364 to 1.2673. Nets whose
-skin carries weights remain outside this correction.
+A guided skin through three or more profiles first constructs the compatible Gordon network,
+then applies the G1/G2 end correction described below. This avoids assembling and factoring a
+dense plate system for a network already representable by spline interpolation. The previous
+plate construction remains available when the network or its correction cannot be represented
+or fails its checks. A previously accepted plate can have a different interior and bending energy; validation
+therefore compares the delivered surfaces, since exact curve interpolation alone does not establish equivalence.
+Coplanar curve networks with planar supports retain the plate construction: a plane has
+zero geometric bending energy, and reconstructing its unit network rectangle would change
+an already accepted carrier and trims. The model tolerance defines the coplanarity search;
+the unchanged plate checks still decide delivery. For curved networks the accepted interior
+is compared with a matched reference surface in both sampled directions; exact interpolation
+alone is not an acceptance argument. Representation checks remain for the other accepted plates.
+
+The network construction follows W. J. Gordon, *Blending-function methods of bivariate and
+multivariate interpolation and approximation*, SIAM Journal on Numerical Analysis 8 (1971),
+158-177, as presented and implemented by Siggel, Kleinert, Stollenwerk and Maierl,
+*TiGL — An Open Source Computational Geometry Library for Parametric Aircraft Design* (2018),
+sections 3.2.1-3.2.3, equations (8)-(17): the profile skin plus the guide skin minus the
+intersection-grid tensor surface. Equation (8) is the compatibility condition; each skin and
+the grid must use matching interpolation parameters and bases. Degree elevation and knot
+insertion align their coefficient spaces without changing their geometry. See also Piegl and
+Tiller, *The NURBS Book*, second edition (1997), chapter 10, page 485, and the TiGL
+`CTiglGordonSurfaceBuilder::CreateGordonSurface` implementation (2018, lines 139-188).
+Sources: <https://elib.dlr.de/124524/1/1810.10795.pdf> and
+<https://github.com/DLR-SC/tigl/blob/main/src/geometry/CTiglGordonSurfaceBuilder.cpp>.
+Compatibility and rational representability limits of `GeomFill_Gordon` still apply.
+
+Two surfaces that share an edge and their tangent planes along it meet G2 when their normal
+curvatures agree in one direction across the edge (the linkage curve theorem [Pegna, Wolter
+1992, J. Mech. Design 114]). The skin already holds the profile, so G1 needs only the way
+across, S_v, turned into the support's tangent plane, and G2 then only the normal part of
+S_vv set to the support's second fundamental form at S_v. Both moves are along the support's
+normal. The correction is h1(v) m1(u) + h2(v) m2(u), with h1 and h2 the quintic Hermite
+functions of the end (h1' = 1, h2'' = 1 there, the rest zero) that vanish to the second
+derivative at the nearest place of the next profile. The other profiles are kept and the skin
+stays C2; m1 and m2 are the moves less their straight interpolation between the guides, so the
+guides are kept too. This correction is derived here; its sampled field approximation is not a
+continuous error certificate. Where a guide leaves the end profile out of the support's plane,
+or with another bend, the surface follows the guide there. Nets whose skin carries weights
+remain outside this correction. Exact interpolation does not imply less bending energy: an
+existing accepted-net counterexample raises the integral from 0.9364 to 1.2673. This candidate
+therefore requires a family-wide geometry and fairness review before replacing accepted results.
 
 Approximating an individual conic by non-rational cubic pieces is not the unresolved problem of
 correspondence between unlike closed sections. Floater, *An O(h^{2n}) Hermite approximation for

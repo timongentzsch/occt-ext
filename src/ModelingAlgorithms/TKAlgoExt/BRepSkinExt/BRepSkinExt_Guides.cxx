@@ -22,6 +22,9 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_FindPlane.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Compound.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -649,8 +652,49 @@ EvolutionData skinGuides(OcctKernel&                  kernel,
     else
       fill.Add(edge, GeomAbs_C0, i == 0 || i >= last);
   }
-  // A valid plate is retained: enforcing the net exactly is not a fairness
-  // improvement in general. Only a refused plate needs another construction.
+  // Coplanar inputs admit the zero-bending plate solution. Keep its existing
+  // carrier and trims: a network's unit rectangle is a different representation
+  // of the same plane. This construction also retains every interior profile.
+  // The plane search uses the requested model tolerance; the plate retains all
+  // its original physical acceptance checks below.
+  TopoDS_Compound planeInputs;
+  BRep_Builder planeBuilder;
+  planeBuilder.MakeCompound(planeInputs);
+  for (const auto id : edges)
+    planeBuilder.Add(planeInputs, get(kernel, id));
+  bool planarSupports = true;
+  for (const auto id : {firstOrder ? firstFace : 0u, lastOrder ? lastFace : 0u})
+  {
+    if (!id)
+      continue;
+    const auto face = TopoDS::Face(get(kernel, id));
+    planarSupports = planarSupports && BRepAdaptor_Surface(face).GetType() == GeomAbs_Plane;
+    planeBuilder.Add(planeInputs, face);
+  }
+  const bool planar = planarSupports && BRepBuilderAPI_FindPlane(planeInputs, tolerance).Found();
+  bool attemptedNetwork = false;
+  const auto network = [&]() -> TopoDS_Face {
+    attemptedNetwork = true;
+    try
+    {
+      return guidedNet(kernel, op, edges, firstFace, lastFace, firstOrder, lastOrder, tolerance);
+    }
+    catch (const Failure&)
+    {
+    }
+    catch (const Standard_Failure&)
+    {
+    }
+    return {};
+  };
+  // Curved compatible networks avoid the dense plate solve. Coplanar networks
+  // retain the plate and its existing recovery; each construction runs at most once.
+  if (edges.size() > 4 && !planar)
+  {
+    const TopoDS_Face face = network();
+    if (!face.IsNull())
+      return stored(kernel, face);
+  }
   try
   {
     fill.Build();
@@ -664,21 +708,11 @@ EvolutionData skinGuides(OcctKernel&                  kernel,
   }
   catch (const Failure&)
   {
-    if (edges.size() > 4 && (firstOrder > 0 || lastOrder > 0))
+    if (edges.size() > 4 && !attemptedNetwork && (firstOrder > 0 || lastOrder > 0))
     {
-      try
-      {
-        const TopoDS_Face face =
-          guidedNet(kernel, op, edges, firstFace, lastFace, firstOrder, lastOrder, tolerance);
-        if (!face.IsNull())
-          return stored(kernel, face);
-      }
-      catch (const Failure&)
-      {
-      }
-      catch (const Standard_Failure&)
-      {
-      }
+      const TopoDS_Face face = network();
+      if (!face.IsNull())
+        return stored(kernel, face);
     }
     throw;
   }
