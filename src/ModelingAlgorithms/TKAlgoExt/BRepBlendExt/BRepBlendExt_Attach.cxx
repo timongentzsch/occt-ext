@@ -2327,13 +2327,20 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
            "a notch's blend ends on a face it does not meet in a section, which the blend does not "
            "make yet",
            {rail.edge});
-    const auto met = meetingEdge(placedSheet(sheet),
-                                 cornerOnSheet,
-                                 placedFace(stop),
-                                 cornerOnStop,
-                                 corner[k][0][end],
-                                 corner[k][1][end],
-                                 rail.scale);
+    auto met = meetingEdge(placedSheet(sheet),
+                           cornerOnSheet,
+                           placedFace(stop),
+                           cornerOnStop,
+                           corner[k][0][end],
+                           corner[k][1][end],
+                           rail.scale);
+    if (!met && refineContacts)
+      met = planeMeeting(sheet,
+                         stop,
+                         cornerOnSheet,
+                         sheet.uv(sheet.rail(u[k][1][end]), sheet.across[1]),
+                         corner[k][0][end],
+                         corner[k][1][end]);
     if (!met)
       fail(op,
            no_solution,

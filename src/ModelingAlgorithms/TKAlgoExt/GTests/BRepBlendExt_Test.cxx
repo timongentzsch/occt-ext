@@ -1619,9 +1619,9 @@ TEST(BRepBlendExt, ReenteredSupportRetainsTheIntervalBetweenCrossings)
       {chain.push_back(candidate);grew=true;}
     }
   }
-  for(double scale:{.5,2.}) for(bool turned:{false,true}) for(bool all:{false,true})
+  for(double radius:{.2,.5}) for(double scale:{.5,2.}) for(bool turned:{false,true}) for(bool all:{false,true})
   {
-    SCOPED_TRACE(::testing::Message()<<scale<<" "<<turned<<" "<<all);
+    SCOPED_TRACE(::testing::Message()<<radius<<" "<<scale<<" "<<turned<<" "<<all);
     gp_Trsf transform;
     transform.SetScale(gp::Origin(),scale);
     if(turned)transform=posed(scale);
@@ -1629,7 +1629,7 @@ TEST(BRepBlendExt, ReenteredSupportRetainsTheIntervalBetweenCrossings)
     std::vector<TopoDS_Edge> selected;
     for(const auto& edge:all?chain:std::vector<TopoDS_Edge>{upper})
       selected.push_back(TopoDS::Edge(moved.ModifiedShape(edge)));
-    auto request=roundOf(moved.Shape(),selected,.2*scale);
+    auto request=roundOf(moved.Shape(),selected,radius*scale);
     request.fitWork=FitWork::Deferred;
     const auto made=blend(request);
     EXPECT_NO_THROW(accepted("round",request.body,made.shape,request.first,&made));

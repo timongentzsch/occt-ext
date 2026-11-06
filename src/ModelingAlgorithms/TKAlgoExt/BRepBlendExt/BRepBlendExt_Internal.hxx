@@ -1640,6 +1640,14 @@ Standard_EXPORT std::optional<TopoDS_Edge> meetingEdge(const Placed&        one,
                                                        const TopoDS_Vertex& second,
                                                        double               scale);
 
+//! A sheet/plane meeting in a transverse graph chart, split at the sheet's spline knots.
+Standard_EXPORT std::optional<TopoDS_Edge> planeMeeting(const Sheet&         sheet,
+                                                        const TopoDS_Face&   face,
+                                                        const gp_Pnt2d&      firstUV,
+                                                        const gp_Pnt2d&      lastUV,
+                                                        const TopoDS_Vertex& first,
+                                                        const TopoDS_Vertex& last);
+
 //! Where two sheets meet between two corners where both are known in each sheet's parameters,
 //! marched along its length from the first corner, in even steps, each place on the plane across
 //! the meeting's direction there, all four parameters by Newton's method from the last place. The

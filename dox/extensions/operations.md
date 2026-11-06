@@ -2274,9 +2274,9 @@ contacts, tangencies or more crossings. Earlier constructions are unchanged.
 The generated torus/oval-prism test checks single-edge and connected-chain requests
 at two scales and two poses. It checks solid acceptance and, away from stopping
 planes, the rolling-ball defect independently by distances to the input skin.
-The larger-radius terminal intersection remains open: its contacts can meet a stop
-plane at different longitudinal stations, so replacing the trim by one iso-section
-would change the geometry.
+At larger radii the contacts can meet a stop plane at different longitudinal
+stations, so replacing the trim by one iso-section would change the geometry.
+The graph construction below handles regular planar branches across spline breaks.
 
 Jacques Goussard, *BRepFeat_SplitShape* (1995), OCCT 6.8.0 edition (2014),
 `Add(Compound, Face)`, requires geometrically connected splitting edges to share
@@ -2285,3 +2285,30 @@ their topological vertices
 That boundary-incidence requirement motivates retaining both crossing vertices; it
 supplies neither a complete topology proof nor a numerical error bound for this
 construction. The existing final validity, closure and contact bounds still apply.
+
+### Non-isoparametric planar stops across spline breaks
+
+After the existing terminal intersection constructions refuse, the final contact
+arrangement can trace a sheet/plane branch as a graph in the sheet's transverse
+parameter. Scalar Newton correction solves the plane residual for the longitudinal
+parameter. Both terminal witnesses must agree with the corrected branch within
+the unchanged length tolerance. The branch is split at every transverse spline
+knot and every intersection of a longitudinal knot line with the plane. Spatial
+and parameter curves are then interpolated together on each smooth piece and
+joined with their common parameter. The existing midpoint residual, solid validity,
+closure and contact checks still decide acceptance. Earlier successful terminal
+constructions are unchanged.
+
+This graph chart and knot arrangement are **derived**. They require a regular
+branch that is a graph in the chosen coordinate; Newton convergence, the finite
+refinement policy and midpoint checks are numerical tests, not a global existence
+or approximation theorem. Tangencies, other components and branches leaving that
+chart remain outside this construction. Patrikalakis, Maekawa and Cho,
+*Shape Interrogation for Computer Aided Design and Manufacturing* (2009),
+sections 5.8.1.1-5.8.1.2, equations (5.84)-(5.87), reduce a patch/plane
+intersection to a scalar parameter-space curve and describe coordinate stepping
+with Newton correction, including the need to change charts near vertical branches
+([formulation](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node101.html),
+[tracing](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node102.html)).
+The generated two-radius, two-scale, two-pose single/chain test checks acceptance
+and the rolling-ball defect against the input skin independently of the solver.

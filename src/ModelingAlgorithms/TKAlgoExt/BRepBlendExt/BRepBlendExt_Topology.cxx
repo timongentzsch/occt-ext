@@ -1230,6 +1230,158 @@ std::optional<TopoDS_Edge> throughPlaces(const Placed&                          
 }
 } // namespace
 
+//! Trace a transverse sheet/plane branch as a graph in the sheet's across coordinate.
+//! Split at both sets of spline knots before interpolation: a C0 sheet break must not be
+//! treated as interpolation error on one smooth span. The branch and its graph chart are
+//! checked numerically; this does not enumerate other components or singular intersections.
+std::optional<TopoDS_Edge> planeMeeting(const Sheet&         sheet,
+                                        const TopoDS_Face&   face,
+                                        const gp_Pnt2d&      firstUV,
+                                        const gp_Pnt2d&      lastUV,
+                                        const TopoDS_Vertex& first,
+                                        const TopoDS_Vertex& last)
+{
+  const Placed one = placedSheet(sheet), two = placedFace(face);
+  const auto   plane  = Handle(Geom_Plane)::DownCast(two.surface);
+  const auto   spline = Handle(Geom_BSplineSurface)::DownCast(sheet.surface);
+  if (plane.IsNull() || spline.IsNull())
+    return {};
+  const gp_Pln pln = plane->Pln();
+  const gp_Vec normal(pln.Axis().Direction());
+  const auto   across       = [&](const gp_Pnt2d& q) { return sheet.swapped ? q.X() : q.Y(); };
+  const auto   longitudinal = [&](const gp_Pnt2d& q) { return sheet.swapped ? q.Y() : q.X(); };
+  const double a = across(firstUV), b = across(lastUV);
+  if (!(b > a + tol::parameter))
+    return {};
+  double u0, u1, v0, v1;
+  spline->Bounds(u0, u1, v0, v1);
+  const double lo = sheet.swapped ? v0 : u0, hi = sheet.swapped ? v1 : u1;
+  const auto   solve = [&](double v, double seed, Place& place) {
+    double u     = seed;
+    bool   found = false;
+    for (int i = 0; i < 50; ++i)
+    {
+      const gp_Pnt2d uv = sheet.uv(u, v);
+      gp_Pnt         p;
+      gp_Vec         du, dv;
+      one.surface->D1(uv.X(), uv.Y(), p, du, dv);
+      const double f = gp_Vec(pln.Location(), p).Dot(normal);
+      if (std::abs(f) <= std::max(limit::marched, tol::rounding(p.XYZ().Modulus())))
+      {
+        found = true;
+        break;
+      }
+      const double slope = (sheet.swapped ? dv : du).Dot(normal);
+      if (!(std::abs(slope) > limit::degenerate))
+        return false;
+      const double next = u - f / slope;
+      if (!std::isfinite(next) || next == u)
+        return false;
+      u = next;
+    }
+    if (!found || u < lo - tol::parameterMerge || u > hi + tol::parameterMerge)
+      return false;
+    place.a = sheet.uv(u, v);
+    place.p = one.surface->Value(place.a.X(), place.a.Y());
+    double pu, pv;
+    ElSLib::Parameters(pln, place.p, pu, pv);
+    place.b = gp_Pnt2d(pu, pv);
+    return true;
+  };
+  std::vector<double> breaks  = {a, b};
+  const int           nAcross = sheet.swapped ? spline->NbUKnots() : spline->NbVKnots();
+  for (int i = 1; i <= nAcross; ++i)
+  {
+    const double v = sheet.swapped ? spline->UKnot(i) : spline->VKnot(i);
+    if (v > a && v < b)
+      breaks.push_back(v);
+  }
+  const int nAlong = sheet.swapped ? spline->NbVKnots() : spline->NbUKnots();
+  for (int i = 1; i <= nAlong; ++i)
+  {
+    const double u = sheet.swapped ? spline->VKnot(i) : spline->UKnot(i);
+    if (!(u > lo && u < hi))
+      continue;
+    GeomAPI_IntCS crossing(sheet.section(u), two.surface);
+    if (!crossing.IsDone() || crossing.NbSegments() != 0)
+      return {};
+    for (int j = 1; j <= crossing.NbPoints(); ++j)
+    {
+      double pu, pv, v;
+      crossing.Parameters(j, pu, pv, v);
+      if (v > a && v < b)
+        breaks.push_back(v);
+    }
+  }
+  std::sort(breaks.begin(), breaks.end());
+  breaks.erase(std::unique(breaks.begin(),
+                           breaks.end(),
+                           [](double x, double y) { return std::abs(x - y) <= tol::parameter; }),
+               breaks.end());
+  std::vector<Handle(Geom_BSplineCurve)>   curves;
+  std::vector<Handle(Geom2d_BSplineCurve)> onOne, onTwo;
+  Place                                    previous;
+  if (!solve(a, longitudinal(firstUV), previous)
+      || previous.p.Distance(BRep_Tool::Pnt(first)) > tol::length)
+    return {};
+  TopoDS_Vertex from = first;
+  for (size_t i = 1; i < breaks.size(); ++i)
+  {
+    const double f = breaks[i - 1], l = breaks[i];
+    Place        next;
+    if (!solve(l, longitudinal(previous.a), next)
+        || (i + 1 == breaks.size() && next.p.Distance(BRep_Tool::Pnt(last)) > tol::length))
+      return {};
+    TopoDS_Vertex to = last;
+    if (i + 1 < breaks.size())
+      BRep_Builder().MakeVertex(to, next.p, tol::length);
+    const auto part = throughPlaces(
+      one,
+      two,
+      previous,
+      next,
+      [&](double t, Place& place) { return solve(f + (l - f) * t, longitudinal(place.a), place); },
+      from,
+      to);
+    if (!part)
+      return {};
+    double     cf, cl;
+    const auto curve = Handle(Geom_BSplineCurve)::DownCast(BRep_Tool::Curve(*part, cf, cl));
+    const auto p     = Handle(Geom2d_BSplineCurve)::DownCast(
+      BRep_Tool::CurveOnSurface(*part, one.basis, one.location, cf, cl));
+    const auto q = Handle(Geom2d_BSplineCurve)::DownCast(
+      BRep_Tool::CurveOnSurface(*part, two.basis, two.location, cf, cl));
+    if (curve.IsNull() || p.IsNull() || q.IsNull())
+      return {};
+    for (const auto& c : {p, q})
+    {
+      auto knots = c->Knots();
+      BSplCLib::Reparametrize(f, l, knots);
+      c->SetKnots(knots);
+    }
+    auto knots = curve->Knots();
+    BSplCLib::Reparametrize(f, l, knots);
+    curve->SetKnots(knots);
+    curves.push_back(curve);
+    onOne.push_back(p);
+    onTwo.push_back(q);
+    previous = next;
+    from     = to;
+  }
+  const auto curve = endToEnd(curves, tol::length);
+  const auto p = endToEnd(onOne, tol::parameterMerge), q = endToEnd(onTwo, tol::parameterMerge);
+  if (curve.IsNull() || p.IsNull() || q.IsNull())
+    return {};
+  return edgeBetween(curve,
+                     first,
+                     a,
+                     last,
+                     b,
+                     {{Handle(Geom2d_Curve)(p), one.basis, one.location},
+                      {Handle(Geom2d_Curve)(q), two.basis, two.location}},
+                     tol::length);
+}
+
 std::optional<TopoDS_Edge> marchedMeeting(const Sheet&         one,
                                           const gp_Pnt2d&      oneFirst,
                                           const gp_Pnt2d&      oneSecond,
