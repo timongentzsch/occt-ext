@@ -124,6 +124,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <memory>
 #include <type_traits>
 #include <optional>
 
@@ -352,6 +353,16 @@ struct SizeLaw
   }
 };
 
+//! Numerical centre-path carrier; its parameter remains the original edge coordinate.
+struct CentreParameter
+{
+  Handle(Geom_BSplineCurve) curve;
+  std::vector<double>       knots, lengths;
+  double                    tolerance = 0;
+  double                    length(double t) const;
+  double                    parameter(double length) const;
+};
+
 //! A full round (Law::Full) is a notch of its face between the two edges, `s[1]`, whose face beyond
 //! is the second support: that side's surface is the face beyond's, where the ball's foot is, and
 //! the ball touches the face between too (`Rail::middle`).
@@ -433,9 +444,23 @@ struct Rail
   bool pinch[2] = {false, false};
 
   //! The edge's parameter at the fit's u, which runs from 0 to 1 over the carried rail, and back.
-  double t(double u) const { return from + (to - from) * u; }
+  std::shared_ptr<const CentreParameter> centreParameter;
 
-  double u(double t) const { return (t - from) / (to - from); }
+  double t(double u) const
+  {
+    if (!centreParameter)
+      return from + (to - from) * u;
+    const double a = centreParameter->length(from), b = centreParameter->length(to);
+    return centreParameter->parameter(a + (b - a) * u);
+  }
+
+  double u(double t) const
+  {
+    if (!centreParameter)
+      return (t - from) / (to - from);
+    const double a = centreParameter->length(from), b = centreParameter->length(to);
+    return (centreParameter->length(t) - a) / (b - a);
+  }
 
   //! Whether `t` is an end where the blend closes to a point (pinch).
   bool pinchedAt(double t) const
@@ -1128,7 +1153,7 @@ Standard_EXPORT double fitTolerance(const Rail& rail);
 // Contact discovery keeps the requested tolerance but uses circular pilot
 // sections; the caller must replace these with the requested law before
 // attachment.
-Standard_EXPORT Fitted fit(const Rail& rail, Stations& stations, bool contactPilot = false);
+Standard_EXPORT Fitted fit(Rail& rail, Stations& stations, bool contactPilot = false);
 Standard_EXPORT Fitted fit(const Rail&                      rail,
                            Stations&                        stations,
                            bool                             contactPilot,

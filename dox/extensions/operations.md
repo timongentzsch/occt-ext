@@ -2108,3 +2108,40 @@ depend on the number of earlier stores. This is a host-lifetime correction, not 
 the geometric construction. ISO C++ working draft, *Containers library*,
 [deque.modifiers], paragraph 1 (accessed 2026), guarantees that end insertion preserves
 references to existing elements: <https://eel.is/c++draft/deque.modifiers#1>.
+
+### Centre-path arc coordinates for a defective sheet
+
+A rail-parameter knot can be a tangential acceleration break rather than a
+geometric curvature break. For a regular centre curve c(t), put v=|c_t| and
+sigma(t)=integral v dt. The chain rule gives
+`p_sigma = p_t/v` and
+`p_sigma_sigma = p_tt/v^2 - p_t (c_t.c_tt)/v^4`
+for each contact foot p(t). This cancellation is **derived** from the arc-length
+relations in Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer
+Aided Design and Manufacturing* (2009), section 2.1, equations (2.6)-(2.11),
+[arc length and tangent vector](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node22.html).
+It removes only tangential parameter acceleration; it cannot remove a geometric
+support break, a section-policy break, a singular centre path or a varying
+radius law's break. Peters, *Geometric Continuity* (2001), sections 2-3,
+[reparameterisation conditions](https://www.cise.ufl.edu/research/SurfLab/papers/01handbook.pdf),
+likewise distinguishes geometric regularity from equality of parameter jets.
+
+The experimental reconstruction keeps the existing result unless a sampled
+one-sided second-form comparison exceeds the existing internal curvature bound
+at an inherited rail knot. For constant-size curvature-continuous sections,
+centres are interpolated in the original edge coordinate, retaining its knots,
+and refined to the station-solve length resolution. Numerical arc integration
+and inversion then define the fit coordinate; the radius law and all station
+solves continue to use the original edge coordinate. A reconstruction with more longitudinal poles retains the original coefficients.
+The shared rail carries
+both coordinate directions, so contact, section and attachment readers agree.
+The sheet fit drops only edge-coordinate knots and retains support and policy
+events. Support-split rails retain their previous construction: coupling their
+terminal jets requires a common group coordinate. Variable-size laws and
+edge-supported contacts also retain their previous construction.
+
+Position sampling of the centre carrier is not an interval bound on its length
+or derivatives. The regularity argument is conditional on regular transverse
+offset intersections and smooth support and section data; it does not establish
+convergence of this sampled reconstruction. Final contact, internal curvature,
+section-law, topology and preservation checks remain separate acceptance gates.

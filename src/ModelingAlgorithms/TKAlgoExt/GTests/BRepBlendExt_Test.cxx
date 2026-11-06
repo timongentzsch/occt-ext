@@ -1473,3 +1473,49 @@ TEST(BRepBlendExt, ClosedOffsetIntersectionHasOneCircuitOfContacts)
           EXPECT_LE(start.centre.Distance(end.centre), 1e-9 * scale);
         }
 }
+
+TEST(BRepBlendExt, CentreLengthIgnoresTangentialParameterBreaks)
+{
+  using namespace BRepExt::blending::detail;
+  // x(t)=t+max(0,t-1/2)^2/5 is C1, with a nonzero tangential
+  // acceleration jump. Its geometric trace is a straight segment.
+  for (double scale : {0.001, 1.0, 1000.0})
+    for (bool turned : {false, true})
+    {
+      gp_Trsf pose;
+      if (turned)
+        pose.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 2, 3)), 0.7);
+      const gp_Pnt               origin(2 * scale, -3 * scale, scale);
+      const gp_Vec               direction = gp_Vec(scale, 0, 0).Transformed(pose);
+      NCollection_Array1<gp_Pnt> poles(1, 4);
+      const double               x[] = {0, 0.25, 0.75, 1.05};
+      for (int i = 1; i <= 4; ++i)
+        poles(i) = origin.Translated(direction * x[i - 1]);
+      NCollection_Array1<double> knots(1, 3);
+      NCollection_Array1<int>    mult(1, 3);
+      knots(1)       = 0;
+      knots(2)       = 0.5;
+      knots(3)       = 1;
+      mult(1)        = 3;
+      mult(2)        = 1;
+      mult(3)        = 3;
+      auto arc       = std::make_shared<CentreParameter>();
+      arc->curve     = new Geom_BSplineCurve(poles, knots, mult, 2);
+      arc->knots     = {0, 0.5, 1};
+      arc->lengths   = {0, 0.5 * scale, 1.05 * scale};
+      arc->tolerance = scale * 1e-12;
+      Rail rail;
+      rail.from            = 0.1;
+      rail.to              = 0.9;
+      rail.centreParameter = arc;
+      const auto xAt       = [](double t) { return t + std::pow(std::max(0.0, t - 0.5), 2) / 5; };
+      for (int i = 0; i <= 32; ++i)
+      {
+        const double u = i / 32.0, t = rail.t(u);
+        const double expected = xAt(rail.from) + u * (xAt(rail.to) - xAt(rail.from));
+        EXPECT_NEAR(xAt(t), expected, 1e-10);
+        EXPECT_NEAR(rail.u(t), u, 1e-10);
+        EXPECT_NEAR(arc->length(t), scale * xAt(t), scale * 1e-10);
+      }
+    }
+}

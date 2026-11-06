@@ -56,7 +56,7 @@ std::map<double, int> breaksOf(const Rail& rail, Stations& stations, bool sought
   // point there (ballAt), so the stations are as smooth as the edge's points, not its tangent:
   // a C1 edge (OpenCascade's approximated meetings, degree 8 with knots of multiplicity 7) makes
   // the blend C1 there, not C0.
-  if (rail.curve.GetType() == GeomAbs_BSplineCurve)
+  if (!rail.centreParameter && rail.curve.GetType() == GeomAbs_BSplineCurve)
   {
     const auto curve = rail.curve.BSpline();
     for (int k = 2; k < curve->NbKnots(); ++k)
@@ -168,11 +168,6 @@ double fitTolerance(const Rail& rail)
   // its points where it sits (tolerance::resolved).
   return std::max(tol::length * std::min(1.0, rail.scale) * (rail.law == Law::G2 ? 0.1 : 1),
                   tol::rounding(rail.magnitude + rail.scale));
-}
-
-Fitted fit(const Rail& rail, Stations& stations, bool contactPilot)
-{
-  return fit(rail, stations, contactPilot, {});
 }
 
 Fitted fit(const Rail&                      rail,
@@ -903,4 +898,201 @@ std::vector<Fold> capFolds(Dips& dips, std::vector<Fold>* open)
   return {};
 }
 
+} // namespace BRepExt::blending::detail
+
+namespace BRepExt::blending::detail
+{
+
+double CentreParameter::length(double t) const
+{
+  const auto   it = std::upper_bound(knots.begin(), knots.end(), t);
+  const size_t i =
+    it == knots.begin() ? 0 : std::min(size_t(it - knots.begin() - 1), knots.size() - 2);
+  if (t == knots[i])
+    return lengths[i];
+  if (t == knots[i + 1])
+    return lengths[i + 1];
+  GeomAdaptor_Curve adaptor(curve, std::min(knots[i], t), std::max(knots[i + 1], t));
+  const double      delta =
+    GCPnts_AbscissaPoint::Length(adaptor, std::min(knots[i], t), std::max(knots[i], t), tolerance);
+  return lengths[i] + (t < knots[i] ? -delta : delta);
+}
+
+double CentreParameter::parameter(double distance) const
+{
+  const auto   it = std::upper_bound(lengths.begin(), lengths.end(), distance);
+  const size_t i =
+    it == lengths.begin() ? 0 : std::min(size_t(it - lengths.begin() - 1), lengths.size() - 2);
+  if (distance == lengths[i])
+    return knots[i];
+  if (distance == lengths[i + 1])
+    return knots[i + 1];
+  GeomAdaptor_Curve    adaptor(curve,
+                               distance < lengths.front() ? curve->FirstParameter() : knots[i],
+                               distance > lengths.back() ? curve->LastParameter() : knots[i + 1]);
+  GCPnts_AbscissaPoint along(tolerance, adaptor, distance - lengths[i], knots[i]);
+  if (!along.IsDone())
+    fail("blendEdges", no_solution, "the centre-path length cannot be inverted");
+  return along.Parameter();
+}
+
+//! Fit only the station centres, retaining the original edge-coordinate breaks.
+//! Arc length is subsequently integrated span by span; no polygonal length is used.
+static std::shared_ptr<CentreParameter> centreParameter(const Rail& rail, Stations& stations)
+{
+  std::map<double, int> knots{{0, kDegree + 1}, {1, kDegree + 1}};
+  for (int k = 1; k < 8; ++k)
+    knots[k / 8.0] = 1;
+  if (rail.curve.GetType() == GeomAbs_BSplineCurve)
+  {
+    const auto curve = rail.curve.BSpline();
+    for (int k = 2; k < curve->NbKnots(); ++k)
+      addBreak(knots,
+               rail.u(curve->Knot(k)),
+               kDegree - std::max(0, curve->Degree() - curve->Multiplicity(k)));
+  }
+  const double tolerance = rail.resolved(limit::solved);
+  const auto   exact     = [&](double u) {
+    Station station;
+    if (!stations.at(rail.t(u), station))
+      fail(rail.op, no_solution, "the centre path cannot be fitted", {rail.edge});
+    return station.centre;
+  };
+  const gp_Pnt origin = exact(0);
+  for (;;)
+  {
+    const auto flat = flatten(knots);
+    const int  n    = int(flat.size()) - kDegree - 1;
+    if (n > 4000)
+      fail(rail.op, no_solution, "the centre-path fit exceeds its pole budget", {rail.edge});
+    NCollection_Array1<double> full(1, int(flat.size())), parameters(1, n);
+    NCollection_Array1<int>    orders(1, n);
+    std::vector<double>        poles(3 * n), sites(n);
+    for (size_t i = 0; i < flat.size(); ++i)
+      full(int(i) + 1) = flat[i];
+    for (int i = 0; i < n; ++i)
+    {
+      double u = 0;
+      for (int j = 1; j <= kDegree; ++j)
+        u += flat[i + j] / kDegree;
+      sites[i]          = u;
+      parameters(i + 1) = u;
+      orders(i + 1)     = 0;
+      const auto p      = exact(u).XYZ() - origin.XYZ();
+      for (int c = 0; c < 3; ++c)
+        poles[3 * i + c] = p.Coord(c + 1);
+    }
+    int singular = 0;
+    BSplCLib::Interpolate(kDegree, full, parameters, orders, 3, poles[0], singular);
+    if (singular)
+      fail(rail.op, no_solution, "the centre-path interpolation is singular", {rail.edge});
+    NCollection_Array1<gp_Pnt> points(1, n);
+    for (int i = 0; i < n; ++i)
+      points(i + 1) =
+        gp_Pnt(origin.XYZ() + gp_XYZ(poles[3 * i], poles[3 * i + 1], poles[3 * i + 2]));
+    NCollection_Array1<double> distinct(1, int(knots.size()));
+    NCollection_Array1<int>    mult(1, int(knots.size()));
+    int                        j = 1;
+    for (const auto& [u, m] : knots)
+    {
+      distinct(j) = rail.t(u);
+      mult(j++)   = m;
+    }
+    Handle(Geom_BSplineCurve) curve = new Geom_BSplineCurve(points, distinct, mult, kDegree);
+    std::vector<double>       refine;
+    for (int i = 0; i + 1 < n; ++i)
+      for (double f : {.25, .5, .75})
+      {
+        const double u = sites[i] + (sites[i + 1] - sites[i]) * f;
+        if (curve->Value(rail.t(u)).Distance(exact(u)) > tolerance)
+        {
+          const auto next = knots.upper_bound(u);
+          refine.push_back((std::prev(next)->first + next->first) / 2);
+        }
+      }
+    if (refine.empty())
+    {
+      auto out       = std::make_shared<CentreParameter>();
+      out->curve     = curve;
+      out->tolerance = tolerance;
+      GeomAdaptor_Curve adaptor(curve);
+      double            length = 0;
+      for (int k = 1; k <= curve->NbKnots(); ++k)
+      {
+        if (k > 1)
+          length +=
+            GCPnts_AbscissaPoint::Length(adaptor, curve->Knot(k - 1), curve->Knot(k), tolerance);
+        out->knots.push_back(curve->Knot(k));
+        out->lengths.push_back(length);
+      }
+      return out;
+    }
+    bool changed = false;
+    for (double u : refine)
+      changed |= knots.emplace(u, 1).second;
+    if (!changed)
+      fail(rail.op, no_solution, "the centre-path fit cannot refine", {rail.edge});
+  }
+}
+
+static bool defectiveRailKnot(const Rail& rail, const Fitted& fitted)
+{
+  if (rail.curve.GetType() != GeomAbs_BSplineCurve)
+    return false;
+  const auto curve   = rail.curve.BSpline();
+  const auto surface = fitted.blend;
+  for (int k = 2; k < surface->NbUKnots(); ++k)
+  {
+    if (surface->UMultiplicity(k) < surface->UDegree() - 1)
+      continue;
+    const double u         = surface->UKnot(k);
+    bool         inherited = false;
+    for (int j = 2; j < curve->NbKnots(); ++j)
+      inherited |= std::abs(u - rail.u(curve->Knot(j))) <= tol::parameter;
+    if (!inherited)
+      continue;
+    for (int j = 1; j < surface->NbVKnots(); ++j)
+      for (int q = 0; q <= 18; ++q)
+      {
+        const double v = surface->VKnot(j) + (surface->VKnot(j + 1) - surface->VKnot(j)) * q / 18.;
+        SurfaceJet   a{rail.op}, b{rail.op};
+        surfaceD2OnUSpan(surface, u, v, k - 1, k, a);
+        surfaceD2OnUSpan(surface, u, v, k, k + 1, b);
+        a.orient(false);
+        b.orient(false);
+        if (bendDifference(a, b, a.v.Normalized()).first * rail.scale > limit::seamBend)
+          return true;
+      }
+  }
+  return false;
+}
+
+Fitted fit(Rail& rail, Stations& stations, bool contactPilot)
+{
+  Fitted original = fit(rail, stations, contactPilot, {});
+  if (contactPilot || rail.law != Law::G2 || rail.centreParameter || rail.parameterSupports
+      || !rail.sizes.places.empty()
+      || rail.s[0].cliffCurve || rail.s[1].cliffCurve || !defectiveRailKnot(rail, original))
+    return original;
+  try
+  {
+    rail.centreParameter = centreParameter(rail, stations);
+    Fitted candidate = fit(rail, stations, false, {});
+    // Existing deliveries may improve their geometry without growing their
+    // representation. Keep the original coefficients when that test fails.
+    if (candidate.blend->NbUPoles() > original.blend->NbUPoles())
+    {
+      rail.centreParameter.reset();
+      return original;
+    }
+    return candidate;
+  }
+  catch (const Failure& failure)
+  {
+    rail.centreParameter.reset();
+    if (failure.reason == std::string("cancelled"))
+      throw;
+    return original;
+  }
+}
 } // namespace BRepExt::blending::detail
