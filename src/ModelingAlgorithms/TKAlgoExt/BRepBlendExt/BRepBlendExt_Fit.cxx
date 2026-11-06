@@ -1078,13 +1078,9 @@ Fitted fit(Rail& rail, Stations& stations, bool contactPilot)
   {
     rail.centreParameter = centreParameter(rail, stations);
     Fitted candidate = fit(rail, stations, false, {});
-    // Existing deliveries may improve their geometry without growing their
-    // representation. Keep the original coefficients when that test fails.
-    if (candidate.blend->NbUPoles() > original.blend->NbUPoles())
-    {
-      rail.centreParameter.reset();
-      return original;
-    }
+    // A change of parameter can require more interpolation coefficients even
+    // when it removes an artificial curvature break. Positional and contact
+    // checks in fit remain the acceptance conditions for this construction.
     return candidate;
   }
   catch (const Failure& failure)

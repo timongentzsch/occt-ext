@@ -2176,7 +2176,12 @@ at an inherited rail knot. For constant-size curvature-continuous sections,
 centres are interpolated in the original edge coordinate, retaining its knots,
 and refined to the station-solve length resolution. Numerical arc integration
 and inversion then define the fit coordinate; the radius law and all station
-solves continue to use the original edge coordinate. A reconstruction with more longitudinal poles retains the original coefficients.
+solves continue to use the original edge coordinate. The experimental refit now
+keeps a checked reconstruction even if it needs more longitudinal coefficients.
+Changing the fit coordinate does not preserve the complexity of its interpolant;
+coefficient count alone is not an error estimate. Position and contact checks in
+`fit` remain mandatory. Additional coefficients are an explicit representation
+cost, not evidence of a smaller geometric error or Pareto acceptance.
 The shared rail carries
 both coordinate directions, so contact, section and attachment readers agree.
 The sheet fit drops only edge-coordinate knots and retains support and policy
@@ -2189,6 +2194,7 @@ or derivatives. The regularity argument is conditional on regular transverse
 offset intersections and smooth support and section data; it does not establish
 convergence of this sampled reconstruction. Final contact, internal curvature,
 section-law, topology and preservation checks remain separate acceptance gates.
+
 ### Smooth section-policy selections
 
 `BRepBlendExt_Smooth.hxx` provides compact C2 upper/lower rounding for policy
