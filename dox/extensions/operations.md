@@ -2005,3 +2005,13 @@ points for every component and why tangencies require additional treatment
 The OCCT `GeomAPI_IntCS` interface separately exposes isolated points and
 tangential segments; a zero point count alone is not a complete empty-set
 oracle ([reference](https://occt3d.com/dev/doc/refman/html/class_geom_a_p_i___int_c_s.html)).
+
+### Native test host reference lifetime
+
+The native test host keeps shape entries in `std::deque`. Its `get()` interface returns a
+reference; an operation can retain that reference while `store()` appends an intermediate
+shape. A vector can invalidate it when it reallocates, making an otherwise identical operation
+depend on the number of earlier stores. This is a host-lifetime correction, not a change to
+the geometric construction. ISO C++ working draft, *Containers library*,
+[deque.modifiers], paragraph 1 (accessed 2026), guarantees that end insertion preserves
+references to existing elements: <https://eel.is/c++draft/deque.modifiers#1>.

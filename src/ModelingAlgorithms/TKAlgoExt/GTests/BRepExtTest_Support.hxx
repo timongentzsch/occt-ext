@@ -11,7 +11,7 @@
 // Alternatively, this file may be used under the terms of Open CASCADE
 // commercial license or contractual agreement.
 
-// Shared by the TKAlgoExt tests: the host seam of BRepToolsExt_Session.hxx (a vector of shapes,
+// Shared by the TKAlgoExt tests: the host seam of BRepToolsExt_Session.hxx (stable shape storage,
 // defined in BRepExtTest_Support.cxx) and oracles that use nothing of the code under test.
 
 #pragma once

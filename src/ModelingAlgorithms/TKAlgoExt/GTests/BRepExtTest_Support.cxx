@@ -11,8 +11,9 @@
 // Alternatively, this file may be used under the terms of Open CASCADE
 // commercial license or contractual agreement.
 
-// The host seam of BRepToolsExt_Session.hxx for the tests: shapes live in a vector and a handle
-// is the index plus one.
+// The host seam of BRepToolsExt_Session.hxx for the tests: a handle is the index plus one.
+// Operations may keep a get() reference while storing intermediate shapes, so appending must
+// preserve references to existing entries.
 
 #include "BRepExtTest_Support.hxx"
 
@@ -20,10 +21,11 @@
 #include <GeomAlgoExt_Failure.hxx>
 
 #include <ctime>
+#include <deque>
 
 namespace
 {
-std::vector<TopoDS_Shape> shapes;
+std::deque<TopoDS_Shape> shapes;
 alignas(8) char token[8];
 } // namespace
 
