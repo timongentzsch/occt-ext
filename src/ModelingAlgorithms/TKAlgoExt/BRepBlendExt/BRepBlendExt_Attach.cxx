@@ -5002,6 +5002,50 @@ void faceBox(const TopoDS_Face& face, Bnd_Box& box)
       BRepBndLib::Add(face, box);
   }
 }
+//! A positive-weight tensor spline lies in the convex hull of its poles. Separating
+//! that hull from the other face's entire supporting plane therefore separates the
+//! faces. Unlike world-axis boxes this test is unchanged by a rigid motion.
+bool separatedByPlane(const TopoDS_Face& splineFace,
+                      const TopoDS_Face& planeFace,
+                      double tolerance)
+{
+  const GeomAdaptor_Surface plane(BRep_Tool::Surface(planeFace));
+  if (plane.GetType() != GeomAbs_Plane)
+    return false;
+  const auto spline = Handle(Geom_BSplineSurface)::DownCast(BRep_Tool::Surface(splineFace));
+  if (spline.IsNull())
+    return false;
+  double u0, u1, v0, v1, su0, su1, sv0, sv1;
+  BRepTools::UVBounds(splineFace, u0, u1, v0, v1);
+  spline->Bounds(su0, su1, sv0, sv1);
+  if (!(u0 >= su0 && u1 <= su1 && v0 >= sv0 && v1 <= sv1))
+    return false; // Extrapolation beyond the spline domain need not obey its convex hull.
+  // A face's stored edge/vertex geometry can deviate from its support by its
+  // own tolerance. Include both boundary envelopes before skipping a shape query.
+  tolerance += tol::largest(splineFace) + tol::largest(planeFace);
+  const gp_Pln support = plane.Plane();
+  const gp_Vec normal(support.Axis().Direction());
+  double low = Precision::Infinite(), high = -Precision::Infinite();
+  for (int i = 1; i <= spline->NbUPoles(); ++i)
+    for (int j = 1; j <= spline->NbVPoles(); ++j)
+    {
+      if (!(spline->Weight(i, j) > 0))
+        return false;
+      const gp_Pnt pole = spline->Pole(i, j);
+      const gp_Vec delta(support.Location(), pole);
+      const double distance = delta.Dot(normal);
+      // Resolve subtraction and dot-product roundoff at the coordinates used.
+      const double error = tol::rounding(pole.XYZ().Modulus()
+                                         + support.Location().XYZ().Modulus());
+      if (!std::isfinite(distance) || !std::isfinite(error))
+        return false;
+      low = std::min(low, distance - error);
+      high = std::max(high, distance + error);
+      if (low <= tolerance && high >= -tolerance)
+        return false;
+    }
+  return low > tolerance || high < -tolerance;
+}
 } // namespace
 
 void Attach::collisions()
@@ -5049,6 +5093,10 @@ void Attach::collisions()
         Bnd_Box other;
         faceBox(TopoDS::Face(f.Current()), other);
         if (box.IsOut(other))
+          continue;
+        const double tolerance = tol::own(face) + tol::own(f.Current());
+        if (separatedByPlane(face, TopoDS::Face(f.Current()), tolerance)
+            || separatedByPlane(TopoDS::Face(f.Current()), face, tolerance))
           continue;
         BRepExtrema_DistShapeShape distance(face, f.Current());
         if (distance.IsDone() && distance.Value() <= tol::own(face) + tol::own(f.Current()))

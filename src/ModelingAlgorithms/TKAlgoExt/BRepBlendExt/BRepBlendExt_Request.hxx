@@ -50,6 +50,8 @@ struct Request
   FitWork fitWork = FitWork::Deferred;
   //! Final contact-arrangement construction, after both existing fit pipelines refuse.
   bool refineContacts = false;
+  //! Last construction: stations on the intersection of constant-distance offset supports.
+  bool intersectSpines = false;
   const char*               operation = "blendEdges";
   TopoDS_Shape              body;
   std::vector<TopoDS_Shape> edges;

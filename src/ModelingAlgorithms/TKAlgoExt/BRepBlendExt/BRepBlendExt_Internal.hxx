@@ -16,6 +16,7 @@
 // The internals of the rolling-ball blend, shared by its modules:
 //   BRepBlendExt_Ball.cxx      the ball on the supports and its section (Station, Section)
 //   BRepBlendExt_Fit.cxx       the blend approximated from the exact sections (Fitted)
+//   BRepBlendExt_Spine.cxx     independent closed offset-intersection station carriers
 //   BRepBlendExt_Sheet.cxx     exact sheets and frames that read back bit for bit (Sheet)
 //   BRepBlendExt_Split.cxx     inherited support breaks, section frames and joined sheets
 //   BRepBlendExt_Topology.cxx  meetings, edges, trims and the stop faces' ends
@@ -357,10 +358,38 @@ struct SizeLaw
 
 struct Rail
 {
+  //! Experimental fixed-contact shoulder homotopy on a closed offset circuit.
+  struct ConicWindow
+  {
+    int cylinder = 0;
+    gp_Vec axis, acute, planeNormal;
+    gp_Pnt planeOrigin;
+    double halfWidth = 0;
+  };
+  std::optional<ConicWindow> conicWindow;
   bool boundedFit = false;
   const char*       op = "blendEdges";
   TopoDS_Edge       edge;
   BRepAdaptor_Curve curve;
+  //! Offset-intersection carrier; the source edge remains authoritative for source coordinates.
+  Handle(Geom_Curve) spine;
+  double spineFirst = 0, spineLast = 0;
+  double spineParameterFirst = 0, spineParameterLast = 0;
+
+  void stationD1(double t, gp_Pnt& point, gp_Vec& tangent) const
+  {
+    if (spine.IsNull())
+      return curve.D1(t, point, tangent);
+    const double rate = (spineLast - spineFirst) / (spineParameterLast - spineParameterFirst);
+    double parameter = spineFirst + (t - spineParameterFirst) * rate;
+    // A closed SSI spline can be clamped rather than periodic. Evaluate its one circuit,
+    // never the polynomial continuation of its end span.
+    const double begin = spine->FirstParameter(), period = spine->LastParameter() - begin;
+    parameter -= period * std::floor((parameter - begin) / period);
+    spine->D1(parameter, point, tangent);
+    tangent *= rate;
+  }
+
   Side              s[2];
   double sigma = -1; // the centre is sigma times the distance along the outward normal: -1 convex
   double first = 0, last = 0, from = 0, to = 0;
@@ -700,6 +729,12 @@ Standard_EXPORT std::optional<Ball> restingBall(const std::vector<Side>& faces,
                                                 double                   distance,
                                                 double                   sigma,
                                                 double                   scale);
+
+//! Select a regular closed branch of the two constant-distance offset supports through the
+//! existing middle station. Does not change the source edge or its parameter range.
+Standard_EXPORT bool intersectSpine(Rail& rail);
+Standard_EXPORT bool prepareConicWindow(Rail& rail);
+Standard_EXPORT double conicPhase(const Rail& rail, const Station& station);
 
 //! The stations of a rail, marched from the middle of the edge to both carried ends, and
 //! solved again at any parameter from the nearest one found.

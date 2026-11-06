@@ -237,7 +237,11 @@ Known limits and what remains:
    plane and cylinder, two cylinders). Where the angle turns along the edge so far that the balls' centre
    path bends more tightly than the ball (the rim of a hole leaning a with r >= (R + r) cos a: from about
    70 degrees), the rolling-ball surface crosses itself and is refused by name until it is trimmed there;
-   short of that the rim is the balls' envelope. Historical stored results over pairs of supports include
+   short of that the rim is the balls' envelope. A final circuit route attaches a fixed-contact conic
+   replacement on a cylindrical cavity and transverse plane, retaining the envelope outside its
+   crossing sector. Its validity, closed-solid, sampled contact and retained-section checks match
+   the other delivered blend routes; continuous spline and embedding certificates remain open
+   (see the conic-window section in [operations.md](dox/extensions/operations.md)). Historical stored results over pairs of supports include
    values from an earlier construction; they do not establish that this solver delivered those results.
    Several curvature-continuous results recorded before the internal tangent-continuity check are also
    refused by that check. Recovery requires meeting the current seam and section-law bounds.

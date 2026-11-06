@@ -272,7 +272,7 @@ static bool ballAt(const Rail& rail, double t, Station& s, double r0, double r1)
 {
   gp_Pnt E;
   gp_Vec d;
-  rail.curve.D1(t, E, d);
+  rail.stationD1(t, E, d);
   if (!(d.Magnitude() > limit::degenerate))
     return false;
   // At an end where the faces are tangent the ball rests on both at the edge's point: the
@@ -299,7 +299,7 @@ static bool ballAt(const Rail& rail, double t, Station& s, double r0, double r1)
     s.along  = d.Normalized();
     return true;
   }
-  if (rail.byCentre)
+  if (rail.byCentre && rail.spine.IsNull())
   {
     const auto across = centreAcross(rail, t, E, r0, r1);
     if (!across)
@@ -795,6 +795,22 @@ bool sectionAt(const Rail&                      rail,
       out.knots          = {0, 1};
       out.multiplicities = {3, 3};
       out.degree         = 2;
+      if (rail.conicWindow)
+      {
+        const auto& window = *rail.conicWindow;
+        const double x = conicPhase(rail, s) / window.halfWidth;
+        if (std::abs(x) < 1)
+        {
+          // Both shoulders lie on both contact tangent planes. Their affine
+          // combination keeps the two contact positions and tangent planes exact.
+          const gp_Pnt q = s.foot[window.cylinder];
+          const double d = gp_Vec(q, window.planeOrigin).Dot(window.planeNormal)
+                           / window.axis.Dot(window.planeNormal);
+          const gp_Pnt flat = q.Translated(window.axis * d);
+          const double w = (1 - x * x) * (1 - x * x);
+          out.poles[1] = apex.Translated(gp_Vec(apex, flat) * w);
+        }
+      }
       if (rail.halves)
         halve(out);
       return true;

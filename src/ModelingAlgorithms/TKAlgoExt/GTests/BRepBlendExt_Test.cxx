@@ -21,6 +21,8 @@
 #include <BRepBlendExt_Request.hxx>
 #include <BRepBlendExt_Internal.hxx>
 #include <GeomConvert.hxx>
+#include <Geom_Ellipse.hxx>
+#include <IntAna_QuadQuadGeo.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
@@ -792,12 +794,15 @@ TEST(BRepBlendExt, BlendOfARimOverASideNarrowerThanItUsesTheSideUp)
 // hole's axis: on an ellipse of semi-axes R + r and (R + r) / cos a, whose radius of curvature at
 // its acute end is (R + r) cos a. Below that the round is the balls' envelope, every point r from
 // the ellipse (at 75 degrees its sections turn by up to 165 degrees and are made of two spans);
-// past it (r / (R + r)
-// >= cos a) the envelope crosses itself, and the blend is refused by name, as the reference
-// modeller trims it there: these are exactly the members the reference modeller splits into 11
-// faces.
+// past r/(R+r) >= cos(a), a compact fixed-contact conic replaces its acute sector.
+// The retained sector must still satisfy the original rolling-ball bound.
 TEST(BRepBlendExt, RoundOfASteepRimIsTheBallsWhereItDoesNotCrossItself)
 {
+  const auto text = [](const TopoDS_Shape& shape) {
+    std::ostringstream stream;
+    BRepTools::Write(shape, stream);
+    return stream.str();
+  };
   struct Member
   {
     double t, R, r;
@@ -842,10 +847,13 @@ TEST(BRepBlendExt, RoundOfASteepRimIsTheBallsWhereItDoesNotCrossItself)
       const bool crosses = m.r / (m.R + m.r) >= std::cos(a);
       SCOPED_TRACE(std::to_string(degrees) + " t" + std::to_string(m.t) + " R"
                    + std::to_string(m.R));
+      const auto inputBefore = text(plate);
       try
       {
-        const TopoDS_Shape made = BRepExt::blending::blend(roundOf(plate, rim, m.r)).shape;
-        EXPECT_FALSE(crosses) << "a crossing envelope was delivered";
+        const auto result = BRepExt::blending::blend(roundOf(plate, rim, m.r));
+        const TopoDS_Shape made = result.shape;
+        EXPECT_EQ(inputBefore, text(plate));
+        EXPECT_NO_THROW(BRepExt::blending::accepted("round", plate, made, m.r, &result));
         EXPECT_TRUE(BRepExt::invalidity(made).empty());
         // Every point of the blend r from the centres' ellipse: about the axis through (size/2,
         // size/2, t/2) along (0, -sin a, cos a), the circle of radius R + r in the plane z = t - r.
@@ -873,6 +881,19 @@ TEST(BRepBlendExt, RoundOfASteepRimIsTheBallsWhereItDoesNotCrossItself)
               const double u = u0 + (u1 - u0) * i / 16, v = v0 + (v1 - v0) * j / 16;
               if (BRepClass_FaceClassifier(face, gp_Pnt2d(u, v), 1e-7).State() != TopAbs_IN)
                 continue;
+              if (crosses)
+              {
+                // Read the station phase from the cylindrical contact, independently of
+                // the spline's longitudinal coordinate and of closest-centre projection.
+                const gp_Lin axis(O, d);
+                const gp_Pnt p0 = surface.Value(u, v0), p1 = surface.Value(u, v1);
+                const gp_Pnt q = std::abs(axis.Distance(p0)-m.R) < std::abs(axis.Distance(p1)-m.R)
+                                   ? p0 : p1;
+                const gp_Vec arm(O, q);
+                const double phase = std::atan2(arm.Dot(gp_Vec(e1)), arm.Dot(gp_Vec(e2)));
+                if (std::abs(phase) <= 2 * std::asin(m.r / (m.R + m.r)))
+                  continue;
+              }
               const gp_Pnt p    = surface.Value(u, v);
               const auto   gap  = [&](double q) { return p.Distance(centre(q)); };
               int          best = 0;
@@ -897,10 +918,7 @@ TEST(BRepBlendExt, RoundOfASteepRimIsTheBallsWhereItDoesNotCrossItself)
       }
       catch (const BRepExt::Failure& refused)
       {
-        EXPECT_TRUE(crosses) << refused.what();
-        if (crosses && degrees < 80)
-          EXPECT_NE(std::string(refused.what()).find("crosses itself"), std::string::npos)
-            << refused.what();
+        ADD_FAILURE() << refused.what();
       }
     }
 }
@@ -1359,4 +1377,99 @@ TEST(BRepBlendExt, ContactOwnershipHasACommonPartitionOnANarrowSupport)
         EXPECT_NO_THROW(accepted("round", input, result.shape, request.first, &result));
         EXPECT_EQ(before, text(input));
       }
+}
+
+// The oracle is the independent analytic intersection, not the carrier returned by the SSI
+// implementation. A full circuit of contacts must not retrace at a tight bend.
+TEST(BRepBlendExt, ClosedOffsetIntersectionHasOneCircuitOfContacts)
+{
+  using namespace BRepExt::blending::detail;
+  for (double scale : {.01, 1., 100.})
+    for (bool turned : {false, true})
+      for (double degrees : {75., 80.})
+        for (double ratio : {.25, .5})
+        {
+          SCOPED_TRACE(::testing::Message() << scale << " " << turned << " " << degrees
+                                            << " " << ratio);
+          const double radius = 2 * scale, r = radius * ratio;
+          const double angle = degrees * M_PI / 180;
+          gp_Cylinder cylinder(gp_Ax3(gp::Origin(), gp::DZ()), radius);
+          gp_Pln plane(gp::Origin(), gp_Dir(0, std::sin(angle), std::cos(angle)));
+          if (turned)
+          {
+            const gp_Trsf pose = posed(1);
+            cylinder.Transform(pose);
+            plane.Transform(pose);
+          }
+          IntAna_QuadQuadGeo source(plane, cylinder, 1e-12, 1e-10 * scale);
+          ASSERT_TRUE(source.IsDone());
+          ASSERT_EQ(source.TypeInter(), IntAna_Ellipse);
+          const Handle(Geom_Curve) curve = new Geom_Ellipse(source.Ellipse(1));
+          Rail rail;
+          rail.edge = BRepBuilderAPI_MakeEdge(curve);
+          rail.curve.Initialize(rail.edge);
+          rail.first = rail.from = rail.curve.FirstParameter();
+          rail.last = rail.to = rail.curve.LastParameter();
+          rail.closed = true;
+          rail.scale = r;
+          rail.magnitude = radius / std::cos(angle) + 10;
+          rail.s[0].surface = new Geom_CylindricalSurface(cylinder);
+          rail.s[1].surface = new Geom_Plane(plane);
+          rail.s[0].outward = -1;
+          for (int side = 0; side < 2; ++side)
+          {
+            rail.s[side].distance = r;
+            rail.s[side].face = BRepBuilderAPI_MakeFace(rail.s[side].surface, 1e-10 * scale);
+            const auto pc = GeomProjLib::Curve2d(curve, rail.first, rail.last, rail.s[side].surface);
+            ASSERT_FALSE(pc.IsNull());
+            BRep_Builder().UpdateEdge(rail.edge, pc, rail.s[side].face, 1e-9 * scale);
+          }
+          ASSERT_TRUE(intersectSpine(rail));
+          // Restricting a piece at a support seam must not stretch another complete
+          // carrier circuit across that piece. Compare its physical station frame.
+          Rail restricted = rail;
+          restricted.first = rail.t(.2);
+          restricted.last = rail.t(.7);
+          restricted.from = restricted.first;
+          restricted.to = restricted.last;
+          for (double u : {.21, .4, .69})
+          {
+            gp_Pnt wholePoint, partPoint;
+            gp_Vec wholeTangent, partTangent;
+            rail.stationD1(rail.t(u), wholePoint, wholeTangent);
+            restricted.stationD1(rail.t(u), partPoint, partTangent);
+            EXPECT_LE(wholePoint.Distance(partPoint), 1e-12 * scale);
+            EXPECT_LE((wholeTangent-partTangent).Magnitude(), 1e-12 * scale);
+          }
+          Stations stations(rail);
+          ASSERT_NO_THROW(stations.march());
+          double first = 0, previous = 0, minimum = 1e100;
+          Station start, end;
+          for (int i = 0; i <= 256; ++i)
+          {
+            Station station;
+            ASSERT_TRUE(stations.at(rail.t(i / 256.), station));
+            // Analytic offset equations: radial distance R+r and signed plane distance -r.
+            EXPECT_NEAR(gp_Lin(cylinder.Axis()).Distance(station.centre), radius + r, 1e-9 * scale);
+            const gp_Vec arm(plane.Location(), station.centre);
+            EXPECT_NEAR(arm.Dot(gp_Vec(plane.Axis().Direction())), -r, 1e-9 * scale);
+            double phase = station.uv[0][0];
+            if (i == 0)
+            {
+              first = phase;
+              start = station;
+            }
+            else
+            {
+              phase = BRepExt::nearPeriod(phase, previous, 2 * M_PI);
+              minimum = std::min(minimum, phase - previous);
+            }
+            previous = phase;
+            end = station;
+          }
+          // Source orientation can be either way; all increments must have that same sign.
+          EXPECT_NEAR(std::abs(previous - first), 2 * M_PI, 1e-9);
+          EXPECT_GT(minimum, 0);
+          EXPECT_LE(start.centre.Distance(end.centre), 1e-9 * scale);
+        }
 }

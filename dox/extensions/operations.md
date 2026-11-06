@@ -73,6 +73,99 @@ from trimming and integration into a valid body: that paper addresses the former
 by itself proves ownership of every retained trimmed region or that a coupled section satisfies
 its prescribed law; those remain separate acceptance requirements.
 
+### Fixed-contact conic windows
+
+A final closed offset-circuit route can now attach a non-circular conic skin for a
+cylindrical cavity meeting a transverse plane, at constant circular radius
+`0 < r < R`. It follows every previous whole-request route. Neither previously
+successful requests nor the crossing and solid acceptance checks are bypassed.
+The carrier parameter frame is immutable: restricting a piece at a support seam
+must restrict that circuit, rather than map a new complete circuit onto the piece.
+
+Let `q` be the cylindrical contact's signed phase from the acute radial direction,
+`A=R+r`, `h=2 asin(r/A)`, and `x=q/h`. The complete ellipse double-point domain
+has half-width `asin(sqrt(((r/A)^2-c^2)/(1-c^2)))`, where `c` is the absolute
+cosine between the plane normal and cylinder axis. It is enclosed by `h` when
+`r/A >= c`. These formulas and the enclosure are derived; they are not a
+published construction theorem. Outside `|x|<1`, the circular generator remains
+unchanged. Inside, replace its shoulder `M` by
+`M + (1-x*x)^2 (M0-M)`, with `M0` the intersection of the cylinder-axis line
+through its cylindrical contact with the plane. Both shoulders lie in both
+contact tangent planes. Positions and tangent planes at both contacts remain
+exact analytically. The window and its first derivative vanish at the two ends,
+so the retained/replacement first jets match. The existing homogeneous fitter
+receives these sections and both contact pcurves together; knots of multiplicity
+four in its degree-five longitudinal basis represent the actual C1 window breaks.
+Homogeneous subdivision into two transverse spans follows the shoulder change.
+
+The ordinary fitter controls error numerically at its refinement sites. Neither
+continuous point/derivative error of this spline approximation nor its global
+embedding has a runtime interval certificate. The analytic first-jet identities
+do not supply those certificates. Delivered results use the same validity,
+closed-solid, sampled join and retained-section checks as the other blend routes;
+these checks are numerical, not a proof of global injectivity.
+The generated cavity/plane tests retain their original rolling-ball section-error
+bound outside the replaced sector, and independently test the immutable carrier
+under seam restrictions. No acceptance bound changes.
+
+Sources read: Jaiswal, Ghosal and Gurumoorthy, *An Efficient Algorithm for Circular
+Blending of Edges* (2001), introduction, pp. 1-2,
+<https://mecheng.iisc.ac.in/~asitava/sharad.pdf>, separates geometric spine
+construction from trimming and solid integration. Patrikalakis, Maekawa and Cho,
+*Shape Interrogation for Computer Aided Design and Manufacturing* (2009),
+§5.8.2.3, equations 5.101-5.105,
+<https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node109.html>, gives
+transverse SSI continuation and its branch-start/tangency conditions. These
+sources motivate the station/attachment separation; the compact shoulder
+homotopy and its identities above are derived here.
+
+### Rigid-motion invariant collision prefilter
+
+The collision stage keeps its world-axis bounding boxes and exact face-distance
+query. Where a box pair overlaps, it additionally tests a positive-weight tensor
+spline against the other face's entire support plane. The signed plane distances
+of all control poles enclose every point of the spline by the convex-hull
+property. If this interval, enlarged by coordinate roundoff, lies strictly beyond
+the sum of the two face tolerances and both boundary tolerance envelopes on
+either side of zero, no point of the two faces can collide. A trimmed face is a subset of that spline, so trimming cannot
+invalidate the separation. Other support types and inconclusive intervals retain
+the original exact query. No geometry or collision tolerance changes.
+
+The enclosure is the standard NURBS convex-hull property: Alexander Efremov,
+*Efficient Ray Tracing of Trimmed NURBS Surfaces*, master's thesis (2004),
+§2.5.3, property 3, pp. 23-24,
+<https://dcgi.fel.cvut.cz/~havran/ARTICLES/EfremovMasterThesis.pdf>.
+The separation inference above is derived. It avoids expensive distance queries
+caused solely by rotation of long thin surfaces' world-axis boxes.
+
+### Closed offset-intersection station carriers
+
+After the existing whole-request constructions refuse, a separate carrier may be obtained
+by intersecting the constant-distance offset supports with `GeomAPI_IntSS`. Canonical offsets
+are represented exactly through `Geom_OffsetSurface::Surface`; other offsets retain their
+surface evaluator. The source-edge adaptor and its parameter range are kept separately.
+The branch must be a closed circuit through the existing middle station, with compatible end
+tangents. Its orientation follows that station. A closed clamped SSI spline is evaluated by
+wrapping its finite domain, never by continuing its end polynomial. Every ball is still corrected
+on the original offset equations. These numerical tests identify a branch, not a proof that all
+branches were found. Open chains, carried ends, variable distances and cliff contacts are not
+handled by this carrier construction.
+
+The intersection tangent construction requires transverse normals: Patrikalakis, Maekawa and
+Cho, *Shape Interrogation for Computer Aided Design and Manufacturing* (2009),
+[section 5.8.2.3, equations (5.101)-(5.105)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node109.html).
+The same section distinguishes tracing from finding a seed on every component. The choice of
+one circuit through the middle station and its affine parameter correspondence are implementation
+choices, not a published completeness theorem. Independent plane/cylinder equations and winding
+checks cover 24 combinations of angle, radius, scale and pose in the native test.
+
+The carrier alone moves folded station maps to the unchanged interior-crossing check; it
+does not repair overlapping envelopes. On the cavity/plane class the conic-window construction
+above supplies that replacement. The immutable carrier frame keeps restrictions at support seams
+from stretching another circuit across a fragment. Forcing a new carrier on completed circuits
+can relocate the support seam, so this construction stays after the previous whole-request
+routes. Other crossing classes still require their own compatible contact arrangement.
+
 *Radius-law extrema.* Positivity and the scale used by the tolerances now come
 from outward-rounded enclosures of every cubic span, rather than uniform samples.
 Writing a span over x in [0,1], with h its parameter width, endpoints y0,y1 and

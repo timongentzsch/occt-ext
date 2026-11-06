@@ -1458,6 +1458,19 @@ Blended blend(const Request& request)
     {
     }
   }
+  extended.intersectSpines = true;
+  try
+  {
+    return blendStage(extended, true);
+  }
+  catch (const Failure& failure)
+  {
+    if (failure.reason == std::string("cancelled"))
+      throw;
+  }
+  catch (const Standard_Failure&)
+  {
+  }
   std::rethrow_exception(original);
 }
 
@@ -2605,6 +2618,8 @@ void Blend::sheets()
            "the blend crosses too many faces along one edge",
            {pieces[k].rail.edge});
     Piece& piece = pieces[k];
+    if (request.intersectSpines && piece.rail.spine.IsNull())
+      intersectSpine(piece.rail);
     if (centred(piece.rail.edge))
       piece.rail.byCentre = true;
     // Where the planes through the edge's points cross before they reach it, the balls found
@@ -2651,6 +2666,8 @@ void Blend::sheets()
         centreChain(int(k));
         return;
       }
+      if (request.intersectSpines)
+        prepareConicWindow(piece.rail);
       if (piece.rail.law == Law::Chordal)
         roundOfChord(piece.rail, stations);
       if (request.meet > 0)

@@ -186,6 +186,36 @@ Fitted fit(const Rail&                      rail,
   for (int k = 1; k < 8; ++k)
     knots[k / 8.0] = 1;
   auto naturalBreaks = breaksOf(rail, stations);
+  if (rail.conicWindow)
+    for (double target : {-rail.conicWindow->halfWidth, rail.conicWindow->halfWidth})
+    {
+      const auto value = [&](double u) {
+        Station station;
+        if (!stations.at(rail.t(u), station))
+          fail(rail.op, no_solution, "a conic window has no contact station", {rail.edge});
+        return conicPhase(rail, station) - target;
+      };
+      double before = value(0);
+      for (int k = 1; k <= 256; ++k)
+      {
+        const double u = k / 256.0, after = value(u);
+        if (before * after < 0 && std::abs(after - before) < M_PI)
+        {
+          double lo = (k - 1) / 256.0, hi = u;
+          for (int j = 0; j < 48; ++j)
+          {
+            const double mid = (lo + hi) / 2;
+            if (value(mid) * before > 0)
+              lo = mid;
+            else
+              hi = mid;
+          }
+          addBreak(naturalBreaks, (lo + hi) / 2, kDegree - 1);
+        }
+        before = after;
+      }
+    }
+
   // A compact frame is C2 at its window boundary. Preserve that actual law
   // break instead of asking a globally C4 fit to approximate it by refinement.
   for (const auto& frame : frames)
@@ -641,7 +671,7 @@ struct Speed
     gp_Pnt foot, at;
     gp_Vec su, sv, d;
     surface.D1(uv.X(), uv.Y(), foot, su, sv);
-    rail.curve.D1(rail.t(u), at, d);
+    rail.stationD1(rail.t(u), at, d);
     // Where the supports are tangent at the feet (a crease's end) the ball rolls along the edge.
     Jet            j[2];
     const gp_Pnt2d there = other.Value(u);
