@@ -1948,6 +1948,50 @@ also distinguishes intersection joins from added arc faces and does not promise 
 elimination. A general construction must establish its own existence conditions and final bounds.
 
 
+### Separated tangent junctions
+
+The fixed-incidence construction runs first and retains its successful results.
+After a vertex fails the point-on-every-support check, a single-shell solid with
+three incident faces and a retained tangent edge can instead split the junction.
+The tangent edge ends at its original endpoint transported to the offset. Each of
+its two continuations intersects the third offset support independently; the two
+sharp edges use those separate endpoints. The old support surfaces remain exact.
+A ruled strip fills the boundary between the continuations, and its transverse end
+closes the third face. Face lineage associates this added strip with all three
+incident parents. Unsupported arrangements still refuse.
+
+The ruled construction is `R(u,v)=(1-v)C0(u)+v C1(u)`, with the two boundary
+curves parametrized on [0,1]. Patrikalakis, Maekawa and Cho, *Shape Interrogation
+for Computer Aided Design and Manufacturing* (2009), section 9.7.1, equations
+(9.74)-(9.76), give this representation
+([chapter](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node190.html)).
+OCCT `BRepFill::Face` constructs it through `GeomFill_Generator`; this is a boundary
+closure, not a claim that the strip is a regular developable surface or an exact
+normal-distance envelope. The normal offset definition is equation (11.17) in
+section 11.3.1 of the same book
+([chapter](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html)).
+Section 11.1.4 discusses separately generated edge and corner patches in solid
+offsets; it does not prove this strip's validity
+([chapter](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node217.html)).
+
+The seam's two transported endpoints must agree within the operation tolerance.
+The rail fits use one tenth of that tolerance. The transverse chord must project
+to the third support within the unchanged operation bound. Every oriented endpoint
+and each new boundary's lifted pcurve is checked against that bound independently
+of output metadata. Existing validity, self-interference, signed-distance, volume
+and whole-body clearance checks still run. Curve/support checks are adaptive fits
+followed by sampled validation, not interval certificates of the whole strip.
+
+**Derived diagnostic:** for two regular contact continuations with a common
+position and tangent, their normal separation is
+`0.5 * (k0-k1) * s^2 + o(s^2)` in common tangent arc coordinate s. The curvature
+must be taken on the continued side of a boundary knot; a symmetric finite
+difference across a second-derivative break averages the two sides. This Taylor
+estimate diagnoses the failed old incidence and never assigns a result tolerance.
+The reconstruction does not assume that this local estimate certifies existence,
+regularity, or nonintersection of a finite strip. Tests vary the revolution's
+profile, scale and rigid placement and check the delivered boundary directly.
+
 ### Transported contact uncertainty is confined to its measured domain
 
 Let `p(t), q(t)` be corresponding lifts of a source edge and `n(t), m(t)` their

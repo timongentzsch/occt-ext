@@ -22,10 +22,11 @@ namespace BRepExt
 {
 
 //! `body` with the faces of `moved` moved by `distance` along their outward normals and its
-//! topology kept: each face on its own offset surface, the edges and vertices where those
-//! surfaces meet (BRepOffsetExt_Kept.cxx). `faces` is set to what each face has become. A null
-//! shape, and in `why` the reason, where the faces cannot keep their topology or the result is
-//! not certified to be the offset.
+//! topology kept where possible: each face on its own offset surface, the edges and vertices
+//! where those surfaces meet. After that construction refuses a separated tangent junction,
+//! a single-shell solid may split that junction and close it with a ruled contact strip.
+//! `faces` includes strips descended from each incident face. A null shape, and in `why` the
+//! reason, where neither construction passes the geometric and topology checks.
 Standard_EXPORT TopoDS_Shape keptOffset(const TopoDS_Shape& body,
                                         const FaceSet&      moved,
                                         double              distance,

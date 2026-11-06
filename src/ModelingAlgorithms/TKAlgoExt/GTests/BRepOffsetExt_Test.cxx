@@ -23,6 +23,10 @@
 #include <gp_Ax2.hxx>
 #include <BRepOffsetExt_Parts.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <BRepOffsetExt_Focal.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <Geom_BezierSurface.hxx>
@@ -1148,4 +1152,120 @@ TEST(BRepOffsetExt, PeriodicChartCutsFollowTheirIncidentJunctions)
 TEST(BRepOffsetExt, ClosedIntersectionOccurrencesShareTheirJunction)
 {
   checkJunctionFamily(true);
+}
+
+namespace
+{
+TopoDS_Shape separatedRevolutionContact(double bulge, double top)
+{
+  NCollection_Array1<gp_Pnt> pts(1, 4);
+  pts(1)                           = gp_Pnt(6, 0, -10);
+  pts(2)                           = gp_Pnt(bulge, 0, -4);
+  pts(3)                           = gp_Pnt(11, 0, 5);
+  pts(4)                           = gp_Pnt(top, 0, 10);
+  Handle(Geom_BezierCurve) profile = new Geom_BezierCurve(pts);
+  BRepBuilderAPI_MakeWire  wire;
+  wire.Add(BRepBuilderAPI_MakeEdge(profile));
+  wire.Add(BRepBuilderAPI_MakeEdge(pts(4), gp_Pnt(0, 0, 10)));
+  wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 10), gp_Pnt(0, 0, -10)));
+  wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, -10), pts(1)));
+  auto right =
+    BRepPrimAPI_MakeRevol(BRepBuilderAPI_MakeFace(wire.Wire()).Face(), gp::OZ(), 2 * M_PI).Shape();
+  gp_Trsf shift;
+  shift.SetTranslation(gp_Vec(6, 3, 2));
+  right = BRepBuilderAPI_Transform(right, shift, true).Shape();
+  const auto left =
+    BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -10), gp::DZ()), 10, 20).Shape();
+  auto            common = BRepAlgoAPI_Common(left, right).Shape();
+  TopExp_Explorer solids(common, TopAbs_SOLID);
+  if (!solids.More())
+    throw std::runtime_error("no solid");
+  auto body = solids.Current();
+  NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>
+    ef;
+  TopExp::MapShapesAndUniqueAncestors(body, TopAbs_EDGE, TopAbs_FACE, ef);
+  TopoDS_Shape chosen;
+  double       longest = 0;
+  const auto kind = GeomAbs_Cylinder;
+  for (int i = 1; i <= ef.Extent(); ++i)
+  {
+    if (ef(i).Size() != 2)
+      continue;
+    auto a = BRepAdaptor_Surface(TopoDS::Face(ef(i).First())).GetType(),
+         b = BRepAdaptor_Surface(TopoDS::Face(ef(i).Last())).GetType();
+    if (!((a == kind && b == GeomAbs_SurfaceOfRevolution)
+          || (b == kind && a == GeomAbs_SurfaceOfRevolution)))
+      continue;
+    GProp_GProps props;
+    BRepGProp::LinearProperties(ef.FindKey(i), props);
+    if (props.Mass() > longest)
+    {
+      longest = props.Mass();
+      chosen  = ef.FindKey(i);
+    }
+  }
+  if (chosen.IsNull())
+    throw std::runtime_error("no contact");
+  BRepExt::blending::Request request;
+  request.body  = body;
+  request.edges = {chosen};
+  request.first = .5;
+  auto source   = BRepExt::blending::blend(request).shape;
+
+  return source;
+}
+} // namespace
+
+TEST(BRepOffsetExt, SeparatedTangentContactsAddBoundedStrips)
+{
+  for (const double bulge : {12.0, 14.0})
+    for (const double top : {7.0, 9.0})
+    {
+      const auto source = separatedRevolutionContact(bulge, top);
+      for (const double scale : (bulge == 12.0 && top == 7.0 ? std::vector<double>{0.1, 1.0, 10.0}
+                                                             : std::vector<double>{1.0}))
+        for (const bool turned : {false, true})
+        {
+          SCOPED_TRACE(::testing::Message()
+                       << bulge << " " << top << " " << scale << " " << turned);
+          gp_Trsf size;
+          size.SetScale(gp::Origin(), scale);
+          auto body = BRepBuilderAPI_Transform(source, size, true).Shape();
+          if (turned)
+          {
+            gp_Trsf pose;
+            pose.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), 0.6);
+            pose.SetTranslationPart(gp_Vec(13, -7, 19) * scale);
+            body = BRepBuilderAPI_Transform(body, pose, true).Shape();
+          }
+          const double bound  = 1e-6 * scale;
+          const auto   result = kept(body, 0.05 * scale, bound);
+          ASSERT_FALSE(result.IsNull());
+          EXPECT_GT(faceCount(result), faceCount(body));
+          EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
+          EXPECT_GT(volume(result), volume(body));
+          checkEndpointOccurrences(result, bound);
+          for (TopExp_Explorer f(result, TopAbs_FACE); f.More(); f.Next())
+          {
+            const auto face = TopoDS::Face(f.Current());
+            for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+            {
+              const auto edge = TopoDS::Edge(e.Current());
+              double     first, last, lo, hi;
+              const auto curve = BRep_Tool::Curve(edge, first, last);
+              const auto pc    = BRep_Tool::CurveOnSurface(edge, face, lo, hi);
+              ASSERT_FALSE(pc.IsNull());
+              if (curve.IsNull())
+                continue;
+              for (int k = 0; k <= 128; ++k)
+              {
+                const double t  = first + (last - first) * k / 128.;
+                const auto   uv = pc->Value(t);
+                EXPECT_LE(curve->Value(t).Distance(BRep_Tool::Surface(face)->Value(uv.X(), uv.Y())),
+                          bound);
+              }
+            }
+          }
+        }
+    }
 }

@@ -47,6 +47,13 @@
 // was extended to meet its neighbours lies beyond its old bounds.
 
 #include <BRepOffsetExt_Kept.hxx>
+#include <BRepFill.hxx>
+#include <BRepTools_WireExplorer.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
+#include <TopoDS_Wire.hxx>
 #include <BRepAlgoExt_Geometry.hxx>
 #include <BRepAlgoExt_Properties.hxx>
 #include <GeomAlgoExt_Cancel.hxx>
@@ -1132,13 +1139,16 @@ bool crossesItself(const TopoDS_Shape& result, double eps)
 
 } // namespace
 
-TopoDS_Shape keptOffset(const TopoDS_Shape& body,
-                        const FaceSet&      moved,
-                        double              distance,
-                        double              tolerance,
-                        Lineage&            lineage,
-                        std::string&        why)
+static TopoDS_Shape offsetWithContacts(const TopoDS_Shape& body,
+                                       const FaceSet&      moved,
+                                       double              distance,
+                                       double              tolerance,
+                                       Lineage&            lineage,
+                                       std::string&        why,
+                                       bool                splitContacts,
+                                       bool&               separatedContact)
 {
+  separatedContact = false;
   Handle(Plan) plan = new Plan;
   const double accuracy = 1e-3 * tolerance;
 
@@ -1235,6 +1245,29 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       spread.Bind(edge, one.IsSame(other) ? 0.0 : std::abs(distance) * largestAngle(edge, one, other));
     }
   }
+
+  struct SplitContact
+  {
+    TopoDS_Vertex vertex;
+    TopoDS_Edge   seam, sharp[2];
+    TopoDS_Face   sides[2], third;
+    gp_Pnt        points[2];
+    double        origin = 0.0, ends[2] = {};
+    TopoDS_Vertex made[2];
+    TopoDS_Edge   rails[2], end;
+    TopoDS_Face   patch;
+  };
+
+  std::vector<SplitContact> splits;
+  const auto                endpoint = [&](const TopoDS_Vertex& v, const TopoDS_Edge& e) {
+    for (const auto& split : splits)
+      if (split.vertex.IsSame(v))
+        for (int k = 0; k < 2; ++k)
+          if (split.sharp[k].IsSame(e))
+            return split.points[k];
+    const auto nv = plan->vertices.Seek(v);
+    return nv ? nv->point : BRep_Tool::Pnt(v);
+  };
 
   // Vertices.
   for (int i = 1; i <= facesOfVertex.Extent(); ++i)
@@ -1437,9 +1470,88 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       if (!nearest(plan->faces.Find(face).surface, point, u, v, at)
           || at.Distance(point) > std::max(tolerance, carried))
       {
-        why = "the faces round a vertex do not meet in one point after the move; the topology "
-              "would change there";
-        return {};
+        // Recovery changes incidence, never the support or the assigned tolerance.
+        bool splitFound = false;
+        if (splitContacts && around.Size() == 3)
+          for (const auto& candidate : edgesOfVertex.FindFromKey(vertex))
+          {
+            const auto seam = TopoDS::Edge(candidate);
+            if (!keeps.Contains(seam) || BRep_Tool::Degenerated(seam))
+              continue;
+            SplitContact split;
+            split.vertex = vertex;
+            split.seam   = seam;
+            if (!facesOf(facesOfEdge.FindFromKey(seam), split.sides[0], split.sides[1])
+                || split.sides[0].IsSame(split.sides[1]))
+              continue;
+            for (const auto& f : around)
+              if (!f.IsSame(split.sides[0]) && !f.IsSame(split.sides[1]))
+                split.third = TopoDS::Face(f);
+            if (split.third.IsNull())
+              continue;
+            split.origin = BRep_Tool::Parameter(vertex, seam);
+            bool solved  = true;
+            for (int k = 0; k < 2 && solved; ++k)
+            {
+              for (const auto& e : edgesOfVertex.FindFromKey(vertex))
+                if (!e.IsSame(seam))
+                {
+                  const auto& fs   = facesOfEdge.FindFromKey(e);
+                  bool        side = false, third = false;
+                  for (const auto& f : fs)
+                  {
+                    side  = side || f.IsSame(split.sides[k]);
+                    third = third || f.IsSame(split.third);
+                  }
+                  if (side && third)
+                    split.sharp[k] = TopoDS::Edge(e);
+                }
+              if (split.sharp[k].IsNull())
+              {
+                solved = false;
+                break;
+              }
+              const auto  uv = BRep_Tool::Parameters(vertex, split.third);
+              math_Vector z(1, 3);
+              z(1)   = split.origin;
+              z(2)   = uv.X();
+              z(3)   = uv.Y();
+              solved = newton(
+                z,
+                [&](const math_Vector& at, math_Vector& f, math_Matrix& j) {
+                  gp_Vec     dq, su, sv;
+                  gp_Pnt     p;
+                  const auto q = along(*plan, seam, split.sides[k], at(1), &dq);
+                  plan->faces.Find(split.third).surface->D1(at(2), at(3), p, su, sv);
+                  put(f, 1, gp_Vec(p, q));
+                  put(j, 1, 1, dq);
+                  put(j, 1, 2, -su);
+                  put(j, 1, 3, -sv);
+                },
+                accuracy,
+                accuracy);
+              split.ends[k]   = z(1);
+              split.points[k] = along(*plan, seam, split.sides[k], z(1), nullptr);
+            }
+            if (!solved)
+              continue;
+            point = along(*plan, seam, split.sides[0], split.origin, nullptr);
+            if (point.Distance(along(*plan, seam, split.sides[1], split.origin, nullptr))
+                > tolerance)
+              continue;
+            splits.push_back(split);
+            splitFound = true;
+            break;
+          }
+        if (!splitFound)
+        {
+          separatedContact = true;
+          why = "the faces round a vertex do not meet in one point after the move; the topology "
+                "would change there";
+          return {};
+        }
+        off = 0.0;
+        break;
       }
       off = std::max(off, at.Distance(point));
     }
@@ -1658,8 +1770,7 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
         return {};
       }
       const auto stationAt = [&](const TopoDS_Vertex& vertex, double& t) {
-        return stationOf(old, plan->vertices.IsBound(vertex) ? plan->vertices.Find(vertex).point
-                                                             : BRep_Tool::Pnt(vertex),
+        return stationOf(old, endpoint(vertex, edge),
                          t);
       };
       if (!start.IsNull() && !stationAt(start, made.first))
@@ -1732,10 +1843,8 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
                              along,
                              gp_Pnt2d(z(1), z(2)),
                              gp_Pnt2d(z(3), z(4)),
-                             plan->vertices.IsBound(start) ? plan->vertices.Find(start).point
-                                                           : BRep_Tool::Pnt(start),
-                             plan->vertices.IsBound(end) ? plan->vertices.Find(end).point
-                                                         : BRep_Tool::Pnt(end),
+                             endpoint(start, edge),
+                             endpoint(end, edge),
                              closed,
                              tolerance,
                              exact,
@@ -1828,7 +1937,7 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       if (NewVertex* v = plan->vertices.ChangeSeek(vertex))
         v->tolerance = std::max({v->tolerance,
                                  made.tolerance,
-                                 1.001 * v->point.Distance(made.curve->Value(t))});
+                                 1.001 * endpoint(vertex, TopoDS::Edge(it.Key())).Distance(made.curve->Value(t))});
   }
 
   BRepTools_Modifier modifier(body, plan);
@@ -1848,11 +1957,220 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
     builder.SameRange(edge, true);
     builder.SameParameter(edge, true);
   }
+  NCollection_DataMap<TopoDS_Shape, TopoDS_Shape, TopTools_ShapeMapHasher> changed;
+  const auto modified = [&](const TopoDS_Shape& source) -> TopoDS_Shape {
+    const auto* replacement = changed.Seek(source);
+    return replacement ? *replacement : modifier.ModifiedShape(source);
+  };
+  if (!splits.empty())
+  {
+    int shells = 0;
+    for (TopExp_Explorer shell(body, TopAbs_SHELL); shell.More(); shell.Next())
+      ++shells;
+    if (body.ShapeType() != TopAbs_SOLID || shells != 1)
+    {
+      why = "separated contact strips require a single solid shell";
+      return {};
+    }
+    // An edge has a separate endpoint on each of the two sharp contacts.
+    for (auto& split : splits)
+      for (int k = 0; k < 2; ++k)
+        split.made[k] = BRepBuilderAPI_MakeVertex(split.points[k]);
+    for (int i = 1; i <= facesOfEdge.Extent(); ++i)
+    {
+      const auto source  = TopoDS::Edge(facesOfEdge.FindKey(i).Oriented(TopAbs_FORWARD));
+      bool       replace = false;
+      for (const auto& split : splits)
+        for (int k = 0; k < 2; ++k)
+          replace = replace || source.IsSame(split.sharp[k]);
+      if (!replace)
+        continue;
+      const auto old  = TopoDS::Edge(modifier.ModifiedShape(source).Oriented(TopAbs_FORWARD));
+      auto       edge = TopoDS::Edge(old.EmptyCopied());
+      for (TopExp_Explorer v(source, TopAbs_VERTEX); v.More(); v.Next())
+      {
+        auto vertex = TopoDS::Vertex(modifier.ModifiedShape(v.Current()));
+        for (const auto& split : splits)
+          if (split.vertex.IsSame(v.Current()))
+            for (int k = 0; k < 2; ++k)
+              if (source.IsSame(split.sharp[k]))
+                vertex = split.made[k];
+        vertex.Orientation(v.Current().Orientation());
+        builder.Add(edge, vertex);
+        const auto& geometry = plan->edges.Find(source);
+        builder.UpdateVertex(vertex,
+                             vertex.Orientation() == TopAbs_FORWARD ? geometry.first
+                                                                    : geometry.last,
+                             edge,
+                             tolerance);
+      }
+      changed.Bind(source, edge);
+    }
+    // Each rail is the continuation of its own offset support. A ruled strip closes
+    // their separation; its transverse chord must also lie on the third support.
+    for (auto& split : splits)
+    {
+      const auto common = TopoDS::Vertex(modifier.ModifiedShape(split.vertex));
+      for (int k = 0; k < 2; ++k)
+      {
+        Handle(Geom_Curve)                curve;
+        std::vector<Handle(Geom2d_Curve)> pcs;
+        double                            error = 0.0;
+        if (!interpolate(
+              0.0,
+              1.0,
+              {},
+              [&](double t, gp_Pnt& p, std::vector<gp_Pnt2d>& uv) {
+                const double at = split.origin + t * (split.ends[k] - split.origin);
+                double       f, l;
+                const auto   pc = BRep_Tool::CurveOnSurface(split.seam, split.sides[k], f, l);
+                uv              = {pc->Value(at)};
+                p               = along(*plan, split.seam, split.sides[k], at, nullptr);
+                return true;
+              },
+              [&](size_t, const gp_Pnt2d& uv) {
+                return plan->faces.Find(split.sides[k]).surface->Value(uv.X(), uv.Y());
+              },
+              1,
+              true,
+              0.1 * tolerance,
+              curve,
+              pcs,
+              error))
+        {
+          why = "a separated contact rail could not be fitted";
+          return {};
+        }
+        split.rails[k]  = BRepBuilderAPI_MakeEdge(curve, common, split.made[k], 0.0, 1.0);
+        const auto face = TopoDS::Face(modifier.ModifiedShape(split.sides[k]));
+        builder.UpdateEdge(split.rails[k],
+                           pcs[0],
+                           face,
+                           std::max(error, BRep_Tool::Tolerance(split.seam)));
+      }
+      split.patch = BRepFill::Face(split.rails[0], split.rails[1]);
+      for (TopExp_Explorer e(split.patch, TopAbs_EDGE); e.More(); e.Next())
+        if (!e.Current().IsSame(split.rails[0]) && !e.Current().IsSame(split.rails[1])
+            && !BRep_Tool::Degenerated(TopoDS::Edge(e.Current())))
+          split.end = TopoDS::Edge(e.Current().Oriented(TopAbs_FORWARD));
+      if (split.end.IsNull())
+      {
+        why = "a separated contact strip has no transverse end";
+        return {};
+      }
+      double     first, last;
+      const auto curve   = BRep_Tool::Curve(split.end, first, last);
+      const auto surface = plan->faces.Find(split.third).surface;
+      const auto pc      = GeomProjLib::Curve2d(curve, first, last, surface);
+      if (pc.IsNull())
+      {
+        why = "the contact strip end could not be placed on its third support";
+        return {};
+      }
+      for (int j = 0; j <= 64; ++j)
+      {
+        const double t  = first + (last - first) * j / 64.;
+        const auto   uv = pc->Value(t);
+        if (curve->Value(t).Distance(surface->Value(uv.X(), uv.Y())) > tolerance)
+        {
+          why = "the contact strip end leaves its third support";
+          return {};
+        }
+      }
+      builder.UpdateEdge(split.end,
+                         pc,
+                         TopoDS::Face(modifier.ModifiedShape(split.third)),
+                         tolerance);
+    }
+    // Rebuild only the affected wires, inserting the unique bridge between adjacent
+    // edge endpoints. All faces retain their exact offset carrier.
+    for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
+    {
+      bool affected = false;
+      for (const auto& split : splits)
+        affected = affected || f.Current().IsSame(split.third) || f.Current().IsSame(split.sides[0])
+                   || f.Current().IsSame(split.sides[1]);
+      if (!affected)
+        continue;
+      const auto old  = TopoDS::Face(modifier.ModifiedShape(f.Current()));
+      auto       face = TopoDS::Face(old.EmptyCopied());
+      face.Orientation(TopAbs_FORWARD);
+      for (TopExp_Explorer w(TopoDS::Face(f.Current().Oriented(TopAbs_FORWARD)), TopAbs_WIRE);
+           w.More();
+           w.Next())
+      {
+        std::vector<TopoDS_Edge> edges;
+        for (BRepTools_WireExplorer e(TopoDS::Wire(w.Current())); e.More(); e.Next())
+          edges.push_back(TopoDS::Edge(modified(e.Current()).Oriented(e.Current().Orientation())));
+        TopoDS_Wire wire;
+        builder.MakeWire(wire);
+        for (size_t j = 0; j < edges.size(); ++j)
+        {
+          builder.Add(wire, edges[j]);
+          const auto end  = TopExp::LastVertex(edges[j], true),
+                     next = TopExp::FirstVertex(edges[(j + 1) % edges.size()], true);
+          if (end.IsSame(next))
+            continue;
+          TopoDS_Edge bridge;
+          for (const auto& split : splits)
+          {
+            TopoDS_Edge candidate;
+            if (f.Current().IsSame(split.third))
+              candidate = split.end;
+            for (int k = 0; k < 2; ++k)
+              if (f.Current().IsSame(split.sides[k]))
+                candidate = split.rails[k];
+            if (candidate.IsNull())
+              continue;
+            const auto a = TopExp::FirstVertex(candidate), b = TopExp::LastVertex(candidate);
+            if (a.IsSame(end) && b.IsSame(next))
+              bridge = candidate;
+            if (b.IsSame(end) && a.IsSame(next))
+              bridge = TopoDS::Edge(candidate.Reversed());
+          }
+          if (bridge.IsNull())
+          {
+            why = "a separated contact has no boundary bridge";
+            return {};
+          }
+          builder.Add(wire, bridge);
+        }
+        wire.Closed(true);
+        builder.Add(face, wire);
+      }
+      face.Orientation(f.Current().Orientation());
+      changed.Bind(f.Current(), face);
+    }
+    TopoDS_Shell shell;
+    builder.MakeShell(shell);
+    for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
+      builder.Add(shell, modified(f.Current()));
+    for (auto& split : splits)
+    {
+      // Choose the strip orientation opposite its first rail's use on its neighbour.
+      TopAbs_Orientation use = TopAbs_FORWARD, own = TopAbs_FORWARD;
+      for (TopExp_Explorer e(modified(split.sides[0]), TopAbs_EDGE); e.More(); e.Next())
+        if (e.Current().IsSame(split.rails[0]))
+          use = e.Current().Orientation();
+      for (TopExp_Explorer e(split.patch, TopAbs_EDGE); e.More(); e.Next())
+        if (e.Current().IsSame(split.rails[0]))
+          own = e.Current().Orientation();
+      if (use == own)
+        split.patch.Reverse();
+      builder.Add(shell, split.patch);
+    }
+    shell.Closed(true);
+    TopoDS_Solid solid;
+    builder.MakeSolid(solid);
+    builder.Add(solid, shell);
+    result = solid;
+  }
+
   // Faces whose offset surface would not load again: a spline over the face's own box.
   for (TopExp_Explorer all(body, TopAbs_FACE); all.More(); all.Next())
     if (plan->faces.Find(all.Current()).approximate
         && !asSpline(result,
-                     TopoDS::Face(modifier.ModifiedShape(all.Current())),
+                     TopoDS::Face(modified(all.Current())),
                      plan->faces.Find(all.Current()).surface,
                      0.1 * tolerance))
     {
@@ -1861,7 +2179,14 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       return {};
     }
   for (TopExp_Explorer all(body, TopAbs_FACE); all.More(); all.Next())
-    lineage.set(all.Current(), {modifier.ModifiedShape(all.Current())});
+  {
+    std::vector<TopoDS_Shape> descendants{modified(all.Current())};
+    for (const auto& split : splits)
+      if (all.Current().IsSame(split.third) || all.Current().IsSame(split.sides[0])
+          || all.Current().IsSame(split.sides[1]))
+        descendants.push_back(split.patch);
+    lineage.set(all.Current(), std::move(descendants));
+  }
   lineage.within(result);
 
   // Every endpoint occurrence, including both ends of closed edges and both pcurves of a
@@ -1869,12 +2194,12 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
   for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
   {
     const TopoDS_Face sourceFace = TopoDS::Face(f.Current());
-    const TopoDS_Face madeFace   = TopoDS::Face(modifier.ModifiedShape(sourceFace));
+    const TopoDS_Face madeFace   = TopoDS::Face(modified(sourceFace));
     const auto        surface    = BRep_Tool::Surface(madeFace);
     for (TopExp_Explorer e(sourceFace, TopAbs_EDGE); e.More(); e.Next())
     {
       const TopoDS_Edge sourceEdge = TopoDS::Edge(e.Current());
-      TopoDS_Edge       madeEdge   = TopoDS::Edge(modifier.ModifiedShape(sourceEdge));
+      TopoDS_Edge       madeEdge   = TopoDS::Edge(modified(sourceEdge));
       madeEdge.Orientation(sourceEdge.Orientation());
       double     first, last;
       const auto curve  = BRep_Tool::Curve(madeEdge, first, last);
@@ -1887,7 +2212,12 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       for (TopExp_Explorer v(sourceEdge, TopAbs_VERTEX); v.More(); v.Next())
       {
         const auto    sourceVertex = TopoDS::Vertex(v.Current());
-        TopoDS_Vertex madeVertex   = TopoDS::Vertex(modifier.ModifiedShape(sourceVertex));
+        TopoDS_Vertex madeVertex   = TopoDS::Vertex(modified(sourceVertex));
+        for (const auto& split : splits)
+          if (split.vertex.IsSame(sourceVertex))
+            for (int k = 0; k < 2; ++k)
+              if (split.sharp[k].IsSame(sourceEdge))
+                madeVertex = split.made[k];
         madeVertex.Orientation(sourceVertex.Orientation());
         const NewVertex* assigned = plan->vertices.Seek(sourceVertex);
         const double     bound = assigned ? assigned->endpointBudget
@@ -1904,6 +2234,53 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       }
     }
   }
+
+  // New boundaries have no inherited error budget. Check both oriented uses of
+  // every strip edge, including its collapsed end, against the operation bound.
+  for (const auto& split : splits)
+    for (const auto& face : {split.patch,
+                            TopoDS::Face(modified(split.sides[0])),
+                            TopoDS::Face(modified(split.sides[1])),
+                            TopoDS::Face(modified(split.third))})
+      for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+      {
+        const auto edge = TopoDS::Edge(e.Current());
+        if (!edge.IsSame(split.rails[0]) && !edge.IsSame(split.rails[1]) && !edge.IsSame(split.end)
+            && !face.IsSame(split.patch))
+          continue;
+        double     first, last;
+        const auto pc      = BRep_Tool::CurveOnSurface(edge, face, first, last);
+        const auto surface = BRep_Tool::Surface(face);
+        if (pc.IsNull())
+        {
+          why = "a contact strip boundary has no pcurve";
+          return {};
+        }
+        const auto curve = BRep_Tool::Curve(edge, first, last);
+        for (TopExp_Explorer v(edge, TopAbs_VERTEX); v.More(); v.Next())
+        {
+          const auto   vertex = TopoDS::Vertex(v.Current());
+          const auto   point  = BRep_Tool::Pnt(vertex);
+          const double t      = BRep_Tool::Parameter(vertex, edge);
+          const auto   uv     = pc->Value(t);
+          if (point.Distance(surface->Value(uv.X(), uv.Y())) > tolerance
+              || (!curve.IsNull() && point.Distance(curve->Value(t)) > tolerance))
+          {
+            why = "a contact strip boundary misses its endpoint";
+            return {};
+          }
+        }
+        for (int k = 0; k <= 64 && !curve.IsNull(); ++k)
+        {
+          const double t  = first + (last - first) * k / 64.;
+          const auto   uv = pc->Value(t);
+          if (curve->Value(t).Distance(surface->Value(uv.X(), uv.Y())) > tolerance)
+          {
+            why = "a contact strip boundary leaves its support";
+            return {};
+          }
+        }
+      }
 
   // The certificate.
   if (!BRepCheck_Analyzer(result).IsValid())
@@ -1942,7 +2319,7 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
   for (TopExp_Explorer all(body, TopAbs_FACE); all.More(); all.Next())
   {
     const TopoDS_Face source = TopoDS::Face(all.Current());
-    const TopoDS_Face made   = TopoDS::Face(modifier.ModifiedShape(source));
+    const TopoDS_Face made   = TopoDS::Face(modified(source));
     // Points inside the face on a 5 x 5 grid of its parameter box: a point (u, v) of the moved
     // surface, from whose (u, v) the foot on the source is found.
     const BRepAdaptor_Surface  box(made, false);
@@ -1968,7 +2345,7 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
     const TopoDS_Edge& edge = TopoDS::Edge(facesOfEdge.FindKey(i));
     if (BRep_Tool::Degenerated(edge))
       continue;
-    const TopoDS_Edge made = TopoDS::Edge(modifier.ModifiedShape(edge));
+    const TopoDS_Edge made = TopoDS::Edge(modified(edge));
     double            first, last;
     const Handle(Geom_Curve) curve = BRep_Tool::Curve(made, first, last);
     for (const TopoDS_Shape& f : facesOfEdge(i))
@@ -1976,7 +2353,7 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
       const TopoDS_Face source = TopoDS::Face(f);
       double            c0, c1;
       const Handle(Geom2d_Curve) onFace =
-        BRep_Tool::CurveOnSurface(made, TopoDS::Face(modifier.ModifiedShape(source)), c0, c1);
+        BRep_Tool::CurveOnSurface(made, TopoDS::Face(modified(source)), c0, c1);
       for (int k = 0; k <= 16 && !onFace.IsNull(); ++k)
       {
         const double   t  = first + (last - first) * k / 16;
@@ -2022,6 +2399,38 @@ TopoDS_Shape keptOffset(const TopoDS_Shape& body,
             +"; "+measured.issue;
       return {};
     }
+  }
+  return result;
+}
+
+TopoDS_Shape keptOffset(const TopoDS_Shape& body,
+                        const FaceSet&      moved,
+                        double              distance,
+                        double              tolerance,
+                        Lineage&            lineage,
+                        std::string&        why)
+{
+  bool separatedContact = false;
+  auto result = offsetWithContacts(body, moved, distance, tolerance, lineage, why, false,
+                                   separatedContact);
+  if (!result.IsNull())
+    return result;
+  if (!separatedContact)
+    return {};
+  Lineage recovered(lineage);
+  try
+  {
+    result = offsetWithContacts(body, moved, distance, tolerance, recovered, why, true, separatedContact);
+  }
+  catch (const Standard_Failure&)
+  {
+    why = "a separated contact strip could not be constructed on its supports";
+    return {};
+  }
+  if (!result.IsNull())
+  {
+    lineage = std::move(recovered);
+    why.clear();
   }
   return result;
 }
