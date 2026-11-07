@@ -872,662 +872,402 @@ curve constraints and minimises a different energy.
 
 ## BRepCurveExt and BRepSurfaceExt
 
-*Curves.* Offsets of planar curves with three corner treatments (arc, chord, extension to the crossing) by
-working on a copy moved to the origin and scaled, so that OCCT's absolute 1e-7 lengths do not change
-the result with the curve's size; the outline of a body along a direction from edges and the turning curve
-n.v = 0 of curved faces, with the places where visibility can change found exactly; tangent circles by Newton
-in a frame of the curves' own extent; projection, rebuild with a prescribed degree and count, refinement and
-regions of coplanar curves. A spiral is the helix (angle 2 pi t, radius R + p t, height h t / turns).
+*Curves.* Offsets of planar curves with three corner treatments (arc, chord, extension to the crossing) are made on a
+copy moved to the origin and scaled, so OCCT's absolute 1e-7 lengths do not change the result with the curve's size.
+The outline of a body along a direction uses the edges and the turning curve `n.v = 0` of curved faces, with the
+places where visibility can change found exactly. Tangent circles are found by Newton in a frame of the curves' own
+extent. Also: projection, rebuild with a prescribed degree and count, refinement, and regions of coplanar curves.
+A spiral is the helix (angle `2 pi t`, radius `R + p t`, height `h t / turns`).
 
-*Surfaces.* Alignment of the control row beside a shared boundary on the line through the boundary
-pole and the neighbour's next pole, so that the control hulls make one grid; orthogonal projection of pole
-offsets onto the affine constraint space; polyspline development of an oriented quad graph in integer UV;
-face rebuild by interpolation checked on an independent grid; the number of poles a deformation target needs
-from the C2 cubic interpolation error 5 h^4 max|f| / 384 and the end-slope term h^3 max|f| / 4;
-face-separation proofs by Bernstein bounds and, for a plane beside a surface of revolution about its normal,
-in closed form (the surface meets the plane in circles; a band of width gap / sin t).
+*Surfaces.* Alignment of the control row beside a shared boundary on the line through the boundary pole and the
+neighbour's next pole, so the control hulls make one grid; orthogonal projection of pole offsets onto the affine
+constraint space; polyspline development of an oriented quad graph in integer UV; face rebuild by interpolation
+checked on an independent grid; the number of poles a deformation target needs from the C2 cubic interpolation error
+`5 h^4 max|f| / 384` and the end-slope term `h^3 max|f| / 4`; face-separation proofs by Bernstein bounds and, for a
+plane beside a surface of revolution about its normal, in closed form (the surface meets the plane in circles; a band
+of width `gap / sin t`).
 
 ### Alignment input-shape prior
 
-`alignSurface` accepts `inputShapeInfluence` in the closed interval [0, 1], finite,
-with default zero. It acts only when extra blend rows are requested. Zero influence,
-or zero extra rows, executes the previous solve without adding any matrix entries.
-The moving surface and reference are copied; only a certified result is stored.
-
-The construction is Tikhonov regularisation of the free poles around their original
-positions, following Akil Narayan, *Regularization and relaxation* (University of Utah,
-22 February 2022), slides 6–7, “Tikhonov regularization” and “Tikhonov regularization
-for least squares” ([lecture](https://www.sci.utah.edu/~akil/docs/courses/2022spring/math6880/slides09.pdf)).
-Let P0 be the pole vector after exact degree/knot refinement and before alignment.
-Let F(P) be the existing bending-plus-variation quadratic, with scalar-coordinate
-matrix H on the n free poles. The objective is
+`alignSurface` accepts `inputShapeInfluence` w in [0, 1] (finite, default zero). It acts only when extra blend rows
+are requested; zero influence or zero extra rows runs the plain solve with no added matrix entries. The moving
+surface and reference are copied and only a certified result is stored.
+The construction is Tikhonov regularisation of the free poles about their original positions [Narayan22 slides
+6-7]. Let P0 be the pole vector after exact degree and knot refinement, before alignment, and F(P) the bending-plus-
+variation quadratic with scalar-coordinate matrix H on the n free poles. The objective is
 
     F(P) + w a sum_free ||P_i - P0_i||^2,  a = trace(H) / n,
 
-subject to the existing continuity conditions and fixed remaining poles. Trace
-normalisation and the [0, 1] control domain are design choices derived here, not a
-published surface-specific weighting law. The trace is computed before constraint
-rows or the prior are added. This makes w dimensionless and preserves rigid-motion
-and uniform geometric scale covariance for a fixed basis. It does not make the
-pole metric invariant to changing basis or arbitrary UV reparameterisation.
-
-For displacement unknowns d from the current iteration Pc, add w a to each free
-coordinate's diagonal and w a (P0 - Pc) to its right-hand side. Keep P0 unchanged
-through all nonlinear continuity iterations. This costs O(N) time and O(N) saved
-coordinates for N total poles, adds no poles, and keeps the matrix band unchanged. The generic fit
-applies this term after its optional energy cache, so no prior is cached accidentally.
-The unchanged condition/multiplier solve and final seam check still apply; the
-prior cannot authorise a seam miss. If a surface already meets the requested
-continuity, the existing unchanged-surface path still returns it.
-
-**Derived bounds.** H is positive semidefinite, since it integrates squared spline
-derivatives. For a > 0 and w > 0, H + w a I is positive definite on the free
-coordinates. Thus a nonempty affine constraint set has a unique minimiser.
-For minimisers P1 and P2 at w1 < w2 on the same feasible set, adding their two
-optimality inequalities gives (w2 - w1)(D(P2) - D(P1)) <= 0, where D is the
-squared pole displacement. Thus total displacement is nonincreasing; individual
-poles or curvature need not vary monotonically. Nonlinear G2/skew iterations have
-changing linearised feasible sets: the inequality proves each fixed-row problem,
-not global convergence or a universal monotonicity theorem for those iterations.
-The final seam certification remains sampled, not a whole-domain Hausdorff proof.
-
-*Unproven.* Work budgets and halving depths of the separation proofs, the crease threshold, interpolation
-grid sizes, and the choice of pole counts "twenty-one for any target". The sampled checks are not Hausdorff
-certificates.
-
-*Stock.* Offsets: `BRepOffsetAPI_MakeOffset`; outline: `HLRBRep` (its documented limits on tangent and
-edge-on faces are what the exact event search avoids); the rest has no direct stock counterpart.
-
-## BRepOffsetExt, BRepSkinExt, BRepBooleanExt
-
-*Offsets and shells.* A solid offset first classifies faces the distance would shrink to nothing, removes
-them from a working copy by extending their neighbours (`BRepAlgoAPI_Defeaturing`) and offsets that copy;
-a face too tightly bent in part is refused by name. Stock `BRepOffset_MakeOffset` removes vanishing faces
-only where every face is planar (`myIsPlanar`); a fillet whose radius the distance reaches comes back as an
-invalid solid or not at all. Push-pull follows Zou and Feng (2019): the solid swept by the moved faces is built
-and joined to or cut from the body by a Boolean, which resolves whatever the move does to the rest. Thicken
-divides a C0 sheet's supports without changing their geometry before offsetting.
-
-*Face offset that keeps the topology* (`BRepOffsetExt_Kept.cxx`, tried first by push-pull where every
-face moves; it holds for any set of faces with no tangent neighbour that stays, but a move of some faces
-keeps the engine's route until a difference it caused in a later incremental display mesh is explained). The reference modeller's face offset keeps every face (the same face
-count before and after in 536 of 537 results), which is the intersection join. Each face goes onto its
-offset surface, which `BRepOffset::Surface` gives in the surface's own parameters (a plane translated; a
-cylinder, cone, sphere or torus with the same axes and (u, v), since S(u, v) + d n(u, v) is again such a
-surface in those parameters; otherwise `Geom_OffsetSurface`). *Tangent edges:* if two faces have the same
-normal n along an edge c and move by the same d, the point c + d n lies on both offset surfaces with the
-normal n on both, so they touch along the offset of the edge and its curves on the faces stay; this is
-tested, not assumed (the two faces' points of each edge parameter after the move agree within the
-tolerance, or within the edge's own tolerance where that is larger). Two faces tangent only to an angle
-θ come apart by |d| · 2 sin(θ/2) ≤ |d| θ more when both move by d. An input that is G1 only to θ, its edge
-tolerance that wide (the reference modeller's G2 blends meet a cylinder to 6e-5 rad, edge tolerances 4e-5 to 2e-4),
-has its edge kept, and the result's edge carries the input's tolerance plus |d| θ_max. θ_max is found,
-not bounded (judgement): 8 samples in each piece of the edge where its curves on the faces are polynomial
-and cross no knot line of either surface, each local maximum refined by golden-section search. A bound
-would need the faces' curvatures bounded along the edge, and the hull bound on curvature was three orders
-loose on blend sheets (above). Measured against 4 097 samples on every nearly tangent edge of the 22
-recorded rows, it found the larger maximum on all of them; 33 even samples fell short by up to 36 per
-cent. The intended budget is that edge's carried tolerance and the input vertex's
-plus the same spread (the endpoint gap limitation below is not covered); the result is never claimed more accurate than its input. Tested on a held-out family:
-prisms whose round meets its sides at θ from 1e-5 to 1e-3, at three scales. *Sharp edges:* the new edge is the crossing of the two offset surfaces, solved in the plane
-through c(t) normal to the old edge (four equations S1(u1, v1) = S2(u2, v2), (S1 − c(t))·c'(t) = 0 by
-Newton from the old edge's curves on the faces), so it keeps the old parameter t; the curve and the
-curves on the faces are cubic interpolants of those sections, refined locally (a midpoint added where an
-interpolant is further than a tenth of the tolerance from the section there). An offset surface is one
-order less smooth than its basis (its normal takes a derivative), so where the edge crosses a line along
-which a moved surface is less than C2, or the old edge (whose tangent sets the section planes) is less than
-C3, the curve is interpolated apart on each side and joined C0 there; the crossing is found among samples
-and by bisection. Newton steps that do not reduce the residual are halved; where two surfaces only touch
-and the residual stalls, a point within half the tolerance of both is accepted (judgement: the other half is left to the interpolation, a tenth, and the input's own edges). *Vertices:* on a tangent edge's (or seam's) moved curve, crossed with the face
-around the vertex that meets it most steeply among those that meet another at a sharp edge there (all
-tangent: the vertex moves along the common normal); between two edges of the same two faces, in the
-section of one of them; else where three faces cross (the three whose normals are furthest from a common
-plane). A vertex that is then not on every face around it is declined by this local construction.
-That failure does not prove that the topology must change; approximate contact continuations can
-also leave the other support. *Certificate,* apart from
-the construction: a valid solid; points inside every face and along every edge at the moved distance from
-their sources' unbounded surfaces, on the side moved to (foot point by Newton, Gauss–Newton where the
-Hessian is not positive definite); faces clear of each other (below); volume grown by an outward move and shrunk
-by an inward one; and where every face moves, nothing nearer the body than the distance. A failure of any
-of these falls back to the routes below. Judgement: the refinement of an edge stops at 16 halvings of the first spacing or 4096 samples (a curve a cubic cannot follow there has a kink).
-
-*Faces clear of each other.* Always the general self-interference check (`BOPAlgo_ArgumentAnalyzer`) on
-the exact faces, on what the separation pre-pass (`BRepSurfaceExt_FaceSeparation.hxx`, pole hulls and
-Bernstein bounds) cannot prove clear. The pre-pass does not read offset surfaces, so it runs on proxies: a
-copy whose offset faces are splines within ε = a hundredth of the tolerance of them, each face's tolerance
-grown by ε. Two proxies it proves further apart than their tolerances have their exact faces apart too;
-that a proxy is one to one says nothing of its exact face, so each offset face also goes to the check by
-itself unless the pre-pass leaves it in a part that is checked. The result keeps its exact faces. Tried and
-dropped: skipping the check by the reach [Federer 1959, Thm 4.8] (|d| κ_max < 1 per face, faces that share
-no vertex further apart than both moved faces reach). A rigorous κ bound per rational Bezier patch was
-sound on the matrix's bodies but three orders above the sampled curvature on blend sheets, and the reach
-leaves faces that share a vertex unproven.
-
-*Offsets that load again.* The binary BREP reader builds an offset surface with OpenCascade's continuity
-check (`BinTools_SurfaceSet`), which refuses a basis that is C0 at a knot unless it finds it G1 there; a
-blend's sheet whose parts are joined C0 in their parameters is refused, and a body holding such an offset
-cannot be loaded from a saved file. Such a face's offset is built unchecked for the construction and, once
-the face's extent is known, replaced by a spline over its box within a tenth of the tolerance
-(`GeomConvert_ApproxSurface`), its edges' curves, vertices' points and continuity records moved onto it
-and their tolerances grown by the error; every result loads again (checked on the matrix's bodies). An edge
-whose old curve is a line or a circle keeps one: the offset of a line on a plane or cylinder is a line, of a
-circle round a surface of revolution's axis a coaxial circle, with the parameter kept (checked at 17
-points). At a pole, where S_u × S_v vanishes against the derivatives' size, the certificate checks the
-distance alone (judgement: below a millionth of |S_u|² + |S_v|²), as the normal's sign is not defined there.
-
-*Read back as written.* A body read from a saved file has the directions it was written with, bit for bit
-(`gp_Dir::Restored` in the BinTools and GeomTools readers; corrections.md, gp_Dir-restored), so a body
-and the same body loaded again mesh alike. Open: the X and Y directions of an axis placement (`gp_Ax2`,
-`gp_Ax3`, `gp_Ax22d`: planes, conics, elementary surfaces) are rebuilt from the main and X directions by
-cross products when read, and come back exact only where those products are; a reader that keeps
-orthonormal axes as written is not yet made.
-
-*Skins and sweeps.* Frames along a path are rotation-minimising by the double reflection method [Wang,
-Jüttler, Zheng, Liu 2008], with a fourth-order error in the step; stock `BRepOffsetAPI_MakePipeShell`
-twists a profile only where the path starts square to it. Gordon surfaces follow [Siggel et al., section 3.2]
-with compatibility by common reparametrisation; a skin's cross-section lines are natural C2 cubics, whose
-minimum of the integral of |s''|^2 over H2 interpolants is proved in the utilities section above. Closed
-sections are made fit by cyclic seam alignment: the cyclic cross-correlation of two sampled rings is maximised
-over start shifts and orientation [Dogan, Bernal, Hagwood 2025, rotation by Kabsch/SVD proof read; the
-version here fixes rotation]. Draft of walls that `BRepOffsetAPI_DraftAngle` does not take (it handles planes,
-cylinders and cones) uses the ruled isocline surface over the wall's neutral curve, whose every tangent plane
-makes the draft angle with the pull direction.
-
-A guided skin through three or more profiles first constructs the compatible Gordon network,
-then applies the G1/G2 end correction described below. This avoids assembling and factoring a
-dense plate system for a network already representable by spline interpolation. The previous
-plate construction remains available when the network or its correction cannot be represented
-or fails its checks. A previously accepted plate can have a different interior and bending energy; validation
-therefore compares the delivered surfaces, since exact curve interpolation alone does not establish equivalence.
-Coplanar curve networks with planar supports retain the plate construction: a plane has
-zero geometric bending energy, and reconstructing its unit network rectangle would change
-an already accepted carrier and trims. The model tolerance defines the coplanarity search;
-the unchanged plate checks still decide delivery. For curved networks the accepted interior
-is compared with a matched reference surface in both sampled directions; exact interpolation
-alone is not an acceptance argument. Representation checks remain for the other accepted plates.
-
-The network construction follows W. J. Gordon, *Blending-function methods of bivariate and
-multivariate interpolation and approximation*, SIAM Journal on Numerical Analysis 8 (1971),
-158-177, as presented and implemented by Siggel, Kleinert, Stollenwerk and Maierl,
-*TiGL — An Open Source Computational Geometry Library for Parametric Aircraft Design* (2018),
-sections 3.2.1-3.2.3, equations (8)-(17): the profile skin plus the guide skin minus the
-intersection-grid tensor surface. Equation (8) is the compatibility condition; each skin and
-the grid must use matching interpolation parameters and bases. Degree elevation and knot
-insertion align their coefficient spaces without changing their geometry. See also Piegl and
-Tiller, *The NURBS Book*, second edition (1997), chapter 10, page 485, and the TiGL
-`CTiglGordonSurfaceBuilder::CreateGordonSurface` implementation (2018, lines 139-188).
-Sources: <https://elib.dlr.de/124524/1/1810.10795.pdf> and
-<https://github.com/DLR-SC/tigl/blob/main/src/geometry/CTiglGordonSurfaceBuilder.cpp>.
-Compatibility and rational representability limits of `GeomFill_Gordon` still apply.
-
-Two surfaces that share an edge and their tangent planes along it meet G2 when their normal
-curvatures agree in one direction across the edge (the linkage curve theorem [Pegna, Wolter
-1992, J. Mech. Design 114]). The skin already holds the profile, so G1 needs only the way
-across, S_v, turned into the support's tangent plane, and G2 then only the normal part of
-S_vv set to the support's second fundamental form at S_v. Both moves are along the support's
-normal. The correction is h1(v) m1(u) + h2(v) m2(u), with h1 and h2 the quintic Hermite
-functions of the end (h1' = 1, h2'' = 1 there, the rest zero) that vanish to the second
-derivative at the nearest place of the next profile. The other profiles are kept and the skin
-stays C2; m1 and m2 are the moves less their straight interpolation between the guides, so the
-guides are kept too. This correction is derived here; its sampled field approximation is not a
-continuous error certificate. Where a guide leaves the end profile out of the support's plane,
-or with another bend, the surface follows the guide there. Nets whose skin carries weights
-remain outside this correction. Exact interpolation does not imply less bending energy: an
-existing accepted-net counterexample raises the integral from 0.9364 to 1.2673. This candidate
-therefore requires a family-wide geometry and fairness review before replacing accepted results.
-
-Approximating an individual conic by non-rational cubic pieces is not the unresolved problem of
-correspondence between unlike closed sections. Floater, *An O(h^{2n}) Hermite approximation for
-conic sections*, 1997, section 2 and Theorem 3.1, gives geometric Hermite interpolants and a
-Hausdorff bound for positive normalized middle weights up to 3; for degree three the subdivision
-order is six. That bound controls the conversion of each section, not which points on two
-sections should be joined. Repeated bisection of three initial parameter regions can explain a
-knot pattern without determining that correspondence. No new pairing law is inferred from such
-a pattern here. Source: <https://numerika.fmf.uni-lj.si/bib2html/e-documents/clanki/FloaterAnO(h2n)Hermiteapproximationforconicsections.pdf>.
-
-Rational reparameterization does not supply a unique correspondence either. Hu, Wang and
-Wang, *Piecewise Möbius Reparameterization of Rational Bézier Curves* (2018), section 2.1,
-equation (3), changes weights by `w_i -> lambda^i w_i` under
-`t = lambda u / (1 - u + lambda u)`, with `lambda > 0`, preserving degree and geometry.
-Their section 2.2, equations (7), (9) and (12), uses curvature maxima as breakpoints,
-normalized arc lengths as new breakpoints, and matching derivatives between pieces.
-Those are choices for a single curve's speed, not a theorem selecting points to join
-between unlike curves. In particular, a three-region knot pattern alone does not establish
-that these regions are Möbius pieces. A numerical diagnostic fitting one such map through
-three places of each region, then checking thirty other places, misses the observed conics
-by 0.234 to 0.550 in model units across a five-set family (the maximum per section).
-This is evidence against that three-piece hypothesis, not a bound on arbitrary piecewise
-reparameterizations. The cross-section pairing remains unresolved; no new rule is installed.
-Source: <https://www.jcad.cn/cn/article/pdf/preview/10.3724/SP.J.1089.2018.16764.pdf>.
-
-The compatibility step must also be distinguished from choosing correspondence. Piegl and
-Tiller, *The NURBS Book*, second edition (1997), section 10.3, pages 458-459, equation
-(10.7), first assumes common section degree and knots, then interpolates their control
-points, in homogeneous space for rational sections. Engleitner and Juttler, G+S Report 73
-(2018), sections 2-4, permit incompatible section spaces through patchwork splines. Their
-Theorem 3 proves existence in the chosen space from a blending construction under the
-shadow-compatibility and smoothness-monotonicity assumptions; section 4.3 selects a solution
-by constrained energy minimization. The sections' parameterizations remain given in both
-constructions. These existence results therefore do not identify an unknown cross-section
-pairing from an output knot pattern.
-Sources: <https://home.zcu.cz/~bastl/GM1/the-nurbs-book.pdf>,
-<https://www.gs.jku.at/pubs/NFNreport73.pdf>.
-
-
-*Booleans.* Cell selection from one General Fuse with a ladder of fallbacks, each rung accepted only if
-checked; a sheet tool divides rather than subtracts.
-
-*Unproven.* Seam and pairing conventions of closed skins (a convention, not derived), tolerance ladders of the Boolean fallbacks, the sampling counts of the offset and
-skin validity checks.
-
-
-### Local focal witnesses for a sheet's normal sweep
-
-`BRepOffsetExt_Focal` encloses non-periodic rational B-spline and Bezier supports directly from
-stored poles, positive weights and knots, on each nonempty knot rectangle. The homogeneous first
-and second derivative control nets use the derivative formula in Patrikalakis, Maekawa and Cho,
-*Shape Interrogation for Computer Aided Design and Manufacturing*, hyperbook edition (2009),
-[section 1.4.2, equations (1.65)–(1.68)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
-Their active-pole hulls enclose their values by nonnegativity and partition of unity
-([section 1.4.1, (1.58)–(1.61)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node16.html)).
-Each hull is intersected with interval Cox–de Boor evaluation on the current rectangle. Homogeneous
-poles, location matrices, knot differences, quotient derivatives and fundamental forms all use outward-rounded
-interval arithmetic; the calculation does not first convert or insert knots with ordinary floating
-point arithmetic. This follows the arithmetic requirement in
-[section 4.9.1](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node53.html).
-
-Let I be the first fundamental form and II the second form against S_u cross S_v. Principal
-curvatures are the generalized eigenvalues of (II,I); see the same authors,
-[section 3.4, (3.41)–(3.43)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node30.html).
-**Derived here:** the normal sweep S+s n, 0 <= s <= d (signed), has no focal point on a regular
-parameter rectangle precisely when I-d II is positive definite. Indeed its eigenvalues in an
-I-orthonormal frame are 1-d k_i. A negative diagonal entry or determinant proves that an eigenvalue
-has passed zero somewhere along that normal segment. Sylvester's criterion proves the positive
-case without subtracting nearly equal curvature roots. The signed curvature convention here is
-opposite to that of the hyperbook's offset chapter; the focal condition is the same
-([section 11.3.1, (11.18)–(11.25)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html)).
-The face orientation reverses d. A crossing witness must lie strictly inside the trimmed face;
-it refuses thickening with kind `Curvature` and names that source face, before copying or building.
-
-A regular verdict proves only local regularity within the support's knot rectangles. It does not
-prove separation of distinct normal segments, nor continuity across knots. Periodic or other
-supports, zero derivative denominators, singular parameter regions, exact equality and exhausted
-work remain `Unknown`; a loose interval never causes a refusal. The existing construction remains
-for unknowns, so complete general self-intersection exclusion is still open. The breadth-first
-subdivision budgets (4096 rectangles, depth 24) are work choices, not geometric thresholds.
-
-### A circular tube's parallel body after its hole closes
-
-For a complete ring torus with core circle C of radius R and tube radius r<R, **derived here**:
-T=C+B_r, so its outward distance-d parallel body is T+B_d=C+B_(r+d), using associativity of the
-Minkowski sum and B_r+B_d=B_(r+d). Put a=r+d. At radial coordinate rho>=0 its meridian satisfies
-(rho-R)^2+z^2 <= a^2, since the closest point on C has the same azimuth. When a>R, this is the
-circle's disk clipped at the rotation axis. Revolving the circular arc through (R+a,0) between
-(0,+/-sqrt((a-R)(a+R))) together with its axis segment constructs the boundary without the
-self-crossing continuation. No surface fitting or new tolerance allowance is involved. The exact
-hole-closure equality a=R remains on the existing route.
-
-The construction applies to a valid positive-volume solid with one toroidal face. The source
-face maps to the new skin; validity, positive volume and the existing independent clearance check
-still apply. The independent volume oracle in the held-out family is the meridian's first moment:
-
-V = 4 pi [ z0^3/3 + R (pi a^2/4 + R z0/2 + a^2 asin(R/a)/2) ],
-where z0=sqrt((a-R)(a+R)).
-
-This is a trimmed parallel **body**, whereas thickening retains the input sheet's normal sweep.
-Trimming arbitrary spline offsets requires tracing all self-intersection components; the distinction
-is described by Patrikalakis, Maekawa and Cho (2009),
-[section 11.3.2, equations (11.28)–(11.29)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node225.html).
-
-### Extending the approximation domain of a moved crease face
-
-The kept-face offset approximates the exact normal offset on the UV rectangle of the
-constructed face, including any extension needed to intersect adjacent moved supports.
-It supplies that rectangle through `GeomAdaptor_Surface`, whose bounds select an evaluation
-domain, rather than `Geom_RectangularTrimmedSurface`, which rejects bounds outside a bounded
-basis surface. The approximation tolerance, degree and segment limits are unchanged.
-
-Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided Design and
-Manufacturing* (2009), [section 11.3.1, equation (11.17)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html)
-defines the normal offset used here; [section 1.4.2, equation (1.62)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html)
-expresses a spline as polynomial spans. **Derived here:** evaluating the end span beyond
-its knot interval continues the same parametric support used by the extended edge curves;
-it does not change the normal-offset definition or justify extrapolating a fitted result
-outside its certified rectangle. The existing approximation-error, topology, clearance
-and self-interference checks still apply to that rectangle. A generated family varies
-scale, pose and signed distance on a valid near-planar C0 support, checking face lineage,
-volume and independently evaluated normal-offset samples.
-
-### Continuing both branches of a periodic seam
-
-A seam has two curves on its face, although it has only one three-dimensional edge.
-The two curves may differ by a period in either surface parameter. When the end faces
-move, a finite seam pcurve can need the same end-span continuation as a tangent edge.
-The kept-face construction now fits both branches independently, at its existing
-one-tenth-tolerance interpolation bound, and gives the modifier the branch selected by
-that edge use's orientation. Binding both curves by face identity alone would overwrite
-one with the other. Branches that need no continuation keep their original route.
-The solid validity, source-normal distance, self-interference and clearance checks remain.
-A generated cylinder with finite spline seam pcurves checks the closed-form volume
-pi (r+d)^2 (h+2d), at three scales and a rotated, translated pose, in both directions.
-
-The continuation argument is **derived** from the existing parameter curves and the
-normal-offset definition of Patrikalakis, Maekawa and Cho, *Shape Interrogation for
-Computer Aided Design and Manufacturing* (2009), section 11.3.1, equation (11.17):
-<https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html>.
-The representation contract is OCCT's `BRep_Builder::UpdateEdge(E,C1,C2,F,Tol)`
-overload for a closed face, and `BRepTools_Modifier`'s separate `NewCurve2d` calls
-for the two uses. This does not prove that arbitrary continuation is regular or
-non-self-intersecting; those are still checked on the constructed body.
-
-For an *exact* pipe P(s,t)=c(s)+r e(s,t), where e is the unit radial vector in the
-normal plane of the regular spine, its normal is radial while the surface is regular.
-Substituting into equation (11.17) gives c(s)+(r +/- d)e(s,t): its offset is a pipe
-about the same spine. This substitution is **derived** from the pipe parameterization
-and normal in the same authors' section 11.6.2, equations (11.111)-(11.115):
-<https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node237.html>.
-The local condition is that the shifted radius times the maximum spine curvature
-is less than one; global separation also matters (section 11.6.3.4, Theorem 11.6.1):
-<https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node242.html>.
-A fitted tensor spline through circular sections is not thereby certified to be this
-exact pipe. The kept-face operation has no retained spine/radius descriptor for a
-general spline support. Inferring one from a nominal size and replacing the support
-would change the input surface; this change does not do so.
+subject to the continuity conditions and fixed remaining poles. Trace normalisation (taken before constraint rows or
+the prior are added) and the [0, 1] domain are design choices derived here, not a published surface-specific
+weighting law. They make w dimensionless and keep rigid-motion and uniform-scale covariance for a fixed basis; the
+pole metric is not invariant under change of basis or arbitrary UV reparameterisation.
+For displacement unknowns d from the current iterate Pc, add `w a` to each free coordinate's diagonal and
+`w a (P0 - Pc)` to its right-hand side; P0 is held through all nonlinear continuity iterations. Cost is O(N) time and
+storage for N total poles, with no new poles and unchanged band; the term is applied after the energy cache so no
+prior is cached. The condition/multiplier solve and final seam check still apply: the prior cannot authorise a seam
+miss, and a surface that already meets the continuity is returned as it is.
+*Derived bounds.* H is positive semidefinite (it integrates squared spline derivatives), so for `a > 0, w > 0`,
+`H + w a I` is positive definite on the free coordinates and a nonempty affine constraint set has a unique
+minimiser. For minimisers P1, P2 at `w1 < w2` on the same feasible set, adding their optimality inequalities gives
+`(w2 - w1)(D(P2) - D(P1)) <= 0`, D the squared pole displacement: total displacement is nonincreasing, while
+individual poles or curvature need not vary monotonically. Nonlinear G2/skew iterations change the linearised
+feasible set, so this proves each fixed-row problem, not global convergence or monotonicity there. The final seam
+certification is sampled, not a whole-domain Hausdorff proof.
 
 ### Collinear alignment: units and rational boundary rows
 
-Collinear alignment uses exact degree elevation and the union of the two normalized
-boundary knot vectors, with the larger multiplicity at each knot. It edits rows
-directly and has no degree-five fitting restriction. Knot insertion preserves the
-parameterized surface: Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer
-Aided Design and Manufacturing*, hyperbook (2009), section 1.4.3, equations
-(1.74)-(1.76), <https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node18.html>.
-OCCT's `Geom_BSplineSurface::IncreaseDegree` preserves the geometry, while
-`InsertUKnot` and `InsertVKnot` with `Add=false` raise a knot to the requested
-multiplicity: <https://dev.opencascade.org/doc/refman/html/class_geom___b_spline_surface.html>.
+Collinear alignment uses exact degree elevation and the union of the two normalized boundary knot vectors with the
+larger multiplicity at each knot, and edits rows directly (no degree-five fitting restriction). Knot insertion
+preserves the parameterized surface [PMC09 §1.4.3, (1.74)-(1.76)]; `Geom_BSplineSurface::IncreaseDegree` preserves
+the geometry and `InsertUKnot`/`InsertVKnot` with `Add=false` raise a knot to the requested multiplicity
+[OCCT8 Geom_BSplineSurface].
+*Derived:* for unit row directions a, b at angle theta, `|a+b| = 2 cos(theta/2)`. The symmetric fold check compares
+this dimensionless quantity with 1e-9 (a conditioning choice retained from the unit-scale algorithm); physical
+short-row degeneracy is checked separately. Scaling model lengths cannot change this angular verdict.
+Rational supports need clamped boundary knots; rows carry weights as well as Euclidean poles. After exact refinement
+the moving boundary and next row receive the reference's corresponding weights; deeper rows keep theirs. From the
+rational surface definition [PMC09 §1.5, (1.91)] (derived): write the boundary as `S = A0/W0`; its cross derivative is
+`c (A1 - S W1)/W0`, c the positive endpoint degree/knot factor. If the reference next-row weights are a constant
+multiple of its boundary weights then `sum N_i w1_i P0_i = S W1`, so placing the moving next poles at
+`P0_i + r (P0_i - P1_i)`, common `r > 0`, gives the opposite proportional derivative. This proves tangency for the
+constant-ratio option, rational curved boundaries included. The proportional-weight condition is checked to 64
+machine epsilons relative (an arithmetic allowance); a nonproportional reference weight row with that option is
+unsupported. Without the option, pole lines align but neither polynomial nor rational variable row ratios
+guarantee exact G1; skew changes the target lines and is not covered by the zero-skew argument.
+At very large coordinates independently evaluated exact isocurves and surface points can differ by more than OCCT's
+default absolute confusion tolerance. The face construction may then carry the requested positional tolerance onto
+its new face, edges and vertices if the default metadata does not validate, and rechecks BRep validity and the
+interior check. No poles, knots, weights or curves are fitted or moved by this step and no tolerance larger than the
+caller's allowance is introduced; the option is off for other consumers of the face builder.
 
-**Derived here:** for unit row directions a and b with angle theta,
-|a+b|=2 cos(theta/2). The symmetric fold check compares this dimensionless
-quantity with 1e-9, a conditioning choice retained from the unit-scale algorithm;
-physical short-row degeneracy is checked separately. Multiplying model lengths
-cannot change this angular verdict.
+### Rectangular sheet extension
 
-Rational supports must have clamped boundary knots. Their rows carry weights as well as Euclidean poles. The moving boundary and
-next row receive the reference's corresponding weights, after exact refinement;
-deeper rows retain their weights. From the rational surface definition in the same
-authors' section 1.5, equation (1.91),
-<https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node20.html>, **derived here**:
-write the boundary as S=A0/W0. Its cross derivative is
-c (A1-S W1)/W0, where c is the positive endpoint degree/knot factor.
-If the reference next-row weights are a constant multiple of its boundary weights,
-then sum N_i w1_i P0_i = S W1. Consequently placing the moving next poles at
-P0_i+r(P0_i-P1_i), with common r>0, gives the opposite proportional derivative.
-This proves tangency for the constant-ratio option, including rational curved
-boundaries. The proportional-weight condition is checked to 64 machine epsilons
-relative (an arithmetic allowance); a nonproportional reference weight row with
-that option remains unsupported. Without the option, pole lines align but neither
-polynomial nor rational variable row ratios guarantee exact G1. Skew likewise
-changes the target lines and is not covered by the zero-skew tangency argument.
-
-At very large coordinates, independently evaluated exact isocurves and surface
-points can differ by more than OCCT's default absolute confusion tolerance. The
-Collinear face construction may carry the requested positional tolerance onto its
-new face, edges and vertices if the default metadata does not validate. It then
-rechecks BRep validity and the existing interior check. No poles, knots, weights,
-curves or parameter curves are fitted or moved by this step, and no tolerance
-larger than the caller's allowance is introduced. Already valid faces retain their
-original metadata; the option is disabled for other consumers of the face builder.
-The scale tests multiply both coordinates and the positional allowance by the
-same factor, while checking boundary equality more tightly (1e-12 times scale)
-and unit-normal agreement independently. Both planar and curved cases are tested
-at scales 1e-3, 1 and 3e9, at rest and in a rotated, translated pose.
-
-### Skin solid publication
-
-Planar end caps are the only cap construction used by the smooth section skin.
-A failed cap is a construction failure for a solid request; an open sheet request
-continues to return its sheet. Before publication, closure is checked with
-`BRepCheck_Shell::Closed`, orientation with `BRepLib::OrientClosedSolid`, and
-validity with `BRepCheck_Analyzer`. Disconnected shells are not silently discarded.
-These checks follow OPEN CASCADE, *OCCT Reference Manual* (8.0, 2026),
-[`BRepCheck_Shell::Closed`](https://dev.opencascade.org/doc/refman/html/class_b_rep_check___shell.html)
-and [`BRepLib::OrientClosedSolid`](https://dev.opencascade.org/doc/refman/html/class_b_rep_lib.html).
-They establish topological closure and the kernel's validity conditions, not a
-proof against geometric self-intersection. Nonplanar end-cap construction remains open.
-
-### Rectangular sheet extension preserves trims
-
-Extension requires a valid single-wire face whose boundary is its parameter
-rectangle. `GeomAlgoExt::parameterRectangle` checks all boundary curves against
-the four sides: line endpoints, or the complete positive-weight spline pole hull.
-Area agreement cannot establish this condition, since a narrow notch can have
-arbitrarily small area and finite depth. The pole-hull implication follows from
-Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided Design and
-Manufacturing*, hyperbook (2009), [section 1.4.2, convex hull property](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
-Applying that property to each constant coordinate is derived here. Unrecognized
-boundary representations are not assumed rectangular.
+Extension requires a valid single-wire face whose boundary is its parameter rectangle. `GeomAlgoExt::parameterRectangle`
+checks all boundary curves against the four sides: line endpoints, or the complete positive-weight spline pole hull,
+which implies the property by the convex hull property applied to each constant coordinate [PMC09 §1.4.2] (derived).
+Area agreement cannot establish the condition, since a narrow notch can have arbitrarily small area and finite
+depth. Unrecognized boundary representations are not assumed rectangular.
 
 ### Coincidence of projected curves
 
-Five common points and equal lengths do not imply equal curves. Plane projection
-removes an edge only after establishing a common normalized spline basis (degree
-elevation, knot insertion, and optionally reversal) with identical positive
-weights. If every corresponding pole differs by at most the modelling tolerance,
-the rational convex-combination formula bounds the displacement for every
-parameter by that tolerance. The common parameter interval covers both edges,
-so the bound is bidirectional. The pole-distance arithmetic is outward rounded.
-This implication is derived here from Patrikalakis, Maekawa and Cho, *Shape
-Interrogation for Computer Aided Design and Manufacturing*, hyperbook (2009),
-[section 1.4.2](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
-Representations whose correspondence cannot be established are both retained.
-Degree elevation and knot insertion use OCCT's floating-point implementations;
-the enclosure bounds the resulting common-basis representations, with the usual
-rounding limitations of those representation conversions.
+Five common points and equal lengths do not imply equal curves. Plane projection removes an edge only after
+establishing a common normalized spline basis (degree elevation, knot insertion, optionally reversal) with identical
+positive weights. If every corresponding pole differs by at most the modelling tolerance, the rational
+convex-combination formula bounds the displacement at every parameter by that tolerance, in both directions since the
+common interval covers both edges, with outward-rounded pole-distance arithmetic [PMC09 §1.4.2] (derived). Edges whose
+correspondence cannot be established are both retained. Degree elevation and knot insertion are OCCT's floating-point
+implementations; the enclosure bounds the resulting common-basis representations, with the usual rounding limits.
+
+*Unproven.* Work budgets and halving depths of the separation proofs, the crease threshold, interpolation grid sizes,
+and the choice of pole counts ("twenty-one for any target"). The sampled checks are not Hausdorff certificates.
+
+*Stock.* Offsets: `BRepOffsetAPI_MakeOffset`. Outline: `HLRBRep` (its documented limits on tangent and edge-on faces
+are what the exact event search avoids). The rest has no direct stock counterpart.
+
+## BRepOffsetExt, BRepSkinExt, BRepBooleanExt
+
+### Offsets and shells
+
+A solid offset first classifies the faces the distance would shrink to nothing, removes them from a working copy by
+extending their neighbours (`BRepAlgoAPI_Defeaturing`) and offsets that copy; a face too tightly bent in part is
+refused by name. Stock `BRepOffset_MakeOffset` removes vanishing faces only where every face is planar
+(`myIsPlanar`); a fillet whose radius the distance reaches comes back as an invalid solid or not at all.
+Push-pull follows [ZouFeng19]: the solid swept by the moved faces is built and joined to or cut from the body by a
+Boolean, which resolves whatever the move does to the rest. Thicken divides a C0 sheet's supports without changing
+their geometry before offsetting.
+
+### Face offset that keeps the topology
+
+`BRepOffsetExt_Kept.cxx`, tried first by push-pull where every face moves. It holds for any set of faces with no
+tangent neighbour that stays; a move of only some faces keeps the engine's route. The face offset keeps every face
+(the intersection join). Each face goes onto its offset surface, which `BRepOffset::Surface` gives in the surface's
+own parameters: a plane translated; a cylinder, cone, sphere or torus with the same axes and `(u, v)`, since
+`S(u, v) + d n(u, v)` is again such a surface in those parameters; otherwise `Geom_OffsetSurface`.
+
+*Tangent edges.* If two faces have the same normal n along an edge c and move by the same d, the point `c + d n` lies
+on both offset surfaces with normal n on both, so they touch along the offset of the edge and its curves on the faces
+stay. This is tested, not assumed: the two faces' points of each edge parameter after the move agree within the
+tolerance, or within the edge's own tolerance where that is larger. Two faces tangent only to an angle theta come
+apart by `|d| 2 sin(theta/2) <= |d| theta` more when both move by d. An input G1 only to theta (its edge tolerance
+that wide) has its edge kept, and the result's edge carries the input's tolerance plus `|d| theta_max`. `theta_max` is
+found, not bounded (judgement): 8 samples in each piece of the edge where its curves on the faces are polynomial and
+cross no knot line of either surface, each local maximum refined by golden-section search. A bound would need the
+faces' curvatures bounded along the edge, and the hull bound on curvature was three orders loose on blend sheets;
+sampling found the larger maximum than a 4 097-sample reference on every nearly tangent edge tested, while 33 even
+samples fell short by up to 36 per cent. The intended budget is that edge's carried tolerance and the input vertex's
+plus the same spread (the endpoint gap limit below is not covered); the result is never claimed more accurate than
+its input.
+
+*Sharp edges.* The new edge is the crossing of the two offset surfaces, solved in the plane through c(t) normal to
+the old edge: four equations `S1(u1, v1) = S2(u2, v2)`, `(S1 - c(t)).c'(t) = 0`, by Newton from the old edge's curves
+on the faces, so it keeps the old parameter t. The curve and the curves on the faces are cubic interpolants of those
+sections, refined locally (a midpoint is added where an interpolant is further than a tenth of the tolerance from the
+section there); refinement stops at 16 halvings of the first spacing or 4096 samples (judgement: a curve a cubic
+cannot follow there has a kink). An offset surface is one order less smooth than its basis (its normal takes a
+derivative), so where the edge crosses a line along which a moved surface is less than C2, or the old edge (whose
+tangent sets the section planes) is less than C3, the curve is interpolated apart on each side and joined C0 there;
+the crossing is found among samples and by bisection. Newton steps that do not reduce the residual are halved; where
+two surfaces only touch and the residual stalls, a point within half the tolerance of both is accepted (judgement:
+the other half is left to the interpolation, a tenth, and the input's own edges).
+
+*Vertices.* On a tangent edge's (or seam's) moved curve, crossed with the face around the vertex that meets it most
+steeply among those that meet another at a sharp edge there (all tangent: the vertex moves along the common normal);
+between two edges of the same two faces, in the section of one of them; else where three faces cross (the three whose
+normals are furthest from a common plane). A vertex then not on every face around it is declined by this local
+construction; that does not prove the topology must change, since approximate contact continuations can also leave the
+other support.
+
+*Certificate,* apart from the construction: a valid solid; points inside every face and along every edge at the moved
+distance from their sources' unbounded surfaces, on the side moved to (foot point by Newton, Gauss-Newton where the
+Hessian is not positive definite); faces clear of each other (below); volume grown by an outward move and shrunk by an
+inward one; and, where every face moves, nothing nearer the body than the distance. A failure of any falls back to the
+engine's routes. At a pole, where `S_u x S_v` vanishes against the derivatives' size, the certificate checks the
+distance alone (judgement: below a millionth of `|S_u|^2 + |S_v|^2`), as the normal's sign is not defined there.
+
+*Faces clear of each other.* The general self-interference check (`BOPAlgo_ArgumentAnalyzer`) on the exact faces, on
+whatever the separation pre-pass (`BRepSurfaceExt_FaceSeparation.hxx`, pole hulls and Bernstein bounds) cannot prove
+clear. The pre-pass does not read offset surfaces, so it runs on proxies: a copy whose offset faces are splines within
+`eps` = a hundredth of the tolerance of them, each face's tolerance grown by `eps`. Two proxies proved further apart
+than their tolerances have their exact faces apart too; that a proxy is one to one says nothing of its exact face, so
+each offset face also goes to the check by itself unless the pre-pass leaves it in a part that is checked. The result
+keeps its exact faces. Skipping the check by the reach [Federer59 Thm 4.8] (`|d| kappa_max < 1` per face, faces sharing
+no vertex further apart than both moved faces reach) was dropped: a rigorous kappa bound per rational Bezier patch was
+sound but three orders above the sampled curvature on blend sheets, and the reach leaves faces that share a vertex
+unproven.
+
+*Offsets that load again.* The binary BREP reader builds an offset surface with OpenCascade's continuity check
+(`BinTools_SurfaceSet`), which refuses a basis that is C0 at a knot unless it finds it G1 there, so a body holding the
+offset of a blend sheet whose parts are joined C0 in their parameters cannot be loaded from a saved file. Such a
+face's offset is built unchecked for the construction and, once the face's extent is known, replaced by a spline over
+its box within a tenth of the tolerance (`GeomConvert_ApproxSurface`), its edges' curves, vertices' points and
+continuity records moved onto it and their tolerances grown by the error. An edge whose old curve is a line or a circle
+keeps one: the offset of a line on a plane or cylinder is a line, of a circle round a surface of revolution's axis a
+coaxial circle, with the parameter kept.
+*Read back as written.* A body read from a saved file has the directions it was written with, bit for bit
+(`gp_Dir::Restored` in the BinTools and GeomTools readers; [corrections.md](corrections.md#gp_dir-restored)). Open: the
+X and Y directions of an axis placement (`gp_Ax2`, `gp_Ax3`, `gp_Ax22d`) are rebuilt from the main and X directions by
+cross products when read and come back exact only where those products are; a reader that keeps orthonormal axes as
+written is not made.
+
+### Local focal witnesses for a sheet's normal sweep
+
+`BRepOffsetExt_Focal` encloses non-periodic rational B-spline and Bezier supports directly from stored poles, positive
+weights and knots, on each nonempty knot rectangle. The homogeneous first and second derivative control nets use the
+derivative formula [PMC09 §1.4.2, (1.65)-(1.68)]; their active-pole hulls enclose their values by nonnegativity and
+partition of unity [PMC09 §1.4.1, (1.58)-(1.61)]. Each hull is intersected with interval Cox-de Boor evaluation on the
+current rectangle. Homogeneous poles, location matrices, knot differences, quotient derivatives and fundamental forms
+all use outward-rounded interval arithmetic, with no prior conversion or knot insertion in ordinary floating point
+[PMC09 §4.9.1].
+Let I be the first fundamental form and II the second form against `S_u x S_v`; principal curvatures are the
+generalized eigenvalues of (II, I) [PMC09 §3.4, (3.41)-(3.43)]. **Derived here:** the normal sweep `S + s n`,
+`0 <= s <= d` (signed), has no focal point on a regular parameter rectangle precisely when `I - d II` is positive
+definite, since its eigenvalues in an I-orthonormal frame are `1 - d k_i`. A negative diagonal entry or determinant
+proves an eigenvalue has passed zero somewhere along the segment; Sylvester's criterion proves the positive case
+without subtracting nearly equal curvature roots. The signed curvature convention is opposite to the hyperbook's
+offset chapter; the focal condition is the same [PMC09 §11.3.1, (11.18)-(11.25)]. Face orientation reverses d. A
+crossing witness must lie strictly inside the trimmed face; it refuses thickening with kind `Curvature`, naming that
+source face, before copying or building.
+A regular verdict proves only local regularity within the support's knot rectangles: not separation of distinct
+normal segments, nor continuity across knots. Periodic or other supports, zero derivative denominators, singular
+parameter regions, exact equality and exhausted work remain `Unknown`, and a loose interval never causes a refusal.
+The construction runs for unknowns, so complete general self-intersection exclusion is open. The breadth-first
+subdivision budgets (4096 rectangles, depth 24) are work choices, not geometric thresholds.
 
 ### Elementary focal distances
 
-The offset Jacobian loses rank at a principal focal distance. Patrikalakis,
-Maekawa and Cho, *Shape Interrogation for Computer Aided Design and Manufacturing*,
-hyperbook (2009), [section 11.3.1, equations (11.24)-(11.25)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html)
-and [section 11.3.2, equation (11.28)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node225.html),
-give the offset curvature and singularity conditions. With this implementation's
-normal convention, the factor is `1-d*k`. For a sphere or cylinder of radius R,
-the inward focal distance is exactly R. These two elementary supports are classified
-by comparing the signed physical distance to their stored radius, without the
-relative allowance used for fitted blends.
-
-For a cone with semi-angle alpha, `r(v)=R+v*sin(alpha)` and principal
-curvatures are `0` and `-cos(alpha)/abs(r(v))`. Endpoint radii and a possible
-zero crossing give the full focal range over the trimmed v interval, without
-interior sampling. For a ring torus (`R>r`), the principal curvatures are
-`-1/r` and `-cos(v)/(R+r*cos(v))`. Inward focal crossing is at r everywhere;
-for an outward distance d the other crossing is `cos(v) <= -R/(r+d)`.
-Endpoints and the contained multiples of pi give the cosine extrema over the
-complete v interval. These reductions are derived here from the parametrizations
-and the first and second fundamental forms. See Malakhaltsev and Vankerschaver,
-*Sage Reference Manual: Differential Geometry of Parametrized Surfaces* (2010,
-Sage 9.3 edition), [`principal_directions`, torus example](https://sporadic.stanford.edu/reference/riemannian_geometry/sage/geometry/riemannian_manifolds/parametrized_surface3d.html),
-which gives these ring-torus curvatures with the same normal convention.
-Arithmetic and trigonometric evaluation retain floating-point rounding limits.
-Horn and spindle tori retain strict sampled classification.
-A radius-10000 sphere moved inward by 9999.5 therefore remains a radius-0.5 sphere.
-Classification of general fitted supports remains sampled with the existing
-approximation allowance; it is not a proven curvature-error enclosure. A general
-enclosure that separates uncertainty from a strict crossing remains open.
-
-### Clearance coverage
-
-Clearance carries separate coverage and resolution states. Empty input, failed
-extrema, or exclusion of every region cannot become successful infinite clearance.
-Distances are measured between whole trimmed regions and the original skin,
-including boundaries; an interior lattice alone provides no lower bound.
-Near openings, a region is either measured clear, or wholly inside the opening
-exclusion, or subdivided. Work exhaustion is unresolved, never a measurement.
-
-The exclusion bound is derived here: for a closed set A, the triangle inequality
-gives `d(x,A) <= d(c,A)+|x-c|`. A containing box supplies c and a radius covering
-the complete trimmed region. Thus `d(c,A)+radius < wall` excludes the entire
-region. The radius is rounded upwards and the modelling confusion is added.
-Trimming and distance computations still have OCCT's numerical tolerances; this
-is a coverage check using those solvers, not interval certification of their
-extrema. The existing distance allowance is unchanged.
-
-A failed whole-region solve can instead use the derived lower bound
-`d(x,skin) >= d(c,skin)-radius`, subdividing until that bound resolves the
-requested clearance. This uses the same triangle inequality. A failed point
-solve or exhausted subdivision stays unresolved.
-
-Distance queries use independent copies of each trimmed surface. Spatial edge
-curves inherited from an import can deviate from that surface within their
-stored tolerance. Measuring those curves would measure their representation
-error as wall thickness. Rebuild query curves from each face's own pcurves and
-support, retaining the published surfaces and trims. `GeomLib::BuildCurve3d`
-returns a maximum approximation deviation; unresolved or excessive deviation
-fails the query. For query curve error at most e on either shape, the triangle
-inequality gives `|d(A,B)-d(A',B')| <= 2e` (derived here). Subtract this amount
-from the numerical distance; add it to an opening exclusion upper bound.
-Here e is one tenth of the existing modelling confusion. This remains a
-numerical approximation/error estimate, not a Bernstein-certified enclosure
-of the approximation. OCCT's *Boolean Operations* specification, section
-"Interferences", describes the stored-tolerance model; a stored edge tolerance
-is not a justified allowance to reduce the requested wall thickness.
-
-### Walls and opening rims
-
-A shell's clearance domain is the inward descendants of the retained input
-faces. Descendants reached only from removed input faces close the opening;
-they are rims, not offset walls. This follows the construction in Open Cascade,
-*Open CASCADE Technology Reference Manual* (2026, version 8.0.1),
-[`BRepOffsetAPI_MakeThickSolid`, Detailed Description and `MakeThickSolidByJoin`](https://occt3d.com/dev/doc/refman/html/class_b_rep_offset_a_p_i___make_thick_solid.html):
-the first shell contains the input faces except the removed faces; the second
-is its offset. Track this distinction by input-face identity through construction,
-not by surface type, coordinates, a distance threshold or a hash. A descendant
-shared with any retained input face is still measured. Opening descendants
-remain in the reported history. An empty retained domain still fails coverage.
-
-For example, an opening in a rectangular pocket can produce an annular rim
-slightly beyond the removed face, with an outer trim at the requested offset
-and an inner trim touching the original pocket walls. Independent whole-face
-distances give zero against those walls. No positive lower distance bound
-exists on this rim. A uniform interior lattice can miss that zero.
-For a plane separation h and an in-plane distance r from the rectangular
-opening, `d_open^2 = r^2 + h^2`, while the adjacent trimmed wall can be at r.
-Thus a spherical opening exclusion of radius t retains distances down to
-`sqrt(t^2-h^2)`, not t (derived here by Pythagoras, where h < t).
-Subdivision cannot repair this difference of domains.
-
-The regression test uses a pocketed body with a bore, a round and a chamfer,
-at three scales, two poses and three wall thicknesses. Separate trimmed-face
-extrema measure all 17 retained wall descendants at the requested thickness;
-the opening descendant has minimum zero and remains in the history. A separate
-thin retained face fails. The numerical solver and its tolerance are documented
-by Open Cascade, *Open CASCADE Technology Reference Manual* (2026, version
-8.0.1), [`BRepExtrema_DistShapeShape`, Detailed Description and `Perform`](https://occt3d.com/dev/doc/refman/html/class_b_rep_extrema___dist_shape_shape.html).
-These are numerical distance checks, not interval proofs of extrema.
+The offset Jacobian loses rank at a principal focal distance [PMC09 §11.3.1, (11.24)-(11.25); §11.3.2, (11.28)]; with
+this implementation's normal convention the factor is `1 - d k`. For a sphere or cylinder of radius R the inward focal
+distance is exactly R, and these two supports are classified by comparing the signed physical distance with the stored
+radius, without the relative allowance used for fitted blends (a radius-10000 sphere moved inward by 9999.5 remains a
+radius-0.5 sphere). For a cone of semi-angle alpha, `r(v) = R + v sin(alpha)` and the principal curvatures are `0` and
+`-cos(alpha)/|r(v)|`; endpoint radii and a possible zero crossing give the full focal range over the trimmed v
+interval without interior sampling. For a ring torus (`R > r`) the principal curvatures are `-1/r` and
+`-cos(v)/(R + r cos(v))`: the inward crossing is at r everywhere; for outward d the other crossing is
+`cos(v) <= -R/(r+d)`, and endpoints with the contained multiples of pi give the cosine extrema over the whole v
+interval (curvatures with the same normal convention: [Sage10 principal_directions, torus example]). These
+reductions are derived here from the parametrizations and the first and second fundamental forms; arithmetic and
+trigonometric evaluation keep floating-point limits. Horn and spindle tori keep strict sampled classification.
+Classification of general fitted supports stays sampled with the approximation allowance: not a proven
+curvature-error enclosure. A general enclosure separating uncertainty from a strict crossing is open.
 
 ### Regularity of network surfaces
 
-A lattice sized from the number of knots does not cover short knot intervals.
-Rejection witnesses now include every actual knot interval. Acceptance additionally
-uses the outward-rounded Cox-de Boor derivative enclosure on every knot rectangle
-implemented by `focalSweep` at distance zero. The derived identity
-`det(I) = |Su cross Sv|^2` permits the cross-product enclosure to establish
-regularity directly without dependency loss in `E*G-F*F`. A zero-free interval
-normal proves local immersion; unresolved cells do not receive that verdict.
-The basis and convex-hull bounds are those of Patrikalakis, Maekawa and Cho,
-*Shape Interrogation for Computer Aided Design and Manufacturing*, hyperbook
-(2009), [sections 1.4.2 and 1.4.3](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
-Periodic finite covers use the stored extended flat knot sequence and cyclic pole
-copies, matching OCCT's BSplSLib evaluation without fitting. This proves local
-immersion only. A separate global injectivity certificate remains open; the
-argument analyzer can flag valid periodic boundary seams and does not establish
-self-intersection freedom within a single face. It is not an acceptance proof here.
+A lattice sized from the number of knots does not cover short knot intervals, so rejection witnesses include every
+actual knot interval. Acceptance uses the outward-rounded Cox-de Boor derivative enclosure on every knot rectangle
+implemented by `focalSweep` at distance zero. The derived identity `det(I) = |S_u x S_v|^2` lets the cross-product
+enclosure establish regularity directly without dependency loss in `E*G-F*F`; a zero-free interval normal proves
+local immersion and unresolved cells receive no such verdict. Basis and convex-hull bounds: [PMC09 §1.4.2-1.4.3].
+Periodic finite covers use the stored extended flat knot sequence and cyclic pole copies, matching OCCT's BSplSLib
+evaluation without fitting. This proves local immersion only; a global injectivity certificate is open (the argument
+analyzer can flag valid periodic boundary seams and does not establish self-intersection freedom within one face).
+To reduce interval dependency for rational surfaces, translate homogeneous coordinates by a constant local anchor,
+`(X,W) -> (X-aW,W)`: this changes the surface to `S-a` and leaves every first and second derivative unchanged
+(derived). All subtraction and multiplication are outward rounded. At distance zero only first derivatives are needed.
+Local-immersion queries have no work-count cutoff; the finite subdivision precision limit reports unresolved, never
+regular.
 
-To reduce interval dependency for rational surfaces, translate homogeneous
-coordinates by a constant local anchor: `(X,W) -> (X-aW,W)`. This changes the
-surface to `S-a`; every first and second derivative is unchanged (derived here).
-All subtraction and multiplication are outward rounded. At distance zero only
-first derivatives are needed, so second derivative nets are not evaluated.
-Local-immersion queries have no work-count cutoff; the existing finite
-subdivision precision limit still reports unresolved, never regular.
+### A circular tube's parallel body after its hole closes
+
+For a complete ring torus with core circle C of radius R and tube radius `r < R`, **derived here**: `T = C + B_r`, so
+its outward distance-d parallel body is `T + B_d = C + B_(r+d)`, by associativity of the Minkowski sum and
+`B_r + B_d = B_(r+d)`. With `a = r + d`, at radial coordinate `rho >= 0` its meridian satisfies
+`(rho-R)^2 + z^2 <= a^2`, since the closest point on C has the same azimuth. When `a > R` this is the circle's disk
+clipped at the rotation axis. Revolving the circular arc through `(R+a, 0)` between `(0, +/-sqrt((a-R)(a+R)))`,
+together with its axis segment, constructs the boundary without the self-crossing continuation: no surface fitting or
+new tolerance is involved, and the exact hole-closure equality `a = R` stays on the engine's route. It applies to a
+valid positive-volume solid with one toroidal face, which maps to the new skin; validity, positive volume and the
+clearance check still apply. The volume oracle is the meridian's first moment,
+`V = 4 pi [ z0^3/3 + R (pi a^2/4 + R z0/2 + a^2 asin(R/a)/2) ]`, `z0 = sqrt((a-R)(a+R))`.
+This is a trimmed parallel *body*, whereas thickening keeps the input sheet's normal sweep; trimming arbitrary spline
+offsets requires tracing all self-intersection components [PMC09 §11.3.2, (11.28)-(11.29)].
+
+### Offsets of moved faces: domains, seams, pipes
+
+*Extending the approximation domain.* The kept-face offset approximates the exact normal offset on the UV rectangle of
+the constructed face, including any extension needed to intersect adjacent moved supports. It supplies that rectangle
+through `GeomAdaptor_Surface`, whose bounds select an evaluation domain, not `Geom_RectangularTrimmedSurface`, which
+rejects bounds outside a bounded basis surface. Approximation tolerance, degree and segment limits are unchanged. The
+normal offset is [PMC09 §11.3.1, (11.17)] and a spline as polynomial spans [PMC09 §1.4.2, (1.62)]. **Derived here:**
+evaluating the end span beyond its knot interval continues the same parametric support used by the extended edge
+curves; it neither changes the offset definition nor justifies extrapolating a fitted result outside its certified
+rectangle. Approximation-error, topology, clearance and self-interference checks still apply to that rectangle.
+
+*Both branches of a periodic seam.* A seam has two curves on its face but one 3D edge; they may differ by a period in
+either surface parameter. When the end faces move, a finite seam pcurve can need the same end-span continuation as a
+tangent edge. Both branches are fitted independently at the one-tenth-tolerance interpolation bound, and the modifier
+gets the branch selected by that edge use's orientation; binding both curves by face identity alone would overwrite
+one with the other. Branches needing no continuation keep their route. The representation contract is OCCT's
+`BRep_Builder::UpdateEdge(E,C1,C2,F,Tol)` for a closed face and `BRepTools_Modifier`'s separate `NewCurve2d` calls for
+the two uses. The continuation argument is **derived** from the parameter curves and (11.17). It does not prove that
+arbitrary continuation is regular or non-self-intersecting; the constructed body is checked. Closed form for a
+cylinder with finite spline seam pcurves: volume `pi (r+d)^2 (h+2d)`.
+
+*Exact pipes.* For an exact pipe `P(s,t) = c(s) + r e(s,t)`, e the unit radial vector in the normal plane of the regular
+spine, the normal is radial while the surface is regular; (11.17) gives `c(s) + (r +/- d) e(s,t)`, a pipe about the same
+spine (**derived** from the parameterization and normal [PMC09 §11.6.2, (11.111)-(11.115)]). The local condition is that
+the shifted radius times the maximum spine curvature is less than one; global separation also matters [PMC09
+§11.6.3.4, Thm 11.6.1]. A fitted tensor spline through circular sections is not thereby certified to be this pipe, and
+the kept-face operation has no retained spine/radius descriptor for a general spline support; inferring one from a
+nominal size and replacing the support would change the input surface and is not done.
+
+### Clearance coverage and rims
+
+Clearance carries separate coverage and resolution states. Empty input, failed extrema, or exclusion of every region
+cannot become successful infinite clearance. Distances are measured between whole trimmed regions and the original
+skin, boundaries included; an interior lattice alone gives no lower bound. Near openings a region is measured clear,
+or wholly inside the opening exclusion, or subdivided. Work exhaustion is unresolved, never a measurement.
+*Exclusion bound (derived).* For a closed set A the triangle inequality gives `d(x,A) <= d(c,A) + |x-c|`; a containing
+box supplies c and a radius covering the whole trimmed region, so `d(c,A) + radius < wall` excludes the region. The
+radius is rounded upwards and the modelling confusion added. Trimming and distance computations keep OCCT's numerical
+tolerances: a coverage check using those solvers, not interval certification of their extrema. A failed whole-region
+solve can instead use the lower bound `d(x,skin) >= d(c,skin) - radius`, subdividing until it resolves the requested
+clearance; a failed point solve or exhausted subdivision stays unresolved.
+Distance queries use independent copies of each trimmed surface. Spatial edge curves inherited from an import can
+deviate from the surface within their stored tolerance, and measuring them would measure representation error as wall
+thickness; query curves are rebuilt from each face's pcurves and support with `GeomLib::BuildCurve3d`, whose maximum
+deviation is returned (unresolved or excessive deviation fails the query). For query curve error at most e on either
+shape, `|d(A,B) - d(A',B')| <= 2e` (derived by the triangle inequality); subtract it from the numerical distance and add
+it to an opening exclusion's upper bound, with e = one tenth of the modelling confusion (a numerical estimate, not a
+Bernstein-certified enclosure). A stored edge tolerance [OCCT8 Boolean Operations, "Interferences"] is not a justified
+allowance to reduce the requested wall thickness.
+*Walls and opening rims.* A shell's clearance domain is the inward descendants of the retained input faces; descendants
+reached only from removed input faces close the opening and are rims, not offset walls [OCCT8
+BRepOffsetAPI_MakeThickSolid, `MakeThickSolidByJoin`: the first shell holds the input faces except the removed ones,
+the second is its offset]. This is tracked by input-face identity through construction, not by surface type,
+coordinates, a distance threshold or a hash; a descendant shared with any retained input face is still measured;
+opening descendants stay in the history; an empty retained domain still fails coverage. An opening in a rectangular
+pocket can give an annular rim slightly beyond the removed face, its outer trim at the requested offset and its inner
+trim touching the original pocket walls: independent whole-face distances give zero there, no positive lower bound
+exists, and a uniform lattice can miss that zero. For plane separation h and in-plane distance r from the rectangular
+opening, `d_open^2 = r^2 + h^2` while the adjacent trimmed wall can be at r; a spherical exclusion of radius t retains
+distances down to `sqrt(t^2 - h^2)`, not t (derived by Pythagoras, `h < t`). Subdivision cannot repair a difference of
+domains. These are numerical distance checks [OCCT8 BRepExtrema_DistShapeShape], not interval proofs of extrema.
 
 ### Neighbour-bounded planar push-pull
 
-Zou and Feng, *Push-Pull Direct Modeling of Solid CAD Models*, preprint (2018),
-[section 5.2, Algorithm 3](https://arxiv.org/pdf/1811.04036), construct auxiliary
-volumes bounded by the neighbours' extended underlying surfaces and the moved
-face's start and end supports. A prism is unsuitable for a slanted neighbour.
+[ZouFeng19 §5.2, Alg. 3] build auxiliary volumes bounded by the neighbours' extended underlying surfaces and the
+moved face's start and end supports; a prism is unsuitable for a slanted neighbour. The convex planar specialization
+is derived here: write the body as an intersection of outward support inequalities `n_i.x <= c_i`. Translating the
+selected faces by v changes only their constants to `c_i + n_i.v`, and the result is their new halfspace
+intersection, exactly the neighbour-bounded volume update; active constraints may appear or disappear without a
+topology rule. Moving constants leaves the recession cone unchanged, so a bounded original stays bounded whenever the
+target is nonempty. Triples of independent support planes contain every vertex, giving the temporary box; no artificial
+box face may survive, and each surviving face is tracked through Boolean history to its defining support. Both
+Boolean differences between the original body and its reconstructed support intersection must contain no solid (this
+rejects nonconvex input), and the final topology must pass the validity check. The construction is attempted only after
+the sweep rejects a slanted neighbour. Curved supports and nonconvex neighbour-bounded volumes are open.
 
-The convex planar specialization here is derived: write the body as an
-intersection of outward support inequalities `n_i dot x <= c_i`. Translating the
-selected faces by v changes only their constants to `c_i+n_i dot v`. The result
-is their new halfspace intersection. This is exactly the neighbour-bounded volume
-update; active constraints may appear or disappear without a special topology
-rule. Moving constants leaves the recession cone unchanged, hence a bounded
-original intersection stays bounded whenever the target is nonempty. Triples of
-independent support planes contain every vertex, providing the temporary box.
-No artificial box face may survive in the result. Each surviving face is tracked
-through Boolean history back to its defining original support.
+### Skins and sweeps
 
-Before using this construction, both Boolean differences between the original
-body and its reconstructed support intersection must contain no solid. This
-rejects nonconvex input. Final topology must pass the normal validity check.
-The construction is attempted only after the existing sweep rejects a slanted
-neighbour; previously successful sweep geometry is unchanged. Curved supports and
-nonconvex neighbour-bounded auxiliary volumes remain open.
+Frames along a path are rotation-minimising by the double reflection method [WangJuttler08], with a fourth-order error
+in the step; stock `BRepOffsetAPI_MakePipeShell` twists a profile only where the path starts square to it. A skin's
+cross-section lines are natural C2 cubics, whose minimum of `integral |s''|^2` over H2 interpolants is proved in
+[utilities.md](utilities.md). Closed sections are made fit by cyclic seam alignment: the cyclic cross-correlation of two
+sampled rings is maximised over start shifts and orientation [Dogan25] (the rotation proof by Kabsch/SVD read; the
+version here fixes rotation). Draft of walls that `BRepOffsetAPI_DraftAngle` does not take (it handles planes,
+cylinders and cones) uses the ruled isocline surface over the wall's neutral curve, whose every tangent plane makes the
+draft angle with the pull direction.
 
-*Adjacent refinement (derived).* A rejected adjacent fit marks angular and
-complete-form curvature misses as well as positional misses. Between-row side
-checks call the same measurement and easing alternatives as acceptance. A fit
-already accepted retains its previous refinement decisions. This removes a
-position-only stop condition; finite refinement still does not prove existence
-or convergence for arbitrary boundary jets.
+*Gordon network.* Gordon [Gordon71] as presented by [Siggel18 §3.2.1-3.2.3, (8)-(17)]: the profile skin plus the guide
+skin minus the intersection-grid tensor surface; also [PieglTiller97 ch. 10, p. 485]. Equation (8) is the
+compatibility condition: each skin and the grid must use matching interpolation parameters and bases, which degree
+elevation and knot insertion align without changing geometry. Compatibility and rational representability limits of
+`GeomFill_Gordon` apply. A guided skin through three or more profiles first constructs the compatible Gordon network,
+then applies the G1/G2 end correction below, avoiding assembly and factoring of a dense plate system for a network
+already representable by spline interpolation. The plate construction remains when the network or its correction
+cannot be represented or fails its checks. An accepted plate can have a different interior and bending energy, so
+validation compares the delivered surfaces; exact curve interpolation alone does not establish equivalence. Coplanar
+networks with planar supports keep the plate construction (a plane has zero geometric bending energy, and rebuilding
+its unit network rectangle would change an accepted carrier and trims); the model tolerance defines the coplanarity
+search and the plate checks decide delivery. For curved networks the accepted interior is compared with a matched
+reference surface in both sampled directions.
 
-Endpoint jet information is retained as a hint after a fit has already failed its
-result checks. It explains the failed fit and never rejects a delivered fit or
-acts as a feasibility condition for positional-tolerance guides.
+*G1/G2 end correction (derived).* Two surfaces sharing an edge and their tangent planes along it meet G2 when their
+normal curvatures agree in one direction across the edge (linkage curve theorem [PegnaWolter92]; for the geometric
+interpretation and its tangent-plane-continuity assumption see [PMC09 §8.1.3.5]). The skin already holds the profile,
+so G1 needs only the way across, `S_v`, turned into the support's tangent plane, and G2 only the normal part of
+`S_vv` set to the support's second fundamental form at `S_v`; both moves are along the support's normal. The
+correction is `h1(v) m1(u) + h2(v) m2(u)`, h1 and h2 the quintic Hermite functions of the end (`h1' = 1`, `h2'' = 1`
+there, the rest zero) that vanish to the second derivative at the nearest place of the next profile. The other
+profiles are kept and the skin stays C2; `m1`, `m2` are the moves less their straight interpolation between the guides,
+so the guides are kept too. Its sampled field approximation is not a continuous error certificate. Where a guide leaves
+the end profile out of the support's plane, or with another bend, the surface follows the guide. Nets whose skin carries
+weights are outside this correction. Exact interpolation does not imply less bending energy (a counterexample raised
+the integral from 0.9364 to 1.2673), so this candidate needs a family-wide geometry and fairness review before it
+replaces accepted results.
 
-### Owned point witnesses near curved trims
+*Pairing of unlike closed sections (open).* Approximating one conic by non-rational cubic pieces is not the problem of
+correspondence between unlike sections. [Floater97 §2, Thm 3.1] give geometric Hermite interpolants and a Hausdorff
+bound for positive normalized middle weights up to 3 (for degree three the subdivision order is six); it controls the
+conversion of each section, not which points on two sections are joined. Repeated bisection of three initial parameter
+regions can explain a knot pattern without determining the correspondence. Rational reparameterization supplies none
+either: [HuWangWang18 §2.1, (3)] change weights by `w_i -> lambda^i w_i` under `t = lambda u / (1 - u + lambda u)`,
+`lambda > 0`, preserving degree and geometry; their §2.2, (7), (9), (12) use curvature maxima as breakpoints,
+normalized arc lengths as new breakpoints and matching derivatives, as choices for one curve's speed, not a theorem
+selecting points between unlike curves; a three-region knot pattern does not establish Möbius pieces (a one-map
+diagnostic through three places per region missed the observed conics by 0.234 to 0.550 model units: evidence
+against that hypothesis, not a bound on piecewise reparameterizations). Compatibility is distinct from choosing
+correspondence: [PieglTiller97 §10.3, pp. 458-459, (10.7)] assume common section degree and knots and interpolate the
+control points (homogeneous for rational sections); [EngleitnerJuttler18 §2-4] permit incompatible section spaces
+through patchwork splines, with existence in the chosen space (Thm 3, under shadow-compatibility and
+smoothness-monotonicity) and a constrained energy minimization (§4.3). In every case the sections'
+parameterizations are given, so none identifies an unknown pairing from an output knot pattern. No pairing law is
+installed.
 
-A fixed-resolution trim polygon can misclassify points near a curved rim. An
-interior-distance witness now uses parity of boundary arcs certified to avoid
-the query point. Positive-weight Bezier hulls enclose each arc in a convex tube
-about its chord. If that tube excludes the point, straightening the arc to its
-chord cannot cross the point and preserves crossing parity. Subdivide only
-uncertain arcs; retain uncertainty once hull deviation reaches the existing
-numerical enclosure guard. For a rectangle witness, additionally require that
-no boundary enclosure intersects the rectangle. Surface construction, result
-bounds and the ordinary surface-interior checks remain unchanged.
+*Solid publication.* Planar end caps are the only cap construction of the smooth section skin. A failed cap is a
+construction failure for a solid request; an open sheet request returns its sheet. Before publication closure is
+checked with `BRepCheck_Shell::Closed`, orientation with `BRepLib::OrientClosedSolid` and validity with
+`BRepCheck_Analyzer` [OCCT8 BRepCheck_Shell, BRepLib]; disconnected shells are not silently discarded. These establish
+topological closure and validity, not freedom from geometric self-intersection. Nonplanar end caps are open.
 
-The hull property is Patrikalakis, Maekawa and Cho, *Shape Interrogation for
-Computer Aided Design and Manufacturing* (2009), section 1.4.2. Polygon crossing
-parity and its relation to winding number are given by Hormann and Agathos,
-*The Point in Polygon Problem for Arbitrary Polygons* (2001), sections 1-2,
-equations (1)-(3), [author manuscript](https://www.inf.usi.ch/hormann/papers/Hormann.2001.TPI.pdf).
-The adaptive arc-to-chord restriction is derived here. This is not interval
-arithmetic: it retains the established floating-point enclosure guard and treats
-unresolved curves or near-boundary points conservatively.
+### Booleans
 
-Adjacent owned pcurves can have different representations of their common
-vertex. A parity chain includes connecting segments only when each gap fits
-within the unchanged enclosure guard. For larger gaps, point ownership comes
-from `BRepClass_FaceClassifier` on the delivered face, rather than an invented
-closing curve. Before propagating that ownership across a nonzero rectangle,
-exclude every boundary-arc tube and the entire coordinate box of every endpoint
-gap, enlarged only by the existing guard. Unsupported pcurves cannot supply a
-cell certificate. A remote endpoint gap therefore does not invalidate an
-otherwise resolved local cell. Points classified on the rim remain unresolved.
+Cell selection from one General Fuse with a ladder of fallbacks, each rung accepted only if checked; a sheet tool
+divides rather than subtracts.
 
-This local propagation is derived: an open connected rectangle disjoint from
-the delivered boundary lies in one component of its complement, so its ownership
-is constant and one authoritative interior point suffices. It assumes the face's
-own ownership semantics; it does not certify a malformed wire's missing geometry
-or assert that any arbitrary-gap closure is the delivered trim. The test family
-varies endpoint gaps, UV scale and rigid pose, and independently checks the seed
-with the face classifier. The ordinary interior-curvature classifier, all
-construction arithmetic and all result tolerances are unchanged.
-
-
+*Unproven.* Seam and pairing conventions of closed skins (a convention, not derived), tolerance ladders of the Boolean
+fallbacks, the sampling counts of the offset and skin validity checks.
 ### Internal curvature joins and boundary-ribbon compatibility
 
 A quintic spline knot of multiplicity four permits a second-derivative jump;
@@ -1704,199 +1444,108 @@ framework, not a proof of convergence of this correction.
 
 ### Face-offset endpoint certificate limits
 
-A normal-offset surface and a valid BREP do not by themselves establish a bounded face-offset
-result. The normal-offset definition is Patrikalakis, Maekawa and Cho, *Shape Interrogation for
-Computer Aided Design and Manufacturing* (2009), [section 11.3.1, equation (11.17)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html).
-The boundary must also realize the required incidences within an independently assigned budget.
-In particular, measure `|V-C(t_V)|` for every oriented endpoint occurrence, and compare 3D edge
-curves with both lifted pcurves. A metadata tolerance subsequently enlarged to cover a measured
-gap is not an independent result bound. Closed edges require both endpoint orientations.
+A normal-offset surface [PMC09 §11.3.1, (11.17)] and a valid BREP do not by themselves give a bounded face-offset
+result: the boundary must also realize the required incidences within an independently assigned budget. For every
+oriented endpoint occurrence measure `|V - C(t_V)|`, and compare the 3D edge curves with both lifted pcurves. A
+metadata tolerance enlarged afterwards to cover a measured gap is not an independent result bound. Closed edges need
+both endpoint orientations. The certificate checks every oriented vertex/edge occurrence against
+`max(operation tolerance, input vertex tolerance, carried input vertex tolerance + incident normal spread)`, assigned
+before any incident curve is fitted; both lifted seam pcurves are checked after rebuilding and optional surface
+approximation. The inherited normal-spread estimate is sampled, not an interval enclosure.
 
-This matters in the current fixed-incidence construction. Continuing a pcurve beyond an
-approximately tangent seam's old trim need not keep it on the other offset support. A local
-point-on-support solve may locate a vertex while its incident curves still miss it. An
-experimental SVD Gauss--Newton vertex refinement returned otherwise valid bodies with endpoint
-gaps of 0.0034 to 0.0052 model units; the input tolerances were at most about 5e-6. That experiment
-was discarded. Independent endpoint measurements also found a pre-existing 0.1478 gap on an
-inward offset with cylindrical and toroidal supports, despite sampled edge/support gaps below
-1e-6 and a valid shape. That audit made no production change. The endpoint certificate now
-checks every oriented vertex/edge occurrence against `max(operation tolerance, input vertex
-tolerance, carried input vertex tolerance + incident normal spread)`, assigned before any
-incident curve is fitted. Both lifted seam pcurves are checked after rebuilding and optional
-surface approximation. Inflating result metadata can no longer satisfy this independent check.
-The inherited normal-spread estimate is still sampled, not an interval enclosure.
+In the fixed-incidence construction, continuing a pcurve beyond an approximately tangent seam's old trim need not keep
+it on the other offset support, and a local point-on-support solve may locate a vertex while its incident curves still
+miss it (an SVD Gauss-Newton vertex refinement returned valid bodies with gaps 700 to 1000 times the input tolerances).
+Two representation defects were found:
+1. *Seam carried through a moved junction.* An inward junction on a cylindrical support moves in azimuth while its chart
+   seam stays fixed. A seam is not a physical intersection: carry both pcurves through the projected endpoint UVs with the
+   same linear endpoint correction, then fit their common lift. **Derived:** if the original pcurves differ by a period
+   vector kP, adding the same correction `delta(t)` preserves `S(q(t)+delta(t)) = S(q(t)+kP+delta(t))` on a periodic
+   carrier; the support and physical trims stay fixed. This needs regular endpoint projections and a valid cut in the
+   retained region (validity, normal distance and interference stay separate checks) and is not a general existence
+   proof for arbitrary seam routing.
+2. *Closed edge without periodic parameter.* A closed topological edge need not have a periodic curve parameter
+   [OCCT8 BRep_Tool `IsClosed`, `CurveOnSurface`: closure is by shared vertices; the two seam pcurves are distinct].
+   Reusing its old parameter width for a moved endpoint can put the final section off the junction; where the candidate
+   final section exceeds the preassigned endpoint budget, the final occurrence's section parameter is solved
+   independently. A defect with a seam as retained cut (normal spread exactly zero) is held to the operation's 1e-6
+   allowance and is not an unresolved angular-budget case.
 
-Two representation defects caused six measured invalid deliveries. First, an inward junction
-on a cylindrical support moved in azimuth while its chart seam stayed fixed. A seam is not a
-physical intersection: carry both pcurves through the projected endpoint UVs with the same
-linear endpoint correction, then fit their common lift. Derived here: if the original pcurves
-differ by a period vector kP, adding the same correction delta(t) preserves
-`S(q(t)+delta(t)) = S(q(t)+kP+delta(t))` on a periodic carrier. The support and physical trims
-stay fixed. This argument requires regular endpoint projections and a valid cut in the retained
-region; validity, normal distance and interference remain separate checks. It is not a general
-existence proof for arbitrary seam routing. The 0.147808 gap falls below 3.03e-9 in the first
-measured body, including both lifted pcurves.
-
-Second, a closed topological edge need not have a periodic curve parameter. Reusing its old
-parameter width for a moved endpoint put its final section off the junction, although its first
-section hit it. Where that candidate final section exceeds the preassigned endpoint budget,
-solve the final occurrence's section parameter independently. Four sphere/toroid directions
-had 2.57e-6 to 2.63e-6 gaps. The relevant vertex's input tolerance is 1.000000022e-7 and its
-incident retained cut is a seam (normal spread exactly zero), so the operation's 1e-6 allowance
-applies: these four are defects, not unresolved angular-budget cases. The first measured repair
-falls below 2.91e-9. Every other completed construction in the measured sweep keeps its existing representation.
-
-OCCT, *BRep_Tool reference manual* (8.0.1, accessed 2026),
-[`IsClosed` and `CurveOnSurface`](https://occt3d.com/dev/doc/refman/html/class_b_rep___tool.html),
-defines topological edge closure by shared vertices and distinguishes the two pcurves of a
-seam. Neither definition implies periodicity of the stored curve's parameter.
-
-A revolution-extension hypothesis was independently refuted on 85 generated revolution faces:
-8,500 evaluations, including extrapolated parameters, agree with homogeneous de Casteljau
-continuation of the end profile span, followed by rotation, within 7.80e-15 model units.
-Offset evaluation agrees with `S+d n` within floating-point error. On the first refused contact,
-the two independently continued *source* lifts already differ by 3.23e-5 and their unit normals
-by 0.001617, although they agree at the old vertex to 8.71e-15. The triangle inequality gives
-`gap_after <= gap_before + |d| |n1-n2|` (derived here). This explains why an old trimmed-contact
-bound does not automatically certify the continued contact. It does not authorize a larger
-output tolerance or prove that a jointly constructed continuation cannot exist.
-
-Closest-point stationarity follows the same book's [section 7.2.1, equations (7.8)-(7.9)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node135.html).
-SVD least squares and Gauss--Newton are described by Nocedal and Wright, *Numerical Optimization*,
-second edition (2006), sections 10.2-10.3, equations (10.20)-(10.26), pages 252-255
-([authors' contents](https://users.iems.northwestern.edu/~nocedal/book/toc.html)). Neither source
-establishes that a locally refined vertex connects to the desired intersection branch. A
-failed iteration is not an impossibility proof. Reconstructing nearby exact section intersections
-and minimizing contact distances in model space also failed the first measured continuation;
-these experiments do not establish nonexistence of an offset within the input uncertainty.
-
-A structural alternative is to construct each junction together with its incident contact curves,
-track intersection branches before trimming, and carry explicit endpoint and edge/support budgets
-through the fit. This is a proposed design, not an implemented solution. Mukundan, Ko, Maekawa,
-Sakkalis and Patrikalakis, *Tracing Surface Intersections with Validated ODE System Solver* (2004),
-[section 2.2, equations (4)-(6), sections 3-4 and Theorem 1](https://web.mit.edu/deslab/pubs/files/SM04.pdf),
-distinguish isolated tangential contacts, branching and higher-order contacts, then validate
-tracing and map continuous parameter enclosures to model-space enclosures. Their assumptions
-include an identified branch, a bounded starting point and regular rational interval surfaces;
-this is not a ready theorem for arbitrary normal-offset surfaces or approximate contact seams.
-The upstream [`BRepOffsetAPI_MakeOffsetShape::PerformByJoin` contract](https://occt3d.com/dev/doc/refman/html/class_b_rep_offset_a_p_i___make_offset_shape.html)
-also distinguishes intersection joins from added arc faces and does not promise self-intersection
-elimination. A general construction must establish its own existence conditions and final bounds.
-
+*Why an old trimmed-contact bound does not certify a continued contact.* Source lifts continued independently (by
+homogeneous de Casteljau continuation of the end profile span, then rotation, which matches the offset `S + d n` to
+floating-point error) already differ at the first refused contact by 3e-5 with normals differing by 1.6e-3 although
+they agree at the old vertex. The triangle inequality gives `gap_after <= gap_before + |d| |n1-n2|` (derived). It
+neither authorizes a larger output tolerance nor shows that a jointly constructed continuation cannot exist.
+Closest-point stationarity: [PMC09 §7.2.1, (7.8)-(7.9)]; SVD least squares and Gauss-Newton: [NocedalWright06
+§10.2-10.3, (10.20)-(10.26)]. Neither establishes that a locally refined vertex connects to the desired intersection
+branch, a failed iteration is no impossibility proof, and reconstructing nearby exact section intersections and
+minimizing contact distances in model space also failed the measured continuation; none shows that no offset exists
+within the input uncertainty.
+*Structural alternative (proposed, not implemented).* Construct each junction together with its incident contact
+curves, track intersection branches before trimming, and carry explicit endpoint and edge/support budgets through the
+fit. [Mukundan04 §2.2, (4)-(6), §3-4, Thm 1] distinguish isolated tangential contacts, branching and higher-order
+contacts, then validate tracing and map parameter enclosures to model-space enclosures; their assumptions (an identified
+branch, a bounded starting point, regular rational interval surfaces) make this no ready theorem for arbitrary
+normal-offset surfaces or approximate contact seams. The [OCCT8 BRepOffsetAPI_MakeOffsetShape `PerformByJoin`] contract
+distinguishes intersection joins from added arc faces and promises no self-intersection elimination. A general
+construction must establish its own existence conditions and final bounds.
 
 ### Separated tangent junctions
 
-The fixed-incidence construction runs first and retains its successful results.
-After a vertex fails the point-on-every-support check, a single-shell solid with
-three incident faces and a retained tangent edge can instead split the junction.
-The tangent edge ends at its original endpoint transported to the offset. Each of
-its two continuations intersects the third offset support independently; the two
-sharp edges use those separate endpoints. The old support surfaces remain exact.
-A ruled strip fills the boundary between the continuations, and its transverse end
-closes the third face. Face lineage associates this added strip with all three
-incident parents. Unsupported arrangements still refuse.
-
-The ruled construction is `R(u,v)=(1-v)C0(u)+v C1(u)`, with the two boundary
-curves parametrized on [0,1]. Patrikalakis, Maekawa and Cho, *Shape Interrogation
-for Computer Aided Design and Manufacturing* (2009), section 9.7.1, equations
-(9.74)-(9.76), give this representation
-([chapter](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node190.html)).
-OCCT `BRepFill::Face` constructs it through `GeomFill_Generator`; this is a boundary
-closure, not a claim that the strip is a regular developable surface or an exact
-normal-distance envelope. The normal offset definition is equation (11.17) in
-section 11.3.1 of the same book
-([chapter](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html)).
-Section 11.1.4 discusses separately generated edge and corner patches in solid
-offsets; it does not prove this strip's validity
-([chapter](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node217.html)).
-
-Shell reconstruction retains the orientation of each source-face occurrence,
-including faces outside the split junction. The modifier's shape map identifies
-shapes independently of their occurrence orientation; its stored face is not a
-replacement for the oriented use in the shell. This follows the OCCT topology
-model (Open CASCADE, *Modeling Data*, 8.0.1, 2026,
-["Orientation"](https://occt3d.com/dev/doc/overview/html/occt_user_guides__modeling_data.html)) and the explicit
-orientation composition in `BRepTools_Modifier::Rebuild`, "copy the sub-elements"
-([source](https://github.com/Open-Cascade-SAS/OCCT/blob/b8f597c6/src/ModelingData/TKBRep/BRepTools/BRepTools_Modifier.cxx)).
-Using the stored orientation for an unchanged face can give a shared edge two
-identical uses, so a closed collection of individually valid faces is not an
-oriented boundary. The correction restores occurrence orientations without
-changing carriers, curve parameters or contact bounds. The generated regression
-varies concave cylinder and cone unions with cubic-profile revolutions in scale
-and rigid pose, checking validity and boundary lifts independently.
-
-The seam's two transported endpoints must agree within the operation tolerance.
-The rail fits use one tenth of that tolerance. The transverse chord must project
-to the third support within the unchanged operation bound. Every oriented endpoint
-and each new boundary's lifted pcurve is checked against that bound independently
-of output metadata. Existing validity, self-interference, signed-distance, volume
-and whole-body clearance checks still run. Curve/support checks are adaptive fits
-followed by sampled validation, not interval certificates of the whole strip.
-
-**Derived diagnostic:** for two regular contact continuations with a common
-position and tangent, their normal separation is
-`0.5 * (k0-k1) * s^2 + o(s^2)` in common tangent arc coordinate s. The curvature
-must be taken on the continued side of a boundary knot; a symmetric finite
-difference across a second-derivative break averages the two sides. This Taylor
-estimate diagnoses the failed old incidence and never assigns a result tolerance.
-The reconstruction does not assume that this local estimate certifies existence,
-regularity, or nonintersection of a finite strip. Tests vary the revolution's
-profile, scale and rigid placement and check the delivered boundary directly.
+The fixed-incidence construction runs first and keeps its successful results. After a vertex fails the
+point-on-every-support check, a single-shell solid with three incident faces and a retained tangent edge can instead
+split the junction. The tangent edge ends at its original endpoint transported to the offset; each of its two
+continuations intersects the third offset support independently, and the two sharp edges use those separate endpoints.
+The old support surfaces stay exact. A ruled strip `R(u,v) = (1-v) C0(u) + v C1(u)`, boundary curves on [0,1] [PMC09
+§9.7.1, (9.74)-(9.76)], fills the boundary between the continuations and its transverse end closes the third face;
+face lineage gives the strip all three incident parents. `BRepFill::Face` builds it through `GeomFill_Generator`. It is
+a boundary closure, not a claim that the strip is a regular developable surface or an exact normal-distance envelope
+(normal offset: [PMC09 §11.3.1, (11.17)]; separately generated edge and corner patches in solid offsets are discussed in
+§11.1.4, which does not prove this strip's validity). Unsupported arrangements refuse.
+*Checks.* The seam's two transported endpoints must agree within the operation tolerance; rail fits use one tenth of it;
+the transverse chord must project to the third support within it. Every oriented endpoint and each new boundary's lifted
+pcurve is checked against that bound independently of output metadata, and validity, self-interference, signed-distance,
+volume and whole-body clearance checks still run. Curve/support checks are adaptive fits followed by sampled validation,
+not interval certificates of the whole strip.
+*Shell orientation.* Shell reconstruction keeps the orientation of each source-face occurrence, including faces outside
+the split junction: the modifier's shape map identifies shapes independently of occurrence orientation, and its stored
+face is not a replacement for the oriented use [OCCT8 Modeling Data, "Orientation"; `BRepTools_Modifier::Rebuild`,
+"copy the sub-elements"]. The stored orientation of an unchanged face can give a shared edge two identical uses, so a
+closed collection of individually valid faces is not an oriented boundary. Carriers, curve parameters and contact bounds
+are unchanged.
+**Derived diagnostic:** for two regular contact continuations with a common position and tangent, the normal separation
+is `0.5 (k0-k1) s^2 + o(s^2)` in the common tangent arc coordinate s. The curvature is taken on the continued side of a
+boundary knot (a symmetric finite difference across a second-derivative break averages the two sides). This Taylor
+estimate diagnoses the failed old incidence and never assigns a result tolerance; it does not certify existence,
+regularity or nonintersection of a finite strip.
 
 ### Transported contact uncertainty is confined to its measured domain
 
-Let `p(t), q(t)` be corresponding lifts of a source edge and `n(t), m(t)` their
-outward unit normals. From the normal-offset definition in Patrikalakis, Maekawa
-and Cho, *Shape Interrogation for Computer Aided Design and Manufacturing* (2009),
-[section 11.3.1, equation (11.17)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html),
-the triangle inequality gives the following **derived** bound for equal signed
-moves `d`:
+Let `p(t), q(t)` be corresponding lifts of a source edge and `n(t), m(t)` their outward unit normals. From the normal-offset
+definition [PMC09 §11.3.1, (11.17)] the triangle inequality gives the **derived** bound for equal signed moves d:
 
-`|(p+d n)-(q+d m)| <= |p-q| + |d| |n-m|`.
+`|(p+d n) - (q+d m)| <= |p-q| + |d| |n-m|`.
 
-For unequal signed moves, replace the second term by `|d1 n-d2 m|`. If the
-representative 3D curve, rather than the other lift, is used, its discrepancy must
-also be included. A bound on the original closed parameter interval does not bound
-an extrapolation outside that interval. In particular, a large continued residual
-cannot be substituted for the original source uncertainty to justify itself.
-Nor does a measured nonzero input error provide a necessary lower limit on output
-accuracy: the inequality is an upper bound, not a nonexistence theorem.
-
-On 47 generated sources with approximate tangent contact against revolution
-supports, 4,097 samples on each of 79 relevant edges gave maximum source lift
-disagreement `5.243e-8`, and maximum pointwise transported bound `5.478e-8` for
-`d=0.05`, in model units. Their input edge tolerances were `1e-7`. These measurements
-do not support replacing the operation's `1e-6` allowance with a constant near
-`1e-5`. The sample maxima are diagnostics, not certified supremum bounds. The
-existing endpoint and paired-pcurve checks remain necessary.
-
-A reference modeller preserved the complete face-edge-vertex incidence graph on
-four corresponding outward requests, without a vertex patch. That observation
-alone does not establish a strictly bounded construction. Two results had curve
-endpoints within `7.59e-10`, but their junction points were approximately
-`2.287e-5` from the original exact offset revolution support; two further returned
-bodies had endpoint discrepancies above `5e-5`. No reference result is accepted
-as a strict geometric oracle from topology or return status alone.
-
-An independent diagnostic reduces distance to a regular offset revolution to a
-meridian calculation. Write the generating curve as `(r(v),h(v))` about the axis,
-with `r>0` and `L=sqrt(r'^2+h'^2)>0`. For surface-normal offset `d`, its offset
-meridian is `(r+d h'/L, h-d r'/L)`. For query cylindrical coordinates `(rho,z)`,
-minimize the Euclidean distance to that curve; angular minimization aligns the
-radial directions when the offset radius remains positive. This formula is
-**derived** by evaluating `S_u cross S_v` for a revolution. Numerical scalar
-minimization over an enlarged parameter interval agrees with direct 3D projection
-to about `2.1e-15` on the first rejected junction. It is a cross-check of that
-measurement, not a whole-domain existence or global-minimum certificate.
-
-The distinction between exact and approximated offsets also appears in the same
-book's [section 11.3.7](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node230.html).
-A continuous contact construction still needs branch ownership and endpoint
-compatibility; the initial-component assumptions of Mukundan, Ko, Maekawa,
-Sakkalis and Patrikalakis, *Tracing Surface Intersections with Validated ODE System
-Solver* (2004), [sections 1, 2.2 and 4](https://web.mit.edu/deslab/pubs/files/SM04.pdf),
-are not supplied by an independently continued approximate contact. Neither the
-reference observation nor the finite-point bound closes that construction problem.
+For unequal signed moves replace the second term by `|d1 n - d2 m|`; if the representative 3D curve rather than the other
+lift is used, its discrepancy is added. A bound on the original closed parameter interval does not bound an
+extrapolation outside it, so a large continued residual cannot justify itself by replacing the source uncertainty; and a
+measured nonzero input error is no necessary lower limit on output accuracy (the inequality is an upper bound, not a
+nonexistence theorem). The operation's 1e-6 allowance is not replaced by a constant near 1e-5: on 47 generated sources
+with approximate tangent contact against revolution supports (input edge tolerances 1e-7) the sample maxima were 5.2e-8
+for the source lift disagreement and 5.5e-8 for the pointwise transported bound at `d = 0.05`; sample maxima are
+diagnostics, not certified suprema, and the endpoint and paired-pcurve checks remain necessary.
+A reference result preserving the whole face-edge-vertex incidence graph, or returned without error, is no strict
+geometric oracle: bodies were seen with curve endpoints within 7.6e-10 whose junction points were 2.3e-5 from the
+exact offset revolution support, and others with endpoint discrepancies above 5e-5.
+*Offset of a revolution by its meridian (derived).* Write the generating curve as `(r(v), h(v))` about the axis, `r > 0`,
+`L = sqrt(r'^2 + h'^2) > 0`. For surface-normal offset d the offset meridian is `(r + d h'/L, h - d r'/L)`, by
+evaluating `S_u x S_v` for a revolution. For query cylindrical coordinates `(rho, z)`, minimize the Euclidean distance to
+that curve; angular minimization aligns the radial directions while the offset radius stays positive. Scalar
+minimization over an enlarged parameter interval agrees with direct 3D projection to about 2e-15 on the first rejected
+junction: a cross-check of that measurement, no whole-domain existence or global-minimum certificate.
+Exact versus approximated offsets: [PMC09 §11.3.7]. A continuous contact construction still needs branch ownership and
+endpoint compatibility; the initial-component assumptions of [Mukundan04 §1, 2.2, 4] are not supplied by an independently
+continued approximate contact, and neither the reference observation nor the finite-point bound closes that problem.
 
 ### Contact ownership on a joined blend sheet
 
