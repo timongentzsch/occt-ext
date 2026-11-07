@@ -26,15 +26,7 @@ This supports the locality construction concept. The implemented two-dimensional
 quadrant rotation is not a claim to reproduce Skilling's global Gray-code algorithm;
 no speed theorem follows from the citation.
 
-[5] Michael E. Hohmeyer and Brian A. Barsky (1989), “Rational continuity: parametric, geometric, and Frenet
-frame continuity of rational curves”, ACM Transactions on Graphics 8(4), 335–359. The beta-constraints for G^n
-(equations 105 to 109) are the end conditions of `BRepCurveExt_Bridge`; the three free scalars at an end are its
-tensions.
-
-[6] Standard constructions without a single source. A circle tangent to two curves has its centre on the
-intersection of their offsets by the radius; the offset point is C + r n, solved by Newton's method with the exact
-derivative dO/du = C' + r (n x dT/du), started along the pieces as in the documentation of `ChFi2d_FilletAlgo`.
-Chaining unordered curves grows greedily from nearest ends. A gap in a chart closes with a straight segment
+[5] Standard constructions without a single source. Chaining unordered curves grows greedily from nearest ends. A gap in a chart closes with a straight segment
 between the surface parameters of its two ends.
 
 ## Keys used in operations.md

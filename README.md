@@ -6,7 +6,7 @@
 
 The repository is OCCT with its history, followed by commits that add
 
-* **`TKAlgoExt`**, nine packages: rolling-ball fillets and chamfers, boundary-first Patch fills, Gordon and guided skins, framed sweeps, offsets and shells, G0 to G3 bridge curves, surface alignment and squaring, curve and surface deformation, and cell-based Booleans;
+* **`TKAlgoExt`**, nine packages: rolling-ball fillets and chamfers, boundary-first Patch fills, Gordon and guided skins, framed sweeps, offsets and shells, surface alignment and squaring, curve and surface deformation, and cell-based Booleans;
 * **numerical utilities** in `TKGeomAlgo` and `TKMesh`: interval enclosures, Bernstein products, constrained tensor-spline fitting, certified knot compaction, trim integration, surface jets;
 * **corrections** to existing OCCT algorithms, one commit each, with the derivation and limits of each. One of them makes face classification 30 times faster on the benchmark plate.
 
@@ -21,9 +21,8 @@ The base is OCCT `b8f597c6` (30 July 2026). Nothing here has been proposed upstr
 | **Smooth skins** through sections, and Gordon skins through networks of profiles and guides | `BRepOffsetAPI_ThruSections` bulges to half-width 19.3 through six circles of radius at most 10 | Stays within the sections (10.0); closed rings joined seam to seam; guided skins that contain their guides | [benchmarks.md](dox/extensions/benchmarks.md) |
 | **Framed sweeps and drafts** | `MakePipeShell` twists a profile unless the path starts square to it; `DraftAngle` takes planes, cylinders and cones | Rotation-minimising frames (double reflection, fourth-order error); draft of any wall by its isocline surface | [operations.md](dox/extensions/operations.md) |
 | **Hollow, shell, offset, thicken, push-pull, defeature** | An offset that reaches a fillet radius returns an invalid or wrong solid (volume off by 3.3e4 on the benchmark) | Faces the distance would shrink to nothing are removed first; exact to 1e-11 on the benchmark; a face offset that keeps every face, sharp edges where the moved faces cross, tangent edges held to the input's own tolerance, each result certified by distances and loadable from a saved file; sheets with C0 creases are divided before they are thickened; several features removed in one call | [benchmarks.md](dox/extensions/benchmarks.md) |
-| **Bridge curves of G0 to G3** between curves or from a point and a direction | no direct counterpart | Continuity from the end conditions of the geometric-continuity constraints (Hohmeyer and Barsky 1989), tested to 1e-12 on a circle and a helix; cusps refused | [references.md](dox/extensions/references.md) |
 | **Surface bridging, alignment, squaring, deformation** | no direct counterpart | G1 bridges and alignments whose normals agree with the supports along the shared edge; four-sided surfaces over boundaries with supports; carrying curves and bodies from one face to another in UVN | `BRepSurfaceExt`, `BRepCurveExt` |
-| **Curves**: offset at any scale, outline, regions, corner rounding of wires, tangent circles, spirals | `BRepOffsetAPI_MakeOffset` depends on the curve's size (absolute 1e-7 lengths); `HLRBRep` has documented limits on tangent and edge-on faces | Offsets that behave at any scale, exact silhouette events, all bounded cells of overlapping and nested loops | `BRepCurveExt` |
+| **Curves**: offset at any scale, outline, regions, tangent circles, spirals | `BRepOffsetAPI_MakeOffset` depends on the curve's size (absolute 1e-7 lengths); `HLRBRep` has documented limits on tangent and edge-on faces | Offsets that behave at any scale, exact silhouette events, all bounded cells of overlapping and nested loops | `BRepCurveExt` |
 | **Booleans that report what they did** | a single run | A ladder of fallbacks, each accepted only if its result is checked; imprints of curves along a direction or normals | `BRepBooleanExt` |
 | **Certified numerics** | no direct counterpart | Outward-rounded interval enclosures, a displacement bound for knot removal over the whole rectangle, adaptive trim integration | [utilities.md](dox/extensions/utilities.md) |
 
@@ -111,7 +110,7 @@ is supported; the numbers are in the benchmark and the tests.
 | `BRepFilletExt` | Constant, variable, range and station fillets, chamfer, contour and prism support, blend validity checks |
 | `BRepPatchExt` | Patch: one face inside a loop of edges (chained, with gaps closed, if the boundary does not close), with G0/G1/G2 to neighbouring faces and interior guides, over the mean plane or over a chart of its own |
 | `BRepSurfaceExt` | Surface alignment, bridging, constraint jets, deformation, face support and rebuild, face separation proofs |
-| `BRepCurveExt` | Planar and 3D curve offset, outline, tangent circles, corner rounding of wires, G0 to G3 bridge curves, projection, rebuild, refinement, regions, spiral |
+| `BRepCurveExt` | Planar and 3D curve offset, outline, tangent circles, projection, rebuild, refinement, regions, spiral |
 | `BRepOffsetExt` | Solid offset, hollow, shell, thicken, push-pull, face offset that keeps every face, defeaturing, sewing history |
 | `BRepSkinExt` | Gordon and guided skins, framed sweeps, draft |
 | `BRepBooleanExt` | Cell-based Booleans with a ladder of fallbacks, checked solids, imprints |
@@ -142,13 +141,11 @@ from `std::runtime_error` and carries a stable reason code.
 ### Section policy
 
 What follows from the mathematics is in this tree. What an application chooses is not: the blend section law
-for curvature continuity, how a bridge curve chooses tensions it was not given, which control vertices an
+for curvature continuity, which control vertices an
 alignment keeps, the shape of a sheet extension, and the mapping of a curve deformation. For curvature
 continuity, `BRepBlendExt_Policy.hxx` has a conic-section default and refuses curvature-continuous requests
 until a caller supplies a law through `BREPBLENDEXT_POLICY_HEADER` and `BREPBLENDEXT_POLICY_CLASS`
-([Building](#building)). The derived parts that those choices sit on are here: the G0 to G3 bridge
-construction `BRepCurveExt_Bridge.hxx`, which takes the tensions as arguments, and planar corner rounding
-`BRepExt::roundWireCorners`.
+([Building](#building)).
 
 ## Building
 
