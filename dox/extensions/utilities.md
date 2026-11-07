@@ -12,7 +12,7 @@ means a number or rule chosen for the code, not derived. Sources are listed in [
 
 `BRepAlgoExt_PatchFlow` builds a chart of a disc-like boundary loop. It uses `TKMesh` because the chart needs its
 Delaunay mesher. The interior survey used by Patch is `BRepPatchExt_Inside`; its ratio-four acceptance rule is an
-unproven heuristic ([operations.md](operations.md#brepatchext-boundary-first-fill)).
+unproven heuristic ([operations.md](operations.md#breppatchext-boundary-first-fill)).
 
 The cotangent stiffness matrix L is formed, the interior equation L_II u = K_I is solved with zero boundary
 log scale, and the boundary turns follow from pi - angleSum - (Lu)_boundary. For boundary directions t_i and
