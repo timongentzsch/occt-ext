@@ -1,6 +1,6 @@
 # Corrections to existing OCCT algorithms
 
-Twenty-one changes to existing OCCT code, one commit each, on top of OCCT `b8f597c6` (30 July 2026).
+Changes to existing OCCT code, one commit each, on top of OCCT `b8f597c6` (30 July 2026).
 Each entry states the problem, the derivation that makes the change correct, and its limits.
 Derivations are elementary arguments, not machine-checked proofs, unless a paper is cited.
 Existing OCCT tolerances and limits are kept unless an entry names an added constant.
@@ -36,9 +36,13 @@ guard (`Geom_OffsetSurfaceUtils-cancellable-progress`) first.
 | [BndLib-torus-patch-box](#bndlib-torus-patch-box) | `810a8e12a5` | box misses the patch | not assessed |
 | [CSLib_Class2d-v-bucket-index](#cslib_class2d-v-bucket-index) | `341272613f` | linear scan per query | not assessed |
 | [BRepTopAdaptor_FClass2d-periods-read-once](#breptopadaptor_fclass2d-periods-read-once) | `6e6ea43f94` | repeated work | not assessed |
+| [BRepFill_CompatibleWires-planar-polar-cut](#brepfill_compatiblewires-planar-polar-cut) | `3fdfd239ba` | search in three dimensions | not assessed |
+| [GeomFill_Gordon-known-contacts](#geomfill_gordon-known-contacts) | `a9169c5405` | repeated search | not assessed |
+| [Extrema_ExtPExtS-complete-spline-extrema](#extrema_extpexts-complete-spline-extrema) | `4c15fca2ae` | discarded extrema | not assessed |
+| [BRepExtrema_ExtPC-length-units](#brepextrema_extpc-length-units) | `319fbae3cf` | wrong tolerance units | not assessed |
 
-A twenty-second entry, [BRepSkinExt-section-vertices-exact](#brepskinext-section-vertices-exact), fixes a defect
-in the extension package `BRepSkinExt` rather than in OCCT.
+[BRepSkinExt-section-vertices-exact](#brepskinext-section-vertices-exact) fixes a defect in the extension package
+`BRepSkinExt` rather than in OCCT.
 
 ### gp_Dir-restored
 
@@ -270,6 +274,8 @@ Derivation and limits: A loop is contained in the bounds of all its existing pcu
 
 ### BRepFill_CompatibleWires-planar-polar-cut
 
+Commit `3fdfd239ba`. Upstream: not assessed.
+
 Problem: `SameNumberByPolarMethod` finds a planar section's radial cut with a
 three-dimensional global edge/wire distance minimization. Spline sections spend most of the
 compatibility step in that search.
@@ -295,6 +301,8 @@ On a five-section spline skin, 25 native Linux CPU samples gave median 17.71 ms 
 1.29 ms after, with the same serialized boundary representation. These timings exclude meshing.
 
 ### GeomFill_Gordon-known-contacts
+
+Commit `a9169c5405`. Upstream: not assessed.
 
 Problem: a caller that already located the profile/guide crossings had no way to supply them.
 `Perform()` repeated all curve/curve extrema searches in `fillContactTable`.
@@ -332,6 +340,8 @@ the same parameter domain. It does not claim bit-identical serialization.
 
 ### Extrema_ExtPExtS-complete-spline-extrema
 
+Commit `4c15fca2ae`. Upstream: not assessed.
+
 Problem: retaining only four distances in the transverse spline shortcut discarded
 valid stationary distances (a family of six, eight and twelve quadratic lobes
 returns eleven, fifteen and twenty-three curve extrema).
@@ -348,3 +358,26 @@ the shortcut's admissibility checks fail. This is the class's documented all-ext
 contract (OPEN CASCADE, *OCCT Reference Manual*, 2026,
 [`Extrema_ExtPExtS`](https://dev.opencascade.org/doc/refman/html/class_extrema___ext_p_ext_s.html)).
 The constant-height test and root solves retain their existing numerical tolerances.
+
+### BRepExtrema_ExtPC-length-units
+
+Commit `319fbae3cf`. Upstream: not assessed.
+
+Problem: `BRepExtrema_ExtPC` converted the edge's length tolerance to parameter units with
+`BRepAdaptor_Curve::Resolution` before passing it to `Extrema_ExtPC::Initialize` as `TolF`. The stationary function of
+`Extrema_GFuncExtPC::Value` is `(C(u)-P).C'(u)/|C'(u)|`, which has length units. For short or slowly parameterized
+spans the converted tolerance can exceed the whole function; `math_FunctionRoots` then classifies it as all-null,
+`Extrema_GGenExtPC::Perform` supplies no stationary points, and endpoint and knot candidates overestimate the distance.
+
+Derivation and limits (derived here): a regular parameter rescaling cancels between numerator and denominator of the
+stationary function, whereas a tolerance converted to parameter units does not. The edge's existing length tolerance is
+therefore passed directly as `TolF`: the physical tolerance and the geometry are preserved and neither bounds nor curve
+representations change. The test family is degree-one three-pole splines (span lengths 1 to 1e-4, knot spacings 1 to
+1e4, three rigid poses, full and trimmed edges, polynomial and positive rational weights) against a perpendicular
+distance of 1e-7 with arithmetic allowance 4e-15, for point/curve extrema and for topological point/edge distance. The
+independent reference is projection onto a segment with the scalar-product parameter clamped to [0,1] (Eberly,
+*Geometric Tools*, `DistPointSegment.h`, 2025-05-10, lines 42-85,
+<https://raw.githubusercontent.com/davideberly/GeometricTools/master/GTE/Mathematics/DistPointSegment.h>); a positive
+rational degree-one spline traces the same segment as its end poles, since its normalized positive basis coefficients
+range continuously between the endpoints and only its speed differs (derived here). The reference is exact for the stored
+span geometry; it is no bound on errors of an intersection curve nor a certificate for general nonlinear projection.

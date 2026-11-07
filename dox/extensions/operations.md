@@ -403,46 +403,6 @@ It does not classify construction intent from the measured output angle. Native
 role checks cover twelve combinations of three scales, two noncircular sections,
 and single stopped edges versus closed mitred loops.
 
-### Length units in point/edge extrema
-
-`BRepExtrema_ExtPC` now passes the edge's existing length tolerance directly
-to `Extrema_ExtPC::Initialize` as `TolF`. It previously converted that tolerance
-to parameter units using `BRepAdaptor_Curve::Resolution`. Source inspection of
-`Extrema_GFuncExtPC::Value` shows that its stationary function is
-`(C(u)-P).C'(u)/|C'(u)|`, which has length units.
-**Derived here:** a regular parameter rescaling cancels between the numerator
-and denominator, whereas conversion of `TolF` to parameter units does not.
-For short or slowly parameterized spans the converted tolerance can exceed
-the whole stationary function. `math_FunctionRoots` then classifies it as
-all-null, `Extrema_GGenExtPC::Perform` supplies no stationary points, and
-endpoint/knot candidates can overestimate distance. The correction preserves
-the existing physical tolerance and the geometry; it changes neither bounds
-nor curve representations.
-
-The native regression uses degree-one three-pole splines, span lengths
-1, 1e-2, 1e-3 and 1e-4, knot spacings 1, 100 and 10000, three rigid poses,
-full and trimmed edges, and polynomial and positive rational weights
-(144 combinations). The expected perpendicular distance is 1e-7 with
-an arithmetic allowance of 4e-15. Both point/curve extrema and topological
-point/edge distance are checked. For the simpler untrimmed twelve-case
-family, six baseline distances were wrong; the corrected distances all pass.
-
-The independent analytic reference is projection onto a segment with the
-scalar product parameter clamped to [0,1]: David Eberly, *Geometric Tools*,
-`DistPointSegment.h`, version 2025-05-10, lines 42-85:
-<https://raw.githubusercontent.com/davideberly/GeometricTools/master/GTE/Mathematics/DistPointSegment.h>.
-**Derived here:** a positive rational degree-one spline traces the same straight
-segment as its endpoint poles, since its normalized positive basis coefficients
-range continuously between the endpoints; only its speed differs. This reference
-is exact for the stored span geometry, not a bound on errors in an intersection
-curve or a certificate for general nonlinear projection.
-
-A same-machine Linux process-CPU benchmark, after two warmups with thirty
-interleaved samples of 12000 queries each, gives median 0.00528649 ms/query
-before and 0.00558283 ms/query after (1.05606 ratio). The cost includes finding
-the previously missed extrema. Native extension and distance tests: 139 passed
-in 17 suites. Timing is a measurement of this family, not a complexity bound.
-
 ### Compatibility before a second-order join
 
 Jorg Peters, *Geometric Continuity* (2001), section 2, defines continuity by
