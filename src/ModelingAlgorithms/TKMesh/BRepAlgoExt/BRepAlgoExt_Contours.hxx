@@ -25,25 +25,6 @@
 namespace BRepExt
 {
 
-// Read an already seeded maker's own tangent contours without building a body.
-// Keep the explicit selection first, including any edge the maker did not adopt.
-// Both native construction and medial preflight use this same propagation census.
-template <typename Maker>
-std::vector<TopoDS_Shape> blendContourMembers(Maker&                           maker,
-                                              const std::vector<TopoDS_Shape>& selected)
-{
-  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> runs;
-  for (const auto& edge : selected)
-    runs.Add(edge);
-  for (int contour = 1; contour <= maker.NbContours(); ++contour)
-    for (int i = 1; i <= maker.NbEdges(contour); ++i)
-      runs.Add(maker.Edge(contour, i));
-  std::vector<TopoDS_Shape> result;
-  for (int i = 1; i <= runs.Extent(); ++i)
-    result.push_back(runs(i));
-  return result;
-}
-
 // GeomAPI_Interpolate's periodic spline is only C1 at its closing knot. OCCT's
 // closed-contour walker can miss that knot when seeded on another trimmed part
 // of the same curve: merely reversing the selected edges changes the blend.

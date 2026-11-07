@@ -4112,10 +4112,6 @@ constexpr int freePoles = 640;
 //! The places along a side at which the turning of its face is read.
 constexpr int turningSteps = 48;
 
-//! Whether the neighbours' bend is wished for also where two of them disagree about it at a
-//! corner of the rim.
-constexpr bool wishAcrossCorners = false;
-
 //! The nets that are tried with the neighbours' bend wished for, before the surface is made
 //! tangent and no more.
 constexpr int wishNets = 3;
@@ -5752,7 +5748,7 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
                                                         after,
                                                         a.tangent(1 - cornerInset).Normalized(),
                                                         before.n.Dot(after.n) < 0 ? -1 : 1);
-    wishable = miss.within(asked.limits, 2, asked.size) || wishAcrossCorners;
+    wishable = miss.within(asked.limits, 2, asked.size);
   }
   if (wishable)
   {
