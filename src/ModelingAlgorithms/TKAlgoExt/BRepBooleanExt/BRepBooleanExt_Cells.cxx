@@ -322,8 +322,7 @@ struct Balance
   void settle(int     dimension,
               double  tolerance,
               double& difference,
-              double& allowed,
-              bool    reference = true) const
+              double& allowed) const
   {
     difference = allowed = 0;
     const auto& counts   = net[dimension];
@@ -347,7 +346,7 @@ struct Balance
         // any other only the allowance and the integral's tolerance come from it.
         const bool isPlain = plain(face);
         double     bound;
-        if (dimension == 3 && !isPlain && !reference)
+        if (dimension == 3 && !isPlain)
         {
           bound = faceArea(face);
         }
@@ -363,20 +362,16 @@ struct Balance
         if (!isPlain)
         {
           const double area = bound;
-          held = !reference && dimension == 3 ? faceMeasure(face, false, origin, nullptr, &area)
+          held = dimension == 3 ? faceMeasure(face, false, origin, nullptr, &area)
                                               : faceMeasure(face, dimension == 2, origin, nullptr);
         }
         else if (dimension == 3)
         {
           // On a plane (p - origin) . n is the same everywhere: its area times that.
-          GProp_GProps area;
-          if (reference)
-            BRepGProp::SurfaceProperties(face, area);
           const auto   position = BRepAdaptor_Surface(face).Plane().Position();
           const gp_Vec normal =
             gp_Vec(position.XDirection()).Crossed(gp_Vec(position.YDirection()));
-          held = (reference ? area.Mass() : quick.Mass())
-                 * gp_Vec(origin, position.Location()).Dot(normal) / 3;
+          held = quick.Mass() * gp_Vec(origin, position.Location()).Dot(normal) / 3;
         }
         else
         {
@@ -1067,7 +1062,7 @@ void fuse(Partition&            partition,
   partition.journal  = request.journal;
   const double fuzzy = step.fuzzy;
   const double setup = booleanTimingEnabled() ? booleanNow() : 0;
-  if (prepared && !request.reference)
+  if (prepared)
     partition.operands = std::move(*prepared);
   else
   {
@@ -1076,12 +1071,6 @@ void fuse(Partition&            partition,
     for (const auto& shape : request.tools)
       partition.operands.push_back(operandOf(request, shape, true));
   }
-  if (prepared && request.reference)
-    for (size_t i = 0; i < partition.operands.size(); ++i)
-    {
-      partition.operands[i].argument    = (*prepared)[i].argument;
-      partition.operands[i].represented = (*prepared)[i].represented;
-    }
   // Boundary images belong to this rung, while boxes/classifiers belong to immutable inputs.
   for (auto& operand : partition.operands)
   {
@@ -1321,7 +1310,7 @@ void verify(Partition& partition, const BooleanRequest& request, Rung& rung)
       balance.add(operands[o].original, dimension, -1);
       double     residual, slack;
       const auto timed = Clock::now();
-      balance.settle(dimension, partition.tolerance, residual, slack, request.reference);
+      balance.settle(dimension, partition.tolerance, residual, slack);
       rung.measureMs += since(timed);
       if (residual / std::max(slack, 1e-300) > rung.residual / std::max(rung.slack, 1e-300))
       {
@@ -1506,9 +1495,8 @@ void verify(Partition& partition, const BooleanRequest& request, Rung& rung)
   {
     std::vector<size_t> candidates;
     for (size_t o = 0; o < operands.size(); ++o)
-      if (request.reference
-          || (operands[o].dimension >= cell.dimension
-              && (cell.in[o] || !operands[o].box.IsOut(cell.box))))
+      if (operands[o].dimension >= cell.dimension
+          && (cell.in[o] || !operands[o].box.IsOut(cell.box)))
         candidates.push_back(o);
     for (const auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
     {
@@ -1527,11 +1515,6 @@ void verify(Partition& partition, const BooleanRequest& request, Rung& rung)
         }
         for (const size_t o : candidates)
         {
-          // Nothing of a cell reaches an operand that the cell's box does not.
-          if (request.reference
-              && (operands[o].dimension < cell.dimension
-                  || (!cell.in[o] && operands[o].box.IsOut(cell.box))))
-            continue;
           const auto state = stateOf(element, o);
           const bool wrong = cell.in[o] ? state == TopAbs_OUT : state == TopAbs_IN;
           if (!wrong)
@@ -2471,7 +2454,7 @@ BooleanResult build(Partition& partition, const BooleanRequest& request, Rung& r
       for (const auto& cell : chosen.cells)
         balance.add(cell, dimension, -1);
       double difference, allowed;
-      balance.settle(dimension, partition.tolerance, difference, allowed, request.reference);
+      balance.settle(dimension, partition.tolerance, difference, allowed);
       if (difference > allowed)
         return false;
     }
@@ -2694,85 +2677,6 @@ BooleanResult booleanCells(const BooleanRequest& request, std::vector<Rung>* rep
   }
   result.rungs = rungs;
   return result;
-}
-
-std::vector<Rung> compareBooleanChecks(const BooleanRequest& given)
-{
-  Freedom              freedom(given);
-  BooleanRequest       request = given;
-  std::vector<Operand> operands;
-  for (const auto& shape : request.sources)
-    operands.push_back(operandOf(request, shape, false));
-  for (const auto& shape : request.tools)
-    operands.push_back(operandOf(request, shape, true));
-  const auto        lines = sweptCrossings(operands);
-  std::vector<Rung> compared;
-  double            tolerance = Precision::Confusion();
-  Bnd_Box           box;
-  for (const auto& operand : operands)
-  {
-    tolerance =
-      std::max({tolerance, tubeOf(operand.original), vertexToleranceOf(operand.original)});
-    box.Add(operand.box);
-  }
-  const double diagonal = !box.IsVoid() && !box.IsOpen() ? std::sqrt(box.SquareExtent()) : 0;
-  const double plain    = std::min(request.fuzzy, tolerance::booleanCeiling);
-  const double fuzzy    = std::max(plain,
-                                std::min({kFuzzyFactor * tolerance,
-                                             tolerance::booleanFuzzyRelative * diagonal,
-                                             tolerance::booleanCeiling}));
-  // Ask both tolerances even after acceptance; repeat plain when no higher rung is permitted.
-  for (const Step step : {Step{"plain", plain}, Step{"fuzzy", fuzzy}})
-  {
-    Partition partition;
-    Rung      initial;
-    initial.name  = step.name;
-    initial.fuzzy = step.fuzzy;
-    try
-    {
-      fuse(partition, request, step, lines);
-    }
-    catch (const Refused& refused)
-    {
-      initial.refusal = refused.why;
-    }
-    catch (const Standard_Failure& error)
-    {
-      initial.refusal = error.what();
-    }
-    const auto cells = partition.cells;
-    for (const bool reference : {true, false})
-    {
-      Rung rung         = initial;
-      rung.cells        = static_cast<int>(cells.size());
-      rung.tolerance    = partition.tolerance;
-      request.reference = reference;
-      partition.cells   = cells;
-      partition.context = new IntTools_Context;
-      for (auto& operand : partition.operands)
-        for (auto& lump : operand.lumps)
-          for (auto& skin : lump.skin)
-            skin.hits.reset();
-      try
-      {
-        if (rung.refusal.empty())
-        {
-          verify(partition, request, rung);
-          rung.accepted = true;
-        }
-      }
-      catch (const Refused& refused)
-      {
-        rung.refusal = refused.why;
-      }
-      catch (const Standard_Failure& error)
-      {
-        rung.refusal = error.what();
-      }
-      compared.push_back(rung);
-    }
-  }
-  return compared;
 }
 
 } // namespace BRepExt

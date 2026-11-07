@@ -117,8 +117,6 @@ struct BooleanRequest
   const char*               operation = "boolean"; // the name failures carry
   Select                    select    = Select::Union;
   std::vector<TopoDS_Shape> sources, tools;
-  // Diagnostic reference path for differential tests/timing, never selected by commands.
-  bool   reference   = false;
   bool   cancellable = false;
   bool   journal     = false;
   int    glue        = 0; // BOPAlgo_GlueEnum
@@ -137,9 +135,5 @@ Standard_EXPORT void simplifyBooleanResult(BooleanResult&                   resu
                                            const BooleanRequest&            request,
                                            double                           angle,
                                            const std::vector<TopoDS_Shape>& kept = {});
-
-//! Run the reference and optimized check on each SAME partition, without building a result.
-//! Paired rungs (reference, optimized) retain every verdict and diagnostic.
-Standard_EXPORT std::vector<Rung> compareBooleanChecks(const BooleanRequest& request);
 
 } // namespace BRepExt
