@@ -20,8 +20,8 @@ namespace GeomAlgoExt
 {
 struct HermiteSite
 {
-  double parameter;
-  int    order;
+  double parameter = 0;
+  int    order = 0;
 };
 
 // The knot vector is expanded by multiplicity and clamped at both ends. Replace

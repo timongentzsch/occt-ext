@@ -29,7 +29,7 @@ struct Boundary
   TopoDS_Edge             edge;
   TopoDS_Face             face;
   occ::handle<Geom_Curve> curve;
-  double                  first, last;
+  double                  first = 0, last = 0;
   gp_Pnt                  point(double f) const;
   SurfaceJet              jet(const char* op, double f) const;
 };
@@ -38,7 +38,7 @@ struct Constraint
 {
   Boundary reference;
   gp_XY    start, end;
-  int      order;
+  int      order = 0;
   // How far the surface's way off the boundary leans along it at its two ends, as the tangent of
   // the angle from straight across: towards the other end when positive. Between them it runs
   // evenly. Only where `skewed`. Unsourced convention: the origin and sense of the angle are

@@ -27,8 +27,8 @@ namespace BRepExt
 //! highest, asked to meet their faces to the orders `first` and `last` (0 to 2).
 struct Crossing
 {
-  bool acrossV;
-  int  first, last;
+  bool acrossV = false;
+  int  first = 0, last = 0;
 };
 
 //! What is wrong with the inside of a face, if anything is: that it folds over, or that it

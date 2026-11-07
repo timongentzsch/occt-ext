@@ -41,7 +41,8 @@ struct EvolutionData
 //! Register a shape in the host's store and return its handle.
 uint32_t store(OcctKernel& kernel, const TopoDS_Shape& shape);
 
-//! The shape behind a handle. Throws a typed invalid_input failure with code INVALID_SHAPE_ID.
+//! The shape behind a handle. The reference stays valid until `release`, also across later `store`
+//! calls: callers hold it while they register results. Throws a typed invalid_input failure with code INVALID_SHAPE_ID.
 const TopoDS_Shape& get(const OcctKernel& kernel, uint32_t id);
 
 //! Drop a handle the algorithm itself registered for a temporary.

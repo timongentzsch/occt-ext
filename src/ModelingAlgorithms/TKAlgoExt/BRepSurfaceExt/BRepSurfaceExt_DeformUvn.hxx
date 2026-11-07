@@ -28,8 +28,9 @@ class DeformUVN
   gp_Pln                    plane;
   occ::handle<Geom_Surface> surface;
   Vec3                      scale, offset;
-  bool                      swap, mirror;
-  double                    a, b, c, d, u0, u1, v0, v1, up, out;
+  bool                      swap = false, mirror = false;
+  double                    a = 0, b = 0, c = 0, d = 0, u0 = 0, u1 = 0, v0 = 0, v1 = 0, up = 0,
+                            out = 0;
 
 public:
   DeformUVN(const char*, const TopoDS_Face&, const TopoDS_Face&, Vec3, Vec3, bool, bool, bool);

@@ -42,7 +42,7 @@ struct RimPlace
   gp_Pnt point;
   gp_XY  uv;
   gp_XY  across;
-  bool   bend;
+  bool   bend = false;
 };
 
 //! The parameters of the point of a surface nearest to `point`, looked for from `uv`: steps of

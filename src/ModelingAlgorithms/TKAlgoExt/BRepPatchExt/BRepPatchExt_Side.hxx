@@ -35,12 +35,12 @@ namespace BRepExt::patch_side
 //! An edge of the loop or a curve inside it, run from `from` to `to`.
 struct Side
 {
-  int                     input;
+  int                     input = 0;
   TopoDS_Edge             edge;
   TopoDS_Face             support;
-  int                     order;
+  int                     order = 0;
   occ::handle<Geom_Curve> curve;
-  double                  from, to, length, slack;
+  double                  from = 0, to = 0, length = 0, slack = 0;
 
   double parameter(double fraction) const { return from + (to - from) * fraction; }
 

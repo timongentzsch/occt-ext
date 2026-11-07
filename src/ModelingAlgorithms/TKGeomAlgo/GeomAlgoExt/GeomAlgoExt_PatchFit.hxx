@@ -54,7 +54,7 @@ constexpr int splineOrder = 6, splineDerivatives = 3;
 
 struct SplineBasis
 {
-  int    first;
+  int    first = 0;
   double value[splineDerivatives + 1][splineOrder];
 };
 
@@ -73,10 +73,10 @@ struct FitCondition
     gp_XYZ direction;
   };
 
-  double u, v;
+  double u = 0, v = 0;
   Term   terms[5];
-  int    count;
-  double value;
+  int    count = 0;
+  double value = 0;
   //! Against the energies, which count as one per unit of squared second derivative.
   double weight;
   //! A wish and not a condition: weighed against the energies and left at that, where a

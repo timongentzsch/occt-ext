@@ -21,7 +21,7 @@ namespace BRepExt
 // plane; only their approximation to a polyline depends on the drawing tolerance.
 struct DrawingCurve
 {
-  int                 body, kind;
+  int                 body = 0, kind = 0;
   std::vector<double> points;
 };
 
