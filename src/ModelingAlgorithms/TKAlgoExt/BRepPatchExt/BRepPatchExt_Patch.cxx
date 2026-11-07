@@ -2419,9 +2419,10 @@ std::vector<double> flatKnots(const occ::handle<Geom_BSplineCurve>& curve)
 //! as finer nets would take them. A share of the size, so that the stop is the same at every size
 //! and pose; the length tolerance, which is absolute, would not be, and nothing inside the loop is
 //! asked to any tolerance. The value is a judgement: between the nets of the tests, these distances
-//! spread from 1e-5 to 1 of the size with no gap between settled and unsettled pairs; a seat, two
-//! mouse tops and a hull bottom that a coarse net filled 0.6 to 9 off their masters stop on
-//! the same nets for any value from 3.1e-4 to 2.4e-3 (see dox/extensions/operations.md).
+//! spread from 1e-5 to 1 of the size with no gap between settled and unsettled pairs; an
+//! eight-sided seat surface, two domed tops and a hull bottom that a coarse net filled 0.6 to 9 off
+//! their masters stop on the same nets for any value from 3.1e-4 to 2.4e-3 (see
+//! dox/extensions/operations.md).
 constexpr double settled = 1e-3;
 
 //! How far apart the surfaces of two nets are: from places of the coarser, `countU` x `countV`
@@ -6617,7 +6618,7 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
   if (controls.flow >= 2 && controls.quad != 1 && !plane && !conformal)
     fail(op,
          unsupported_geometry,
-         "Next and Adjacent UV flow are not implemented for this boundary; select Natural");
+         "Next and Adjacent UV flow are not implemented for this boundary; use Natural flow");
   std::optional<Built> built;
   if (plane)
   {

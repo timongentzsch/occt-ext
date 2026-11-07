@@ -624,10 +624,10 @@ struct Rounds
 };
 
 //! Three arms of quarter rounds of radius r about the axes, each from height r + q, with concave
-//! quarter rounds of radius q between them (the teddy example), placed by `pose`. At each
+//! quarter rounds of radius q between them (three arms, as in a tripod), placed by `pose`. At each
 //! of the six corners an arm, which does not bend along its axis, meets a strip whose edge bends
 //! across that axis, and the other way round: the faces bend differently there.
-Rounds teddy(double r, double q, const gp_Trsf& pose)
+Rounds threeArms(double r, double q, const gp_Trsf& pose)
 {
   Rounds       out;
   const double start = r + q, length = 60;
@@ -740,18 +740,18 @@ gp_Trsf turned(double scale)
 
 } // namespace
 
-// The teddy, turned in space, and with narrower strips at rest: at its six corners an arm and a
+// The three-arm loop, turned in space, and with narrower strips at rest: at its six corners an arm and a
 // strip bend differently, which no surface twice differentiable there can have both of. The fill
 // is delivered and not refused: it meets every edge and both tangent planes along it, and the
 // bend of each face on the middle of each edge, away from the corners (expectMet). What it misses
 // near the corners is reported in the per-edge numbers, a share of the curvature above the 5 %
 // asked.
-TEST(BRepPatchExt, TeddyCornersThatBendDifferentlyAreEasedAndTheFacesMetBetween)
+TEST(BRepPatchExt, ThreeArmCornersThatBendDifferentlyAreEasedAndTheFacesMetBetween)
 {
   for (const auto& [q, pose] : {std::pair<double, gp_Trsf>(50, turned(1)), {30, gp_Trsf()}})
   {
     SCOPED_TRACE(q);
-    const Rounds      loop  = teddy(50, q, pose);
+    const Rounds      loop  = threeArms(50, q, pose);
     const auto        built = loop.fill();
     const TopoDS_Face fill  = onlyFace(BRepExt::get(session(), built.evolution.resultId));
     ASSERT_FALSE(fill.IsNull());
@@ -1165,7 +1165,7 @@ void expectSame(const Outcome& at, const Outcome& base)
 // on eased rounds, the share by which their bends disagree was rounding over rounding, and above an
 // absolute floor at one size only (see cornerBend). Not yet so, and asked at a thousand times
 // only: at a thousandth the corner of rounds (its tolerance below OpenCascade's least distance) is
-// made. The teddy is left out: it is refused at a thousand times.
+// made. The three-arm loop is left out: it is refused at a thousand times.
 TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
 {
   struct Case
