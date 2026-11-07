@@ -21,6 +21,7 @@
 #include <Geom_SphericalSurface.hxx>
 #include <Geom_SurfaceOfRevolution.hxx>
 #include <gp_Lin.hxx>
+#include <Geom2dAdaptor_Curve.hxx>
 
 namespace BRepExt::blending::detail
 {
@@ -255,7 +256,12 @@ static std::optional<gp_Pnt> centreAcross(const Rail&   rail,
     const auto pcurve = BRep_Tool::CurveOnSurface(rail.edge, side(i).face, f, l);
     if (pcurve.IsNull())
       return {};
-    const gp_Pnt2d uv = pcurve->Value(t);
+    // Evaluate the endpoint span as a cached polynomial when carrying the
+    // station origin beyond the edge, rather than extrapolating the de Boor
+    // recurrence repeatedly through large signed coefficients.
+    const gp_Pnt2d uv = rail.centreInterpolation
+      && (t < pcurve->FirstParameter() || t > pcurve->LastParameter())
+      ? Geom2dAdaptor_Curve(pcurve).Value(t) : pcurve->Value(t);
     Jet            j;
     if (!jetAt(side(i), uv.X(), uv.Y(), j))
       return {};

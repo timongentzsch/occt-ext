@@ -431,6 +431,9 @@ struct Rail
   //! points there), through the centre a ball would have between the faces' tangent planes at
   //! it, which lies within a fraction of the ball of its own centre (ballAt).
   bool byCentre = false;
+  //! Centre interpolation resolves the source path to the station-solve tolerance.
+  //! Its extrapolated parameter curves use the endpoint polynomial evaluator.
+  bool centreInterpolation = false;
   //! A split changes the rolling supports, not the original edge's parameter frame.
   std::optional<std::array<Side, 2>> parameterSupports;
   //! Whether a conic section is made of two spans, split at its middle: where the faces meet so
@@ -1152,7 +1155,8 @@ Standard_EXPORT std::vector<double> flatten(const std::map<double, int>& knots);
 //! the fit takes a knot of multiplicity 5 - (c - k) at that place. Each as (u, multiplicity).
 Standard_EXPORT std::map<double, int> breaksOf(const Rail& rail,
                                                Stations&   stations,
-                                               bool        sought = false);
+                                               bool        sought = false,
+                                               bool        centre = false);
 
 //! How closely a blend is fitted to its exact sections (and the sections of its parts meet).
 Standard_EXPORT double fitTolerance(const Rail& rail);
@@ -1165,7 +1169,16 @@ Standard_EXPORT Fitted fit(const Rail&                      rail,
                            Stations&                        stations,
                            bool                             contactPilot,
                            const std::vector<SectionFrame>& frames,
-                           const Fitted*                    terminalReference = nullptr);
+                           const Fitted*                    terminalReference = nullptr,
+                           bool                             reparameterizedTerminal = false);
+
+Standard_EXPORT void coupleSplitJets(Handle(Geom_BSplineSurface)& a,
+                                      Handle(Geom_BSplineSurface)& b,
+                                      const Rail& railA, const Rail& railB);
+Standard_EXPORT bool defectiveRailKnot(const Rail& rail, const Fitted& fitted);
+Standard_EXPORT std::shared_ptr<CentreParameter> centreParameter(
+  const Rail& rail, const std::function<gp_Pnt(double)>& pointAt,
+  const std::vector<double>& joins = {}, const std::map<double, int>& events = {});
 
 //! Where each contact's speed the way the ball rolls is least, (speed, u) at
 //! each place: worked out once for a fitted piece, for both checks below.

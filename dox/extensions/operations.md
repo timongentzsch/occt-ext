@@ -33,6 +33,42 @@ results; Hermann 1995 and Lukacs 1998 are cited second-hand there); Salvi and VÃ
 surfaces with curvature continuity" (2014; statement of the Linkage Curve Theorem, appendix proof not
 read); Zang, Liu, Lai, GMP 2008, sections 1-3 (Hu's extension; Hu 2002 not obtained); de Boor 1972.
 
+*Connected centre-length fitting.* At a defective rail knot in a constant-size
+curvature-continuous blend, connected pieces now share one numerical centre
+carrier. Each piece uses its restriction of that carrier's integrated length;
+the joined parameter widths are proportional to those lengths. Transforming a
+retained terminal jet uses the chain rule, including the second derivative of
+the inverse length map. Split-normal coupling uses the same derivative rates.
+Independently normalising the pieces without these rate changes does not
+preserve their coupled tangent planes.
+
+The centre carrier retains a C0 knot at each change of rolling support: the
+pieces share a centre there, but equal centre tangents have not been established.
+This is a spline-space requirement, derived from the continuity of the data;
+smooth refinement alone does not represent that event. Carrier refinement is
+not refused at a fixed coefficient count. It retains the station-solve length
+tolerance and requires new representable knots until the sampled residual fits.
+Coefficient count is a representation cost, not a geometric obstruction.
+The independent two-line centre family checks position, exact piecewise arc
+length and its inverse, under rigid transformations and scales 1e-3 through 1e3.
+
+Where the section law has no framed break, the two terminal homogeneous jets
+are averaged in physical centre length. Quintic Hermite displacements carry
+these first and second jets, vanishing through order two at their inner window
+boundaries. The existing radius-bounded coupling windows cannot overlap in
+the interior of a piece. Rational weights are included, so a homogeneous scale
+change does not change the construction. This jet transport and the polynomial
+window formulas are derived applications of the chain rule and Hermite
+interpolation. They do not prove that an arbitrary prescribed section law is
+C2 across a support event; such events retain their knots and framed law.
+
+Sources: Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided
+Design and Manufacturing* (2009), section 2.1, equations 2.6--2.11; Peters,
+*Geometric Continuity* (2001), sections 2--3. Centre fitting and geometric
+acceptance remain sampled numerical checks. The generated polynomial and
+rational-sheet family checks common terminal jets through order two, unchanged
+window exteriors, rigid transforms and scales 1e-3 through 1e3.
+
 *Arc length beyond a trimmed rail.* A rail can outlive the edge that supplied its parameter
 range: the adjoining supports still carry the ball beyond an endpoint. For a nonperiodic multi-span
 curve, `GCPnts_AbscissaPoint::Length` sums only the intersections with the adaptor's continuity
@@ -1641,6 +1677,47 @@ offset intersections and smooth support and section data; it does not establish
 convergence of this sampled reconstruction. Final contact, internal curvature,
 section-law, topology and preservation checks remain separate acceptance gates.
 
+### Source-normal events of a centre carrier
+
+The centre-based station plane uses both contact normals and normals evaluated
+on the source edge's parameter curves. These are distinct paths through a
+support's parameters. A contact can cross a support's finite spline boundary
+before the source edge does. Retaining contact crossings alone therefore does
+not retain every event of the centre function being interpolated.
+
+For a regular station solve, the implicit-function theorem transports the
+regularity of its input data to the centre. A support of class C^c has normals
+of class C^(c-1), so the centre carrier retains a quintic knot of multiplicity
+`5-max(0,c-1)` at either path's crossing. A tangent continuation of a finite
+support is only C1 in general and thus requires a C0 carrier knot. These
+regularity statements are **derived**, conditional on a nonsingular station
+Jacobian. Knot multiplicity and continuity follow the B-spline definition
+(`Geom_BSplineCurve`, Detailed Description). The existing event locator is
+shared by the section and centre fits; the latter uses first-order support
+data rather than the section law's second-order data. Connected pieces map
+their events into the delivering carrier's common source coordinate.
+
+During connected centre-carrier interpolation, station-plane origins outside a parameter
+curve's domain use the existing adaptor's cached polynomial evaluation. The
+interpolator resolves positions to the station-solve tolerance, substantially
+finer than the section fit. Ordinary station construction retains its original
+parameter-curve evaluation. Each connected carrier starts from the delivering pieces'
+station seeds. Single-rail centre fits retain their original event inventory and station cache.
+Only a station interval extending beyond a source parameter curve's domain
+needs a separate cache evaluated with the endpoint polynomial. The adaptor
+evaluates the same endpoint span,
+while avoiding repeated extrapolation through signed de Boor coefficients.
+Horner evaluation's coefficient backward-error analysis is described by
+Higham, *Accuracy and Stability of Numerical Algorithms*, second edition
+(2002), section 5.1,
+[Horner's method](https://epubs.siam.org/doi/10.1137/1.9780898718027.ch5).
+It is not a universal forward-accuracy guarantee for extrapolation. Independent
+long-double de Boor comparisons distinguish evaluation error from a geometric
+break. Neither the centre-fit length resolution nor any final geometric bound
+is changed. Position sampling still does not certify the carrier's length or
+derivatives; final contact, section, continuity and topology checks remain
+necessary.
+
 ### Smooth section-policy selections
 
 `BRepBlendExt_Smooth.hxx` provides compact C2 upper/lower rounding for policy
@@ -1743,6 +1820,12 @@ with Newton correction, including the need to change charts near vertical branch
 [tracing](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node102.html)).
 The generated two-radius, two-scale, two-pose single/chain test checks acceptance
 and the rolling-ball defect against the input skin independently of the solver.
+
+For an offset-intersection station route, centre-length fitting retains that
+route's spline carrier, including its circuit seam and orientation. It does not
+re-march the source edge. The carrier is segmented at circuit wraps and affinely
+mapped to source coordinates before spanwise length integration. This coordinate
+rule applies to every such G2 route, independently of a near-limit knot verdict.
 
 ### Carried-sheet corner boundaries
 

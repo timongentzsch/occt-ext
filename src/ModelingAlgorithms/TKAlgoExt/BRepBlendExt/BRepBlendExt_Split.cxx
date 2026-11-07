@@ -110,6 +110,95 @@ static CouplingWindow couplingWindow(const Handle(Geom_BSplineSurface)& surface,
   return result;
 }
 
+// The common centre-length coordinate makes both derivatives comparable.
+// A quintic Hermite lift carries their arithmetic mean while vanishing
+// through order two at each window's inner boundary.
+void coupleSplitJets(Handle(Geom_BSplineSurface)& a,
+                            Handle(Geom_BSplineSurface)& b,
+                            const Rail& railA, const Rail& railB)
+{
+  if (!commonSections({a, b}))
+    fail(railA.op, no_solution, "connected section jets need a common basis");
+  const double scaleA = a->Weight(a->NbUPoles(), 1), scaleB = b->Weight(1, 1);
+  const double lengthA = railA.centreParameter->length(railA.to)
+                         - railA.centreParameter->length(railA.from);
+  const double lengthB = railB.centreParameter->length(railB.to)
+                         - railB.centreParameter->length(railB.from);
+  const auto terminalJets = [](const Handle(Geom_BSplineSurface)& s, bool last) {
+    std::vector<double> full;
+    for (int i = 1; i <= s->NbUKnots(); ++i)
+      full.insert(full.end(), s->UMultiplicity(i), s->UKnot(i));
+    NCollection_Array1<double> flat(1, int(full.size()));
+    for (size_t i = 0; i < full.size(); ++i) flat(int(i) + 1) = full[i];
+    math_Matrix basis(1, 3, 1, s->UDegree() + 1);
+    int first = 0;
+    BSplCLib::EvalBsplineBasis(2, s->UDegree() + 1, flat, last ? 1 : 0, first, basis);
+    std::vector<std::array<std::array<double, 4>, 2>> result(s->NbVPoles());
+    const double scale = s->Weight(last ? s->NbUPoles() : 1, 1);
+    for (int j = 1; j <= s->NbVPoles(); ++j)
+      for (int d = 1; d <= 2; ++d)
+        for (int k = 1; k <= s->UDegree() + 1; ++k)
+          for (int c = 0; c < 4; ++c)
+          {
+            const int i = first + k - 1;
+            const double value = c == 3 ? 1 : s->Pole(i, j).Coord(c + 1);
+            result[j - 1][d - 1][c] += value * s->Weight(i, j) * basis(d + 1, k) / scale;
+          }
+    return result;
+  };
+  const auto ja = terminalJets(a, true), jb = terminalJets(b, false);
+  const auto apply = [&](const Handle(Geom_BSplineSurface)& s, const Rail& rail,
+                         bool last, double length, double scale, const auto& own) {
+    const auto window = couplingWindow(s, rail, last);
+    if (window.derivative.empty())
+      fail(rail.op, no_solution, "a connected jet has no coupling window");
+    std::vector<double> full;
+    for (int i = 1; i <= s->NbUKnots(); ++i)
+      full.insert(full.end(), s->UMultiplicity(i), s->UKnot(i));
+    const auto sites = GeomAlgoExt::hermiteSites(s->UDegree(), full, 2, 2);
+    std::vector<gp_Vec> second(sites.size());
+    for (size_t i = 0; i < sites.size(); ++i)
+    {
+      const auto& site = sites[i];
+      const double x = last ? 1 + (site.parameter - 1) / window.width
+                            : 1 - site.parameter / window.width;
+      if (site.order == 0 && x > 0 && x < 1)
+        second[i].SetX(.5 * window.width * window.width * x*x*x * (1-x)*(1-x));
+      else if (site.order == 2 && site.parameter == (last ? 1 : 0))
+        second[i].SetX(1);
+    }
+    if (!GeomAlgoExt::interpolateHermite(s->UDegree(), full, sites, second))
+      fail(rail.op, no_solution, "a connected second jet cannot be interpolated");
+    for (int j = 1; j <= s->NbVPoles(); ++j)
+    {
+      std::array<double, 4> first{}, bend{};
+      for (int c = 0; c < 4; ++c)
+      {
+        first[c] = ((ja[j-1][0][c] / lengthA + jb[j-1][0][c] / lengthB)
+                    * (.5 * length) - own[j-1][0][c]) * scale;
+        bend[c] = ((ja[j-1][1][c] / (lengthA*lengthA)
+                    + jb[j-1][1][c] / (lengthB*lengthB))
+                    * (.5 * length*length) - own[j-1][1][c]) * scale;
+      }
+      for (int i = 1; i <= s->NbUPoles(); ++i)
+      {
+        const double oldWeight = s->Weight(i, j);
+        const double weight = oldWeight + first[3] * window.derivative[i-1]
+                              + bend[3] * second[i-1].X();
+        if (!(weight > 0))
+          fail(rail.op, no_solution, "a connected second jet has a nonpositive weight");
+        gp_XYZ xyz;
+        for (int c = 0; c < 3; ++c)
+          xyz.SetCoord(c + 1, (s->Pole(i,j).Coord(c+1) * oldWeight
+            + first[c] * window.derivative[i-1] + bend[c] * second[i-1].X()) / weight);
+        s->SetPole(i, j, gp_Pnt(xyz), weight);
+      }
+    }
+  };
+  apply(a, railA, true, lengthA, scaleA, ja);
+  apply(b, railB, false, lengthB, scaleB, jb);
+}
+
 // A regularized section law must retain the sheet orientation and immersion.
 // Its acceptance budget permits at most one ball-curvature unit of added shape
 // operator (Frobenius norm, hence also an operator-norm bound). This bounds the
@@ -276,6 +365,18 @@ static bool coupleSplitNormals(const char*                  op,
       railB.curve.D1(railB.from, ratePoint, railSpeedB);
       rateA = railSpeedA.Magnitude() * std::abs(railA.to - railA.from);
       rateB = railSpeedB.Magnitude() * std::abs(railB.to - railB.from);
+      const auto centreRate = [](const Rail& rail, double t, double edgeSpeed) {
+        if (!rail.centreParameter)
+          return edgeSpeed * std::abs(rail.to - rail.from);
+        gp_Pnt p;
+        gp_Vec d;
+        rail.centreParameter->curve->D1(t, p, d);
+        const double length = rail.centreParameter->length(rail.to)
+                              - rail.centreParameter->length(rail.from);
+        return edgeSpeed * length / d.Magnitude();
+      };
+      rateA = centreRate(railA, railA.to, railSpeedA.Magnitude());
+      rateB = centreRate(railB, railB.from, railSpeedB.Magnitude());
       if (!(std::isfinite(rateA) && std::isfinite(rateB) && rateA > 0 && rateB > 0))
         return false;
     }
@@ -958,6 +1059,59 @@ void joinSplitPieces(const char*                                op,
       Dips dips{pieces[index].rail, pieces[index].fitted};
       checkFold(dips);
     }
+    bool reparameterized = false;
+    bool defective = false, eligible = true, carried = false;
+    for (int index : group)
+    {
+      const auto& p = pieces[index];
+      eligible &= p.rail.law == Law::G2 && p.rail.sizes.places.empty()
+        && !p.rail.centreParameter && !p.rail.s[0].cliffCurve && !p.rail.s[1].cliffCurve;
+      defective |= defectiveRailKnot(p.rail, p.fitted);
+      carried |= !p.rail.spine.IsNull();
+    }
+    if (eligible && (defective || carried))
+    {
+      Rail carrier = pieces[group.front()].rail;
+      carrier.to = pieces[group.back()].rail.to;
+      std::vector<Rail> centreRails;
+      centreRails.reserve(group.size());
+      std::vector<std::unique_ptr<Stations>> stations;
+      std::vector<double> joins;
+      std::map<double, int> events;
+      for (int index : group)
+      {
+        centreRails.push_back(pieces[index].rail);
+        centreRails.back().centreInterpolation = true;
+        stations.push_back(std::make_unique<Stations>(centreRails.back()));
+        stations.back()->march(seeds[index]);
+        const auto& rail = centreRails.back();
+        for (const auto& [u, multiplicity] : breaksOf(rail, *stations.back(), true, true))
+          events[rail.t(u)] = multiplicity;
+        if (index != group.back())
+          joins.push_back(pieces[index].rail.to);
+      }
+      const auto parameter = centreParameter(carrier, [&](double t) {
+        size_t m = 0;
+        while (m + 1 < group.size() && t > pieces[group[m]].rail.to)
+          ++m;
+        Station at;
+        if (!stations[m]->at(t, at))
+          fail(op, no_solution, "a connected centre path has no station");
+        return at.centre;
+      }, joins, events);
+      for (size_t m = 0; m < group.size(); ++m)
+      {
+        auto& piece = pieces[group[m]];
+        const Fitted reference = piece.fitted;
+        piece.rail.centreParameter = parameter;
+        const auto frame = frames.find(group[m]);
+        piece.fitted = fit(piece.rail, *stations[m], false,
+                           frame == frames.end() ? std::vector<SectionFrame>{} : frame->second,
+                           &reference, true);
+        piece.sheet = Sheet{piece.fitted.blend};
+      }
+      reparameterized = true;
+    }
     const bool framedGroup = !requirements.framedJoins.empty();
     if (framedGroup)
       for (size_t m = 1; m < group.size(); ++m)
@@ -1002,6 +1156,11 @@ void joinSplitPieces(const char*                                op,
         if (!glued)
           fail(op, no_solution, "the coupled jets at a split could not be fitted");
       }
+    if (reparameterized)
+      for (size_t m = 1; m < group.size(); ++m)
+        if (!requirements.framedJoins.count(m))
+          coupleSplitJets(pieces[group[m-1]].fitted.blend, pieces[group[m]].fitted.blend,
+                           pieces[group[m-1]].rail, pieces[group[m]].rail);
     bool coupled = false;
     for (int index : group)
       coupled = coupleInnerKinks(op, pieces[index]) || coupled;
@@ -1129,13 +1288,19 @@ void joinSplitPieces(const char*                                op,
     // tolerance and it is tangent to begin with. One unit a part on the average, as they were.
     double along = 0;
     for (int index : group)
-      along += pieces[index].rail.to - pieces[index].rail.from;
+      along += reparameterized
+        ? pieces[index].rail.centreParameter->length(pieces[index].rail.to)
+          - pieces[index].rail.centreParameter->length(pieces[index].rail.from)
+        : pieces[index].rail.to - pieces[index].rail.from;
     std::vector<double> scaledStarts, scaledWidths;
     for (int index : group)
     {
       scaledStarts.push_back(scaledStarts.empty() ? 0 : scaledStarts.back() + scaledWidths.back());
-      scaledWidths.push_back((pieces[index].rail.to - pieces[index].rail.from)
-                             * double(group.size()) / along);
+      const auto& rail = pieces[index].rail;
+      const double length = reparameterized
+        ? rail.centreParameter->length(rail.to) - rail.centreParameter->length(rail.from)
+        : rail.to - rail.from;
+      scaledWidths.push_back(length * double(group.size()) / along);
     }
     NCollection_Array1<double> scaledKnots(uk);
     for (int i = 1; i <= uk.Upper(); ++i)
@@ -1167,7 +1332,11 @@ void joinSplitPieces(const char*                                op,
         }
       if (tilt * 180 / M_PI <= limit::seamDegrees
           && smooth->RemoveUKnot(i, degree - 1, tolerance / 100))
+      {
         stored = true;
+        if (reparameterized)
+          smooth->RemoveUKnot(i, degree - 2, tolerance / 100);
+      }
     }
     if (stored)
     {

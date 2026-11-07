@@ -22,9 +22,11 @@
 #include <BRepBlendExt_Smooth.hxx>
 #include <BRepBlendExt_Internal.hxx>
 #include <GeomConvert.hxx>
+#include <Geom_Circle.hxx>
 #include <Geom_Ellipse.hxx>
 #include <IntAna_QuadQuadGeo.hxx>
 #include <Geom_BezierCurve.hxx>
+#include <Geom_SurfaceOfLinearExtrusion.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <GeomAlgoExt_ModelTolerance.hxx>
 #include <BRepToolsExt_Checks.hxx>
@@ -1694,5 +1696,195 @@ TEST(BRepBlendExt, PlanarConicCornerRetainsItsExactTensor)
           ++tensors;
       }
       EXPECT_EQ(tensors, 1);
+    }
+}
+
+TEST(BRepBlendExt, ConnectedRationalSheetsShareTwoCentreLengthJets)
+{
+  using namespace BRepExt::blending::detail;
+  for (double scale : {0.001, 1., 1000.})
+    for (bool rational : {false, true})
+      for (bool turned : {false, true})
+      {
+        SCOPED_TRACE(::testing::Message() << scale << " " << rational << " " << turned);
+        gp_Trsf transform;
+        transform.SetScale(gp::Origin(), scale);
+        if (turned) transform = posed(scale);
+        NCollection_Array1<gp_Pnt> centres(1, 2);
+        centres(1) = gp_Pnt(0,0,0).Transformed(transform);
+        centres(2) = gp_Pnt(3,0,0).Transformed(transform);
+        NCollection_Array1<double> knots(1, 2); knots(1)=0; knots(2)=3;
+        NCollection_Array1<int> mults(1, 2); mults.Init(2);
+        auto parameter = std::make_shared<CentreParameter>();
+        parameter->curve = new Geom_BSplineCurve(centres, knots, mults, 1);
+        parameter->knots = {0,3}; parameter->lengths = {0,3*scale};
+        parameter->tolerance = 1e-12*scale;
+        const TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(parameter->curve);
+        Rail a, b;
+        a.curve.Initialize(edge); b.curve.Initialize(edge);
+        a.from=0; a.to=1; b.from=1; b.to=3;
+        a.scale=b.scale=scale;
+        for (auto* rail : {&a,&b})
+        {
+          rail->centreParameter=parameter;
+          rail->s[0].distance=rail->s[1].distance=.2*scale;
+        }
+        const auto sheet = [&](bool last) {
+          NCollection_Array2<gp_Pnt> poles(1,6,1,6);
+          NCollection_Array2<double> weights(1,6,1,6);
+          for (int i=1;i<=6;++i) for (int j=1;j<=6;++j)
+          {
+            const double u=(i-1)/5., v=(j-1)/5.;
+            const double z=(last ? i==3 : i==4) ? (last ? -1 : 1)*1e-6*v*(1-v) : 0;
+            poles(i,j)=gp_Pnt(last ? 1+2*u : u,v,z).Transformed(transform);
+            weights(i,j)=rational ? 1+.1*v*(1-v) : 1;
+            if (rational && (last ? i==2 : i==5)) weights(i,j)*=1.000001;
+          }
+          NCollection_Array1<double> k(1,2);k(1)=0;k(2)=1;
+          NCollection_Array1<int> m(1,2);m.Init(6);
+          return Handle(Geom_BSplineSurface)(new Geom_BSplineSurface(poles,weights,k,k,m,m,5,5));
+        };
+        auto sa=sheet(false), sb=sheet(true);
+        const auto oldA=Handle(Geom_BSplineSurface)::DownCast(sa->Copy());
+        const auto oldB=Handle(Geom_BSplineSurface)::DownCast(sb->Copy());
+        ASSERT_NO_THROW(coupleSplitJets(sa,sb,a,b));
+        for (double v : {0.,.13,.37,.5,.83,1.})
+        {
+          gp_Pnt pa,pb;gp_Vec au,av,auu,avv,auv,bu,bv,buu,bvv,buv;
+          sa->D2(1,v,pa,au,av,auu,avv,auv);
+          sb->D2(0,v,pb,bu,bv,buu,bvv,buv);
+          EXPECT_LT(pa.Distance(pb),1e-10*scale);
+          EXPECT_LT((au-bu*.5).Magnitude(),1e-9*scale);
+          EXPECT_LT((auu-buu*.25).Magnitude(),1e-8*scale);
+          EXPECT_LT((av-bv).Magnitude(),1e-9*scale);
+          EXPECT_LT((auv-buv*.5).Magnitude(),1e-8*scale);
+          for(double u:{0.,.2,.5})
+            EXPECT_LT(sa->Value(u,v).Distance(oldA->Value(u,v)),1e-11*scale);
+          for(double u:{.5,.8,1.})
+            EXPECT_LT(sb->Value(u,v).Distance(oldB->Value(u,v)),1e-11*scale);
+        }
+      }
+}
+
+TEST(BRepBlendExt, CentreLengthCarrierRetainsPositionalSupportJoins)
+{
+  using namespace BRepExt::blending::detail;
+  // Two straight centre branches share a position, with independent tangents.
+  // The exact length is piecewise linear; a smooth interpolant cannot represent
+  // the corner. This checks the carrier independently of section fitting.
+  constexpr double join = .37;
+  for (double scale : {.001, 1., 1000.})
+    for (bool turned : {false, true})
+    {
+      SCOPED_TRACE(::testing::Message() << scale << " " << turned);
+      gp_Trsf transform;
+      transform.SetScale(gp::Origin(), scale);
+      if (turned)
+        transform = posed(scale);
+      Rail rail;
+      rail.curve.Initialize(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(1, 0, 0)));
+      rail.first = rail.from = 0;
+      rail.last = rail.to = 1;
+      rail.scale = scale;
+      const auto point = [&](double t) {
+        return gp_Pnt(t, t <= join ? 0 : 2 * (t - join), 0).Transformed(transform);
+      };
+      const auto carrier = centreParameter(rail, point, {join});
+      ASSERT_FALSE(carrier->curve.IsNull());
+      for (double t : {0., .1, .3, join, .4, .6, .9, 1.})
+      {
+        const double length = scale * (t <= join ? t : join + std::sqrt(5.) * (t - join));
+        EXPECT_LT(carrier->curve->Value(t).Distance(point(t)), 1e-10 * scale);
+        EXPECT_NEAR(carrier->length(t), length, 1e-10 * scale);
+        EXPECT_NEAR(carrier->parameter(length), t, 1e-9);
+      }
+    }
+}
+
+
+TEST(BRepBlendExt, CentreLengthRetainsTheDeliveringCircuit)
+{
+  using namespace BRepExt::blending::detail;
+  for (double scale : {.001, 1., 1000.})
+    for (bool reversed : {false, true})
+      for (bool turned : {false, true})
+      {
+        SCOPED_TRACE(::testing::Message() << scale << " " << reversed << " " << turned);
+        Rail rail;
+        rail.curve.Initialize(BRepBuilderAPI_MakeEdge(gp_Pnt(0,0,0),gp_Pnt(1,0,0)));
+        rail.first=rail.from=0;
+        rail.last=rail.to=1;
+        rail.scale=scale;
+        const gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0),gp_Dir(0,0,1)),scale);
+        rail.spine=GeomConvert::CurveToBSplineCurve(new Geom_Circle(circle));
+        if (turned) rail.spine->Transform(posed(1.));
+        const double first=rail.spine->FirstParameter(), span=rail.spine->LastParameter()-first;
+        rail.spineFirst=first+.37*span;
+        rail.spineLast=rail.spineFirst+(reversed ? -span : span);
+        rail.spineParameterFirst=0;
+        rail.spineParameterLast=1;
+        bool remarched=false;
+        const auto parameter=centreParameter(rail,[&](double) { remarched=true; return gp_Pnt(); });
+        EXPECT_FALSE(remarched);
+        EXPECT_NEAR(parameter->length(1),2*M_PI*scale,1e-10*scale);
+        for (int i=0;i<=32;++i)
+        {
+          const double t=i/32.;
+          gp_Pnt point; gp_Vec tangent;
+          rail.stationD1(t,point,tangent);
+          EXPECT_LT(parameter->curve->Value(t).Distance(point),1e-10*scale);
+          EXPECT_NEAR(parameter->parameter(parameter->length(t)),t,1e-9);
+        }
+      }
+}
+
+
+TEST(BRepBlendExt, CentreCarrierRetainsSourceNormalEventsBeforeContactEvents)
+{
+  using namespace BRepExt::blending::detail;
+  // Two perpendicular planes, one represented as a finite spline extrusion.
+  // The offset contact crosses its profile end at t=sqrt(2)*scale-radius;
+  // the source pcurve crosses at t=sqrt(2)*scale. These are distinct data paths.
+  for (double scale : {.001, 1., 1000.})
+    for (bool turned : {false, true})
+    {
+      SCOPED_TRACE(::testing::Message() << scale << " " << turned);
+      const double radius = .1*scale;
+      const gp_Trsf pose = turned ? posed(1) : gp_Trsf();
+      NCollection_Array1<gp_Pnt> poles(1,2);
+      poles(1)=gp_Pnt(0,0,0); poles(2)=gp_Pnt(0,0,scale);
+      Rail rail;
+      rail.s[0].surface = new Geom_SurfaceOfLinearExtrusion(new Geom_BezierCurve(poles),gp::DY());
+      rail.s[1].surface = new Geom_Plane(gp_Pln(gp::Origin(),gp_Dir(0,1,-1)));
+      const Handle(Geom_Curve) curve = new Geom_Line(gp::Origin(),gp_Dir(0,1,1));
+      curve->Transform(pose);
+      rail.edge = BRepBuilderAPI_MakeEdge(curve,0,2*scale);
+      rail.curve.Initialize(rail.edge);
+      rail.first=rail.from=0; rail.last=rail.to=2*scale;
+      rail.scale=radius; rail.magnitude=10+3*scale;
+      rail.byCentre=true;
+      for (int side=0;side<2;++side)
+      {
+        rail.s[side].surface->Transform(pose);
+        rail.s[side].distance=radius;
+        rail.s[side].face=BRepBuilderAPI_MakeFace(rail.s[side].surface,1e-10*scale);
+        const auto pc=GeomProjLib::Curve2d(curve,rail.first,rail.last,rail.s[side].surface);
+        ASSERT_FALSE(pc.IsNull());
+        BRep_Builder().UpdateEdge(rail.edge,pc,rail.s[side].face,1e-9*scale);
+      }
+      Stations stations(rail);
+      ASSERT_NO_THROW(stations.march());
+      const auto sections=breaksOf(rail,stations,true);
+      const auto centres=breaksOf(rail,stations,true,true);
+      const double source=std::sqrt(.5),contact=(std::sqrt(2.)*scale-radius)/(2*scale);
+      const auto has = [](const auto& events,double u) {
+        return std::any_of(events.begin(),events.end(),[&](const auto& event) {
+          return std::abs(event.first-u)<1e-10 && event.second==kDegree;
+        });
+      };
+      EXPECT_TRUE(has(sections,contact));
+      EXPECT_FALSE(has(sections,source));
+      EXPECT_TRUE(has(centres,contact));
+      EXPECT_TRUE(has(centres,source));
     }
 }

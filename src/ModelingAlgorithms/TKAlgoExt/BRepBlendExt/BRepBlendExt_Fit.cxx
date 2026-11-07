@@ -20,6 +20,7 @@
 
 #include <Geom2dAdaptor_Curve.hxx>
 #include <GeomLib_IsPlanarSurface.hxx>
+#include <GeomConvert_CompCurveToBSplineCurve.hxx>
 
 namespace BRepExt::blending::detail
 {
@@ -45,9 +46,9 @@ static void addBreak(std::map<double, int>& breaks, double u, int m)
   slot = std::max(slot, std::min(m, kDegree));
 }
 
-std::map<double, int> breaksOf(const Rail& rail, Stations& stations, bool sought)
+std::map<double, int> breaksOf(const Rail& rail, Stations& stations, bool sought, bool centre)
 {
-  const int  order  = rail.law == Law::G2 ? 2 : 1;
+  const int  order  = !centre && rail.law == Law::G2 ? 2 : 1;
   const auto needed = [&](int degree, int multiplicity) {
     return kDegree - std::max(0, degree - multiplicity - order);
   };
@@ -78,12 +79,18 @@ std::map<double, int> breaksOf(const Rail& rail, Stations& stations, bool sought
     int    multiplicity;
   };
 
+  // A centre-based station plane also follows normals evaluated on the
+  // source edge. Its data can cross a support boundary before either contact.
+  const int paths = centre && rail.byCentre && rail.spine.IsNull() ? 2 : 1;
+  for (int path = 0; path < paths; ++path)
   for (int side = 0; side < 2; ++side)
   {
+    const Side& support = path && rail.parameterSupports ? (*rail.parameterSupports)[side]
+                                                        : rail.s[side];
     std::vector<Line> lines;
     if (rail.s[side].cliffCurve)
       continue; // its feet run along an edge, not across a face's knots
-    const Handle(Geom_Surface) surface    = basisOf(rail.s[side].surface);
+    const Handle(Geom_Surface) surface    = basisOf(support.surface);
     const auto                 curveLines = [&](const Handle(Geom_Curve)& curve, int parameter) {
       if (const auto spline = Handle(Geom_BSplineCurve)::DownCast(basisOf(curve)))
         for (int k = 2; k < spline->NbKnots(); ++k)
@@ -104,7 +111,7 @@ std::map<double, int> breaksOf(const Rail& rail, Stations& stations, bool sought
     // Where the surface ends and runs on along its tangent (runsOn), it is only G1: a break
     // where a ball's foot passes it, as marched (a scan asks for stations of its own, so a fit
     // that needs no such break asks for none).
-    const auto ends = runsOn(rail.s[side].surface);
+    const auto ends = runsOn(support.surface);
     const auto past = [&](int parameter, double value, int beyond) {
       for (const auto& [t, station] : stations.known())
         if ((station.uv[side][parameter] - value) * beyond > 0)
@@ -126,8 +133,19 @@ std::map<double, int> breaksOf(const Rail& rail, Stations& stations, bool sought
       continue;
     // Scan the feet along the rail and bisect each crossing to the parameter's resolution.
     constexpr int scan   = 256;
+    double first, last;
+    const auto pcurve = path ? BRep_Tool::CurveOnSurface(rail.edge, support.face, first, last)
+                             : Handle(Geom2d_Curve)();
+    if (path && pcurve.IsNull())
+      fail(rail.op, invalid_input, "the station plane has no support parameter curve", {rail.edge});
     const auto    footAt = [&](double u, Station& s) {
-      if (!stations.at(rail.t(u), s))
+      if (path)
+      {
+        const auto uv = pcurve->Value(rail.t(u));
+        s.uv[side][0] = uv.X();
+        s.uv[side][1] = uv.Y();
+      }
+      else if (!stations.at(rail.t(u), s))
         fail(rail.op,
              no_solution,
              "the ball cannot roll the length of the edge at this size",
@@ -174,7 +192,8 @@ Fitted fit(const Rail&                      rail,
            Stations&                        stations,
            bool                             contactPilot,
            const std::vector<SectionFrame>& frames,
-           const Fitted*                    terminalReference)
+           const Fitted*                    terminalReference,
+           bool                             reparameterizedTerminal)
 {
   const double          tolerance = fitTolerance(rail);
   std::map<double, int> knots     = {{0, kDegree + 1}, {1, kDegree + 1}};
@@ -251,6 +270,26 @@ Fitted fit(const Rail&                      rail,
            no_solution,
            "the section collapses between the faces beside the edge",
            {rail.edge});
+    if (terminalReference && reparameterizedTerminal)
+    {
+      const auto& basis = terminalReference->blend;
+      auto curve = sectionCurve(section);
+      curve->IncreaseDegree(basis->VDegree());
+      curve->InsertKnots(basis->VKnots(), basis->VMultiplicities(), tol::parameter, false);
+      section.degree = curve->Degree();
+      section.poles.clear(); section.weights.clear();
+      section.knots.clear(); section.multiplicities.clear();
+      for (int i = 1; i <= curve->NbPoles(); ++i)
+      {
+        section.poles.push_back(curve->Pole(i));
+        section.weights.push_back(curve->Weight(i));
+      }
+      for (int i = 1; i <= curve->NbKnots(); ++i)
+      {
+        section.knots.push_back(curve->Knot(i));
+        section.multiplicities.push_back(curve->Multiplicity(i));
+      }
+    }
   };
   Section reference;
   {
@@ -286,6 +325,8 @@ Fitted fit(const Rail&                      rail,
   // interior re-fit changes the global interpolation basis. Test the actual
   // carried fitting endpoints, which need not equal rail.first/last.
   const auto unchangedTerminal = [&](double t) {
+    if (terminalReference && reparameterizedTerminal)
+      return true;
     if (!terminalReference || frames.empty())
       return false;
     for (const auto& frame : frames)
@@ -315,7 +356,7 @@ Fitted fit(const Rail&                      rail,
     for (int i = 1; i <= base->NbUKnots(); ++i)
       referenceFlat.insert(referenceFlat.end(), base->UMultiplicity(i), base->UKnot(i));
   }
-  const auto terminalRow = [&](double u, int order) {
+  const auto referenceRow = [&](double u, int order) {
     const auto&                base = terminalReference->blend;
     NCollection_Array1<double> flat(1, int(referenceFlat.size()));
     for (size_t i = 0; i < referenceFlat.size(); ++i)
@@ -348,6 +389,33 @@ Fitted fit(const Rail&                      rail,
     if (!std::all_of(row.begin(), row.end(), [](double x) { return std::isfinite(x); }))
       fail(rail.op, no_solution, "a terminal fit jet is non-finite", {rail.edge});
     return row;
+  };
+  // Chain rule for the old normalized edge coordinate h as a function
+  // of normalized centre length u: (F o h)'' = F'' h'^2 + F' h''.
+  const auto terminalRow = [&](double u, int order) {
+    auto result = referenceRow(u, order);
+    if (!reparameterizedTerminal || !order)
+      return result;
+    gp_Pnt p;
+    gp_Vec d, dd;
+    const auto& curve = rail.centreParameter->curve;
+    const double t = u == 0 ? rail.from : rail.to;
+    int span = 1;
+    while (span + 1 < curve->NbKnots()
+           && (u == 0 ? curve->Knot(span + 1) <= t : curve->Knot(span + 1) < t))
+      ++span;
+    curve->LocalD2(t, span, span + 1, p, d, dd);
+    const double speed = d.Magnitude();
+    const double length = rail.centreParameter->length(rail.to)
+                          - rail.centreParameter->length(rail.from);
+    const double rate = length / (speed * (rail.to - rail.from));
+    const double acceleration = -length * length * d.Dot(dd)
+      / (std::pow(speed, 4) * (rail.to - rail.from));
+    const auto first = order == 2 ? referenceRow(u, 1) : std::vector<double>();
+    for (size_t i = 0; i < result.size(); ++i)
+      result[i] = order == 1 ? result[i] * rate
+                           : result[i] * rate * rate + first[i] * acceleration;
+    return result;
   };
   std::vector<double> worst;
   int                 bendRounds = 0;
@@ -938,8 +1006,59 @@ double CentreParameter::parameter(double distance) const
 
 //! Fit only the station centres, retaining the original edge-coordinate breaks.
 //! Arc length is subsequently integrated span by span; no polygonal length is used.
-static std::shared_ptr<CentreParameter> centreParameter(const Rail& rail, Stations& stations)
+std::shared_ptr<CentreParameter> centreParameter(
+  const Rail& rail, const std::function<gp_Pnt(double)>& pointAt,
+  const std::vector<double>& joins, const std::map<double, int>& events)
 {
+  if (!rail.spine.IsNull())
+  {
+    const auto source = Handle(Geom_BSplineCurve)::DownCast(rail.spine);
+    if (source.IsNull())
+      fail(rail.op, no_solution, "the station carrier has no spline representation");
+    const double rate = (rail.spineLast - rail.spineFirst)
+                        / (rail.spineParameterLast - rail.spineParameterFirst);
+    const double begin = source->FirstParameter(), period = source->LastParameter()-begin;
+    const auto mapped = [&](double t) {
+      return rail.spineFirst + (t-rail.spineParameterFirst)*rate;
+    };
+    std::vector<double> cuts{rail.from, rail.to};
+    const double a = mapped(rail.from), b = mapped(rail.to);
+    for (int turn = int(std::ceil((std::min(a,b)-begin)/period));
+         turn <= int(std::floor((std::max(a,b)-begin)/period)); ++turn)
+    {
+      const double t = rail.spineParameterFirst+(begin+turn*period-rail.spineFirst)/rate;
+      if (t > rail.from && t < rail.to) cuts.push_back(t);
+    }
+    std::sort(cuts.begin(), cuts.end());
+    GeomConvert_CompCurveToBSplineCurve joined;
+    for (size_t i=1; i<cuts.size(); ++i)
+    {
+      const double lo=cuts[i-1], hi=cuts[i];
+      const double turn=std::floor((mapped((lo+hi)/2)-begin)/period);
+      const double p=mapped(lo)-turn*period, q=mapped(hi)-turn*period;
+      auto part=Handle(Geom_BSplineCurve)::DownCast(source->Copy());
+      part->Segment(std::min(p,q),std::max(p,q));
+      if (rate<0) part->Reverse();
+      NCollection_Array1<double> knots(part->Knots());
+      BSplCLib::Reparametrize(lo,hi,knots);
+      part->SetKnots(knots);
+      if (!joined.Add(part,rail.resolved(limit::solved),true,false,part->Degree()))
+        fail(rail.op,no_solution,"the station carrier circuit does not join");
+    }
+    auto out=std::make_shared<CentreParameter>();
+    out->curve=joined.BSplineCurve();
+    out->tolerance=rail.resolved(limit::solved);
+    GeomAdaptor_Curve adaptor(out->curve);
+    double length=0;
+    for (int k=1; k<=out->curve->NbKnots(); ++k)
+    {
+      if (k>1) length+=GCPnts_AbscissaPoint::Length(adaptor,out->curve->Knot(k-1),
+                                                  out->curve->Knot(k),out->tolerance);
+      out->knots.push_back(out->curve->Knot(k));
+      out->lengths.push_back(length);
+    }
+    return out;
+  }
   std::map<double, int> knots{{0, kDegree + 1}, {1, kDegree + 1}};
   for (int k = 1; k < 8; ++k)
     knots[k / 8.0] = 1;
@@ -951,20 +1070,19 @@ static std::shared_ptr<CentreParameter> centreParameter(const Rail& rail, Statio
                rail.u(curve->Knot(k)),
                kDegree - std::max(0, curve->Degree() - curve->Multiplicity(k)));
   }
+  for (const auto& [t, multiplicity] : events)
+    addBreak(knots, rail.u(t), multiplicity);
+  // A support change shares the centre, but need not share its tangent.
+  // Retain that C0 event instead of approximating it by ever shorter smooth spans.
+  for (double t : joins)
+    addBreak(knots, rail.u(t), kDegree);
   const double tolerance = rail.resolved(limit::solved);
-  const auto   exact     = [&](double u) {
-    Station station;
-    if (!stations.at(rail.t(u), station))
-      fail(rail.op, no_solution, "the centre path cannot be fitted", {rail.edge});
-    return station.centre;
-  };
+  const auto exact = [&](double u) { return pointAt(rail.t(u)); };
   const gp_Pnt origin = exact(0);
   for (;;)
   {
     const auto flat = flatten(knots);
     const int  n    = int(flat.size()) - kDegree - 1;
-    if (n > 4000)
-      fail(rail.op, no_solution, "the centre-path fit exceeds its pole budget", {rail.edge});
     NCollection_Array1<double> full(1, int(flat.size())), parameters(1, n);
     NCollection_Array1<int>    orders(1, n);
     std::vector<double>        poles(3 * n), sites(n);
@@ -1035,11 +1153,11 @@ static std::shared_ptr<CentreParameter> centreParameter(const Rail& rail, Statio
   }
 }
 
-static bool defectiveRailKnot(const Rail& rail, const Fitted& fitted)
+bool defectiveRailKnot(const Rail& rail, const Fitted& fitted)
 {
   if (rail.curve.GetType() != GeomAbs_BSplineCurve)
     return false;
-  const auto curve   = rail.curve.BSpline();
+  const auto curve = rail.curve.BSpline();
   const auto surface = fitted.blend;
   for (int k = 2; k < surface->NbUKnots(); ++k)
   {
@@ -1072,11 +1190,41 @@ Fitted fit(Rail& rail, Stations& stations, bool contactPilot)
   Fitted original = fit(rail, stations, contactPilot, {});
   if (contactPilot || rail.law != Law::G2 || rail.centreParameter || rail.parameterSupports
       || !rail.sizes.places.empty()
-      || rail.s[0].cliffCurve || rail.s[1].cliffCurve || !defectiveRailKnot(rail, original))
+      || rail.s[0].cliffCurve || rail.s[1].cliffCurve
+      || (rail.spine.IsNull() && !defectiveRailKnot(rail, original)))
     return original;
   try
   {
-    rail.centreParameter = centreParameter(rail, stations);
+    Rail centreRail = rail;
+    centreRail.centreInterpolation = true;
+    // Preserve delivering stations unless centre fitting extends the source
+    // parameter curve: only that domain requires stable endpoint evaluation.
+    bool extrapolated = false;
+    if (rail.byCentre && rail.spine.IsNull())
+      for (int side = 0; side < 2; ++side)
+      {
+        double first, last;
+        const auto pcurve = BRep_Tool::CurveOnSurface(rail.edge, rail.s[side].face, first, last);
+        if (!pcurve.IsNull())
+          extrapolated |= rail.from < pcurve->FirstParameter() || rail.to > pcurve->LastParameter();
+      }
+    std::unique_ptr<Stations> stableStations;
+    Stations* centreStations = &stations;
+    if (extrapolated)
+    {
+      stableStations = std::make_unique<Stations>(centreRail);
+      Station anchor;
+      if (!stations.at((rail.from + rail.to) / 2, anchor))
+        fail(rail.op, no_solution, "the delivering centre path has no interior station", {rail.edge});
+      stableStations->march(anchor);
+      centreStations = stableStations.get();
+    }
+    rail.centreParameter = centreParameter(rail, [&](double t) {
+      Station s;
+      if (!centreStations->at(t, s))
+        fail(rail.op, no_solution, "the centre path cannot be fitted", {rail.edge});
+      return s.centre;
+    });
     Fitted candidate = fit(rail, stations, false, {});
     // A change of parameter can require more interpolation coefficients even
     // when it removes an artificial curvature break. Positional and contact
