@@ -369,6 +369,8 @@ struct CentreParameter
 
 struct Rail
 {
+  //! Finite supports entirely between the source rail and a crossed smooth boundary.
+  std::vector<TopoDS_Face> consumedSupports;
   //! Experimental fixed-contact shoulder homotopy on a closed offset circuit.
   struct ConicWindow
   {
@@ -436,6 +438,9 @@ struct Rail
   bool centreInterpolation = false;
   //! A split changes the rolling supports, not the original edge's parameter frame.
   std::optional<std::array<Side, 2>> parameterSupports;
+  //! A contact transferred over its entire interval has a new rolling support.
+  //! Its old parameter guide cannot excuse curvature jumps in the delivered sheet.
+  bool wholeSupportContinuation = false;
   //! Whether a conic section is made of two spans, split at its middle: where the faces meet so
   //! sharply somewhere along the edge that it turns by more than 120 degrees (Blend::rails), past
   //! which one rational quadratic's middle weight cos(turn / 2) falls below a half and its apex
@@ -1499,6 +1504,13 @@ private:
   Handle(Geom_Surface)    surface_;
   gp_Pnt2d                mid_;
 };
+
+//! Whether the retained UV contact lies in the finite support. Boundary intersections,
+//! including the ends of tangential overlaps, partition its constant-membership intervals.
+Standard_EXPORT bool contactWithinFace(const TopoDS_Face& face,
+                                      const Handle(Geom2d_Curve)& contact,
+                                      double from,
+                                      double to);
 
 //! Where a contact meets an edge of its support carried on past its vertex `from`, for a stop
 //! face that the blend runs past (the stop face is extended to cap the blend). Only a

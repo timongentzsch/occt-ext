@@ -880,6 +880,16 @@ void Attach::chainEnds()
           {
             if (railEdge(shape) || crossed.Contains(shape))
               continue;
+            const auto consumed = [&](const Rail& r) {
+              return std::any_of(r.consumedSupports.begin(),
+                                 r.consumedSupports.end(),
+                                 [&](const TopoDS_Face& face) { return onFace(shape, face); });
+            };
+            if (consumed(rail) || consumed(other.rail))
+            {
+              swept.push_back(shape);
+              continue;
+            }
             // A narrow face a cliff or a notch replaces whole takes its edges with it.
             if (std::any_of(std::begin(rail.s), std::end(rail.s), [&](const Side& s) {
                   return (s.cliffCurve || !s.trim.IsNull()) && s.cliffWhole
@@ -4415,6 +4425,20 @@ void Attach::ridges()
 
 void Attach::contacts()
 {
+  for (const auto& piece : pieces)
+    for (const auto& face : piece.rail.consumedSupports)
+    {
+      removed.push_back(face);
+      for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+      {
+        if (railEdge(e.Current()))
+          continue;
+        for (const auto& neighbor : facesOfEdge.FindFromKey(e.Current()))
+          if (!neighbor.IsSame(face))
+            editOf(edits, neighbor).replace.Bind(e.Current(), TopoDS_Edge());
+        swept.push_back(e.Current());
+      }
+    }
   // Edges a blend runs on over (Blend::absorbEnds) go.
   for (const auto& piece : pieces)
     for (const auto& edge : piece.swallowed)
@@ -4635,7 +4659,16 @@ void Attach::contacts()
         std::vector<TopoDS_Edge>& along = runs[{k, side}];
         for (size_t i = 0; i + 1 < stops.size(); i += 2)
         {
-          const double      s0 = sheet.rail(stops[i].first), s1 = sheet.rail(stops[i + 1].first);
+          const double s0 = sheet.rail(stops[i].first), s1 = sheet.rail(stops[i + 1].first);
+          if (piece.rail.parameterSupports
+              && !contactWithinFace(piece.rail.s[side].face,
+                                    alongRail(piece.fitted.contact[side], sheet),
+                                    s0,
+                                    s1))
+            fail(op,
+                 unsupported_geometry,
+                 "a retained blend contact lies outside its finite support",
+                 {piece.rail.edge});
           const TopoDS_Edge part =
             edgeBetween(sheet.contact(side),
                         stops[i].second,
@@ -4690,6 +4723,12 @@ void Attach::contacts()
           onSupport = aligned(exact, s0, onSupport->Value(s0), piece.rail.s[side].surface);
       }
       const double s0 = sheet.rail(u[k][side][0]), s1 = pieces[last].sheet.rail(u[last][side][1]);
+      if (piece.rail.parameterSupports
+          && !contactWithinFace(piece.rail.s[side].face, onSupport, s0, s1))
+        fail(op,
+             unsupported_geometry,
+             "a retained blend contact lies outside its finite support",
+             {piece.rail.edge});
       // Where another blend's contact on this face is this one, the face between them is
       // used up (a box rounded to half its width): the two blends meet along it.
       if (const auto same = sharedContact(piece.rail.s[side].face,

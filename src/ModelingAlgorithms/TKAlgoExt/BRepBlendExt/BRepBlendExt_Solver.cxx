@@ -1649,6 +1649,7 @@ struct Blend
   //! Each piece's stations and sheet, split where a contact crosses a smooth edge onto the next
   //! face.
   void sheets();
+  bool continueWholeSupport(int k, int side, Stations& stations);
   //! The loops where a contact on a cap runs back across a joint into the next piece.
   void crossFolds(const std::vector<std::pair<int, std::vector<Fold>>>& folds);
   //! One kind of sheet along each chain: exact where every piece of it can be, else fitted.
@@ -2675,6 +2676,77 @@ static bool acrossSeam(const Handle(Geom2d_BSplineCurve)& contact,
   return first < hi - slack;
 }
 
+bool Blend::continueWholeSupport(int k, int side, Stations& stations)
+{
+  Piece& piece = pieces[k];
+  if (piece.rail.parameterSupports)
+    return false;
+  const double u0 = piece.uAt(0), u1 = piece.uAt(1);
+  // A contact may have crossed a smooth support boundary over the whole rail.
+  // There is then no longitudinal crossing at which to split the piece. Keep
+  // the original station frame, transfer its middle ball to the adjacent
+  // support and march the same offset equations on that support instead.
+  bool        transferred = false;
+  const auto& beyondEdge  = farOf(piece.rail, side);
+  if (beyondEdge)
+    for (const auto& adjacent : facesOfEdge.FindFromKey(beyondEdge->edge))
+    {
+      if (adjacent.IsSame(piece.rail.s[side].face) || adjacent.IsSame(piece.rail.s[1 - side].face))
+        continue;
+      Side next    = piece.rail.s[side];
+      next.face    = TopoDS::Face(adjacent);
+      next.surface = BRep_Tool::Surface(next.face);
+      next.outward = adjacent.Orientation() == TopAbs_REVERSED ? -1 : 1;
+      double     first, last, a, b;
+      const auto here =
+        BRep_Tool::CurveOnSurface(beyondEdge->edge, piece.rail.s[side].face, first, last);
+      const auto there = BRep_Tool::CurveOnSurface(beyondEdge->edge, next.face, a, b);
+      if (here.IsNull() || there.IsNull())
+        continue;
+      bool smooth = true;
+      for (double share : {0.1, 0.5, 0.9})
+      {
+        const double   t  = first + (last - first) * share;
+        const gp_Pnt2d uv = here->Value(t), xy = there->Value(t);
+        Jet            before, after;
+        smooth = smooth && jetAt(piece.rail.s[side], uv.X(), uv.Y(), before)
+                 && jetAt(next, xy.X(), xy.Y(), after)
+                 && SectionPolicy::tangentFor(before.n.Angle(after.n), piece.rail.scale);
+      }
+      if (!smooth)
+        continue;
+      Station seed;
+      if (!stations.at(piece.rail.t((u0 + u1) / 2), seed))
+        continue;
+      GeomAPI_ProjectPointOnSurf onto(seed.foot[side], next.surface);
+      if (onto.NbPoints() == 0)
+        continue;
+      onto.LowerDistanceParameters(seed.uv[side][0], seed.uv[side][1]);
+      // Projection is only a Newton seed. The offset equations must put the
+      // contact on the finite destination, rather than its carrier extension.
+      Rail transferredRail = piece.rail;
+      transferredRail.parameterSupports = std::array<Side, 2>{piece.rail.s[0], piece.rail.s[1]};
+      transferredRail.s[side] = next;
+      if (!contactAt(transferredRail, seed.t, seed)
+          || inside(next.face).out(gp_Pnt2d(seed.uv[side][0], seed.uv[side][1])))
+        continue;
+      bool consumed = true;
+      for (TopExp_Explorer edge(piece.rail.s[side].face, TopAbs_EDGE); edge.More(); edge.Next())
+        consumed =
+          consumed
+          && (edge.Current().IsSame(piece.rail.edge) || edge.Current().IsSame(beyondEdge->edge));
+      if (consumed)
+        piece.rail.consumedSupports.push_back(piece.rail.s[side].face);
+      piece.rail.parameterSupports = std::array<Side, 2>{piece.rail.s[0], piece.rail.s[1]};
+      piece.rail.s[side]           = next;
+      piece.rail.wholeSupportContinuation = true;
+      seeds[k]                     = seed;
+      transferred                  = true;
+      break;
+    }
+  return transferred;
+}
+
 void Blend::sheets()
 {
   // Sections in two spans along a whole chain, or along none of it: its sections share their
@@ -2983,11 +3055,18 @@ void Blend::sheets()
           return;
         }
         else
+        {
+          if (continueWholeSupport(int(k), offSide, stations))
+          {
+            --attempt;
+            continue;
+          }
           fail(op,
                unsupported_geometry,
                "the blend's contact runs off the face beside the edge, onto faces the blend does "
                "not roll it over yet",
                {piece.rail.edge});
+        }
       }
       for (int s2 = 0; s2 < 2 && side < 0; ++s2)
       {

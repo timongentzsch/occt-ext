@@ -1888,3 +1888,230 @@ TEST(BRepBlendExt, CentreCarrierRetainsSourceNormalEventsBeforeContactEvents)
       EXPECT_TRUE(has(centres,source));
     }
 }
+
+TEST(BRepBlendExt, RoundContinuesPastAnEntireSmoothSupport)
+{
+  using namespace BRepExt::blending;
+  const double          q[4][2] = {{1, 0}, {1, .5522847498307936}, {.5522847498307936, 1}, {0, 1}};
+  std::vector<uint32_t> sections;
+  for (const auto [z, size] : {std::pair{-10., .8}, std::pair{0., 1.1}, std::pair{10., .9}})
+  {
+    BRepBuilderAPI_MakeWire boundary;
+    for (int quadrant = 0; quadrant < 4; ++quadrant)
+    {
+      NCollection_Array1<gp_Pnt> poles(1, 4);
+      const double               a = quadrant * M_PI / 2;
+      for (int j = 0; j < 4; ++j)
+        poles(j + 1) = gp_Pnt(size * 10 * (q[j][0] * std::cos(a) - q[j][1] * std::sin(a)),
+                              size * 7 * (q[j][0] * std::sin(a) + q[j][1] * std::cos(a)),
+                              z);
+      boundary.Add(BRepBuilderAPI_MakeEdge(new Geom_BezierCurve(poles)).Edge());
+    }
+    sections.push_back(BRepExt::store(session(), boundary.Wire()));
+  }
+  const auto skin =
+    BRepExt::get(session(), BRepExt::skinThrough(session(), sections, 0, 0, true, false).resultId);
+  gp_Trsf translate;
+  translate.SetTranslation(gp_Vec(6, 3, 2));
+  const auto tool = BRepBuilderAPI_Transform(skin, translate, true).Shape();
+  const auto body = unified(BRepAlgoAPI_Common(BRepPrimAPI_MakeTorus(9, 4).Shape(), tool).Shape());
+  NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>
+    adjacent;
+  TopExp::MapShapesAndUniqueAncestors(body, TopAbs_EDGE, TopAbs_FACE, adjacent);
+  TopoDS_Edge seed;
+  for (int i = 1; i <= adjacent.Extent(); ++i)
+  {
+    const auto& faces = adjacent.FindFromIndex(i);
+    if (faces.Extent() != 2)
+      continue;
+    const auto a = BRepAdaptor_Surface(TopoDS::Face(faces.First())).GetType();
+    const auto b = BRepAdaptor_Surface(TopoDS::Face(faces.Last())).GetType();
+    if (!((a == GeomAbs_Torus && b == GeomAbs_BSplineSurface)
+          || (b == GeomAbs_Torus && a == GeomAbs_BSplineSurface)))
+      continue;
+    seed = TopoDS::Edge(adjacent.FindKey(i));
+    break; // Selecting one edge propagates around its entire tangent chain.
+  }
+  ASSERT_FALSE(seed.IsNull());
+  for (double radius : {.4, .5, .6})
+    for (double scale : {.5, 2.})
+      for (bool turned : {false, true})
+      {
+        SCOPED_TRACE(::testing::Message() << radius << " " << scale << " " << turned);
+        gp_Trsf transform;
+        transform.SetScale(gp::Origin(), scale);
+        if (turned)
+          transform = posed(scale);
+        BRepBuilderAPI_Transform moved(body, transform, true);
+        auto                     request =
+          roundOf(moved.Shape(), {TopoDS::Edge(moved.ModifiedShape(seed))}, radius * scale);
+        request.fitWork = FitWork::Deferred;
+        const auto made = blend(request);
+        EXPECT_NO_THROW(accepted("round", request.body, made.shape, request.first, &made));
+        const auto defect = ballDefect(made.shape, request.body, request.first);
+        EXPECT_GT(defect.samples, 0);
+        EXPECT_LT(std::abs(defect.worst), 5e-6 * request.first);
+      }
+}
+
+TEST(BRepBlendExt, RetainedContactsRespectTrimmedDomains)
+{
+  using namespace BRepExt::blending::detail;
+  // The hole is away from the endpoints and midpoint of the contact. Sampling
+  // those three places alone would incorrectly accept the whole interval.
+  for (double scale : {0.001, 1.0, 1000.0})
+  {
+    BRepBuilderAPI_MakeFace face(gp_Pln(gp::XOY()), 0, scale, 0, scale);
+    BRepBuilderAPI_MakePolygon hole;
+    for (const auto [x, y] : {std::pair{.23,.2}, std::pair{.23,.8},
+                             std::pair{.24,.8}, std::pair{.24,.2}})
+      hole.Add(gp_Pnt(x * scale, y * scale, 0));
+    hole.Close();
+    face.Add(hole.Wire());
+    const Handle(Geom2d_Curve) contact =
+      new Geom2d_Line(gp_Pnt2d(0, .5 * scale), gp_Dir2d(1, 0));
+    EXPECT_FALSE(contactWithinFace(face.Face(), contact, .1 * scale, .9 * scale));
+    EXPECT_FALSE(contactWithinFace(face.Face(), contact, .9 * scale, .1 * scale));
+    EXPECT_TRUE(contactWithinFace(face.Face(), contact, .1 * scale, .2 * scale));
+    EXPECT_TRUE(contactWithinFace(face.Face(), contact, .3 * scale, .9 * scale));
+    const Handle(Geom2d_Curve) onBoundary =
+      new Geom2d_Line(gp_Pnt2d(0, .2 * scale), gp_Dir2d(1, 0));
+    EXPECT_TRUE(contactWithinFace(face.Face(), onBoundary, .1 * scale, .9 * scale));
+    EXPECT_FALSE(contactWithinFace(face.Face(), contact, -.1 * scale, .2 * scale));
+  }
+  // A periodic chart can be displaced by arbitrarily many whole periods.
+  const Handle(Geom_Surface) cylinder = new Geom_CylindricalSurface(gp::XOY(), 2);
+  const auto face = BRepBuilderAPI_MakeFace(cylinder, .2, 1.2, -1, 1, 1e-7).Face();
+  for (int turns : {-7, 0, 5})
+  {
+    const Handle(Geom2d_Curve) contact =
+      new Geom2d_Line(gp_Pnt2d(turns * 2 * M_PI, 0), gp_Dir2d(1, 0));
+    EXPECT_TRUE(contactWithinFace(face, contact, .3, 1.1));
+    EXPECT_FALSE(contactWithinFace(face, contact, .3, 1.3));
+  }
+}
+
+TEST(BRepBlendExt, FiniteContactToleranceIsMeasuredOnTheFace)
+{
+  using namespace BRepExt::blending::detail;
+  // Along a sphere's meridian the U speed is R*cos(v), not the maximum R
+  // over the face. Near a pole an angular tolerance based on R is too small.
+  for (double scale : {.001, 1., 1000.})
+    for (double latitude : {-1.495, .3, 1.495})
+    {
+      const double               radius = 11 * scale;
+      const Handle(Geom_Surface) sphere = new Geom_SphericalSurface(gp::XOY(), radius);
+      const auto   face = BRepBuilderAPI_MakeFace(sphere, 0, 1, -M_PI / 2, M_PI / 2, 1e-7).Face();
+      const double tolerance = BRep_Tool::Tolerance(face);
+      for (int turns : {-7, 0, 5})
+      {
+        const Handle(Geom2d_Curve) contact =
+          new Geom2d_Line(gp_Pnt2d(turns * 2 * M_PI, latitude), gp_Dir2d(1, 0));
+        for (double share : {.25, .75, 2.})
+        {
+          const double angle = share * tolerance / (radius * std::cos(latitude));
+          // Independent closed form: distance from a point on the sphere to
+          // the meridian great circle. The nearest arc is inside the V trim.
+          const double x        = std::pow(std::cos(latitude) * std::sin(angle), 2);
+          const double distance = radius * std::sqrt(2 * x / (1 + std::sqrt(1 - x)));
+          SCOPED_TRACE(::testing::Message() << scale << " " << latitude << " " << turns << " "
+                                            << share << " " << distance);
+          EXPECT_EQ(contactWithinFace(face, contact, -angle, .2), distance <= tolerance);
+          EXPECT_EQ(contactWithinFace(face, contact, .2, -angle), distance <= tolerance);
+        }
+      }
+    }
+}
+
+TEST(BRepBlendExt, FiniteContactsUseRetainedCurves)
+{
+  // Exact sheets replace the fitted endpoint maps. The finite-face check must
+  // use the same pcurve and retained interval that attachment stores.
+  for (bool plane : {false, true})
+    for (bool crossed : {false, true})
+      for (double radius : {.5, 1.})
+      {
+        SCOPED_TRACE(::testing::Message() << plane << " " << crossed << " " << radius);
+        const auto   left  = plane ? BRepPrimAPI_MakeBox(gp_Pnt(-10, -10, -10), 20, 20, 20).Shape()
+                                   : BRepPrimAPI_MakeSphere(11).Shape();
+        TopoDS_Shape right = BRepPrimAPI_MakeSphere(11).Shape();
+        if (crossed)
+        {
+          gp_Trsf turn;
+          turn.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, .3, 0)), .7);
+          right = BRepBuilderAPI_Transform(right, turn, true).Shape();
+        }
+        gp_Trsf move;
+        move.SetTranslation(gp_Vec(6, 3, 2));
+        right = BRepBuilderAPI_Transform(right, move, true).Shape();
+        const TopoDS_Shape shape =
+          plane ? BRepAlgoAPI_Fuse(left, right).Shape() : BRepAlgoAPI_Common(left, right).Shape();
+        NCollection_IndexedDataMap<TopoDS_Shape,
+                                   NCollection_List<TopoDS_Shape>,
+                                   TopTools_ShapeMapHasher>
+          adjacent;
+        TopExp::MapShapesAndUniqueAncestors(shape, TopAbs_EDGE, TopAbs_FACE, adjacent);
+        TopoDS_Edge seed;
+        double      longest = 0;
+        // Choose the intersection edge for this regression test only.
+        for (int i = 1; i <= adjacent.Extent(); ++i)
+        {
+          const auto& faces = adjacent.FindFromIndex(i);
+          if (faces.Size() != 2)
+            continue;
+          const auto a = BRepAdaptor_Surface(TopoDS::Face(faces.First())).GetType();
+          const auto b = BRepAdaptor_Surface(TopoDS::Face(faces.Last())).GetType();
+          if (plane ? !((a == GeomAbs_Plane && b == GeomAbs_Sphere)
+                        || (b == GeomAbs_Plane && a == GeomAbs_Sphere))
+                    : !(a == GeomAbs_Sphere && b == GeomAbs_Sphere))
+            continue;
+          const auto   edge   = TopoDS::Edge(adjacent.FindKey(i));
+          const double length = GCPnts_AbscissaPoint::Length(BRepAdaptor_Curve(edge));
+          if (length > longest)
+          {
+            longest = length;
+            seed    = edge;
+          }
+        }
+        ASSERT_FALSE(seed.IsNull());
+        auto       request = roundOf(shape, {seed}, radius);
+        const auto made    = blend(request);
+        EXPECT_NO_THROW(accepted("round", request.body, made.shape, request.first, &made));
+        const auto defect = ballDefect(made.shape, request.body, request.first);
+        EXPECT_GT(defect.samples, 0);
+        EXPECT_LT(std::abs(defect.worst), 5e-6 * radius);
+      }
+}
+
+TEST(BRepBlendExt, FiniteContactUsesLiftedTrims)
+{
+  using namespace BRepExt::blending::detail;
+  for (double scale : {.1, 1., 10.})
+  {
+    const auto   face = BRepBuilderAPI_MakeFace(gp_Pln(gp::XOY()), 0, scale, 0, scale).Face();
+    BRep_Builder builder;
+    // The spatial representation is independent of the face's pcurves and
+    // may differ within the edge tolerance. It must not move the face trim.
+    for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+    {
+      const auto edge = TopoDS::Edge(e.Current());
+      double     first, last;
+      const auto curve = Handle(Geom_Curve)::DownCast(BRep_Tool::Curve(edge, first, last)->Copy());
+      curve->Translate(gp_Vec(0, 0, .25 * scale));
+      builder.UpdateEdge(edge, curve, .3 * scale);
+    }
+    for (double share : {0., .75, 2.})
+    {
+      const Handle(Geom2d_Curve) contact =
+        new Geom2d_Line(gp_Pnt2d(0, -share * BRep_Tool::Tolerance(face)), gp_Dir2d(1, 0));
+      EXPECT_EQ(contactWithinFace(face, contact, .2 * scale, .8 * scale), share <= 1);
+    }
+    // Classification does not repair the caller's independent edge curves.
+    for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+    {
+      double     first, last;
+      const auto curve = BRep_Tool::Curve(TopoDS::Edge(e.Current()), first, last);
+      EXPECT_DOUBLE_EQ(curve->Value((first + last) / 2).Z(), .25 * scale);
+    }
+  }
+}

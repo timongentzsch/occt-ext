@@ -930,6 +930,11 @@ static void sheetJoins(const char*                                op,
                        const std::vector<std::optional<Station>>& seeds)
 {
   NCollection_Map<Standard_Address> seen;
+  // Transferring one strip can expose a retained knot on another strip of the
+  // same construction. Check the assembled sheets, not only the transferred strip.
+  const bool continued = std::any_of(pieces.begin(), pieces.end(), [](const Piece& piece) {
+    return piece.rail.wholeSupportContinuation;
+  });
   for (int k = 0; k < int(pieces.size()); ++k)
   {
     if (pieces[k].rail.law != Law::G2)
@@ -959,11 +964,14 @@ static void sheetJoins(const char*                                op,
       const auto   before = holding(w, false), after = holding(w, true);
       if (!before || !after)
         continue;
+      const Piece& p = pieces[before->first];
+      const Piece& q = pieces[after->first];
       double tilt = 0, bent = 0;
       for (int j = 2; j <= surface->NbVKnots(); ++j)
-        for (const double q : {0.25, 0.5, 0.75})
+        for (int sample = 0; sample < (continued ? 17 : 3); ++sample)
         {
-          const double v = surface->VKnot(j - 1) + (surface->VKnot(j) - surface->VKnot(j - 1)) * q;
+          const double share = continued ? (sample + 0.5) / 17 : (sample + 1) / 4.0;
+          const double v = surface->VKnot(j - 1) + (surface->VKnot(j) - surface->VKnot(j - 1)) * share;
           SurfaceJet   a{op}, b{op};
           surfaceD2OnUSpan(surface, w, v, i - 1, i, a);
           surfaceD2OnUSpan(surface, w, v, i, i + 1, b);
@@ -972,11 +980,19 @@ static void sheetJoins(const char*                                op,
           tilt = std::max(tilt, a.n.Angle(b.n));
           bent = std::max(bent, bendDifference(a, b, a.v.Normalized()).first);
         }
-      const Piece& p     = pieces[before->first];
-      const Piece& q     = pieces[after->first];
       const double scale = p.rail.scale, degrees = 180 / M_PI;
       if (tilt * degrees <= limit::seamDegrees && bent * scale <= limit::seamBend)
         continue;
+      // A transferred contact keeps the old guide only as a coordinate. A break
+      // in that guide's section field is not a curvature break in either retained
+      // support, and a small positional sag does not bound curvature. This new
+      // construction must meet the absolute internal seam contract itself.
+      if (continued)
+        fail(op,
+             no_solution,
+             "a continued G2 blend is not curvature continuous inside its face",
+             {p.rail.edge},
+             FailureKind::Curvature);
       // The crease a support itself has there, read on either side of the join, is the only
       // excuse for one here.
       double       crease = 0;

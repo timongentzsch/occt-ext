@@ -17,6 +17,9 @@
 #include <BRepBlendExt_Internal.hxx>
 
 #include <BRepClass_FaceClassifier.hxx>
+#include <Extrema_ExtPC.hxx>
+#include <BndLib_Add2dCurve.hxx>
+#include <Bnd_Box2d.hxx>
 #include <BRepGProp.hxx>
 #include <BRep_TVertex.hxx>
 #include <GProp_GProps.hxx>
@@ -452,6 +455,121 @@ std::vector<Meeting> meetings(const Handle(Geom2d_Curve)& one,
       }
     }
   return out;
+}
+
+bool contactWithinFace(const TopoDS_Face&          face,
+                       const Handle(Geom2d_Curve)& contact,
+                       double                      from,
+                       double                      to)
+{
+  if (from > to)
+    std::swap(from, to);
+  const auto                     surface    = BRep_Tool::Surface(face);
+  const double                   tolerance2 = std::pow(BRep_Tool::Tolerance(face), 2);
+  Inside                         inside(face);
+  std::vector<BRepAdaptor_Curve> trims;
+  std::vector<gp_Pnt>            ends;
+  for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+  {
+    const auto edge = TopoDS::Edge(e.Current());
+    // Evaluate the boundary's pcurve on this surface. Its stored 3D curve can
+    // differ by the edge tolerance and is not the boundary of the trimmed face.
+    const BRepAdaptor_Curve trim(edge, face);
+    ends.push_back(trim.Value(trim.FirstParameter()));
+    ends.push_back(trim.Value(trim.LastParameter()));
+    if (!BRep_Tool::Degenerated(edge))
+      trims.push_back(trim);
+  }
+  const auto onFace = [&](double t) {
+    const gp_Pnt2d uv = contact->Value(t);
+    // Membership is the union of the interior and the boundary's tolerance
+    // band. Measure that band in model units on the lifted trims; a global UV
+    // speed estimate loses the tangential resolution near a surface pole.
+    if (inside.classify(uv) == TopAbs_IN)
+      return true;
+    const gp_Pnt point = surface->Value(uv.X(), uv.Y());
+    for (const auto& end : ends)
+      if (point.SquareDistance(end) <= tolerance2)
+        return true;
+    for (const auto& trim : trims)
+    {
+      const Extrema_ExtPC distance(point,
+                                   trim,
+                                   trim.FirstParameter(),
+                                   trim.LastParameter(),
+                                   tol::parameter);
+      if (distance.IsDone())
+        for (int i = 1; i <= distance.NbExt(); ++i)
+          if (distance.SquareDistance(i) <= tolerance2)
+            return true;
+    }
+    return false;
+  };
+  if (!onFace(from) || !onFace(to))
+    return false;
+  if (from == to)
+    return true;
+  const auto   curve      = between(contact, from, to);
+  const double periods[2] = {surface->IsUPeriodic() ? surface->UPeriod() : 0,
+                             surface->IsVPeriodic() ? surface->VPeriod() : 0};
+  const auto bounds = [](const Handle(Geom2d_Curve)& c) {
+    Bnd_Box2d box;
+    BndLib_Add2dCurve::Add(c, c->FirstParameter(), c->LastParameter(), 0, box);
+    std::array<double, 4> b;
+    box.Get(b[0], b[1], b[2], b[3]);
+    return b;
+  };
+  const auto cb = bounds(curve);
+  std::vector<double> cuts = {from, to};
+  for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next())
+  {
+    double first, last;
+    const auto pc = BRep_Tool::CurveOnSurface(TopoDS::Edge(e.Current()), face, first, last);
+    if (pc.IsNull())
+      return false;
+    const auto boundary = between(pc, first, last);
+    const auto bb = bounds(boundary);
+    double low[2] = {0, 0}, high[2] = {0, 0};
+    double size = 1;
+    for (int i = 0; i < 4; ++i)
+      size = std::max({size, std::abs(cb[i]), std::abs(bb[i])});
+    const double tolerance = tol::parameter * size;
+    for (int d = 0; d < 2; ++d)
+      if (periods[d] > 0)
+      {
+        // Every translated boundary whose conservative UV box can meet the contact.
+        low[d] = std::ceil((cb[d] - bb[d+2] - tolerance) / periods[d]);
+        high[d] = std::floor((cb[d+2] - bb[d] + tolerance) / periods[d]);
+      }
+    for (double i = low[0]; i <= high[0]; ++i)
+      for (double j = low[1]; j <= high[1]; ++j)
+      {
+        if (i + 1 == i || j + 1 == j)
+          return false;
+        const auto shifted = Handle(Geom2d_Curve)::DownCast(
+          boundary->Translated(gp_Vec2d(i * periods[0], j * periods[1])));
+        Geom2dAPI_InterCurveCurve meet(curve, shifted, tolerance);
+        if (!meet.Intersector().IsDone())
+          return false;
+        for (int n = 1; n <= meet.NbPoints(); ++n)
+          cuts.push_back(meet.Intersector().Point(n).ParamOnFirst());
+        for (int n = 1; n <= meet.NbSegments(); ++n)
+        {
+          Handle(Geom2d_Curve) one, two;
+          meet.Segment(n, one, two);
+          cuts.push_back(one->FirstParameter());
+          cuts.push_back(one->LastParameter());
+        }
+      }
+  }
+  std::sort(cuts.begin(), cuts.end());
+  for (size_t i = 1; i < cuts.size(); ++i)
+  {
+    const double a = std::clamp(cuts[i-1], from, to), b = std::clamp(cuts[i], from, to);
+    if (!onFace(a / 2 + b / 2))
+      return false;
+  }
+  return true;
 }
 
 std::optional<Meeting> nearest(const std::vector<Meeting>& found, double near)

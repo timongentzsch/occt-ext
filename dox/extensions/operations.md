@@ -174,6 +174,57 @@ The enclosure is the standard NURBS convex-hull property: Alexander Efremov,
 The separation inference above is derived. It avoids expensive distance queries
 caused solely by rotation of long thin surfaces' world-axis boxes.
 
+### Contacts beyond an entire smooth support
+
+A contact can lie beyond a smooth support boundary for the whole retained rail
+interval. There is no longitudinal crossing at which to split that interval.
+The continuation retains the source station frame, projects the middle contact
+onto the neighbouring support, and solves the same offset equations there. A
+projection is only a Newton seed: the solved foot must classify IN or ON against
+the finite destination face before that face can become a rolling support. The
+existing fit, contact, section and solid checks still apply. A support bounded
+only by the source rail and crossed boundary is consumed together with its
+boundary edges; adjacent faces are rebuilt on the continued contacts.
+
+After end cuts, mitres and ridge replacements restrict each continued contact to
+its retained intervals, acceptance checks the support pcurve attachment actually
+stores: joined where pieces share a contact, and projected from the exact sheet
+where it replaces the fitted endpoint map. Acceptance intersects this UV curve
+with every trim boundary and classifies each interval between events, including the contact endpoints. Ends
+of tangential overlap segments are events too. On periodic carriers, conservative
+UV boxes determine every translated boundary that can intersect the contact;
+each witness belongs if it is in the face interior or within the face's own
+model-space tolerance of a trim evaluated on the carrier. Boundary distances use
+point/curve extrema and both curve endpoints, including degenerate pole edges.
+The lifted trim is essential: the independently stored 3D edge can differ from
+it by the edge tolerance. This union is the definition of membership in the
+closed face's tolerance band (derived); it is invariant under periodic parameter
+translations and does not turn a length tolerance into an angular tolerance
+using a speed measured away from the witness. Membership is
+constant between exact boundary events outside the tolerance band (derived from
+continuity). The event locations and classification remain numerical OCCT operations, rather than an
+interval certificate. Neither a carrier extension nor a missed or incomplete
+intersection computation establishes finite support membership. A contact
+outside its finite support is refused before attachment.
+
+This construction handles whole-interval crossings in the finite-support routing.
+Boundary normal agreement is sampled using the existing tangent policy;
+it is not a continuous smoothness certificate. The regression family varies
+radius, scale and rigid pose and independently measures the ball-contact defect.
+Open intrinsic center-path correspondence and overlapping sheets remain separate
+work; this construction does not trim them.
+
+For a curvature-continuous request, the retained internal knots also pass the
+existing absolute normal and second-form bounds in `sheetJoins`. The source
+parameter guide is a coordinate after transfer, not a retained rolling support:
+its section-field break cannot excuse an internal curvature jump. Nor does a
+small positional sag certify curvature continuity. These continued sheets use
+the absolute bounds without the section-law or sag exemptions. One-sided spline
+jets are exact on their chosen spans; the seventeen transverse sites per span
+are a sampled check, not a continuous certificate. A failed check refuses the
+construction; it is not evidence that no compatible curvature-continuous surface
+exists. Constructing compatible section second derivatives remains open.
+
 ### Closed offset-intersection station carriers
 
 After the existing whole-request constructions refuse, a separate carrier may be obtained
