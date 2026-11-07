@@ -472,555 +472,403 @@ A general generator and its existence conditions remain open.
 
 ## BRepPatchExt: boundary-first fill
 
-*Problem.* Given a closed loop of edges, each optionally asked to meet a neighbouring face to G0, G1 or
-G2, and optional interior curves and points, build one face. The construction tries, in order, a plane,
-an exact rational continuation of a torus or ball, a four-sided surface with the sides as its edges
-(a Coons patch of the four curves with its inner poles moved to meet G1 and G2), and for any loop a
-fitted surface over the loop's mean plane trimmed by the loop, with a net refined where the rim turns fast.
-The fit minimises a weighted energy of squared second and third parameter derivatives subject to the
-constraints; the normal equations are positive semi-definite for a connected net, and are solved by a skyline
-Cholesky factorisation with a multiplier outer iteration. The chart over the loop uses cotangent-weight
-(Dirichlet-energy) coordinates that are injective for a convex boundary [Floater 2003, Thm 4.1 (statement
-read, proof not)]; for a non-convex boundary injectivity is not guaranteed [Karni, Gotsman, Gortler;
-Weber and Zorin], which is why the result is looked at inside its loop before it is returned. G1 and G2
-corner compatibility at a vertex where several patches meet follows the vertex-enclosure condition
-[Hermann, Peters, Strotman 2009, all five pages read].
+*Problem.* Given a closed loop of edges, each optionally asked to meet a neighbouring face to G0, G1 or G2,
+and optional interior curves and points, build one face. Candidates are tried in order: a plane; an exact
+rational continuation of a torus or ball; a four-sided surface with the sides as its edges (a Coons patch whose
+inner poles are moved to meet G1 and G2); for any loop, a fitted surface over the loop's mean plane (or over a
+chart of its own, below), trimmed by the loop, with a net refined where the rim turns fast. The fit minimises a
+weighted energy of squared second and third parameter derivatives subject to the constraints. The normal
+equations are positive semi-definite for a connected net; they are solved by a skyline Cholesky factorisation
+with a multiplier outer iteration. Chart coordinates over the loop are cotangent-weight (Dirichlet-energy)
+coordinates, injective for a convex boundary [Floater03, Thm 4.1 (statement read, proof not)]; for a non-convex
+boundary injectivity is not guaranteed [Karni, Gotsman and Gortler; Weber and Zorin], so the result is looked at
+inside its loop before it is returned. Corner compatibility at a vertex where several patches meet follows the
+vertex-enclosure condition [HermannPetersStrotman09].
 
-*Complete curvature normalization (derived).* A seam compares the two second
-fundamental forms in one orthonormal tangent frame. For a symmetric form
-`[[a,c],[c,b]]`, its spectral norm is `|a/2+b/2| + hypot(a/2-b/2,c)`.
-The absolute mismatch is the norm of the difference; the relative mismatch is
-that norm divided by the larger norm of the two complete forms (capped at one).
-Only two exactly zero forms have zero normalization. In particular, the saddle
-`z=k*x*y` at the origin has norm `|k|` even though both diagonal entries vanish.
-This follows by solving the two-dimensional symmetric eigenproblem, using the
-normal-curvature characterization in Patrikalakis, Maekawa and Cho,
-*Shape Interrogation for Computer Aided Design and Manufacturing* (2009),
-[sections 3.3--3.4, equations (3.26)--(3.43)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node30.html).
-The normalization formula is derived here; it is not an approximation-error bound.
+### Measures and regularity
 
-*Parameter units (derived).* Surface-jet rank is tested on independently normalized
-tangent columns. Their cross product is the sine of their angle; zero length
-columns or a sine at floating-point resolution are unresolved. Coordinates use
-the cross-product dual basis when the Gram determinant is poorly scaled; the
-well-scaled path retains its previous arithmetic. This removes absolute UV-unit
-cutoffs without asserting regularity of near-dependent columns. The numerical
-resolution is eight machine epsilons, a roundoff policy, not a geometric tolerance.
-The dual identities are derived from `x.(y cross (x cross y)) = |x cross y|^2`
-for unit columns. The second fundamental form then acts on physical tangent
-vectors as in Patrikalakis, Maekawa and Cho (2009), section 3.3 above.
+*Complete curvature normalization (derived).* A seam compares the two second fundamental forms in one orthonormal
+tangent frame. For a symmetric form `[[a,c],[c,b]]` the spectral norm is `|a/2+b/2| + hypot(a/2-b/2,c)`. The
+absolute mismatch is the norm of the difference; the relative mismatch is that norm divided by the larger norm of
+the two complete forms (capped at one). Only two exactly zero forms have zero normalization: the saddle
+`z=k*x*y` at the origin has norm `|k|` although both diagonal entries vanish. This solves the 2x2 symmetric
+eigenproblem with the normal-curvature characterization [PMC09 §3.3-3.4, (3.26)-(3.43)]. It is a normalization,
+not an approximation-error bound.
 
-*Sampled normal rotation.* Opposite normals at two separated observations trigger
-midpoint subdivision rather than a fold verdict. A regular cylinder can turn by
-more than a right angle between samples under a nonuniform chart. Subdivision
-continues until consecutive normals agree in sign, a sampled differential loses
-rank, or floating-point UV resolution is exhausted. Unresolved rank or rotation
-is reported as unresolved regularity. This is a derived diagnostic, not a
-certificate of local regularity everywhere or of global injectivity. The separate
-Bernstein regularity certificate on chart fills remains required. The test family
-uses the exact rational circle parameterization documented by Open CASCADE,
-[GeomConvert::CurveToBSplineCurve, 8.0.1](https://occt3d.com/dev/doc/refman/html/class_geom_convert.html).
-Automatic candidate selection retains its established preference for a graph
-when a four-sided surface has coarse opposed normals. This is a preference,
-not a fold verdict: the rotating candidate remains available if the preferred
-construction cannot deliver, and is then checked with adaptive resolution.
-This preserves previously delivered graph geometry. No interior-curvature
-allowance is changed.
+*Parameter units (derived).* Surface-jet rank is tested on independently normalized tangent columns. Their cross
+product is the sine of their angle; zero-length columns or a sine at floating-point resolution (eight machine
+epsilons, a roundoff policy, not a geometric tolerance) are unresolved. Coordinates use the cross-product dual
+basis when the Gram determinant is poorly scaled. The dual identities follow from `x.(y cross (x cross y)) =
+|x cross y|^2` for unit columns; the second fundamental form then acts on physical tangent vectors [PMC09 §3.3].
+This removes absolute UV-unit cutoffs without asserting regularity of near-dependent columns.
 
-*Mean-plane degeneracy (derived).* Polygon area is no longer compared with a
-fixed share of squared perimeter: that would impose an aspect-ratio limit on
-exact planar rectangles. The centered area sum is unresolved only below an
-arithmetic-scale allowance `8*n*epsilon*perimeter^2`, where `n` is its number of
-vertices. Each centered radius is bounded by the perimeter, so bounding cross
-products and accumulated additions gives this conservative first-order roundoff
-policy. It is not a lower bound on geometric area or on the existence of a fill;
-all later geometric and tolerance checks remain required.
+*Sampled normal rotation (derived diagnostic).* Opposite normals at two separated observations trigger midpoint
+subdivision, not a fold verdict: a regular cylinder can turn by more than a right angle between samples under a
+nonuniform chart (exact rational circle: [OCCT8 GeomConvert]). Subdivision continues until consecutive normals
+agree in sign, a sampled differential loses rank, or UV resolution is exhausted; the last two are reported as
+unresolved regularity. This is not a certificate of local regularity everywhere or of global injectivity; the
+separate Bernstein regularity certificate on chart fills remains required. Automatic candidate selection prefers
+a graph when a four-sided surface has coarse opposed normals; this is a preference, not a fold verdict, and the
+rotating candidate is checked with adaptive resolution if the preferred construction cannot deliver.
 
-*Guides with positional tolerance (derived).* A guide is a positional constraint,
-not an exact endpoint two-jet. An endpoint tangent or normal-curvature mismatch
-therefore cannot veto construction. For example `(x,y,z)=(.01*t,50,h*t)` on
-`0<=t<=1` lies within `h` of the planar square for every `h<=tolerance`, regardless
-of its endpoint angle. Its exact planar fill meets the positional and supported
-G1 request. The exact-interpolation endpoint veto is removed; construction and
-final measurements decide feasibility at the requested tolerance. This does not
-assert existence for arbitrary guides.
+*Mean-plane degeneracy (derived).* The centered polygon-area sum is unresolved only below `8*n*epsilon*perimeter^2`
+(n the number of vertices), not below a fixed share of squared perimeter, which would impose an aspect-ratio limit
+on exact planar rectangles. Each centered radius is bounded by the perimeter, so bounding the cross products and
+accumulated additions gives this conservative first-order roundoff policy. It is no lower bound on geometric area
+or on the existence of a fill; the later geometric and tolerance checks remain required.
 
-*Interior-cell witnesses (derived).* A parameter rectangle is used as an owned
-surface witness only if its center is inside the delivered trim and no boundary
-arc enclosure can intersect it. Positive-weight Bezier hull tubes enclose the
-owned pcurves; unresolved conversions or offset approximations yield no interior
-witness. This uses the local convex-hull property in Patrikalakis, Maekawa and
-Cho, *Shape Interrogation for Computer Aided Design and Manufacturing* (2009),
-[section 1.4.2](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
-The rectangle selection argument is derived here. It neither changes the cells
-selected for surface regularity checks nor proves injectivity of a fitted face.
+*Planar collars and graph directions (open construction; derived).* A planar support with unit normal `n` is a
+height over a plane with unit normal `d` exactly when `n.d != 0`. Orthogonal projection restricted to its tangent
+plane has singular values `1` and `|n.d|`, so its inverse condition number is `1/|n.d|` and the height gradient
+has norm `sqrt(1/(n.d)^2 - 1)`. The `0.8` graph-selection threshold is therefore a conditioning policy, not an
+existence condition. Three mutually perpendicular support normals have best common margin `1/sqrt(3)`. A simple
+projected boundary and a global single-valued interior must be established separately.
+For a polynomial tensor graph, affine reproduction gives exact planar boundary jets when every height coefficient
+whose closed basis support meets a planar rim is set to that plane's affine height at the tensor Greville
+abscissae: local support makes the value and first two derivatives planar at the rim, degree five with simple
+knots gives C2. Incompatible planes must not prescribe the same coefficient; refinement separates disjoint
+collars but cannot resolve inconsistent jets at a shared corner. The identities follow from [PMC09 §1.4.1,
+(1.58)-(1.61)] by polynomial reproduction in both tensor directions: with `xi_i = (t_(i+1)+...+t_(i+p))/p`,
+`p (xi_i-xi_(i-1))/(t_(i+p)-t_i) = 1`, so by (1.61) `(sum xi_i N_i,p)' = sum N_i,p-1 = 1`; the clamped left
+endpoint fixes the constant, `sum xi_i N_i,p = u`, and partition of unity reproduces any affine height.
+The construction is not enabled: in a three-direction planar-rim experiment (4 761 to 68 121 coefficients met the
+rim checks) the interior-curvature ratios were about 15, 11 and 10 against the allowance 4. These are failed
+candidates, not a proof of infeasibility; exact planar jets do not establish interior fairness, topology or
+agreement with the intended shape.
 
-*Interior trim checks (derived).* Requested points are measured against the
-delivered face, including its boundary. Positive-weight guide splines are
-subdivided until their control hull has a tolerance-ball cover about a measured
-face witness. If `d` is the witness distance and `r` bounds the hull radius,
-`d+r` bounds every point by the triangle inequality. For a convex planar trim,
-its tolerance neighborhood is convex, so checking every hull pole suffices.
-This uses the convex-hull property in Patrikalakis, Maekawa and Cho (2009),
-[section 1.4.2](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node17.html).
-For polynomial guide and surface pieces, an alternative paired cover avoids
-subdividing to tolerance-sized balls: restrict surface cells to an in-trim
-UV rectangle and follow its diagonal. Partition the certificate at the guide's
-knots and at every crossing of a surface knot by the UV chord. Exact knot
-insertion and restriction give polynomial intervals on which the comparison
-below applies (Patrikalakis, Maekawa and Cho, 2009,
-[section 1.4.3, equations 1.74-1.76](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node18.html)).
-This does not force dyadic geometric subdivision to converge on
-non-dyadic knot parameters. Already validated point witnesses are reused only
-for exactly equal spatial coordinates on the immutable delivered face.
-For bidegree `(p,q)`, its diagonal poles
-are `R_k = sum_(i+j=k) C(p,i) C(q,j) P_ij / C(p+q,k)`. This follows by
-multiplying Bernstein basis polynomials in the tensor-product representation
-(Patrikalakis, Maekawa and Cho, 2009,
-[section 1.3.6, equation 1.56](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node14.html)).
-After degree elevation, the largest distance between paired guide and trace
-poles bounds the whole difference curve by the convex-hull property. This
-bound and the rectangle argument are derived in exact arithmetic; floating-point
-conversion and pole calculations are not interval certificates. A local
-projection is used only to supply an actual in-trim upper-distance witness;
-failure to find one falls back to the global trimmed-face distance query.
-For non-spline curves requiring approximation, the converter's reported maximum
-error is reserved in the budget; that reported error is not an independently
-validated interval bound. Unresolved coverage is refused, never accepted from
-finite guide samples alone. Coverage can be costly on curved faces at tight
-tolerances; this is an optimization item rather than a guide pole-count limit.
+### Guides, witnesses and trim checks
 
-*Reusing projections (derived).* A projection onto a construction's carrier is
-not yet an owned witness on the delivered trim. It can supply a UV seed, but
-the final surface value and trim ownership must still be checked. Finite guide
-samples do not bound the guide between samples. Positive clearance from the
-trim can establish ownership of an enclosed UV path; it does not bound the
-spatial distance from the requested guide to that path. Skipping the final
-cover therefore requires an already certified whole-guide cover on the same
-delivered surface and trim, or a proof that every subsequent operation preserves
-that cover. Merely retaining projection samples is insufficient.
+*Guides with positional tolerance (derived).* A guide is a positional constraint, not an exact endpoint two-jet,
+so an endpoint tangent or normal-curvature mismatch cannot veto construction: `(x,y,z)=(.01*t,50,h*t)`, `0<=t<=1`,
+lies within `h` of the planar square for every `h<=tolerance` whatever its endpoint angle. Construction and the
+final measurements decide feasibility at the requested tolerance. This asserts no existence for arbitrary guides.
+Endpoint jet information is kept only as a hint explaining a fit that already failed its result checks; it never
+rejects a delivered fit. A rejected adjacent fit marks angular and complete-form curvature misses as well as
+positional ones, and the between-row side checks call the same measurement and easing alternatives as
+acceptance (derived). Finite refinement does not prove existence or convergence for arbitrary boundary jets.
 
-*Local extraction and cost.* Knot insertion preserves the polynomial image in
-exact arithmetic (Patrikalakis, Maekawa and Cho, 2009, section 1.4.3,
-equations 1.74-1.76, cited above). The whole-surface and bounded constructors of
-[`GeomConvert_BSplineSurfaceToBezierSurface`](https://occt3d.com/dev/doc/refman/html/class_geom_convert___b_spline_surface_to_bezier_surface.html)
-(Open CASCADE 8.0.1) both copy the input surface before restriction and knot
-insertion. A bounded conversion per visited cell is consequently not guaranteed
-to be cheaper than one whole conversion. A process-CPU profile of a guided
-polynomial panel found that ownership tests and local projections dominated the
-cover, while eager conversion was below one millisecond. Projection-seed reuse
-and lazy bounded extraction were investigated independently; neither established
-cost neutrality. These observations are measurements, not complexity bounds.
+*Owned witnesses near curved trims (derived).* A fixed-resolution trim polygon can misclassify points near a
+curved rim. An interior-distance witness uses the parity of boundary arcs certified to avoid the query point:
+positive-weight Bezier hulls enclose each arc in a convex tube about its chord [PMC09 §1.4.2, convex hull
+property]; if the tube excludes the point, straightening the arc to its chord cannot cross the point and
+preserves crossing parity [HormannAgathos01 §1-2, (1)-(3)]. Only uncertain arcs are subdivided; uncertainty is
+kept once hull deviation reaches the floating-point enclosure guard. A parameter rectangle is a witness only if
+its centre is inside the delivered trim and no boundary enclosure intersects it. This is not interval arithmetic;
+unresolved conversions, offset approximations and near-boundary points give no witness.
+Adjacent owned pcurves can represent their common vertex differently. A parity chain adds connecting segments only
+where the gap fits the enclosure guard; for larger gaps ownership comes from `BRepClass_FaceClassifier` on the
+delivered face, not an invented closing curve. Before ownership is propagated over a nonzero rectangle, every
+boundary-arc tube and the whole coordinate box of every endpoint gap, enlarged only by the guard, is excluded;
+unsupported pcurves cannot supply a cell certificate, and points classified on the rim stay unresolved. The
+propagation is derived: an open connected rectangle disjoint from the boundary lies in one component of its
+complement, so one authoritative interior point suffices. It assumes the face's own ownership semantics and
+certifies no malformed wire. It changes neither the cells selected for surface regularity checks nor proves
+injectivity of a fitted face.
 
-*Energy assembly (derived).* A quadrature cell touches local poles `(a, b)` in order
-`p = (firstU + a) countV + firstV + b`. These indices increase strictly, so an element's
-lower triangle is already in the global lower triangle. The assembly reads the given
-pole's coordinate, or its dot product with the height direction, once per fit, and its
-local-to-global indices once per element. The given net is unchanged until the solve ends.
-The energy does not couple spatial coordinates, so visiting one coordinate at a time
-preserves each right-hand-side entry's sequence of subtractions. Each matrix entry
-likewise receives the same additions in the same order, including the original omission
-of zero entries from the skyline. This removes indexing and repeated projections rather
-than changing quadrature, arithmetic reductions, constraints, or refinement decisions.
-An independent generated family recovers the zero-energy affine plane from perturbed
-poles at degrees three and five, three scales, with separate, coupled and directional
-unknowns. Four fixed corners determine the affine nullspace uniquely.
+*Interior trim checks (derived).* Requested points are measured against the delivered face, boundary included.
+Positive-weight guide splines are subdivided until their control hull has a tolerance-ball cover about a measured
+face witness: with `d` the witness distance and `r` the hull radius, `d+r` bounds every point by the triangle
+inequality; for a convex planar trim the tolerance neighbourhood is convex, so every hull pole suffices [PMC09
+§1.4.2]. For polynomial guide and surface pieces a paired cover avoids tolerance-sized balls: surface cells are
+restricted to an in-trim UV rectangle and its diagonal, with the certificate partitioned at the guide's knots and
+at every crossing of a surface knot by the UV chord; exact knot insertion and restriction give polynomial
+intervals [PMC09 §1.4.3, (1.74)-(1.76)]. For bidegree `(p,q)` the diagonal poles are
+`R_k = sum_(i+j=k) C(p,i) C(q,j) P_ij / C(p+q,k)` [PMC09 §1.3.6, (1.56)]. After degree elevation the largest
+distance between paired guide and trace poles bounds the whole difference curve by the convex-hull property. The
+bounds are exact-arithmetic arguments; floating-point conversions and pole calculations are not interval
+certificates. A local projection only supplies an in-trim upper-distance witness; failing that, the global
+trimmed-face distance query is used. For non-spline curves requiring approximation, the converter's reported
+maximum error is reserved in the budget (not an independently validated bound). Unresolved coverage is refused,
+never accepted from finite guide samples; coverage can be costly on curved faces at tight tolerances.
 
-An open boundary asked for Quad sided whose runs and gaps make four sides with corners is filled by the
-four-sided surface untrimmed: the poles of a gap side are free like the inner ones, and nothing is asked
-along it (a side with more poles at degree 5 than a fitted net may have is first brought down to degree 5
-within a tenth of the tolerance, as an arc is). Where that quad is not a face to keep, the boundary is
-filled as any open one is, as before. Where the two rims face each other across two gaps, the fill must turn
-from the tangent plane of the one to that of the other, often far more tightly than either rim bends (an
-elbow from the end of a tube onto the end of a plate). The inside is then judged against the *bridge*
-between the rims as well: along each crossing, the Hermite curve that leaves and meets each rim square to it
-in its tangent plane, at the speed of the chord, with the face's bend that way where G2 is asked. It is
-built from the rims' places, tangent planes and bends only, so it is pose- and scale-covariant and a bulge,
-ripple or spike that leaves the rims unchanged leaves it unchanged; the fill may bend four times as tightly
-as the rim or as the bridge within a tenth of the crossing's length of the same place. With no gap, or gaps
-that are not opposite, the rule is the previous one.
+*Reusing projections (derived).* A projection onto a construction's carrier is not an owned witness on the delivered
+trim: it can seed a UV search, but the surface value and trim ownership must be checked. Finite samples do not
+bound a guide between samples; positive clearance from the trim establishes ownership of an enclosed UV path, not
+the spatial distance from the guide to it. The final cover may be skipped only given an already certified
+whole-guide cover on the same delivered surface and trim, or a proof that every later operation preserves it.
 
-*A section as reference.* After a guided height fit fails, a planar section guide between two
-disconnected rims supplies a reference candidate. Its plane intersects each rim at an anchor.
-Quintic Hermite segments extend the unchanged guide to these anchors. At a smooth rim the
-extension's first and second derivatives come from the support jet, differentiated subject to
-the section-plane constraint. An unsupported rim asks for position alone. The reference is the
-single tensor spline `S(u,v) = R(u) + C(v) - R(u*)`, made by adding the two curves' poles and
-subtracting the anchor, without a pole-count refusal.
+*Local extraction.* Knot insertion preserves the polynomial image in exact arithmetic [PMC09 §1.4.3]. Both
+constructors of [OCCT8 GeomConvert_BSplineSurfaceToBezierSurface] copy the input surface before restriction and
+knot insertion, so a bounded conversion per visited cell is not guaranteed cheaper than one whole conversion.
+Ownership tests and local projections, not conversion, dominated the cover cost of a guided polynomial panel;
+neither projection-seed reuse nor lazy bounded extraction established cost neutrality (measurements, not
+complexity bounds).
 
-*Derivation and scope.* This translation member of curve-network blending contains the section
-algebraically. If the support is `R(u) + Q(v)` with its transverse two-jet independent of `u`,
-matching the section's two-jet to `Q` at the anchor gives the same surface two-jet along the
-whole supported rim. A rail whose projection derivative on the section-plane normal stays
-away from zero and a simple regular planar section give a regular injective translation surface. These are sufficient
-conditions for this class, not an existence theorem for arbitrary networks. Independently
-parameterised opposite rims are still measured against their original curves. The candidate
-must pass the original delivered-rim, support, guide, validity, interior and sewing checks;
-a failed reference retains the earlier refusal. Existing deliveries are retained.
+### Energy assembly
 
-The curve-network Boolean sum and its conversion to one tensor spline are described by
-Siggel, Kleinert, Stollenwerk and Maierl, *TiGL -- An Open Source Computational Geometry Library
-for Parametric Aircraft Design* (2018), [sections 3.2.1--3.2.2, equations (10), (14)](https://arxiv.org/html/1810.10795v1).
-Support-derived second-order ribbons and their continuity conditions are described by
-Salvi and Varady, *Multi-sided Surfaces with Curvature Continuity* (2014),
-[section 3.3.2 and Appendix](https://salvi.chaosnet.org/texts/ribbons.pdf).
-The section-plane acceleration correction and this restricted reference route are derived here.
-The interior curvature allowance remains the same unproven judgement; a compatible guide can
-therefore still be refused by it.
+*Assembly (derived).* A quadrature cell touches local poles `(a, b)` in order `p = (firstU + a) countV + firstV + b`;
+these indices increase strictly, so an element's lower triangle lies in the global lower triangle. Each given
+pole's coordinate (or its dot product with the height direction) is read once per fit and each element's
+local-to-global indices once. The energy does not couple spatial coordinates, so visiting one coordinate at a time
+keeps each right-hand-side entry's sequence of subtractions, and each matrix entry receives the same additions in
+the same order (zero entries stay omitted from the skyline). Only indexing and repeated projections are removed;
+quadrature, reductions, constraints and refinement decisions are unchanged. Four fixed corners determine the
+affine nullspace, so the zero-energy affine plane is recovered from perturbed poles.
 
-*Planar collars and graph directions (open construction).* A planar support with unit normal
-`n` is locally a height over a plane with unit normal `d` exactly when `n.d != 0`.
-**Derived:** orthogonal projection restricted to its tangent plane has singular values
-`1` and `|n.d|`, so its inverse condition number is `1/|n.d|`; the height gradient has norm
-`sqrt(1/(n.d)^2 - 1)`. The existing `0.8` graph-selection threshold is therefore a conditioning
-policy, not an existence condition. Three mutually perpendicular support normals have best
-common margin `1/sqrt(3)`, which is nonzero. A simple projected boundary and a global
-single-valued interior must also be established; a local inverse alone does not give them.
+### Open boundaries
 
-For a polynomial tensor graph, affine reproduction gives exact planar boundary jets by setting
-every height coefficient whose closed basis support meets a planar rim to that plane's affine
-height at the tensor Greville abscissae. Local support makes the value and its first two
-derivatives planar at the rim; degree five and simple knots give the needed C2 continuity.
-Incompatible planes must not prescribe the same coefficient. Refinement separates disjoint
-collars; it cannot resolve inconsistent jets at a shared corner. The identities follow from
-Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided Design and Manufacturing*
-(2009), [section 1.4.1, equations (1.58)--(1.61)](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node16.html),
-by applying polynomial reproduction in both tensor directions. The coefficient prescription
-and projection singular-value calculation above are derived here.
-For completeness, `xi_i = (t_(i+1)+...+t_(i+p))/p` gives
-`p (xi_i-xi_(i-1))/(t_(i+p)-t_i) = 1`. Substitution in the derivative identity (1.61)
-therefore gives `(sum xi_i N_i,p)' = sum N_i,p-1 = 1`; its value at the clamped left
-endpoint fixes the constant, so `sum xi_i N_i,p = u`. Partition of unity then reproduces
-any affine height, and tensor products reproduce its two-variable form.
+An open boundary asked for Quad sided, whose runs and gaps make four sides with corners, is filled by the
+four-sided surface untrimmed: the poles of a gap side are free like the inner ones and nothing is asked along it
+(a side with more poles at degree 5 than a fitted net may have is first brought down to degree 5 within a tenth
+of the tolerance, as an arc is). If that quad is not a face to keep, the boundary is filled as any open one is.
+Where the two rims face each other across two gaps, the fill must turn from the tangent plane of one to that of the
+other, often more tightly than either rim bends (the end of a tube onto the end of a plate). The inside is then
+also judged against the *bridge* between the rims: along each crossing, the Hermite curve that leaves and meets
+each rim square to it in its tangent plane, at the speed of the chord, with the face's bend that way where G2
+is asked. It is built from the rims' places, tangent planes and bends only, so it is pose- and scale-covariant,
+and a bulge, ripple or spike that leaves the rims unchanged leaves it unchanged. The fill may bend four times as
+tightly as the rim or the bridge within a tenth of the crossing's length of the same place (both factors
+judgements). With no gap, or non-opposite gaps, the reference is the rim alone.
 
-This construction is not enabled. In a three-direction planar-rim experiment, 4,761, 17,689
-and 68,121 coefficients met the surface-side rim checks before sewing, but the interior-curvature
-ratios were approximately 15, 11 and 10 against the existing allowance of 4. These are failed
-candidates, not a proof of infeasibility. Exact planar jets alone do not establish interior
-fairness, topology, or agreement with the intended shape. The original routes and their
-acceptance limits remain in force.
+*A section as reference.* After a guided height fit fails, a planar section guide between two disconnected rims
+supplies a reference candidate. Its plane meets each rim at an anchor; quintic Hermite segments extend the guide
+to the anchors. At a smooth rim the extension's first and second derivatives come from the support jet,
+differentiated subject to the section-plane constraint; an unsupported rim asks for position alone. The reference
+is the single tensor spline `S(u,v) = R(u) + C(v) - R(u*)`, adding the two curves' poles and subtracting the
+anchor, without a pole-count refusal.
+*Derivation and scope.* This translation member of curve-network blending contains the section algebraically: if
+the support is `R(u) + Q(v)` with its transverse two-jet independent of `u`, matching the section's two-jet to `Q`
+at the anchor gives the same surface two-jet along the whole supported rim. A rail whose projection derivative on
+the section-plane normal stays away from zero and a simple regular planar section give a regular injective
+translation surface; these are sufficient conditions for this class, not an existence theorem for arbitrary
+networks. Opposite rims with independent parameterisations are measured against their original curves. The
+candidate must pass the delivered-rim, support, guide, validity, interior and sewing checks; a failed reference
+keeps the refusal. The curve-network Boolean sum and its conversion to one tensor spline are in [Siggel18
+§3.2.1-3.2.2, (10), (14)]; support-derived second-order ribbons and their continuity conditions in
+[SalviVarady14 §3.3.2, Appendix]. The section-plane acceleration correction and this restricted route are derived
+here. The interior curvature allowance is the unproven judgement below; a compatible guide can still be refused.
 
-Where two sides asked for G2 meet at a corner whose faces bend differently (an arm of a round meeting a
-strip whose edge bends across the arm's axis), no surface that is twice differentiable at the corner has
-both bends there. It has the one bend that the two edges and the tangent planes along them leave it: four
-numbers (each edge's normal curvature and the turn of its tangent plane along it) for the three of one
-bend, by least squares, with each face's bend across its edge counting a thousandth as much, so that it
-decides only what the four leave open (an edge that runs straight on through the corner, where the bend
-across becomes the mean of the faces'). The bend each side asks across itself then eases from that one at
-the corner to its face's own, as 1 - (10 t^3 - 15 t^4 + 6 t^5) of the difference over the length of the
-ease: the quintic whose first two derivatives vanish at both ends, so the bend asked stays twice
-differentiable along the side and agrees with the other side's to second order at the corner. Within the
-ease a miss is a share of no less than the ease itself (near a corner of straight edges both the bend asked
-and the surface's are near flat). The fill is held to the eased bends; the per-edge curvature it reports
-is against the faces themselves, so the corner's miss is reported and the fill is not refused. Over how
-long (derived here): with the faces' bends met on both sides beyond the ease, the fill's bend has to turn
-across the corner by the whole difference at every distance d from it (on the one edge it is that edge's
-own curvature, on the other the other face's), so it changes by that over an arc of about d; a net
-follows it only where d is no shorter than its span. The ease is one span of the coarsest net (the loop's
-size over 6), and at most half its side. Where no fill that eases so meets the faces beyond (three rounds
-round a box corner at a tolerance of a millionth; unequal rounds and their planes round a spherical cut),
-the refusal names the corner and says that G1 can be had, as before. The G2 analogue of the
-vertex-enclosure condition is stated open in [Hermann, Peters, Strotman 2009]; this is the elementary part
-of it that a fill can be held to.
+### G2 at a corner
 
-*Corner compatibility (derived).* Take a common oriented tangent plane at a corner p.
-For a regular C2 fill F, its second fundamental form II_F is continuous there. G2 contact to
-support A along one incident edge gives II_F = II_A on that edge; taking its limit at p gives
-II_F(p) = II_A(p). The other edge similarly requires II_F(p) = II_B(p). Thus
-II_A(p) = II_B(p) is necessary. A nonzero difference of these forms rules out exact G2 at
-that corner, however many poles or internally G2 patches the fill has. This is the elementary
-corner obstruction, not a sufficient existence theorem for compatible data. The definition
-of II and its relation to normal curvature are in Patrikalakis, Maekawa and Cho,
-*Shape Interrogation for Computer Aided Design and Manufacturing* (2009 online edition),
-[section 3.3, equations (3.26)-(3.30), Theorem 3.3.1](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node29.html).
+*Corner compatibility (derived).* Take a common oriented tangent plane at a corner p. For a regular C2 fill F,
+the second fundamental form II_F is continuous there. G2 contact to support A along one incident edge gives
+II_F = II_A on that edge, hence II_F(p) = II_A(p); the other edge likewise requires II_F(p) = II_B(p). So
+II_A(p) = II_B(p) is necessary: a nonzero difference rules out exact G2 at that corner, however many poles or
+internally G2 patches the fill has. This is the elementary corner obstruction, not a sufficient existence theorem.
+II and its relation to normal curvature: [PMC09 §3.3, (3.26)-(3.30), Thm 3.3.1]. The scalar twist residual alone
+cannot detect it: in a common orthonormal frame II_A = diag(k, 0) and II_B = 0 have zero mixed term but differ by
+|k| in normal curvature. This covers a bending strip meeting a flat strip and rounds of unequal curvature forms at
+a corner. These are impossible exact requests, not missing capabilities. A seam of lower continuity or a singular
+vertex changes the regular G2 request. The proof does not make the relaxed (eased) problem below impossible: failure
+to meet the limits beyond the ease is a finite-approximation issue.
 
-The scalar twist compatibility residual alone cannot detect this obstruction: for example,
-in a common orthonormal frame II_A = diag(k, 0) and II_B = 0 have zero mixed term but differ
-by |k| in normal curvature. This covers a bending strip meeting a flat strip, and also unequal
-curvature forms of several rounds at a corner. These are impossible exact corner requests,
-not missing solver capabilities. An eased fill reports its actual miss against the supports;
-its ease is a relaxation of the request. Failure to meet the unchanged limits *beyond* that
-ease remains a finite approximation issue, not a consequence of this nonexistence proof.
-A seam with lower continuity or a singular vertex would change the regular G2 request.
+*Ease at a corner.* Where two sides asked for G2 meet at a corner whose faces bend differently (an arm of a round
+meeting a strip whose edge bends across the arm's axis), no surface twice differentiable at the corner has both
+bends there. It has the one bend that the two edges and the tangent planes along them leave it: four numbers (each
+edge's normal curvature and the turn of its tangent plane along it) for the three of one bend, solved by least
+squares, with each face's bend across its edge weighted a thousandth as much, so that it decides only what the
+four leave open (for an edge that runs straight through the corner, the bend across becomes the mean of the
+faces'). The bend each side asks across itself eases from that one at the corner to its own face's as
+`1 - (10 t^3 - 15 t^4 + 6 t^5)` of the difference over the ease length: the quintic whose first two derivatives
+vanish at both ends, so the bend asked stays twice differentiable along the side and agrees with the other side's
+to second order at the corner. Within the ease a miss is allowed a share of no less than the ease itself (near a
+corner of straight edges both the bend asked and the surface's are near flat). The fill is held to the eased
+bends; the per-edge curvature it reports is against the faces themselves, so the corner's miss is reported and the
+fill is not refused.
+*Ease length (derived).* If the faces' bends are met on both sides beyond the ease, the fill's bend has to turn
+across the corner by the whole difference at every distance d from it (on one edge it is that edge's curvature, on
+the other the other face's), so it changes by that over an arc of about d; a net follows it only where d is no
+shorter than its span. The ease is one span of the coarsest net (the loop's size over 6), at most half its side
+(a judgement). Where no fill that eases so meets the faces beyond it (three rounds round a box corner at
+tolerance 1e-6; unequal rounds and their planes round a spherical cut), the refusal names the corner and says
+G1 can be had. The G2 analogue of the vertex-enclosure condition is stated open in [HermannPetersStrotman09]; this
+is the elementary part of it that a fill can be held to. G2 is then met on the middle of each side only; coarse
+nets that meet an eased loop can be lopsided; and the ease of one coarse span is a judgement bounded by
+measurement, not an optimum. A flat strip meeting a bending one is held beyond its ease to the flat G2 limit,
+which no eased fill meets, and is refused naming the corner (the same corner statement is made by a commercial
+fill's manual: the corner's tangent plane and curvature "may not agree to the existing surfaces'").
 
-*Over a chart of its own.* A fill over the mean plane is a height over it, and a height has a slope of
-tan(acos |n . z|) where the rim's faces have normal n; the plane's check refuses a loop where some
-|n . z| < 0.17 or where the loop seen along z crosses itself. Some loops are a height over no plane at
-all: where the normals of the faces along the rim sweep a closed half circle or more (the nose of a
-wing, a window round more than half a cylinder), every direction d is square to one of them by the
-intermediate value theorem, so every height over every plane is vertical somewhere on its rim. Which
-plane comes nearest is read exactly: with the signs s of n . d fixed near the best direction of a
-search over the half sphere (a Fibonacci lattice of 4096 directions laid out in the loop's frame, so
-that it turns with the loop), max over unit d of min s n . d is the distance from the origin to the
-convex hull of the signed normals [Boyd and Vandenberghe, Convex Optimization, 2004, 8.1.1: the
-support function], found by Gilbert's iteration [IEEE J. Robotics and Automation 2, 1966]; every
-answer is a direction's own least, so a bound from below. A loop that the plane's check refuses, and
-for which that margin, read at 65 places of every side asked G1 or G2 with their ends, is below the same
-0.17, is filled over a chart of its own (`overChart` in `BRepPatchExt_Patch.cxx`, the chart in
-`BRepPatchExt_Chart.cxx`). Every other loop is filled as before, and a loop that the chart does not
-fill either is refused as it was over the plane, with the same words.
-The loop is first spanned by a disc of triangles: an even lattice in the unit disc, the loop on its rim
-at even steps of its length (160 places round), whose places in space minimise the sum of the squared
-umbrella Laplacians at every node of the rim and inside it, the rim held (discrete thin-plate fairing
-[Kobbelt, Discrete fairing, 1997; Botsch and Kobbelt, SIGGRAPH 2004]). Along a side to be tangent to a
-face, a ring of nodes outside the disc stands in the face, at each piece's middle less the way the fill
-leaves the side (away from the face, read in the face's own parameters) times the height of an even
-triangle; with the rim's umbrella near nothing, the nodes inside next to it stand where the face's
-tangent plane goes on, the discrete form of the condition on the first derivative across the boundary
-that two fixed rings give the biharmonic equation in Botsch and Kobbelt. Elsewhere the outer node is
-free, a natural end. The umbrella is the Laplacian of the lattice's own parameters, so the disc is laid
-out again, twice, as an even lattice in the chart it lays flat to, where an even triangle is near even
-on the surface and the umbrella near its cotangent Laplacian [Pinkall and Polthier 1993], and faired
-again; from the first of these on it is pinned to 33 places of every guide where it was nearest them
-(each pin counting 100 umbrellas, a judgement: the wing tip's disc then passes within 0.006 of its guide).
-It is laid flat by Boundary First Flattening with the scale held at none along the rim [Sawhney and
-Crane 2017, sections 5 and 6.1; Springborn, Schroeder and Pinkall 2008, appendix E]: angles kept
-everywhere and lengths along the rim, so that the thin-plate energy of the parameters is near the
-surface's bending energy, which it is not over a plane where the surface stands steep. The flattening
-has no injectivity guarantee for a boundary that is not convex [Floater 2003, theorem 4.1; Sawhney and
-Crane, section 7]: a triangle laid flat folded over refuses the chart. A net free in space is then fitted
-over the chart as over the plane, each side at its places in the chart, its tangent plane asked as
-N . S_u = N . S_v = 0 and its bend as n . S_nn = II(S_n, S_n) taken about the surface of the pass before
-(both conditions on the derivatives in space, none on how the chart lies), and trimmed by the sides'
-curves in its parameters. A net free in space can meet every tangent plane by not leaving the rim at
-all, S_n running to nothing, which is no parametrisation: measured on the wing tip without it, the
-tangent planes were missed by 20 to 80 degrees with |S_v| from 1 to 120 along one side. In a chart that
-keeps the rim's lengths a surface the chart is conformal to leaves the rim as fast as it runs along it,
-|S_n| = |S_t| = 1, and along each side asked G1 or G2 the speed along the way the fill leaves is held
-within 0.5 of that: read, and asked only where it leaves that band, an inequality and no wish. The band
-is a judgement (the chart is the disc's, not the fill's). The net starts as the coarsest of the ladder
-and spans are halved where a place is missed, as for the Adjacent fit, up to the poles a net free in
-space is let have (`freePoles`, 640); once a net meets the limits the next finer one is fitted and the
-coarser kept where they lie within `settled` of each other, the stop above. The surface is kept only
-where S_u x S_v is shown away from zero on every cell the face uses: per cell it is a polynomial of
-degrees (2p - 1, 2q - 1) whose Bernstein coefficients come from those of S_u and S_v [Farin, Curves and
-Surfaces for CAGD, 2002, 5.8], and by the convex hull property a cell whose coefficients all have a
-positive part along one direction has no zero; a cell that does not is cut in four, at most four times.
-That is the surface form of the Bernstein test of a Jacobian's sign in planar parametrisation [Gravesen,
-Evgrafov, Nguyen and Nortoft 2014].
-Windows round a cylinder of radius 15 between heights 8 and 20, G2 to four strips of it (the application's fixture
-at 200 degrees; 180, 240 and 300 held out from the design, and 270 on a cylinder of radius 20 between 10
-and 34) are filled on the same nets at rest, turned, mirrored and turned at a thousandth and a thousand
-times the size; read by projection onto the strips they meet every edge, the strips' tangent planes
-within 0.005 degrees and their bends within a share of 0.004 (95th percentile), and stand within 0.009 of
-the cylinder (the 200-degree window 0.0024, on 11 x 8 poles, in 0.34 s of CPU time natively; 300 degrees
-1.4 s).
-Before fitting, `netSpacing` predicts a chart's cost by replacing higher derivatives by those
-of the osculating circle: a circle of curvature k has arc-length derivative magnitude k^p at
-order p+1. This substitution is exact for the circle. Curvature at a point of a general curve
-or surface does not bound its higher derivatives or those of its chart. Consequently the
-forecast and its 640-pole cutoff are computation policy, not an approximation-error theorem,
-a proof of a necessary pole count, or a proof that a refused fill does not exist.
+### Spatial fit and chart
 
-Sande, Manni and Speleers, *Explicit error estimates for spline approximation of arbitrary
-smoothness in isogeometric analysis* (2020), [section 1.2, equations (2)--(3), sections 6--7](https://arxiv.org/html/1909.03559v3),
-give upper error estimates using the actual appropriate-order Sobolev seminorm and, for mapped
-geometry, derivatives of the map. Their L2/Ritz estimates are not pointwise geometric curvature
-bounds and cannot be inverted into a lower bound on a feasible pole count. The production
-forecast still uses the circle surrogate; replacing it requires measured constructions and
-unchanged final geometry checks.
+*Over a chart of its own.* A fill over the mean plane is a height over it, with slope `tan(acos |n.z|)` where the
+rim's faces have normal n; the plane route refuses a loop where some `|n.z| < 0.17` or where the loop seen along z
+crosses itself. Some loops are a height over no plane: where the face normals along the rim sweep a closed half
+circle or more (a wing nose, a window round more than half a cylinder), every direction d is square to one of them
+by the intermediate value theorem, so every height over every plane is vertical somewhere on its rim. The nearest
+plane is read exactly: with the signs s of n.d fixed near the best direction of a search over the half sphere (a
+Fibonacci lattice of 4096 directions in the loop's frame, so it turns with the loop), `max_d min s n.d` is the
+distance from the origin to the convex hull of the signed normals [Boyd04 §8.1.1, support function], found by
+Gilbert's iteration [Gilbert66]; every answer is a direction's own least, hence a bound from below. A loop refused
+by the plane route whose margin, read at 65 places of every side asked G1 or G2 with their ends, is below the same
+0.17 is filled over a chart (`overChart` in `BRepPatchExt_Patch.cxx`, chart in `BRepPatchExt_Chart.cxx`); any
+other loop is filled over the plane, and a loop the chart does not fill is refused as over the plane.
 
-An unconstrained spatial fit currently enforces one transverse curvature equation, with five
-outer linearizations. G0 and G1 tolerance do not bound the omitted tangent and mixed second
-fundamental-form components. A complete correction must check the actual nonlinear form and
-the delivered parameter curves, including places between its fitting samples, and establish
-regularity and interior acceptance. Support-derived second-order ribbons provide local jets
-(Salvi and Varady 2014, section 3.3.2 above), not a convergence theorem for a single fitted
-spline. Globalized constrained iterations and feasibility restoration are described by
-Nocedal and Wright, *Numerical Optimization*, second edition (2006), section 18.4,
-[Algorithm 18.3](https://mcube.lab.nycu.edu.tw/~cfung/docs/books/nocedal2006.pdf); their hypotheses and actual convergence must be verified for the assembled
-problem. Merely adding three frozen curvature rows does not establish either.
+The loop is first spanned by a disc of triangles: an even lattice in the unit disc, the loop on its rim at even
+steps of its length (160 places), whose places in space minimise the sum of squared umbrella Laplacians at every
+node of the rim and inside it, the rim held (discrete thin-plate fairing [Kobbelt97; BotschKobbelt04]). Along a
+side to be tangent to a face, a ring of nodes outside the disc stands in the face at each piece's middle, less the
+way the fill leaves the side (away from the face, read in the face's own parameters) times the height of an even
+triangle; with the rim's umbrella near nothing, the nodes inside next to it stand where the face's tangent plane
+goes on, the discrete form of the first-derivative condition that two fixed rings give for the biharmonic
+equation [BotschKobbelt04]. Elsewhere the outer node is free (a natural end). The umbrella is the Laplacian of the
+lattice's own parameters, so the disc is laid out again, twice, as an even lattice in the chart it lays flat to,
+where an even triangle is near even on the surface and the umbrella near its cotangent Laplacian [Pinkall93], and
+faired again; from the first of these on it is pinned to 33 places of every guide where it was nearest them (each
+pin counting 100 umbrellas, a judgement). It is laid flat by Boundary First Flattening with the scale held at none
+along the rim [SawhneyCrane17 §5-6.1; SpringbornSchroederPinkall08 App. E]: angles kept everywhere and lengths along
+the rim, so that the thin-plate energy of the parameters is near the surface's bending energy, which it is not over
+a plane where the surface stands steep. The flattening has no injectivity guarantee for a non-convex boundary
+[Floater03 Thm 4.1; SawhneyCrane17 §7]; a triangle laid flat folded over refuses the chart.
 
-Open:
-a constrained feasibility solve with complete curvature conditions and measured convergence,
-then refinement where the verified geometric residual requires it. The cap of a cone standing 80 degrees or more against its circle, refused as too steep
-before, asks for 529 to 576 poles at a tolerance of 1e-4, within the 640: it is tried, and its coarse nets
-are not shown regular, so that it is refused as before at about 0.4 s more per loop (the steep
-cones' GTest 23.4 s against 17.8 before there was a chart). That is not foreseen from the chart: the
-chart's own map is regular (a triangle laid flat folded over refuses it), and what is not shown
-regular is S_u x S_v of the net fitted over it, which the chart does not decide.
-The constants of the chart that are not derived: 160 places round the loop, 33 pins per guide, two
-relays, the pin's 100, the band's 0.5, four cuts of a cell, the 4096 directions of the search, which
-only seed the exact step, and the 256 bins over which the spans asked are read across the chart; the
-Favard constant is taken at its upper end, so that the spans are, as far as the bound goes, enough.
+A net free in space is then fitted over the chart as over the plane, each side at its places in the chart, its
+tangent plane asked as `N.S_u = N.S_v = 0` and its bend as `n.S_nn = II(S_n, S_n)` about the surface of the pass
+before (both conditions on derivatives in space, none on how the chart lies), and trimmed by the sides' curves in its
+parameters. Such a net can meet every tangent plane by not leaving the rim at all (`S_n` running to nothing), which
+is no parametrisation. In a chart that keeps the rim's lengths, a surface to which the chart is conformal leaves the
+rim as fast as it runs along it, `|S_n| = |S_t| = 1`; along each side asked G1 or G2 the speed along the way the fill
+leaves is held within 0.5 of that, asked only where it leaves that band (an inequality, not a wish; the band is a
+judgement, since the chart is the disc's, not the fill's). The net starts as the coarsest of the ladder and spans
+are halved where a place is missed, as for the Adjacent fit, up to the poles a net free in space is let have
+(`freePoles`, 640); once a net meets the limits, the next finer is fitted and the coarser kept where they lie
+within `settled` of each other (the stop below). The surface is kept only where `S_u x S_v` is shown away from
+zero on every cell used: per cell it is a polynomial of degrees (2p-1, 2q-1) whose Bernstein coefficients come from
+those of `S_u` and `S_v` [Farin02 §5.8]; by the convex hull property a cell whose coefficients all have a positive
+part along one direction has no zero, and a cell that does not is cut in four, at most four times (the surface form
+of the Bernstein Jacobian-sign test [Gravesen14]).
 
-*Unproven.* The interior acceptance gate (a fault when the interior bends more than 4 times the rim's
-bend, with a floor of 2/size) has no derivation; a bound of the form K sqrt(2D) in the energy gap D was
-tried and rejected. The bridge only replaces the reference that the 4 multiplies; the 4 and the tenth are
-judgements. Over 76 tube-to-plate and wall-to-plate elbows (three heights, tilts and widths, at rest and
-turned) that met their rims, fills bent at most 2.1 times their reference (up to 18 times the rims'
-bend, the old reference, which refuses 36 of them). On the same elbows with injected defects that leave the
-rims unchanged, every ripple of a hundredth of the size (6 or 12 waves) and 80 % of bulges of a twentieth
-are refused, but gentler defects where the elbow turns pass more often than against the rims alone: on the
-40 elbows the old rule keeps, bulges of a twentieth are refused 108 times in 120 instead of 120, spikes of a
-fiftieth 104 instead of 120. The flat G2 limit, the rules by which a ladder that has met nothing yet gives up
+*Cost forecast (derived).* `netSpacing` predicts a chart's cost by replacing higher derivatives by those of the
+osculating circle: a circle of curvature k has arc-length derivative magnitude `k^p` at order p+1. This is exact for
+the circle. Curvature at a point of a general curve or surface bounds neither its higher derivatives nor those of
+its chart, so the forecast and its 640-pole cutoff are computation policy: no approximation-error theorem, no
+necessary pole count, no proof that a refused fill does not exist. [SandeManniSpeleers20 §1.2, (2)-(3), §6-7] give
+upper error estimates in the actual Sobolev seminorm and, for mapped geometry, derivatives of the map; those are
+L2/Ritz estimates, not pointwise curvature bounds, and cannot be inverted into a lower bound on a feasible pole
+count. Replacing the surrogate requires measured constructions and the same final geometry checks.
+
+*Spatial curvature condition (open).* An unconstrained spatial fit enforces one transverse curvature equation,
+with five outer linearizations. G0 and G1 tolerance do not bound the omitted tangent and mixed second
+fundamental-form components. A complete correction must check the actual nonlinear form and the delivered
+parameter curves, including places between fitting samples, and establish regularity and interior acceptance.
+Support-derived second-order ribbons give local jets [SalviVarady14 §3.3.2], not a convergence theorem for one
+fitted spline. Globalized constrained iterations and feasibility restoration are in [NocedalWright06 §18.4,
+Alg. 18.3]; their hypotheses and convergence must be verified for the assembled problem, and merely adding three
+frozen curvature rows establishes neither. Open: a constrained feasibility solve with complete curvature conditions
+and measured convergence, then refinement where the verified geometric residual requires it. The cap of a cone
+standing 80 degrees or more against its circle asks for 529 to 576 poles at tolerance 1e-4, within the 640; its
+coarse nets are not shown regular, and it is refused. The chart's own map is regular (a folded triangle refuses it);
+what is not shown regular is `S_u x S_v` of the net fitted over it, which the chart does not decide.
+
+*Chart constants not derived (judgements).* 160 places round the loop, 33 pins per guide, two relays, the pin's
+100, the band's 0.5, four cuts of a cell, the 4096 directions (they only seed the exact step), and the 256 bins over
+which the spans asked are read across the chart; the Favard constant is taken at its upper end, so that the spans
+are, as far as the bound goes, enough.
+
+### Stop and ladder
+
+A net that meets every limit is not yet the fill asked for: that is the fairest surface of all that meet them,
+which the nets of the ladder approach as they become finer. Once a net meets the limits the ladder continues until
+two nets in a row lie within `settled = 1e-3` of the loop's size of each other, read from twice as many places as
+the finer net has spans each way inside the loop to the nearest place of the other surface; the coarser of the
+two that meets the limits is kept, and where the ladder or the allowed nets end first, the finest that meets them.
+This is a Cauchy test: where the nets converge at least twice as fast as the ladder refines (ratio `rho <= 1/2`),
+the kept net is within `d / (1 - rho) <= 2 d` of their limit, d the distance between the two. A share of the size
+makes the stop the same at every size and pose. A net free in space and a height over the plane minimise
+different energies and approach different surfaces; they are not one sequence, and once nets free in space meet
+the limits no height is tried after them. `settled` is a judgement (about the height by which a tilt of 0.1 degree
+moves a surface over half the loop's size). The cost is at least one net beyond the one kept; nets that a coarse net
+met only roughly come out finer. Where nets keep differing by more than `settled` the whole ladder is run.
+Open: the Cauchy bound needs the distances to fall, and they need not: on some loops (an eight-edge G0 opening
+with nets 2.38e-3, 7.0e-4 and 7.5e-4 of the size apart) the ratio is above 1/2, the nets stand on a plateau below
+`settled`, and the stop is a judgement, not a bound.
+
+*A ladder that does not settle.* The distances between nets may not shrink at all (nets 3.8e-3, 3.1e-3, 1.3e-3,
+2.9e-3, 1.2e-3 of the size apart, up to the finest). A condition is met once it is within its reach: the multipliers
+stop at the first shifts that put every condition there, and the correction then moves the net onto the curves by
+the least movement of its poles. What a net delivers is one surface of the band of all that meet the limits, at which
+that iteration and correction stopped, not the least bending of the band. The band has an inside (the limits are
+inequalities) and as nets become finer nothing draws their surfaces to one point of it. What is asked is the
+fairest surface that meets the limits, the least of the bending energy `integral (k1^2 + k2^2) dA` over the band.
+So where no two nets in a row come within `settled`, of the nets that met every limit the one of least bending is
+kept (`bendingInside`, read at the places the inside of a face is looked at; `k^2 dA` has no unit, so the choice is
+the same at every size and pose to rounding). A ladder that settles keeps what it kept. The energy is the measure
+of fairness and the places are those of the inside check; nothing is newly tuned. Pose dependence is measured, not
+removed: no change in whether a case is refused was seen over rigid-motion variants.
+
+### Reading up to the corners
+
+A fill is measured at the 129 places of Measure Continuity along each side and, between the first and last of them
+and the side's ends, at places that halve their way to each end down to `cornerInset` (1e-6 of the side; a fraction,
+so the same at every size; a judgement of how near is at the corner). G0 and G1 are read there as everywhere; the
+bend is read there too, but not within an ease the corner's faces are shown to ask for (see `agreeAtCorners`),
+where it is read from the first place on. Fills that pass the 129 places can leave their rim near the corner.
+
+Where two sides that are only to be met meet at a corner p, a surface holding both is tangent at p to the plane of
+their two tangents: each edge lies on it, so each tangent lies in its tangent plane, and two non-parallel tangents
+span it. The plane may stand far from the surface around it, but it is asked at p only: along each edge the
+surface's tangent plane need hold only that edge's tangent, and turns as fast as it will. Where the edges run on
+within the G1 angle the two tangents span no plane and nothing is asked. Within the tolerance a surface need not
+be tangent to it, and asking it of every such corner bends fills that were within before; so a correction onto the
+sides holds, besides its even places, those of the measure's places near such a corner that the corrected surface
+misses by more than the tolerance, and finer nets of the ladder are asked the plane at that corner.
+
+### Size
+
+Lengths are shares of the loop's size or of the tolerance, with one exception by design: where a fill goes over
+into planes and other faces at once (or into a cone alone) its rim and its edges' parameter curves are made to a
+tenth of `Precision::Confusion()`, OpenCascade's absolute least distance, so that its edges keep that as their
+tolerance and STEP gives the joint back. A fitted net moved onto its curves ends its ladder when the bounded rim
+correction leaves its own places further off than the tolerance (the correction's own residual, no constant).
+The orientation of two collinear pieces of one straight side is decided by the sign of the `orient2d` determinant
+only where it exceeds the bound on what rounding its products and their difference can do [Shewchuk97,
+ccwerrboundA], a bound relative to the numbers themselves and so the same at every size. At a corner where both edges
+run straight on rounds eased to one bend, everything the corner's four numbers ask is rounding; their share of
+disagreement counts only above the rounding of the faces' own curvatures, `2^-40` of the larger principal curvature
+(`jetRounding`, a judgement: a few thousand units in the last place, far below any curvature asked). The margin is
+thin: rounding alone came to at most 9e-17 of the larger curvature against the floor 9.1e-13, but the least genuine
+disagreement met, 6.7e-12, is only 7.4 times above it, so a genuine disagreement eight times smaller would be taken
+for rounding and its turns dropped. A floor derived from the faces' own representation (each derivative off by up to
+`(gamma_n + eps) sum |N_i^(a)| |N_j^(b)| |P_ij|` over the poles where the face stands, carried into the normal
+curvature) was measured six to ten times above `2^-40` on flat strips and is not used: strips interpolated from posed
+points are rounded by the solve's condition, not by the poles' storage, and no bound from their representation tells
+that. A floor at the flat share of the G2 limit would be the measure's own and is the structural path once the
+fold of the net over the plane without those turns is fixed. Open: a saved opening of near-flat spline faces
+(curvature 6e-7 on a loop of 38) is filled only when the turns asked by its small but genuine disagreement are
+kept; without them its fill folds over, an open defect of the net over the plane, not of the corner. At 1e-3 size
+the corner of three rounds (tolerance below `Precision::Confusion()`) is made and one unequal-rounds corner is
+refused at 1e3. The switch from the height graph to the spatial net at a support normal of 0.8 against the mean
+plane changes a cone cap's area by 2.1 % between 36.8 and 36.95 degrees, and an analytic cone's cap changes between
+two shapes from 70 to 74 degrees; a cap over a circle on a cone is refused as too steep from about 80 degrees.
+
+### Ordering, chart covariance and symmetric requests
+
+Permutation invariance of an annotated boundary differs from isometry covariance of its fill, `F(g X) = g F(X)`,
+with supports, guides and continuity orders transformed together. If `g X = X` a covariant construction preserves
+that symmetry; a unique minimizer supplies this only when its feasible space and complete objective are also
+preserved (convergence of a penalized local solve does not prove uniqueness).
+*Frames (derived).* A unique directed frame cannot be covariantly selected at every symmetric request: if `h X = X`
+and `Q(h X) = h Q(X)`, an invertible frame gives `Q(X) = h Q(X)`, forcing `h` to be the identity. A chart defined up
+to an orthogonal coordinate change works when all later stages respect that change. [DymLawrenceSiegel24 §2.2-3]
+discuss further continuity obstructions and weighted frames.
+The proxy chart is not such a complete construction: changing its seam rotates its circular boundary against a
+regenerated triangular lattice, and a mesh whose connectivity respects cyclic shifts and reversal still cannot
+resolve an ambiguous guide preimage (one of two equally close triangles can break a symmetry). A concentric-ring
+mesh with four triangles per annular quadrilateral removes the arbitrary diagonal but is valid only while its
+homothetic rings do not fold. An experimental guide initializer averages triangle-foot chart coordinates with
+weights `area * exp(-(distanceSquared - minimumSquared)/meanArea)`; normalized weights are invariant under
+isometries and uniform scale and the average transforms under affine chart changes (derived). The mean-area
+bandwidth is an empirical choice, not an error bound; the average need not be a nearest preimage nor lie inside a
+non-convex chart. Neither is a production caller. [SawhneyCrane17 §4.2, 5] give the flattening, not a guarantee for
+these mesh or correspondence choices.
+A fixed tensor spline space is generally not closed under chart reflections: reflecting `u^5 v^5` about an axis at
+pi/8 gives `(u^2-v^2)^5/32`, outside bidegree (5,5). Coordinate reversal requires reversal-symmetric knot vectors,
+which arbitrary adaptive knots do not ensure. Complete total-degree disk polynomial spaces, including complete real
+Zernike levels, are closed under orthogonal chart changes [GreengardSerkh18 §2.3, 4]. A separate spline
+approximation needs its own budget: approximating a reflection-symmetric surface within Hausdorff error e implies
+mirror distance at most 2e by the triangle inequality (derived), with no derivative or regularity bound.
+
+### Unproven
+
+The interior acceptance gate (a fault when the interior bends more than 4 times the rim's bend, with a floor of
+2/size) has no derivation; a bound of the form `K sqrt(2D)` in the energy gap D was tried and rejected. The bridge only
+replaces the reference that the 4 multiplies; the 4 and the tenth are judgements. Against the bridge, defects that
+leave the rims unchanged are caught less often where an elbow turns than against the rims alone (gentler bulges and
+spikes pass more often). The flat G2 limit, the rules by which a ladder that has met nothing yet gives up
 (`stillFalling`, `same`, `unruly`, which compare misses of unconverged nets and so depend on rounding and
-therefore on pose), the span and budget constants of the net, the `settled` share below and the 0.17 slope
-limit are unproven.
+therefore on pose), the span and budget constants of the net, the `settled` share and the 0.17 slope limit are
+unproven.
 
-*Stop.* A net that meets every limit is not yet the fill asked for: that is the fairest surface of all that
-meet them, which the nets of the ladder come nearer as they become finer.
-Once a net meets the limits, the ladder goes on until two nets in a row lie within `settled` = 1e-3 of the
-loop's size of each other, read from twice as many places as the finer net has spans each way inside the
-loop to the nearest place of the other surface; the coarser of the two that meets the limits is kept, and
-where the ladder or the nets allowed end first, the finest that meets them. That is a Cauchy test: where
-the nets converge at least twice as fast as the ladder refines (a ratio rho <= 1/2), the kept net is within
-d / (1 - rho) <= 2 d of their limit, d the distance between the two. A share of the size makes the stop
-the same at every size and pose. A net free in space and a height over the plane minimise different
-energies and come nearer different surfaces: they are not one sequence, and once nets free in space meet
-the limits, no height is tried after them. The rules this replaces took the first net that met the limits
-(closed loops) or a coarser net unless a finer one bent less by 0.75 (open loops); measured on the
-kinds of published example, that delivered a seat 9.2 off its master (limit 1.04; every finer net 0.17), a mouse top
-0.61 (limit 0.6; finer 0.19), a high mouse top 3.3 (limit 0.9; 0.36), a hull bottom 3.6 at rest and 0.04
-turned (limit 1.44; 0.03), with the outcome changing with rotation and translation. With the stop each is within its limit at rest, turned, at five
-times the size, rotated about z and moved a thousand away, with the same reading to three or four digits.
-On parameter variants held out from that design (hulls, mouse tops, seats of other proportions; three
-poses) the old rules missed 17 of 36 and the stop none. Fills of polygons of three to seven sides at G1
-and G2 on strips of biharmonic masters (a dome, saddle, ridge, bowl and monkey saddle) come out on the same
-nets and surfaces as before. `settled` is a judgement (about the height by which a tilt of 0.1 degree moves a
-surface over half the loop's size): over the nets of the native tests these distances spread from 1e-5
-to 1 of the size with no gap between settled and unsettled pairs, and the seat, mouse tops and hull
-bottom above are delivered on the same nets for any value from 3.1e-4 to 2.4e-3. The cost is at least one net beyond the one kept: about
-2.5 times the CPU time of a fill whose first net was already settled, 5 times for the seat, 14 for the high
-mouse top, and nets that a coarse net met only roughly come out finer (a corner of rounds 2 / 3 / 5: 43 x
-48 poles before, 82 x 89 now; the coarse net was 3.5e-3 of the size from the next). Where nets keep
-differing by more than `settled` the whole ladder is run (a G0 fill at flatness 0.95: 1.2e-3 to 3.8e-3
-between nets, up to the finest). Open: the Cauchy bound needs the distances to fall, and they need not.
-On the saved eight-edge opening (G0, Natural, a loop of 38.3) the nets lie 2.38e-3, 7.0e-4 and 7.5e-4 of the
-size apart (6 x 3 to 10 x 4, to 16 x 6, to 24 x 10): the ratio is 1.07, not at most 1/2, and the 2 d bound
-does not hold. The nets stand on a plateau below `settled` (their areas 70.20 and 69.98), and on such
-loops the stop is a judgement, not a bound.
-
-*A ladder that does not settle.* The same opening as a Patch at G0 never settles: its nets lie 3.8e-3,
-3.1e-3, 1.3e-3, 2.9e-3 and 1.2e-3 of the size apart, up to the finest. Why they need not come nearer: a
-condition is met once it is within its reach, and the multipliers stop at the first shifts that put every
-condition there ("nearer is not better"); the correction then moves the net onto the curves by the least
-movement of its poles. What a net delivers is so one surface of the band of all that meet the limits, the
-one at which that iteration and that correction stopped, and not the least bending of the band. The band
-has an inside, the limits being inequalities, and as the nets become finer there is nothing that draws
-their surfaces to one point of it. Read inside the loop, the nets of this opening bend 13.8, 15.6, 7.7,
-7.8, 12.2 (missing the rim, 0.0105 for 0.01) and 14.9, ∫ (k1² + k2²) dA. The rule that kept the first
-net that met the limits delivered the 13.8; keeping the finest delivered the 14.9.
-What is asked is the fairest surface that meets the limits, the least of that energy over the band. Every
-net that meets them is a surface of the band; where the ladder has not settled, nothing says that one of
-them is nearer the least than the others but their energy, and the one that bends least is, by the energy
-of which the least is asked. So where no two nets in a row have come within `settled` of each other, of
-the nets that met every limit the one of least bending is kept (`bendingInside`, read at the places the
-inside of a face is looked at; k² dA has no unit, so the choice is the same at every size and pose to
-rounding). A ladder that settles keeps what it kept. Nothing new is tuned: the energy is the measure of
-fairness, and the places are those of the inside check.
-Pose dependence is measured, not removed: 47 sampled breaches over 154 rigid-motion variants, none changing
-whether a case is refused. The ease of one coarse span is a judgement bounded by measurement, not an
-optimum: on the teddy (arms and strips of radius 50, sides 79 long, the span 24) eases of 0.3 (the
-distance within which a bend that differs by as much moves a surface by no more than the tolerance), 3.9
-and 7.8 left every net short of the bends asked, or meeting them and bulging inside; 16 was met on the third
-net, 24 on the first to third (1.2 to 5.3 s). G2 is then met on the middle 40 % of a teddy side and on
-less of a shorter one; the application's reading of a teddy seam counts the eases as misses above its 95th
-percentile. Coarse nets that meet an eased loop can be lopsided: the turned teddy is filled 5 off its
-three-fold symmetry on the first net, 0.4 on the third at rest. Straight-sided loops of three to six sides on
-rounds tangent to their plane (corners of 60 to 120 degrees, radii 15 to 80, rising and falling, at rest and
-turned and scaled, one side split between two radii) are all met. On a family held out from the design
-(irregular polygons of three to six sides lifted onto a dome, a saddle and a plane, each side held to a
-strip tangent to that surface and bending 0.05, -0.03, 0, 0.02, ... across it; at rest, turned and
-mirrored, and at a thousandth and a thousand times the size with the tolerance in step) 27 of 36 per pose
-or scale are met, with the same cases met at every pose and scale, G1 within 0.015 degrees and the strips'
-bends within 1.1 % on the middle of every edge. The 9 others are the polygons of three, five and six sides
-on the plane: where a strip that does not bend meets one that does, the flat strip is held beyond its
-ease to the flat G2 limit, which no eased fill meets, and they are refused naming the corner. A commercial fill's
-own manual says the same of such corners ("the intersection of two curves or edges determines the
-generated surface's tangent plane and curvature at that point, which may not agree to the existing
-surfaces'"; "disconnecting the boundary curves is a solution for enforcing G2"), and its examples
-deliver with such corners marked as conflicting.
-
-*Read up to the corners.* A fill is measured at the 129 places of Measure Continuity along each side
-and, between the first and the last of them and the side's ends, at places that halve their way to
-each end, down to `cornerInset` (1e-6 of the side, a fraction and so the same at every size; a
-judgement of how near is at the corner: read down to 1e-5 or to 1e-7 instead, the application's Patch
-tests and the mixed records came out the same). G0 and G1 are read there as everywhere; the bend is
-read there too, but not within an ease the corner's faces are shown to ask for (see agreeAtCorners),
-where it is read from the first place on as the ease's allowance was set. Read so densely inside the
-first 1/258 of each side, fills delivered before were not all within: a five-corner tangent chain at
-1e-6 left its rim by 7.97 times the tolerance at 1/16 of the first place, and a later panel at G2 bent
-1.125 times its share there; a fill of the band fit at a hundred times the size of an unresolved
-corner was within.
-
-Where two sides that are only to be met meet at a corner p, a surface that holds both is tangent at p
-to the plane of their two tangents: each edge lies on it, so each tangent lies in its tangent plane,
-and two tangents that are not parallel span it. The plane may stand far from the surface around it
-(at that chain's corner the edges meet at 1.72 degrees in plan with slopes of -0.043 and -0.016, and
-the plane of the two is 42 degrees from the mean plane), but it is asked at p only: along each edge the
-surface's tangent plane need hold only that edge's tangent, and turns as fast as it will. Where the
-edges run on within the G1 angle the two tangents span no plane, and nothing is asked. Within the
-tolerance a surface need not be tangent to it, and asking it of every such corner bends fills that
-were within before (the saved eight-edge opening came out 68.66 for 70.20): so a correction onto the
-sides holds, besides its even places, those of the measure's places near such a corner that the
-corrected surface misses by more than the tolerance, and finer nets of the ladder are asked the plane
-at that corner. On the tangent chain the surface's plane at p came within 0.04 to 0.3 degrees of it and
-the miss near the corner from 7.97 to 0.27 times the tolerance; it is filled on the same net at rest,
-moved and turned, mirrored, and at a thousandth and a thousand times its size (128 x 99 poles at 1e-6,
-75 x 54 at 1e-5), the posed fills within 2.5e-4 of the tolerance of the one at rest mapped back.
-
-*Size.* Lengths are shares of the loop's size or of the tolerance, with one exception by design: where a
-fill goes over into planes and other faces at once (or into a cone alone) its rim and its edges' parameter
-curves are made to a tenth of `Precision::Confusion()`, OpenCascade's absolute least distance, so that its
-edges keep that as their tolerance and STEP gives the joint back (a G1 cap over a circle on a cone, tolerance
-1e-4 in step with the size, is then made on 11 x 11 poles at 1e-3 and on 17 x 17 at 1 and 1e3). A fitted net moved onto its curves ends
-its ladder when the bounded rim correction leaves its own places further off than the tolerance (the
-correction's own residual, no constant). The fills of the tests, with every length and the tolerance
-scaled by 1e3, are made or refused alike with the same nets; at 1e-3 so are a disc, a cap, an open loop of
-arcs, the dish at G0 and G1, the square on rounds and the elbow. The dish at G0 was refused at 1e-3
-as crossing itself: two pieces of one straight side, collinear, were taken to cross by the signs of
-orientation determinants whose true value is nothing and which rounding alone decided, otherwise at
-one size and not at another. A point now counts as on one side of a segment only where the
-determinant exceeds the bound on what rounding its products and their difference can do (Shewchuk
-1997, the ccwerrboundA of orient2d), a bound relative to the numbers themselves and so the same at
-every size. The square on rounds, which missed G2 by its quad at 1e-3, is made alike there now; it
-changed with the stop by convergence or the corner ease in the fit's own units, and was not traced
-further. The pentagon and the split side took other nets at 1e-3: at a corner where both edges run
-straight on rounds that are eased to one bend, everything the corner's four numbers ask is rounding,
-and the share by which they disagree, rounding over rounding, counted where it came above an absolute
-1e-15, at one size and not at another. It now counts only above the rounding of the faces' own
-curvatures, 2^-40 of the larger of their principal curvatures (`jetRounding`, a judgement: a few
-thousand units in the last place, far below any curvature asked). Its margin, as the corner's
-disagreement over the larger curvature: rounding alone, on the pentagon and the split side, came to
-at most 9e-17, ten thousand times below the floor (9.1e-13); the least genuine disagreement, on the
-saved opening below, 6.7e-12, only 7.4 times above it. That margin is thin: a genuine
-disagreement eight times smaller than this one would be taken for rounding, and its turns dropped.
-A floor derived from the faces' own representation instead (each derivative off by up to
-(gamma_n + eps) of the sum of |N_i^(a)| |N_j^(b)| |P_ij| over the poles where the face stands, carried
-into the normal curvature) was measured and is not used. On the held-out flat strips it is about
-2.7e-13 (2^-40 gives 2.7e-14 to 4.5e-14), and the largest of a corner's four numbers is:
-
-| pose | largest of the four | derived floor |
-| --- | --- | --- |
-| at rest | 2.6e-19 to 3.2e-18 | 2.6e-13 to 2.7e-13 |
-| mirrored | 8.4e-12 to 1.7e-11 | 2.5e-13 to 2.8e-13 |
-| moved | 1.2e-12 to 1.4e-12 | 1.9e-13 to 3.7e-13 |
-| turned | 2.3e-11 to 4.9e-11 | 2.8e-13 to 6.7e-13 |
-
-The strips are interpolated from posed points, and an interpolation is rounded by the solve's
-condition, not by the poles' storage: posed, they bend by about 1e-11 along their edges and are other
-surfaces than at rest, which no bound from their representation can tell. And the saved opening's
-corners ask turns of numbers of 1.1e-18 to 2.2e-18 (its largest curvature 4e-8), five orders below
-what its representation is known to: its fill is delivered only through turns that its input cannot
-know. 2^-40 stays, a judgement. Open: the flat strips come out on other nets mirrored, moved and
-turned (their inputs differ); and the saved opening's real defect is the fold of the net over the
-plane without those turns. The structural path is a floor at the flat share of the G2 limit, the
-measure's own, once that fold is fixed. A floor at the flat share of the
-G2 limit instead, as for a miss, would be the measure's own, but a saved opening of near-flat spline
-faces (curvatures of 6e-7 on a loop of 38) is filled only when the turns that their small but
-genuine disagreement asks are kept: without them its fill folds over. That fold is an open defect of
-the net over the plane, not of the corner: a fill whose rim asks no turns should not fold, and the
-turns only hide it. Open: at 1e-3 the corner of three rounds
-(its tolerance below `Precision::Confusion()`) is made; the teddy is refused at 1e3. A
-G1 cap over a circle on a cone is refused as too steep from the same tilt on (between 80 and 80.4
-degrees) at rest, turned and at 1e-3 and 1e3, with the same nets below it; but the switch from the height
-graph to the spatial net at a support normal of 0.8 against the mean plane changes the cap's area by 2.1 %
-between 36.8 and 36.95 degrees (a cone as a spline), and the analytic cone's cap changes between two shapes
-from 70 to 74 degrees (area 2.45, 1.23, 1.22, 1.22, 2.56 of the disc's).
-
-*Stock.* `BRepFill_Filling` and `GeomPlate_BuildPlateSurface`: a plate fit that accepts G0, G1 and G2 point
-and curve constraints and minimises a different energy. See the table below.
+*Stock.* `BRepFill_Filling` and `GeomPlate_BuildPlateSurface`: a plate fit that accepts G0, G1 and G2 point and
+curve constraints and minimises a different energy.
 
 ## BRepCurveExt and BRepSurfaceExt
 
@@ -2049,60 +1897,6 @@ Sakkalis and Patrikalakis, *Tracing Surface Intersections with Validated ODE Sys
 Solver* (2004), [sections 1, 2.2 and 4](https://web.mit.edu/deslab/pubs/files/SM04.pdf),
 are not supplied by an independently continued approximate contact. Neither the
 reference observation nor the finite-point bound closes that construction problem.
-
-### Ordering, chart covariance and symmetric requests
-
-Permutation invariance of an annotated boundary is distinct from isometry
-covariance of its fill. The latter requires `F(g X) = g F(X)`, with support
-faces, guides and continuity orders transformed together. If `g X = X`, a
-covariant construction preserves that symmetry. A unique minimizer supplies
-this conclusion only when its feasible space and complete objective are also
-preserved; convergence of a penalized local solve does not prove uniqueness.
-
-A unique directed frame cannot be covariantly selected at every symmetric
-request: if `h X = X` and `Q(h X) = h Q(X)`, then an invertible frame would
-satisfy `Q(X) = h Q(X)`, forcing `h` to be the identity. This elementary
-stabilizer argument is derived here. A chart defined up to an orthogonal
-coordinate change can instead work when all subsequent stages respect that
-change. Dym, Lawrence and Siegel, *Equivariant Frames and the Impossibility of
-Continuous Canonicalization* (2024), sections 2.2-3, discuss additional
-continuity obstructions and weighted frames
-([paper](https://proceedings.mlr.press/v235/dym24a.html)).
-
-The current proxy is not such a complete construction. Changing its seam
-rotates its initial circular boundary against a regenerated triangular lattice.
-Even a mesh whose connectivity respects cyclic shifts and reversal does not
-resolve an ambiguous guide preimage: selecting one of two equally close
-triangles can break a symmetry. A diagnostic concentric-ring mesh with four
-triangles per annular quadrilateral removes the arbitrary diagonal; it is only
-valid when its homothetic rings do not fold. It is not a general replacement
-mesher.
-
-An experimental guide initializer averages triangle-foot chart coordinates
-with weights `area * exp(-(distanceSquared - minimumSquared)/meanArea)`.
-Normalized weights are invariant under spatial isometries and uniform scale;
-the average transforms under affine chart-coordinate changes. This covariance
-statement is derived. The mean-area bandwidth is an empirical initialization
-choice, not an error bound. The average need not be a nearest preimage or lie
-inside a nonconvex chart; the resulting surface still needs independent guide,
-trim, regularity and continuity checks. Neither initializer is a production
-caller here. Sawhney and Crane, *Boundary First Flattening* (2017), sections
-4.2 and 5, supply the flattening construction, not a guarantee for these
-preceding mesh or correspondence choices
-([paper](https://www.cs.cmu.edu/~kmcrane/Projects/BoundaryFirstFlattening/paper.pdf)).
-
-A fixed tensor spline space is also generally not closed under arbitrary
-chart reflections. For example, reflecting `u^5 v^5` about an axis at pi/8
-produces `(u^2-v^2)^5/32`, outside bidegree (5,5). Coordinate reversal requires
-reversal-symmetric knot vectors; arbitrary adaptive knots do not ensure this.
-Complete total-degree disk polynomial spaces, including complete real Zernike
-levels, are closed under orthogonal chart changes. See Greengard and Serkh,
-*Zernike Polynomials: Evaluation, Quadrature, and Interpolation* (2018),
-sections 2.3 and 4
-([manuscript](https://arxiv.org/abs/1811.02720)). A separate spline approximation
-would need its own geometric budget: approximating an exactly reflection-symmetric
-surface within Hausdorff error e implies mirror distance at most 2e by the
-triangle inequality (derived); it gives no derivative or regularity bound.
 
 ### Contact ownership on a joined blend sheet
 
