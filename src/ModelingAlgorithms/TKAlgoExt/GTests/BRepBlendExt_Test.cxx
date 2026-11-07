@@ -1650,3 +1650,49 @@ TEST(BRepBlendExt, ReenteredSupportRetainsTheIntervalBetweenCrossings)
     EXPECT_LT(std::abs(defect.worst), 5e-6 * request.first);
   }
 }
+
+// The affine corner is a rational quadratic tensor, not a fitted many-pole fill.
+// Its representation matters as well as continuity: a general fill can refuse
+// curvature data which this exact tensor reproduces.
+TEST(BRepBlendExt, PlanarConicCornerRetainsItsExactTensor)
+{
+  using namespace BRepExt::blending;
+  for (double scale : {.2, 1., 5.})
+    for (bool turned : {false, true})
+    {
+      SCOPED_TRACE(::testing::Message() << scale << " " << turned);
+      gp_Trsf pose;
+      if (turned)
+        pose = posed(scale);
+      else
+        pose.SetScale(gp::Origin(), scale);
+      const auto body = BRepBuilderAPI_Transform(BRepPrimAPI_MakeBox(10, 10, 10).Shape(),
+                                                 pose, true).Shape();
+      const gp_Pnt at = gp::Origin().Transformed(pose);
+      std::vector<TopoDS_Edge> selected;
+      for (const auto& edge : edgesWhere(body, [](const double*) { return true; }))
+      {
+        TopoDS_Vertex a, b;
+        TopExp::Vertices(edge, a, b);
+        if ((!a.IsNull() && BRep_Tool::Pnt(a).Distance(at) < 1e-9 * scale)
+            || (!b.IsNull() && BRep_Tool::Pnt(b).Distance(at) < 1e-9 * scale))
+          selected.push_back(edge);
+      }
+      ASSERT_EQ(selected.size(), 3u);
+      auto request = roundOf(body, selected, .2 * scale);
+      request.rho = .7;
+      const auto made = blend(request);
+      EXPECT_NO_THROW(accepted("round", body, made.shape, request.first, &made));
+      EXPECT_TRUE(BRepExt::invalidity(made.shape).empty());
+      int tensors = 0;
+      for (TopExp_Explorer it(made.shape, TopAbs_FACE); it.More(); it.Next())
+      {
+        const auto surface = Handle(Geom_BSplineSurface)::DownCast(
+          BRep_Tool::Surface(TopoDS::Face(it.Current())));
+        if (!surface.IsNull() && surface->UDegree() == 2 && surface->VDegree() == 2
+            && surface->NbUPoles() == 3 && surface->NbVPoles() == 3)
+          ++tensors;
+      }
+      EXPECT_EQ(tensors, 1);
+    }
+}

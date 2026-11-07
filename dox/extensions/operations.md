@@ -1743,3 +1743,37 @@ with Newton correction, including the need to change charts near vertical branch
 [tracing](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node102.html)).
 The generated two-radius, two-scale, two-pose single/chain test checks acceptance
 and the rolling-ball defect against the input skin independently of the solver.
+
+### Carried-sheet corner boundaries
+
+The affine three-sheet tensor is retained when all three solved contact
+crossings lie within the existing positional allowance of the incident tangent
+planes spanned by the outgoing edge directions. This tests the construction
+premise from geometry rather than the representation of the support. The
+coordinates, poles, weights and boundary construction of that tensor are
+unchanged. When a crossing is off its incident plane, the noncircular
+three-sheet construction uses the intersections of the
+carried contacts as its vertices, and connects them by curves in each carried
+sheet's parameter domain. These curves are approximated spatially and used as
+supported boundaries of the existing constrained fill. The carried sheets are
+not changed. The two positional approximations share the existing allowance:
+if the endpoint discrepancy is `g` and the total allowance is `B`, each receives
+`(B-g)/2`. The triangle inequality then accounts for both approximations and
+the endpoint mismatch; this does not certify unsampled approximation errors.
+
+Tangent-continuous examples return valid closed bodies. The affine tensor
+and the carried-sheet construction share one contact solve; the latter starts
+from the same carried sheets and solved stations. Curvature-continuous
+non-affine corners remain work in progress: the generic fill does not realize
+the curvature-continuous ribbons within the existing bounds. Complete
+derivative compatibility and a corner-corrected ribbon interpolant remain
+unresolved.
+No bound or interior acceptance gate has been relaxed.
+
+Salvi and Varady, *Multi-sided Surfaces with Curvature Continuity* (2014),
+sections 3.3 and 4.2--4.4, distinguish ribbon construction, compatible parameter
+speeds, rational twist corrections and the blending order. Agreement of tangent
+planes and second fundamental forms at the vertices does not imply agreement
+of the higher mixed derivatives required by a regular tensor spline. The
+current constrained-fill experiment is not an implementation of the paper's
+corner-corrected Gregory sum, and supplies no such reproduction theorem.

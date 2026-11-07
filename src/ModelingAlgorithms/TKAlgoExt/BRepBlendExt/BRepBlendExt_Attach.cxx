@@ -18,6 +18,8 @@
 #include <GC_MakeSegment.hxx>
 
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepLib.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <GeomAPI_PointsToBSplineSurface.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -68,6 +70,8 @@ struct Attach
                                        const Handle(Geom_BSplineSurface)& surface,
                                        int                                nv);
   TopoDS_Face                 lawCorner(const Corner& at, size_t c);
+  TopoDS_Face                 tracedCorner(const Corner& at, size_t c,
+                                         const TopoDS_Vertex (&Q)[3][3], double crossingGap);
   bool                        notch(int a, int ea, int b, int eb);
   void                        rollRound(int                  k,
                                         int                  ea,
@@ -3670,7 +3674,7 @@ void Attach::cornerPatches()
             }))
           faces.push_back(side.face);
     // One law and one side throughout, each face between two of the blends.
-    bool alike = faces.size() == at.ends.size(), even = true, planes = true;
+    bool alike = faces.size() == at.ends.size(), even = true;
     for (const auto& [k, end] : at.ends)
     {
       const Rail& r = pieces[k].rail;
@@ -3679,8 +3683,6 @@ void Attach::cornerPatches()
       even &= std::abs(r.s[0].distance - first.rail.s[0].distance) < limit::equal * r.scale
               && std::abs(r.s[1].distance - first.rail.s[0].distance) < limit::equal * r.scale;
     }
-    for (const auto& face : faces)
-      planes &= BRepAdaptor_Surface(face).GetType() == GeomAbs_Plane;
     if (!alike)
       fail(op,
            unsupported_geometry,
@@ -3696,12 +3698,6 @@ void Attach::cornerPatches()
              "where more than three G2, conic or chamfer blends meet, the corner is blended with "
              "them, which the blend does not do yet",
              {first.rail.edge});
-      if (!planes)
-        fail(
-          op,
-          unsupported_geometry,
-          "a corner of three G2 or conic blends on curved faces, which the blend does not make yet",
-          {first.rail.edge});
       patches[c] = lawCorner(at, c);
       continue;
     }
@@ -3960,6 +3956,8 @@ TopoDS_Face Attach::lawCorner(const Corner& at, size_t c)
   // The patch's corners on the faces, where each pair's contacts cross.
   double        p[3][3] = {};
   TopoDS_Vertex Q[3][3];
+  double crossingGap = 0;
+  bool planarContacts = true;
   for (int i = 0; i < 3; ++i)
     for (int j = i + 1; j < 3; ++j)
     {
@@ -3998,6 +3996,7 @@ TopoDS_Face Attach::lawCorner(const Corner& at, size_t c)
              no_solution,
              "the contacts of two blends at a corner cross at different places",
              {a.rail.edge});
+      crossingGap = std::max(crossingGap, gap);
       builder.MakeVertex(Q[i][j], here, std::max(tolerance, gap));
       Q[j][i]            = Q[i][j];
       corner[ki][si][ei] = corner[kj][sj][ej] = Q[i][j];
@@ -4010,8 +4009,18 @@ TopoDS_Face Attach::lawCorner(const Corner& at, size_t c)
       p[i][j]          = (q.Dot(e[i]) * jj - q.Dot(e[j]) * ij) / det;
       p[j][i]          = (q.Dot(e[j]) * ii - q.Dot(e[i]) * ij) / det;
       if ((q - e[i] * p[i][j] - e[j] * p[j][i]).Magnitude() > a.rail.resolved(limit::together))
-        fail(op, no_solution, "a corner of two blends' contacts is off their face", {a.rail.edge});
+      {
+        planarContacts = false;
+        if (first.rail.law == Law::Chamfer)
+          fail(op, no_solution, "a corner of two blends' contacts is off their face", {a.rail.edge});
+      }
     }
+  // The affine tensor requires every contact crossing in its incident tangent
+  // plane. Retain that exact construction whenever its geometric premise holds;
+  // otherwise use the carried sheets and the already solved crossings. The
+  // allowance is the same positional bound used by the tensor construction.
+  if (!planarContacts)
+    return tracedCorner(at, c, Q, crossingGap);
   // The law: its coordinate along a side and its weights, and the step.
   std::vector<double> x, w, h, knots;
   std::vector<int>    mults;
@@ -4200,6 +4209,90 @@ TopoDS_Face Attach::lawCorner(const Corner& at, size_t c)
     face.Reverse();
   (void)c;
   return face;
+}
+
+
+//! A corner bounded by the carried sheets' actual end traces. The supports are
+//! retained as the first- and second-order boundary data of the constrained fill.
+TopoDS_Face Attach::tracedCorner(const Corner& at, size_t c,
+                               const TopoDS_Vertex (&Q)[3][3], double crossingGap)
+{
+  const Piece& first = pieces[at.ends[0].first];
+  // Each end trace connects the two independently solved contacts in the carried
+  // sheet's parameter domain. It is not projected from a proposed corner surface.
+  const TopoDS_Vertex starts[3] = {Q[0][1], Q[1][2], Q[0][2]};
+  const TopoDS_Vertex stops[3]  = {Q[0][2], Q[0][1], Q[1][2]};
+  std::vector<PatchSide> boundary;
+  std::vector<TopoDS_Edge> edges;
+  const int order = first.rail.law == Law::G2 ? 2 : 1;
+  // A spatial trace and a fitted corner are two approximations. Their errors
+  // add, so share the existing allowance after reserving the endpoint mismatch.
+  const double approximation =
+    (first.rail.resolved(limit::together) - crossingGap) / 2;
+  for (int i = 0; i < 3; ++i)
+  {
+    const auto& [k, end] = at.ends[i];
+    const Piece& piece = pieces[k];
+    const int    side  = corner[k][0][end].IsSame(starts[i]) ? 0 : 1;
+    const gp_Pnt2d from =
+      piece.sheet.uv(piece.sheet.rail(u[k][side][end]), piece.sheet.across[side]);
+    const gp_Pnt2d to =
+      piece.sheet.uv(piece.sheet.rail(u[k][1 - side][end]), piece.sheet.across[1 - side]);
+    const Handle(Geom2d_Curve) trace = segment2d(from, to);
+    BRepBuilderAPI_MakeEdge make(trace, piece.sheet.surface, starts[i], stops[i], 0, 1);
+    if (!make.IsDone())
+      fail(op, no_solution, "a corner's end trace cannot be bounded on its sheet", {piece.rail.edge});
+    TopoDS_Edge edge = make.Edge();
+    if (!BRepLib::BuildCurve3d(edge, approximation, GeomAbs_C2, 9))
+      fail(op, no_solution, "a corner's carried end trace cannot be approximated", {piece.rail.edge});
+    TopoDS_Face support;
+    builder.MakeFace(support, piece.sheet.surface, tolerance);
+    boundary.push_back({edge, support, order});
+    edges.push_back(edge);
+    section[k][end] = edge;
+  }
+  TopoDS_Face made = patchLoop(boundary, approximation, limit::patchDegrees);
+  const Handle(Geom_Surface) surface = BRep_Tool::Surface(made);
+  // Keep the shared edges and the exact pcurves on the carried sheets. Only their
+  // parameter curves on the new corner are obtained from the constrained fit.
+  for (const auto& edge : edges)
+  {
+    double lo, hi;
+    const auto curve = BRep_Tool::Curve(edge, lo, hi);
+    const auto onPatch = GeomProjLib::Curve2d(curve, lo, hi, surface);
+    if (onPatch.IsNull())
+      fail(op, no_solution, "a carried end trace cannot be laid on its corner", {first.rail.edge});
+    builder.UpdateEdge(edge, onPatch, surface, TopLoc_Location(), tolerance);
+    builder.Range(edge, lo, hi);
+  }
+  BRepBuilderAPI_MakeWire wire;
+  wire.Add(edges[0]);
+  wire.Add(edges[2]);
+  wire.Add(edges[1]);
+  if (!wire.IsDone())
+    fail(op, no_solution, "the carried end traces do not close", {first.rail.edge});
+  BRepBuilderAPI_MakeFace face(surface, wire.Wire(), true);
+  if (!face.IsDone())
+    fail(op, no_solution, "the corner cannot be bounded by its carried traces", {first.rail.edge});
+  TopoDS_Face result = face.Face();
+  gp_Vec outward;
+  for (const auto& [k, end] : at.ends)
+    for (int side = 0; side < 2; ++side)
+    {
+      const gp_Pnt2d foot = pieces[k].fitted.contact[side]->Value(u[k][side][end]);
+      Jet j;
+      if (jetAt(pieces[k].rail.s[side], foot.X(), foot.Y(), j))
+        outward += j.n;
+    }
+  double uf, ul, vf, vl;
+  surface->Bounds(uf, ul, vf, vl);
+  gp_Pnt point;
+  gp_Vec du, dv;
+  surface->D1((uf + ul) / 2, (vf + vl) / 2, point, du, dv);
+  if (du.Crossed(dv).Dot(outward) < 0)
+    result.Reverse();
+  (void)c;
+  return result;
 }
 
 //! `edge` oriented to run as `along` does, by their directions where it starts (round a closed
