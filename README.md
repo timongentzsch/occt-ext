@@ -188,8 +188,7 @@ Every expected value comes from a closed form or a definition that does not use 
 Steiner's volume of a box rounded on every edge; the rolling-ball definition of a blend (distance of the ball
 centre to the input minus the radius); Archimedes' volume of two crossed cylinders; the frustum and Pappus
 volumes of skins and sweeps; the circular segment of three arcs closed by a chord; the position of the circle
-touching a line and an arc; and, for bridge curves, the curvature, change of curvature and torsion of a circle
-and a helix at the ends. Each test names the defect it would catch.
+touching a line and an arc. Each test names the defect it would catch.
 
 Operations without a test of their own yet: deformation of whole bodies (`deformBody`, `deformSupports`),
 Boolean imprints along faces' normals, and the curvature-continuous fills between plates meeting at three or
