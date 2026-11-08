@@ -86,6 +86,33 @@ normals are furthest from a common plane). A vertex then not on every face aroun
 construction; that does not prove the topology must change, since approximate contact continuations can also leave the
 other support.
 
+#### Edge tolerances
+
+The fits meet a tenth of the tolerance at the sections they were checked at. Between two sections the curve and
+its curves on the faces can part further than the tolerance recorded from them, and the result then fails the
+validity check (`BRepCheck_Edge` compares `|C(t) - S(c(t))|` with the edge's tolerance) although every distance is
+inside the bound.
+
+So once the faces are rebuilt, each edge's distance `max_t |C(t) - S(c(t))|` on each of its faces (both curves of a
+seam) is found over the whole edge (`largestApart`), and the edge's and its vertices' tolerances are raised to it
+where it is within the operation's tolerance. It is found as `theta_max` is: 8 samples in each piece where the
+curve, the curve on the face and the surface along it are polynomial, each local maximum refined by golden-section
+search. Between two fitted sections the distance is one hump, nought at both ends. Found, not bounded (judgement),
+for the reason given for `theta_max`. A larger distance keeps the fitted tolerance for the checks below to judge,
+and the certificate keeps the fitted tolerances as a kept edge's allowance, so no bound is widened.
+
+Every edge is measured. Edges in closed form (a line or circle moved with its curves on the faces kept, or the
+crossing of two elementary surfaces) are not exempt: leaving them out lost 14 of the 458 offsets below.
+
+Measured on 458 offsets of blended bodies (229 bodies, each moved by +0.05 and -0.05):
+
+| Measure | Result |
+|---|---|
+| Raised tolerance minus a 16 384-sample search with each local maximum refined | -3.6e-15 to +4.8e-14 mm |
+| Edges of all 458 where that search exceeds the tolerance | 59, by at most 3.6e-15 mm (rounding of the distance) |
+| `BRepLib_CheckCurveOnSurface` (particle swarm, then Newton) against the same search | short by up to 4 % |
+| Raised tolerances | 244 edges in 159 offsets, largest 8.6e-7 mm, at most 3.7 times the fitted one |
+
 #### Certificate
 
 apart from the construction: a valid solid; points inside every face and along every edge at the moved

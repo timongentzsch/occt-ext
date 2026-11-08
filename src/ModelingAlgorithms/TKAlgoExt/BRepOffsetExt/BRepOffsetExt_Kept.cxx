@@ -698,6 +698,54 @@ void curveBreaks(const Adaptor& adaptor, GeomAbs_Shape continuity, std::vector<d
     out.push_back(t(i));
 }
 
+//! The largest value of `f` over [pieces' first, `last`]: 8 samples in each piece, and each
+//! local maximum of the samples refined by golden-section search between its two neighbours.
+template <class F>
+double largestOnPieces(std::vector<double>& pieces, double last, const F& f)
+{
+  std::sort(pieces.begin(), pieces.end());
+  std::vector<double> ts;
+  for (size_t i = 0; i + 1 < pieces.size(); ++i)
+    for (int k = 0; k < 8; ++k)
+      if (pieces[i + 1] > pieces[i])
+        ts.push_back(pieces[i] + (pieces[i + 1] - pieces[i]) * k / 8);
+  ts.push_back(last);
+  std::vector<double> sampled(ts.size());
+  for (size_t k = 0; k < ts.size(); ++k)
+    sampled[k] = f(ts[k]);
+  double       largest = *std::max_element(sampled.begin(), sampled.end());
+  const double golden  = 0.5 * (std::sqrt(5.0) - 1.0);
+  for (size_t k = 0; k < ts.size(); ++k)
+  {
+    if ((k > 0 && sampled[k - 1] > sampled[k]) || (k + 1 < ts.size() && sampled[k + 1] > sampled[k]))
+      continue;
+    double a = ts[k > 0 ? k - 1 : k], b = ts[k + 1 < ts.size() ? k + 1 : k];
+    double x = b - golden * (b - a), y = a + golden * (b - a);
+    double fx = f(x), fy = f(y);
+    for (int i = 0; i < 30; ++i)
+    {
+      if (fx > fy)
+      {
+        b  = y;
+        y  = x;
+        fy = fx;
+        x  = b - golden * (b - a);
+        fx = f(x);
+      }
+      else
+      {
+        a  = x;
+        x  = y;
+        fx = fy;
+        y  = a + golden * (b - a);
+        fy = f(y);
+      }
+    }
+    largest = std::max({largest, fx, fy});
+  }
+  return largest;
+}
+
 //! The largest angle between the outward normals of `one` and `other` along `edge`: sampled 8
 //! times in each piece of the edge where both curves on the faces are polynomial and cross no knot
 //! line of either surface, and each local maximum of the samples refined by golden-section
@@ -744,45 +792,47 @@ double largestAngle(const TopoDS_Edge& edge, const TopoDS_Face& one, const TopoD
       pieces,
       GeomAbs_CN);
   }
-  std::sort(pieces.begin(), pieces.end());
-  std::vector<double> ts;
-  for (size_t i = 0; i + 1 < pieces.size(); ++i)
-    for (int k = 0; k < 8; ++k)
-      if (pieces[i + 1] > pieces[i])
-        ts.push_back(pieces[i] + (pieces[i + 1] - pieces[i]) * k / 8);
-  ts.push_back(last);
-  std::vector<double> sampled(ts.size());
-  for (size_t k = 0; k < ts.size(); ++k)
-    sampled[k] = angle(ts[k]);
-  double       largest = *std::max_element(sampled.begin(), sampled.end());
-  const double golden  = 0.5 * (std::sqrt(5.0) - 1.0);
-  for (size_t k = 0; k < ts.size(); ++k)
+  return largestOnPieces(pieces, last, angle);
+}
+
+//! The largest distance between `edge`'s curve and its curve on `face` (both curves, where the
+//! edge is a seam of the face): |C(t) - S(c(t))| found as `largestAngle` finds its angle, in the
+//! pieces where the curve, the curve on the face and the surface along it are polynomial (8
+//! samples each, every local maximum refined by golden-section search). Between two of the
+//! sections an edge was fitted through the distance is one smooth hump, nought (to the section's
+//! accuracy) at both ends. A judgement, not a bound, for the reason given at `largestAngle`.
+double largestApart(const TopoDS_Edge& edge, const TopoDS_Face& face)
+{
+  double                     first, last, c0, c1;
+  const Handle(Geom_Curve)   curve   = BRep_Tool::Curve(edge, first, last);
+  const Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+  if (curve.IsNull())
+    return 0.0;
+  std::vector<Handle(Geom2d_Curve)> onFace{BRep_Tool::CurveOnSurface(edge, face, c0, c1)};
+  if (BRep_Tool::IsClosed(edge, face))
+    onFace.push_back(BRep_Tool::CurveOnSurface(TopoDS::Edge(edge.Reversed()), face, c0, c1));
+  double largest = 0.0;
+  for (const Handle(Geom2d_Curve)& on : onFace)
   {
-    if ((k > 0 && sampled[k - 1] > sampled[k]) || (k + 1 < ts.size() && sampled[k + 1] > sampled[k]))
+    if (on.IsNull())
       continue;
-    double a = ts[k > 0 ? k - 1 : k], b = ts[k + 1 < ts.size() ? k + 1 : k];
-    double x = b - golden * (b - a), y = a + golden * (b - a);
-    double fx = angle(x), fy = angle(y);
-    for (int i = 0; i < 30; ++i)
-    {
-      if (fx > fy)
-      {
-        b  = y;
-        y  = x;
-        fy = fx;
-        x  = b - golden * (b - a);
-        fx = angle(x);
-      }
-      else
-      {
-        a  = x;
-        x  = y;
-        fx = fy;
-        y  = a + golden * (b - a);
-        fy = angle(y);
-      }
-    }
-    largest = std::max({largest, fx, fy});
+    std::vector<double> pieces{first, last};
+    curveBreaks(GeomAdaptor_Curve(curve, first, last), GeomAbs_CN, pieces);
+    curveBreaks(Geom2dAdaptor_Curve(on, first, last), GeomAbs_CN, pieces);
+    knotCrossings(
+      surface,
+      [&](double t, gp_Pnt2d& uv) {
+        uv = on->Value(t);
+        return true;
+      },
+      first,
+      last,
+      pieces,
+      GeomAbs_CN);
+    largest = std::max(largest, largestOnPieces(pieces, last, [&](double t) {
+      const gp_Pnt2d uv = on->Value(t);
+      return curve->Value(t).Distance(surface->Value(uv.X(), uv.Y()));
+    }));
   }
   return largest;
 }
@@ -2273,6 +2323,36 @@ static TopoDS_Shape offsetWithContacts(const TopoDS_Shape& body,
         }
       }
 
+  // An edge's tolerance is the largest distance between its curve and its curves on its faces.
+  // The fits above meet their bound at the stations they were checked at; between them the
+  // representations may part a little further. That distance is found over the whole edge
+  // (`largestApart`), and the tolerance raised to it where it is still within the operation's
+  // bound. A larger distance
+  // leaves the tolerance as fitted, for the checks below to judge. The fitted tolerances stay
+  // the allowance of the certificate, which this measurement does not widen.
+  NCollection_DataMap<TopoDS_Shape, double, TopTools_ShapeMapHasher> fittedTolerance;
+  {
+    Adjacency facesOfMadeEdge;
+    TopExp::MapShapesAndUniqueAncestors(result, TopAbs_EDGE, TopAbs_FACE, facesOfMadeEdge);
+    BRep_Builder raise;
+    for (int i = 1; i <= facesOfMadeEdge.Extent(); ++i)
+    {
+      const TopoDS_Edge& edge = TopoDS::Edge(facesOfMadeEdge.FindKey(i));
+      if (BRep_Tool::Degenerated(edge))
+        continue;
+      const double fitted = BRep_Tool::Tolerance(edge);
+      fittedTolerance.Bind(edge, fitted);
+      double apart = 0.0;
+      for (const TopoDS_Shape& face : facesOfMadeEdge(i))
+        apart = std::max(apart, largestApart(edge, TopoDS::Face(face)));
+      if (apart <= fitted || apart > tolerance)
+        continue;
+      raise.UpdateEdge(edge, apart);
+      for (TopExp_Explorer v(edge, TopAbs_VERTEX); v.More(); v.Next())
+        raise.UpdateVertex(TopoDS::Vertex(v.Current()), apart);
+    }
+  }
+
   // The certificate.
   if (!BRepCheck_Analyzer(result).IsValid())
   {
@@ -2353,7 +2433,10 @@ static TopoDS_Shape offsetWithContacts(const TopoDS_Shape& body,
                         curve->Value(t),
                         uv.X(),
                         uv.Y(),
-                        keeps.Contains(edge) ? BRep_Tool::Tolerance(made) : 0.0))
+                        keeps.Contains(edge) ? (fittedTolerance.IsBound(made)
+                                                  ? fittedTolerance(made)
+                                                  : BRep_Tool::Tolerance(made))
+                                             : 0.0))
         {
           why = "an edge of the result is not at the distance from both its faces' sources";
           return {};
