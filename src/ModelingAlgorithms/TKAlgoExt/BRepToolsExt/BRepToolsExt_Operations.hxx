@@ -21,6 +21,7 @@
 
 namespace BRepExt
 {
+namespace blending { struct Join; }
 struct Failure;
 Standard_EXPORT void          clearTriangulation(OcctKernel&, uint32_t);
 Standard_EXPORT EvolutionData makeBox(OcctKernel&, double, double, double);
@@ -139,7 +140,8 @@ Standard_EXPORT EvolutionData blendRange(OcctKernel&,
                                          double                     end,
                                          const std::vector<int>&    hashes,
                                          int                        bound,
-                                         const std::vector<double>& sizes = {});
+                                         const std::vector<double>& sizes = {},
+                                         std::vector<blending::Join>* joins = nullptr);
 Standard_EXPORT std::vector<int> boundaryEdgeIndices(OcctKernel&, uint32_t shape);
 Standard_EXPORT EvolutionData    offsetSheetEdge(OcctKernel&,
                                                  uint32_t                     face,

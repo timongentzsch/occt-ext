@@ -35,9 +35,32 @@
 #include <NCollection_Array1.hxx>
 #include <gp_Pnt2d.hxx>
 #include <gp_Pln.hxx>
+#include <BRep_Tool.hxx>
+#include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
+#include <NCollection_IndexedMap.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 
 namespace BRepExt
 {
+//! Carry intent through Boolean edge modifications, retaining only final edges.
+template<class Maker>
+static std::vector<blending::Join> rangeJoins(const std::vector<blending::Join>& before,
+                                            Maker& maker)
+{
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> retained;
+  TopExp::MapShapes(maker.Shape(), TopAbs_EDGE, retained);
+  std::vector<blending::Join> after;
+  for (const auto& join : before)
+  {
+    if (retained.Contains(join.edge))
+      after.push_back(join);
+    for (const auto& edge : maker.Modified(join.edge))
+      if (edge.ShapeType() == TopAbs_EDGE && retained.Contains(edge))
+        after.push_back({edge, join.role, join.order});
+  }
+  return after;
+}
 //! The part of the change `made` makes to `shape` that lies between the planes square to `edge`
 //! at the fractions `start` and `end` of it (the contour's other edges, `others`, must not come
 //! back between them): the material removed and added there only, the rest of `shape` as it was.
@@ -50,7 +73,8 @@ static EvolutionData withinRange(OcctKernel&                     kernel,
                                  double                          start,
                                  double                          end,
                                  const std::vector<TopoDS_Edge>& others,
-                                 FaceHistory&                    history)
+                                 FaceHistory&                    history,
+                                 std::vector<blending::Join>*     joins = nullptr)
 {
   BRepAdaptor_Curve curve(edge);
   // Isolate both sides of the change. Concave blends add material; convex
@@ -99,7 +123,7 @@ static EvolutionData withinRange(OcctKernel&                     kernel,
                  BRepExt::tolerance::length))
         fail(op, unsupported_geometry, "tangent continuation re-enters the limited interval");
   }
-  auto clip = [&](TopoDS_Shape tool) {
+  auto clip = [&](TopoDS_Shape tool, std::vector<blending::Join>& intent) {
     for (int i = 0; i < 2; ++i)
     {
       const auto         point   = i ? p1 : p0;
@@ -110,17 +134,36 @@ static EvolutionData withinRange(OcctKernel&                     kernel,
       BRepAlgoAPI_Common common(tool, half);
       if (!common.IsDone())
         fail(op, no_solution, "fillet limit intersection failed");
+      if (joins)
+      {
+        intent = rangeJoins(intent, common);
+        // The exact plane supplied to Common owns these new faces. They close
+        // the limited material change sharply; they are not support contacts.
+        const auto support = BRep_Tool::Surface(plane);
+        for (TopExp_Explorer f(common.Shape(), TopAbs_FACE); f.More(); f.Next())
+          if (BRep_Tool::Surface(TopoDS::Face(f.Current())) == support)
+            for (TopExp_Explorer e(f.Current(), TopAbs_EDGE); e.More(); e.Next())
+              intent.push_back({e.Current(), blending::JoinRole::Stop, 0});
+      }
       tool = common.Shape();
     }
     return tool;
   };
-  Untouched<BRepAlgoAPI_Cut> cut(shape, clip(removed.Shape()));
+  auto removedIntent = joins ? rangeJoins(*joins, removed) : std::vector<blending::Join>{};
+  auto addedIntent = joins ? rangeJoins(*joins, added) : std::vector<blending::Join>{};
+  Untouched<BRepAlgoAPI_Cut> cut(shape, clip(removed.Shape(), removedIntent));
   if (!cut.IsDone())
     fail(op, no_solution, "limited fillet subtraction failed");
-  BRepAlgoAPI_Fuse fuse(cut.Shape(), clip(added.Shape()));
+  BRepAlgoAPI_Fuse fuse(cut.Shape(), clip(added.Shape(), addedIntent));
   if (!fuse.IsDone() || !BRepExt::invalidity(fuse.Shape(), shape).empty())
     fail(op, no_solution, "limited fillet is invalid");
   history.collectComposed(cut, fuse, shape);
+  if (joins)
+  {
+    *joins = rangeJoins(removedIntent, cut);
+    joins->insert(joins->end(), addedIntent.begin(), addedIntent.end());
+    *joins = rangeJoins(*joins, fuse);
+  }
   return history.finish(store(kernel, fuse.Shape()));
 }
 
@@ -205,7 +248,8 @@ EvolutionData blendRange(OcctKernel&                kernel,
                          double                     end,
                          const std::vector<int>&    hashes,
                          int                        bound,
-                         const std::vector<double>& sizes)
+                         const std::vector<double>& sizes,
+                         std::vector<blending::Join>* joins)
 {
   const char* op    = "filletRange";
   const auto& shape = get(kernel, shapeId);
@@ -251,12 +295,14 @@ EvolutionData blendRange(OcctKernel&                kernel,
     for (const auto& [place, at] : points)
       size = std::max(size, std::max(first, second) * at / first);
   blending::accepted(op, shape, blended.shape, size, &blended);
+  if (joins)
+    *joins = blended.joins;
   FaceHistory history(op, hashes, bound);
   if (start == 0 && end == 1)
   {
     history.collect(*blended.history, shape);
     return history.finish(store(kernel, blended.shape));
   }
-  return withinRange(kernel, op, shape, blended.shape, edge, start, end, {}, history);
+  return withinRange(kernel, op, shape, blended.shape, edge, start, end, {}, history, joins);
 }
 } // namespace BRepExt

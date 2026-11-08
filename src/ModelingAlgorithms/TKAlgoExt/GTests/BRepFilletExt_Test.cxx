@@ -22,6 +22,10 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepFilletExt_Blend.hxx>
+#include <BRep_Tool.hxx>
+#include <TopExp_Explorer.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -50,6 +54,57 @@ TopoDS_Edge uprightAtFarCorner(const TopoDS_Shape& box, double a, double b)
 }
 
 } // namespace
+
+TEST(BRepFilletExt, LimitedBlendCarriesContactsAndSharpStops)
+{
+  for (bool circular : {false, true})
+    for (bool variable : {false, true})
+    {
+      const TopoDS_Shape body = circular ? BRepPrimAPI_MakeCylinder(10, 20).Shape()
+                                         : BRepPrimAPI_MakeBox(20, 20, 20).Shape();
+      const auto candidates = circular
+        ? edgesWhere(body, [](const double* b) { return b[2] > 19.999; })
+        : std::vector<TopoDS_Edge>{uprightAtFarCorner(body, 20, 20)};
+      ASSERT_FALSE(candidates.empty());
+      const auto source = BRepExt::store(session(), body);
+      const auto picked = BRepExt::store(session(), candidates.front());
+      std::vector<BRepExt::blending::Join> joins;
+      const auto output = BRepExt::blendRange(session(), source, picked, 1, 0, 0, .5, 0, 0,
+        .2, .7, {}, BRepExt::failureHashBound,
+        variable ? (circular ? std::vector<double>{0, 1, .5, 2, 1, 1}
+                             : std::vector<double>{0, 1, 1, 2})
+                 : std::vector<double>{}, &joins);
+      const auto& made = BRepExt::get(session(), output.resultId);
+      EXPECT_TRUE(BRepExt::invalidity(made).empty());
+      NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> adjacent;
+      TopExp::MapShapesAndAncestors(made, TopAbs_EDGE, TopAbs_FACE, adjacent);
+      int contacts = 0, stops = 0;
+      for (const auto& join : joins)
+      {
+        EXPECT_TRUE(adjacent.Contains(join.edge));
+        if (join.role == BRepExt::blending::JoinRole::Contact) ++contacts;
+        if (join.role == BRepExt::blending::JoinRole::Stop)
+        { ++stops; EXPECT_EQ(join.order, 0); }
+      }
+      EXPECT_GE(contacts, 2);
+      EXPECT_GE(stops, 2);
+      for (int i = 1; i <= adjacent.Extent(); ++i)
+      {
+        bool constructed = false;
+        for (const auto& face : adjacent.FindFromIndex(i))
+        {
+          bool old = false;
+          for (TopExp_Explorer f(body, TopAbs_FACE); f.More(); f.Next())
+            old |= BRep_Tool::Surface(TopoDS::Face(face)) == BRep_Tool::Surface(TopoDS::Face(f.Current()));
+          constructed |= !old;
+        }
+        if (!constructed) continue;
+        bool recorded = false;
+        for (const auto& join : joins) recorded |= join.edge.IsSame(adjacent.FindKey(i));
+        EXPECT_TRUE(recorded) << "unclassified constructed edge " << i;
+      }
+    }
+}
 
 // An equal-distance chamfer of distance d removes the triangular prism of area d^2 / 2: a wrong
 // setback on either face, or a bevel that is not planar, changes the volume by far more than the
