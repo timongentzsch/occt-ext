@@ -725,6 +725,112 @@ double seedPlace(const Rail& rail)
   return widest;
 }
 
+std::optional<bool> stationsFold(const Rail& rail)
+{
+  if (!rail.spineArc)
+    return {};
+  Rail own = rail;
+  own.spine.Nullify();
+  own.spineArc.reset();
+  const double r0 = rail.sigma * rail.s[0].distance, r1 = rail.sigma * rail.s[1].distance;
+  // The point the rail's own station at `t` puts in its ball's plane (ballAt), and its
+  // derivative.
+  const double span = rail.last - rail.first, dt = span * tol::parameterMerge;
+  const auto   pointAt = [&](double t) -> std::optional<gp_Pnt> {
+    gp_Pnt E;
+    gp_Vec d;
+    own.stationD1(t, E, d);
+    if (!own.byCentre)
+      return E;
+    return centreAcross(own, t, E, r0, r1);
+  };
+  // The spine's point, unit tangent and its turn per length at length `s`.
+  const auto& curve  = rail.spineArc->curve;
+  const auto  spineAt = [&](double s, gp_Pnt& c, gp_Vec& T, gp_Vec& turn) {
+    gp_Vec d1, d2;
+    curve->D2(rail.spineArc->parameter(s), c, d1, d2);
+    const double speed = d1.Magnitude();
+    if (!(speed > 0))
+      return false;
+    T    = d1 / speed;
+    turn = (d2 - T * T.Dot(d2)) / (speed * speed);
+    return true;
+  };
+  // h(s, t) = (c(s) - P(t)).T(s) is zero where the plane across the spine at length s passes
+  // through the station's point at t, with h_s = 1 + (c - P).T' and h_t = -P'.T. Its zero set
+  // is traced from the ball at the edge's first end to the one at its last by pseudo arc length
+  // continuation (Allgower and Georg, Numerical Continuation Methods, 1990, ch. 2), t scaled
+  // to length by the spine's length per unit of the edge's range. The station map is one to one
+  // where along it neither s nor t turns back (dt/ds = -h_s / h_t > 0).
+  const double scaleT = (rail.spineLast - rail.spineFirst) / span;
+  const auto   value  = [&](double s, double t, double grad[2]) -> std::optional<double> {
+    gp_Pnt c;
+    gp_Vec T, turn;
+    const auto p = pointAt(t), a = pointAt(t - dt), b = pointAt(t + dt);
+    if (!spineAt(s, c, T, turn) || !p || !a || !b)
+      return {};
+    const gp_Vec arm(*p, c);
+    grad[0] = 1 + arm.Dot(turn);
+    grad[1] = -gp_Vec(*a, *b).Dot(T) / (2 * dt) / scaleT;
+    return arm.Dot(T);
+  };
+  const double tolerance = rail.resolved(limit::solved), length = rail.spineLast - rail.spineFirst;
+  double       x[2] = {rail.spineFirst, rail.first * scaleT}, g[2];
+  if (!value(x[0], x[1] / scaleT, g))
+    return {};
+  double tangent[2] = {g[1], -g[0]};
+  if (tangent[0] < 0)
+    tangent[0] = -tangent[0], tangent[1] = -tangent[1];
+  double step = length / 64;
+  while (x[0] < rail.spineLast)
+  {
+    if (!(step > length * tol::parameterMerge))
+      return {};
+    const double norm = std::hypot(tangent[0], tangent[1]);
+    double       y[2] = {x[0] + step * tangent[0] / norm, x[1] + step * tangent[1] / norm};
+    // Corrector: Newton across the zero set (the least change to y that zeroes h).
+    bool solved = false;
+    for (int k = 0; k < 8 && !solved; ++k)
+    {
+      const auto h = value(y[0], y[1] / scaleT, g);
+      if (!h)
+        break;
+      const double gg = g[0] * g[0] + g[1] * g[1];
+      if (!(gg > 0))
+        break;
+      solved = std::abs(*h) <= tolerance;
+      y[0] -= *h * g[0] / gg;
+      y[1] -= *h * g[1] / gg;
+    }
+    double next[2] = {g[1], -g[0]};
+    if (next[0] * tangent[0] + next[1] * tangent[1] < 0)
+      next[0] = -next[0], next[1] = -next[1];
+    // A step is kept where it lands near its prediction and its tangent turns little.
+    const double moved = std::hypot(y[0] - x[0], y[1] - x[1]);
+    if (!solved || moved > 2 * step
+        || (next[0] * tangent[0] + next[1] * tangent[1])
+             < std::cos(M_PI / 8) * std::hypot(next[0], next[1]) * norm)
+    {
+      step /= 2;
+      continue;
+    }
+    if (next[0] <= 0 || next[1] <= 0)
+      return true;
+    if (y[0] >= rail.spineLast)
+    {
+      // Through the last end ball (the edge's own station there) only on its branch.
+      const double t = (x[1] + (y[1] - x[1]) * (rail.spineLast - x[0]) / (y[0] - x[0])) / scaleT;
+      if (std::abs(t - rail.last) * scaleT > step)
+        return {};
+      return false;
+    }
+    x[0] = y[0], x[1] = y[1];
+    tangent[0] = next[0], tangent[1] = next[1];
+    step = std::min(step * 1.5, length / 16);
+  }
+  return false;
+}
+
 bool contactAt(const Rail& rail, double t, Station& s, double scale)
 {
   const Station seed = s;

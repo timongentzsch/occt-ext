@@ -313,6 +313,95 @@ from stretching another circuit across a fragment. Forcing a new carrier on comp
 can relocate the support seam, so this construction stays after the previous whole-request
 routes. Other crossing classes still require their own compatible contact arrangement.
 
+### Open offset spines walked by arc length
+
+The same final route now gives an open constant-distance rail (no size law, no cliff or
+trimmed side) its offset-intersection spine. The spine is traced through the balls themselves:
+the ball equations c0(u0, v0) = c1(u1, v1), each centre c_i = S_i + r_i n_i off its support,
+are three equations in the four foot parameters, and where their Jacobian J (3 x 4) has full
+rank their solutions are a curve whose tangent is J's null vector, the signed 3 x 3 minors of J
+(a 4 x 4 determinant with a repeated row vanishes; **derived**), with the centre moving by
+J_u0 t_0 + J_v0 t_1. It is followed by pseudo-arc-length continuation (Allgower and Georg,
+*Introduction to Numerical Continuation Methods*, SIAM 2003, chapters 2 and 6): an Euler step
+along the tangent, scaled to unit centre length, then Newton on the ball equations within the
+hyperplane across the tangent through the step's end. The carrier is the C1 cubic through the
+traced balls with their unit tangents scaled by the chords between them (Hermite); a step is
+kept where that cubic's middle lies within the joining tolerance of the path's own ball there,
+found the same way, and the next step is scaled by the fourth root of the error's ratio to the
+tolerance, at most doubled, as the cubic's error is of fourth order (a step policy: the balls
+are corrected on both supports at every station, so the carrier only places them). On a span
+the carrier's squared speed |dc/dtau|^2 is a quartic in the span's own parameter tau, with
+dc/dtau = A + B tau + C tau^2 from the span's Bezier poles (**derived**); its arc length is the
+square root of that quartic integrated by 8-point Gauss-Legendre (Abramowitz and Stegun,
+1964, 25.4; exact for polynomials up to degree 15, and the speed varies little across a span:
+the order is a choice, not a proven error bound) and inverted by Newton within the span. The
+general centre-length map (adaptive quadrature over the whole spline) took some 19 us an
+inversion and some 11,000 inversions on a refused chain, two thirds of that stage's time.
+
+The trace starts at the rail's middle ball and goes each way to the ball at the edge's end
+there, found exactly as the march finds its first ball (grown from the edge to its size,
+through the edge's points or, for a rail found through its centres, through the centres
+across it). Those end balls are the correspondence of the spine's ends to the edge's. The
+path reaches an end ball where it crosses the plane through its centre across its path at
+that centre (the crossing solved on the path by Newton with that plane as the fourth
+equation); it crosses there along the ball's own path direction, so a step, which turns
+the tangent by less than a right angle, cannot pass it unseen. It proves the end ball on
+another branch, so that the spine does not carry the rail, where the path closes (crosses
+the middle ball's plane at the middle ball from behind) or leaves the supports' domains
+first (a parameter neither periodic nor unbounded past its surface's bound, or, where a
+support runs on without bound, a centre farther from the faces than the ball's distance:
+the centre of a ball resting on a face lies within its distance of it). Where it meets the
+other end ball first, or meets its end against the way the edge runs, the balls do not
+follow along the path as along the edge, and the spine does not carry the rail either. Past
+the end balls the trace goes on as far as the rail is carried past its ends, at the rate the
+spine's length between them runs to the edge's range, and a step beyond, or until it leaves
+the domains. On the class of rails below, the trace takes 0.2-10 ms a rail where the
+intersector's starting-point walk from the middle ball took 3-23 ms and the projections of
+the middle ball onto the general offset surfaces up to 15 ms more. The intersector's walk
+also split one branch into several lines (a cylinder and a torus: six), none of which held all
+three balls; the trace follows the branch through them.
+
+The station parameter is affine in the spine's arc length between the end balls, so the ball
+at an end of the edge is the edge's own and the stations between are evenly spaced along the
+centres' path. The march grows its first ball by the rail's own stations, which are the same
+balls, keeps the existing side check on it, and then places it on the spine. The fit takes no
+separate centre parameter on such a rail: its stations already have one.
+
+*When the spine is used.* Every open rail of that route is traced before it marches. A rail's own station at `t` is the ball whose plane across its path
+passes through a point `P(t)` (the edge's point, or the centre across it). On a spine `c(s)`
+with unit tangent `T(s)` by arc length `s`, that ball is where `h(s,t) = (c(s) - P(t)).T(s) = 0`,
+with `h_s = 1 + (c - P).T'` and `h_t = -P'.T`, so `dt/ds = -h_s/h_t` (**derived**). The station
+map is one to one exactly where `dt/ds > 0` along the zero set of `h` between the two end
+balls. `h_s` vanishes where the focal line of the planes across the spine passes through `P`
+(the planes there turn faster than `P` moves away from the spine), and `h_t` where `P` moves
+across the spine: at either sign change no march by `t` passes, and the march stalls. The zero
+set is traced from the first end ball by pseudo-arc-length continuation (Allgower and Georg,
+*Numerical Continuation Methods: An Introduction*, Springer, 1990, chapter 2), with `t`
+scaled to length by the spine's length per unit of the edge's range; a step is kept where the
+corrector converges near its prediction and its tangent turns by less than 22.5 degrees,
+otherwise it is halved (a step policy, not an existence bound). The rail walks the spine
+where the traced map turns back in either variable, and keeps its own stations where the trace
+reaches the last end ball monotonically or cannot be read. There is no threshold: a sign. A
+closed circuit keeps its seed through the edge's points and its affine parameter
+correspondence unchanged.
+
+The spine itself is the offset intersection of Choi and Ju, *Constant-radius blending in surface
+modelling*, Computer-Aided Design 21(4), 1989, pp. 213-220, traced as in Patrikalakis, Maekawa
+and Cho (above). Arc length is not a new acceptance argument: every ball is still corrected on
+both original offsets and the fitted sheet faces the unchanged contact, crossing, attachment
+and solid checks. In particular a spine that bends more tightly than the ball (`kappa r > 1`)
+still meets the interior-crossing check, which refuses the self-crossing envelope: that
+trimming is not built here.
+
+On the groove of a torus (radii 9 and 4) fused with a B-spline surface skinned through three
+ovals (the longest concave edge and its tangent chain, distance 1) the rail's own station map turns back
+at s = 3.78 mm (t = 0.771) and the centre route's at t = 0.448. Along the spine the stations
+are evenly spaced (13.7 mm between the end balls) and the spine's curvature peaks at 1.35/mm
+near t = 0.52. The conic of rho 0.3 then delivers single and chain selections (13 faces, every
+sampled contact within 3.3e-8 mm of distance 1 from both supports); the round and the G2
+section meet the interior-crossing check there, since their sections reach where
+`1 - kappa r cos a` changes sign.
+
 *Radius-law extrema.* Positivity and the scale used by the tolerances now come
 from outward-rounded enclosures of every cubic span, rather than uniform samples.
 Writing a span over x in [0,1], with h its parameter width, endpoints y0,y1 and

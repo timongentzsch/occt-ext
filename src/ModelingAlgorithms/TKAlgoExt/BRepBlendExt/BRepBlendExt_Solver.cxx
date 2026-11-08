@@ -2787,10 +2787,17 @@ void Blend::sheets()
            "the blend crosses too many faces along one edge",
            {pieces[k].rail.edge});
     Piece& piece = pieces[k];
-    if (request.intersectSpines && piece.rail.spine.IsNull())
-      intersectSpine(piece.rail);
     if (centred(piece.rail.edge))
       piece.rail.byCentre = true;
+    // An open rail is walked along its spine only where its own stations fold there
+    // (stationsFold): elsewhere they are the same balls, by the edge's parameter.
+    if (request.intersectSpines && piece.rail.spine.IsNull()
+        && intersectSpine(piece.rail)
+        && piece.rail.spineArc && stationsFold(piece.rail) != true)
+    {
+      piece.rail.spine.Nullify();
+      piece.rail.spineArc.reset();
+    }
     // Where the planes through the edge's points cross before they reach it, the balls found
     // through those points do not go on along it, and through their centres they do (the
     // same balls, placed by another parameter: Rail::byCentre); the piece's chain is made so

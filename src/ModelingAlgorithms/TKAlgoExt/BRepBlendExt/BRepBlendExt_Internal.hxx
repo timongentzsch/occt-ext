@@ -366,6 +366,21 @@ struct CentreParameter
   double                    parameter(double length) const;
 };
 
+//! An open spine's carrier (intersectSpine): cubic spans between traced balls, each a Bezier
+//! of the span's local parameter tau in [0, 1], and its arc length. On a span the squared speed
+//! |dc/dtau|^2 is a quartic in tau, whose coefficients are kept; lengths are its square root
+//! integrated by Gauss-Legendre and inverted by Newton within the span.
+struct SpineArc
+{
+  Handle(Geom_BSplineCurve) curve;
+  std::vector<double>                knots, lengths;
+  std::vector<std::array<double, 5>> speeds; // per span: |dc/dtau|^2 by powers of tau
+  //! The length from the curve's start to its parameter `u`; past the ends along the end spans.
+  Standard_EXPORT double length(double u) const;
+  //! The curve's parameter at length `distance` from its start; past the ends along the end spans.
+  Standard_EXPORT double parameter(double distance) const;
+};
+
 //! A full round (Law::Full) is a notch of its face between the two edges, `s[1]`, whose face beyond
 //! is the second support: that side's surface is the face beyond's, where the ball's foot is, and
 //! the ball touches the face between too (`Rail::middle`).
@@ -400,6 +415,10 @@ struct Rail
   Handle(Geom_Curve) spine;
   double spineFirst = 0, spineLast = 0;
   double spineParameterFirst = 0, spineParameterLast = 0;
+  //! An open rail's spine is walked by its arc length (intersectSpine): `spineFirst` and
+  //! `spineLast` are then the lengths along `spine` of the balls at the edge's ends, and the
+  //! station parameter is affine in the length between them.
+  std::shared_ptr<const SpineArc> spineArc;
 
   Handle(Geom_Curve) terminalCarrier[2];
 
@@ -413,6 +432,14 @@ struct Rail
     if (spine.IsNull())
       return curve.D1(t, point, tangent);
     const double rate = (spineLast - spineFirst) / (spineParameterLast - spineParameterFirst);
+    if (spineArc)
+    {
+      spine->D1(spineArc->parameter(spineFirst + (t - spineParameterFirst) * rate), point, tangent);
+      const double speed = tangent.Magnitude();
+      if (speed > 0)
+        tangent *= rate / speed;
+      return;
+    }
     double parameter = spineFirst + (t - spineParameterFirst) * rate;
     // A closed SSI spline can be clamped rather than periodic. Evaluate its one circuit,
     // never the polynomial continuation of its end span.
@@ -848,8 +875,19 @@ Standard_EXPORT std::optional<Ball> restingBall(const std::vector<Side>& faces,
                                                 double                   scale);
 
 //! Select a regular closed branch of the two constant-distance offset supports through the
-//! existing middle station. Does not change the source edge or its parameter range.
+//! existing middle station, or for an open rail trace the branch through it to the balls at the
+//! edge's ends (Rail::spineArc). Does not change the source edge or its parameter range.
 Standard_EXPORT bool intersectSpine(Rail& rail);
+//! Whether the rail's own stations (the balls whose planes across their path pass through the
+//! edge's points, or through the centres across it, Rail::byCentre) fold along its open spine
+//! (Rail::spineArc): read on the spine between the end balls, the station parameter t at length
+//! s is where the plane across the spine at its point passes through the station's point, and
+//! dt/ds = (1 + (c - P).T') / (P'.T) changes sign where that plane family's focal line crosses
+//! the station's point P: past it no t is a ball, and a march by t stalls. Empty where it
+//! cannot be read.
+Standard_EXPORT std::optional<bool> stationsFold(const Rail& rail);
+//! The station parameter along an open spine (Rail::spineArc) of the ball centred at `centre`.
+Standard_EXPORT std::optional<double> spineStation(const Rail& rail, const gp_Pnt& centre);
 Standard_EXPORT bool prepareConicWindow(Rail& rail);
 Standard_EXPORT double conicPhase(const Rail& rail, const Station& station);
 
@@ -982,12 +1020,23 @@ public:
              {rail_.edge});
     }
     else
+    {
+      // Along an open spine (Rail::spineArc) the ball is grown by the edge's own stations, which
+      // are the same balls, and placed on the spine after the check below.
+      std::optional<Rail> own;
+      if (rail_.spineArc)
+      {
+        own = rail_;
+        own->spine.Nullify();
+        own->spineArc.reset();
+      }
       for (int step = 1; step <= 8; ++step)
-        if (!contactAt(rail_, middle, start, step / 8.0))
+        if (!contactAt(own ? *own : rail_, middle, start, step / 8.0))
           fail(rail_.op,
                no_solution,
                "no ball of this size rests on both faces beside the edge",
                {rail_.edge});
+    }
     // Each contact on its own face's side of the other face: offsets that meet beyond the
 
     gp_Pnt edge;
@@ -999,7 +1048,16 @@ public:
              "these offset distances meet one support before the edge",
              {rail_.edge},
              FailureKind::Overflow);
-    known_[middle] = start;
+    if (rail_.spineArc)
+    {
+      const auto t = spineStation(rail_, start.centre);
+      if (!t || !contactAt(rail_, *t, start))
+        fail(rail_.op,
+             no_solution,
+             "no ball of this size rests on both faces beside the edge",
+             {rail_.edge});
+    }
+    known_[start.t] = start;
     walk(start, rail_.to);
     walk(start, rail_.from);
   }

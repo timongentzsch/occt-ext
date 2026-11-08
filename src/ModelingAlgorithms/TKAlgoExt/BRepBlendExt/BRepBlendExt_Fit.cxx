@@ -1189,7 +1189,7 @@ std::shared_ptr<CentreParameter> centreParameter(
   const Rail& rail, const std::function<gp_Pnt(double)>& pointAt,
   const std::vector<double>& joins, const std::map<double, int>& events)
 {
-  if (!rail.spine.IsNull())
+  if (!rail.spine.IsNull() && !rail.spineArc)
   {
     const auto source = Handle(Geom_BSplineCurve)::DownCast(rail.spine);
     if (source.IsNull())
@@ -1368,8 +1368,10 @@ Fitted fit(Rail& rail, Stations& stations, bool contactPilot)
 {
   rail.knotWindows = contactPilot ? nullptr : supportKnotWindows(rail, stations);
   Fitted original = fit(rail, stations, contactPilot, {});
+  // Stations walked by the spine's arc length (Rail::spineArc) are already by the centres' path
+  // length, which is what a centre parameter gives.
   if (contactPilot || rail.law != Law::G2 || rail.centreParameter || rail.parameterSupports
-      || !rail.sizes.places.empty()
+      || rail.spineArc || !rail.sizes.places.empty()
       || rail.s[0].cliffCurve || rail.s[1].cliffCurve
       || (rail.spine.IsNull() && !defectiveRailKnot(rail, original)))
     return original;
