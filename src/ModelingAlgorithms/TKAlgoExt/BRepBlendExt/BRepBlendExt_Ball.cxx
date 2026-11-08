@@ -535,25 +535,42 @@ static bool setbackAt(const Rail& rail, double t, Station& s, double d0, double 
       return false;
     distances[1 - rail.reference] = distances[rail.reference] * std::sin(rail.angle) / across;
   }
-  Jet at[2];
+  Jet at[2], edge[2];
   for (int i = 0; i < 2; ++i)
-    if (rail.s[i].cliffCurve || !jetAt(rail.s[i], s.uv[i][0], s.uv[i][1], at[i]))
+  {
+    double     f, l;
+    const auto pcurve = rail.s[i].cliffCurve
+                          ? Handle(Geom2d_Curve)()
+                          : BRep_Tool::CurveOnSurface(rail.edge, rail.s[i].face, f, l);
+    if (pcurve.IsNull() || !jetAt(rail.s[i], s.uv[i][0], s.uv[i][1], at[i])
+        || !jetAt(rail.s[i], pcurve->Value(t).X(), pcurve->Value(t).Y(), edge[i]))
       return false;
+  }
   for (int i = 0; i < 2; ++i)
   {
     const double r = distances[i];
     if (!(r > 0))
       return false;
     Jet j = at[i];
-    // The setback lies across the edge on the face's side: two roots solve the
-    // distance, and the one into the face is the chamfer's.
+    // The setback lies across the edge on the face's side: two roots solve the distance, and
+    // the one into the face is the chamfer's. The side is read at the edge's point, from both
+    // faces' normals there: a foot a setback round a curved face has its normal turned by the
+    // setback's angle, which where the faces meet nearly flat or nearly closed turns the
+    // direction read at the feet over, towards the root on the face's surface beyond the edge.
+    // The start from the edge keeps the feet's direction, on that side.
     const gp_XYZ other = at[1 - i].n.XYZ();
     gp_XYZ       into  = (other - j.n.XYZ() * j.n.XYZ().Dot(other)) * rail.sigma;
     into -= T * T.Dot(into);
-    if (!(into.Modulus() > tol::angle))
+    const gp_XYZ otherAtEdge = edge[1 - i].n.XYZ(), own = edge[i].n.XYZ();
+    gp_XYZ       side = (otherAtEdge - own * own.Dot(otherAtEdge)) * rail.sigma;
+    side -= T * T.Dot(side);
+    if (!(into.Modulus() > tol::angle) || !(side.Modulus() > tol::angle))
       return false;
     into.Normalize();
-    if (j.p.Distance(E) < r / 4 || (j.p.XYZ() - E.XYZ()).Dot(into) <= 0)
+    side.Normalize();
+    if (into.Dot(side) < 0)
+      into.Reverse();
+    if (j.p.Distance(E) < r / 4 || (j.p.XYZ() - E.XYZ()).Dot(side) <= 0)
     {
       GeomAPI_ProjectPointOnSurf onto(gp_Pnt(E.XYZ() + into * r), rail.s[i].surface);
       if (onto.NbPoints() == 0)
@@ -581,7 +598,7 @@ static bool setbackAt(const Rail& rail, double t, Station& s, double d0, double 
         norm = std::abs(across) + std::abs(reach);
         return std::isfinite(norm);
       };
-    if (!newton(x, rail.resolved(limit::solved), residual) || (j.p.XYZ() - E.XYZ()).Dot(into) <= 0)
+    if (!newton(x, rail.resolved(limit::solved), residual) || (j.p.XYZ() - E.XYZ()).Dot(side) <= 0)
       return false;
     s.uv[i][0]  = x[0];
     s.uv[i][1]  = x[1];

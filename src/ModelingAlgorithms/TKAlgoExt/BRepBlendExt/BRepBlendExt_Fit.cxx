@@ -707,7 +707,8 @@ Fitted fit(const Rail&                      rail,
 
 //! A contact's speed the way the ball rolls at the fit's u: its foot's velocity along the direction
 //! across both supports' normals at the contacts, taken the way the edge runs there (as a station's
-//! is, ballAt). Not the edge's direction itself: a contact far from the edge (in an acute wedge)
+//! is, ballAt); a chamfer's, along the edge (its sections lie across the edge). Not the edge's
+//! direction itself for a ball: a contact far from the edge (in an acute wedge)
 //! moves across it, down a leaning wall, without running back.
 //! Through adaptors, which keep the span last evaluated: a thousand and more evaluations each.
 struct Speed
@@ -736,10 +737,12 @@ struct Speed
     surface.D1(uv.X(), uv.Y(), foot, su, sv);
     rail.stationD1(rail.t(u), at, d);
     // Where the supports are tangent at the feet (a crease's end) the ball rolls along the edge.
+    // A chamfer's section lies in the plane across the edge at its point (setbackAt): the way it
+    // goes on is the edge's own, whatever the faces' normals at its feet.
     Jet            j[2];
     const gp_Pnt2d there = other.Value(u);
     gp_Vec         along = d;
-    if (jetAt(rail.s[side], uv.X(), uv.Y(), j[side])
+    if (rail.law != Law::Chamfer && jetAt(rail.s[side], uv.X(), uv.Y(), j[side])
         && jetAt(rail.s[1 - side], there.X(), there.Y(), j[1 - side])
         && j[0].n.Crossed(j[1].n).Magnitude() > tol::coarseAngle)
       along = j[0].n.Crossed(j[1].n) * (j[0].n.Crossed(j[1].n).Dot(d) < 0 ? -1.0 : 1.0);
