@@ -1835,7 +1835,6 @@ TopoDS_Edge Attach::rolledEdge(int k, int side, const TopoDS_Face& stop)
        no_solution,
        "the blend's edge on the face beyond a narrow face does not run between its corners",
        {rail.edge});
-  return {};
 }
 
 //! A face across both sides stops a piece at one end (its vertex there): the edges it shares with

@@ -433,11 +433,6 @@ static std::optional<Blended> minorityFirst(const Request& request,
     for (const auto& [again, after] : then.unchanged)
       if (again.IsSame(middle))
         out.unchanged.emplace_back(before, after);
-  out.rails      = made.rails + then.rails;
-  out.propagated = made.propagated + then.propagated;
-  out.analytic   = made.analytic + then.analytic;
-  for (const auto& [before, after] : out.unchanged)
-    (before.ShapeType() == TopAbs_FACE ? out.keptFaces : out.keptEdges)++;
   return out;
 }
 
@@ -653,7 +648,6 @@ static std::optional<Blended> replayOverrun(const Request&                   req
     fromSharp->Merge(made.history);
     TopoDS_Shape shape = made.shape;
     out.joins = made.joins;
-    int          rails = made.rails, propagated = made.propagated, analytic = made.analytic;
 
     // A round taken off, the faces put back, and the stages after them.
     struct Back
@@ -725,9 +719,6 @@ static std::optional<Blended> replayOverrun(const Request&                   req
             still.emplace_back(before, after);
       kept  = std::move(still);
       shape = then.shape;
-      rails += then.rails;
-      propagated += then.propagated;
-      analytic += then.analytic;
     }
     out.history = composed(request.body, stages);
     // Taken off, then put back: the round goes on as the faces put back along its edge.
@@ -742,15 +733,9 @@ static std::optional<Blended> replayOverrun(const Request&                   req
       for (size_t i = 1; i < faces.size(); ++i)
         out.history->AddModified(back.round, faces[i]);
     }
-    out.shape      = shape;
-    out.rails      = rails;
-    out.propagated = propagated;
-    out.analytic   = analytic;
+    out.shape = shape;
     for (const auto& [before, after] : kept)
-    {
       out.unchanged.emplace_back(before, after);
-      (before.ShapeType() == TopAbs_FACE ? out.keptFaces : out.keptEdges)++;
-    }
     return out;
   }
   catch (const Failure& failure)
@@ -1200,11 +1185,6 @@ static std::optional<Blended> liftFeatures(const Request&                   requ
     for (const auto& face : features)
       if (result.Contains(copy.ModifiedShape(face)) && kept(copy.ModifiedShape(face)))
         out.unchanged.emplace_back(face, copy.ModifiedShape(face));
-    for (const auto& [before, after] : out.unchanged)
-      (before.ShapeType() == TopAbs_FACE ? out.keptFaces : out.keptEdges)++;
-    out.rails      = made.rails;
-    out.propagated = made.propagated;
-    out.analytic   = made.analytic;
     return out;
   }
   catch (const Failure& failure)
@@ -1289,9 +1269,6 @@ static std::optional<Blended> joinedPlanarSupports(const Request& request)
             kept.emplace_back(part, now);
     }
     made.unchanged = std::move(kept);
-    made.keptFaces = made.keptEdges = 0;
-    for (const auto& [old, now] : made.unchanged)
-      (old.ShapeType() == TopAbs_FACE ? made.keptFaces : made.keptEdges)++;
     return made;
   }
   catch (const Failure& failure)
@@ -1404,7 +1381,6 @@ static std::optional<Blended> islandEnvelope(const Request& request)
     }
     // This constructor changes shared boundary vertices while closing its
     // sheets. Keep display reuse conservative until those copies are proved.
-    out.rails = int(request.edges.size());
     return out;
   }
   catch (const Failure& failure)
@@ -3849,13 +3825,8 @@ Blended Blend::result()
       if (!result.Contains(inCopy))
         continue;
       out.unchanged.emplace_back(parts(i), inCopy);
-      (type == TopAbs_FACE ? out.keptFaces : out.keptEdges)++;
     }
   }
-  out.rails      = int(pieces.size());
-  out.propagated = int(edges.size() - request.edges.size());
-  for (const auto& piece : pieces)
-    out.analytic += piece.exact();
   return out;
 }
 

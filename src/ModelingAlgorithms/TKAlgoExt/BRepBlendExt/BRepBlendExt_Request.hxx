@@ -109,7 +109,6 @@ struct Blended
   Handle(BRepTools_History)                          history = new BRepTools_History;
   std::vector<std::pair<TopoDS_Shape, TopoDS_Shape>> unchanged;
   std::vector<Join> joins;
-  int rails = 0, propagated = 0, analytic = 0, keptFaces = 0, keptEdges = 0;
 };
 
 Standard_EXPORT Blended blend(const Request& request);
