@@ -38,6 +38,8 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepAdaptor_Curve.hxx>
@@ -1697,6 +1699,79 @@ TEST(BRepBlendExt, PlanarConicCornerRetainsItsExactTensor)
       }
       EXPECT_EQ(tensors, 1);
     }
+}
+
+// Where more than three conic blends meet between planes the corner is split about a centre into
+// one rational patch per crossing of contacts, made directly and G1 everywhere (accepted reads
+// every seam), on regular and uneven apexes of four to six faces, posed and scaled. The G2 law
+// keeps its refusal there.
+TEST(BRepBlendExt, ConicCornerOfMoreThanThreeBlendsIsSplitIntoExactPatches)
+{
+  using namespace BRepExt::blending;
+  const auto pyramid = [](int n, double off) {
+    BRepBuilderAPI_Sewing      sew(1e-6);
+    std::vector<gp_Pnt>        base;
+    BRepBuilderAPI_MakePolygon bottom;
+    for (int i = 0; i < n; ++i)
+    {
+      const double angle = 2 * M_PI * i / n + 0.3 * std::sin(3.1 * i + n);
+      base.emplace_back(6 * std::cos(angle), 6 * std::sin(angle), 0);
+    }
+    const gp_Pnt apex(off, off / 2, 9);
+    for (int i = n - 1; i >= 0; --i)
+      bottom.Add(base[i]);
+    bottom.Close();
+    sew.Add(BRepBuilderAPI_MakeFace(bottom.Wire()).Face());
+    for (int i = 0; i < n; ++i)
+      sew.Add(BRepBuilderAPI_MakeFace(
+                BRepBuilderAPI_MakePolygon(base[i], base[(i + 1) % n], apex, true).Wire())
+                .Face());
+    sew.Perform();
+    BRepBuilderAPI_MakeSolid solid;
+    for (TopExp_Explorer x(sew.SewedShape(), TopAbs_SHELL); x.More(); x.Next())
+      solid.Add(TopoDS::Shell(x.Current()));
+    return std::make_pair(TopoDS_Shape(solid.Solid()), apex);
+  };
+  for (int n = 4; n <= 6; ++n)
+    for (double off : {0., 1.5})
+      for (double scale : {1., 5.})
+      {
+        const auto [shape, apex] = pyramid(n, off);
+        const gp_Trsf pose       = scale == 1. ? gp_Trsf() : posed(scale);
+        const auto    body       = BRepBuilderAPI_Transform(shape, pose, true).Shape();
+        const gp_Pnt  at         = apex.Transformed(pose);
+        std::vector<TopoDS_Edge> selected;
+        for (const auto& edge : edgesWhere(body, [](const double*) { return true; }))
+        {
+          TopoDS_Vertex a, b;
+          TopExp::Vertices(edge, a, b);
+          if (BRep_Tool::Pnt(a).Distance(at) < 1e-9 * scale
+              || BRep_Tool::Pnt(b).Distance(at) < 1e-9 * scale)
+            selected.push_back(edge);
+        }
+        ASSERT_EQ(int(selected.size()), n);
+        for (double rho : {.3, .7})
+        {
+          SCOPED_TRACE(::testing::Message() << n << " " << off << " " << scale << " " << rho);
+          auto request = roundOf(body, selected, .8 * scale);
+          request.rho  = rho;
+          const auto made = blend(request);
+          EXPECT_NO_THROW(accepted("round", body, made.shape, request.first, &made));
+          EXPECT_TRUE(BRepExt::invalidity(made.shape).empty());
+          int patches = 0;
+          for (TopExp_Explorer it(made.shape, TopAbs_FACE); it.More(); it.Next())
+          {
+            const auto surface = Handle(Geom_BSplineSurface)::DownCast(
+              BRep_Tool::Surface(TopoDS::Face(it.Current())));
+            patches += !surface.IsNull() && surface->UDegree() == 6 && surface->VDegree() == 6
+                       && surface->NbUPoles() == 7 && surface->NbVPoles() == 7;
+          }
+          EXPECT_EQ(patches, n);
+        }
+        auto g2 = roundOf(body, selected, .8 * scale);
+        g2.law  = Law::G2;
+        EXPECT_THROW(blend(g2), BRepExt::Failure);
+      }
 }
 
 TEST(BRepBlendExt, ConnectedRationalSheetsShareTwoCentreLengthJets)

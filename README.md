@@ -232,8 +232,10 @@ Current limits and what remains, with the cause of each:
    [operations.md](dox/extensions/operations.md#contact-ownership-on-a-joined-blend-sheet)). Some configurations where
    several blends meet are refused although a valid result exists: trimming a blend group needs an owner for every
    retained region and contact before chain ends are cut, and the centre path must be parametrised by arc length along
-   the marched curve, not by the edge's parameter. Curvature-continuous and conic sections at corners where four or more
-   blends meet are refused, and a curvature-continuous blend must meet the current seam and section-law bounds.
+   the marched curve, not by the edge's parameter. Curvature-continuous sections at corners where four or more blends meet
+   are refused, and so are conic ones there unless every face at the corner is a plane (see
+   [operations.md](dox/extensions/operations.md#split-corners-of-more-than-three-conic-blends)); a
+   curvature-continuous blend must meet the current seam and section-law bounds.
 2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published bound
    for a curvature-continuous conic or quintic section as a function of the support's curvature is missing.
 3. **Fill.** The interior acceptance gate and the flat-support curvature limit have no derivation. Across two rims of an

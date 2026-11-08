@@ -1974,3 +1974,62 @@ planes and second fundamental forms at the vertices does not imply agreement
 of the higher mixed derivatives required by a regular tensor spline. The
 current constrained-fill experiment is not an implementation of the paper's
 corner-corrected Gregory sum, and supplies no such reproduction theorem.
+
+### Split corners of more than three conic blends
+
+Where more than three conic blends meet at a vertex and every face there is a plane, each blend's
+sheet is its section's extrusion along its edge, `S(s, r) = C(s) + r d`, with `C` one rational
+quadratic. The corner is split about a centre `C` into one four-sided face at each place `Q_i` where
+the contacts of blends `i` and `i + 1` cross, bounded by a half of either blend's end and by two
+inner curves from the ends' splits `M_i` to `C`: the central split of an n-sided region [Charrot
+and Gregory 1984; Chiyokura and Kimura 1983]. Each face is a rational Bézier patch of degree 6,
+made directly; nothing is fitted.
+
+*Ends (derived).* Blend `i`'s end runs on its sheet at `r(s) = R(s)/W(s)`, `W` the section's
+denominator and `R` the cubic with the crossings' rail places and slopes such that the end leaves
+`Q_(i-1)` along `d_(i-1)` and arrives at `Q_i` along `d_(i+1)`. It is a rational cubic lying on the
+sheet exactly, with an exact parameter curve there. Both directions and both sheets' tangent planes
+at `Q_i` are those of the face the two blends share.
+
+*Across an end (derived).* If a patch's second row of homogeneous poles is its first moved along
+`d` at the same weights, `H_j1 = H_j0 + w_j0 l_j (d, 0)`, then its derivative across that side is
+`6 (sum_j B_j w_j0 l_j) / W d`, along the sheet's extrusion, so the patch is G1 to the sheet for any
+offsets `l_j`. At `Q_i` the two rules give the same pole, because either end's tangent there is the
+other side's direction. G2 to both sheets is impossible at `Q_i`: along the shared face the two
+sheets bend differently there (the corner obstruction of [G2 at a corner](#g2-at-a-corner)).
+
+*Halves.* Each half end is brought to the form whose two first and two last weights are 1: a
+Möbius change of parameter (standard form), then a common cubic factor `(1, 2 - w_1, 2 - w_2, 1)` of
+numerator and denominator, which gives a sextic. The end is split where the halves' speeds agree, so
+the inner curves have unit weights and the halves join C1 at `M_i`.
+
+*Across an inner curve.* Let `T` be the curve's tangent and `D_a`, `D_b` the derivatives across it
+of the patch it ends at `u = 1` and of the one it ends at `v = 1`. The condition
+`D_a + D_b = 2 cos(2 pi / n) t T` is the G1 condition of a split of `n` patches about one point
+[Loop 1994; Peters 2000]. It is linear in the poles. Its first two coefficients hold by
+construction: the offsets next to `M_i` are `l_i (1 - cos(2 pi / n) / 6)`, with `l_i` at `M_i`
+(derived). The remaining coefficients are solved for together with the free poles, which are kept
+fair by the least thin-plate energy of the nets. That is one symmetric system for all three
+coordinates; it is solved by singular values, because the centre's equations are dependent. Its
+last coefficient makes the inner curves' tangents at `C` an affine image of the regular n-gon's.
+`l_i` is a sixth of the chord from `M_i` to the splits' mean: the first leg of a straight curve to
+the centre's likely place. This is a judgement; in measurements the peak curvature of the corner
+depends strongly on `l_i`. Choosing it by the same fairness instead left a split with no positive
+offset on uneven pentagons.
+
+*Measured.* Every seam is within rounding: gaps up to 1e-14 of the size and angles up to 1e-7 degrees
+on regular apexes and pockets of four to six faces (rho 0.3 and 0.7). On
+regular apexes the corner bends at most 1.9 times as tightly as its blends. Uneven apexes (apex
+moved up to half the base radius, faces from 30 to 114 degrees, sizes 1e-3 to 1e3) build in 120 of
+144 members, without folds: the smallest ratio of `|S_u x S_v|` to its largest on a patch is 0.068.
+The other 24, all on one pentagon whose faces span 30 and 113 degrees at height 14, fold and are
+refused (the patches do not face one way). The worst delivered corner on that family bends 59 times
+as tightly as its blends. A symmetric template of tangents at `C` is the likely cause; a template
+from the splits' actual directions, with the matching non-symmetric condition
+`t_(i+1) + alpha_i t_(i-1) = beta_i t_i` (`alpha_i` constant along a curve, so the ends are split at
+speed ratio `alpha_i`), was measured and folded more often.
+
+Charrot and Gregory, *A pentagonal surface patch for computer aided geometric design*, CAGD 1 (1984).
+Chiyokura and Kimura, *Design of solids with free-form surfaces*, SIGGRAPH (1983).
+Loop, *Smooth spline surfaces over irregular meshes*, SIGGRAPH (1994).
+Peters, *Patching Catmull-Clark meshes*, SIGGRAPH (2000).

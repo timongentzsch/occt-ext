@@ -2131,16 +2131,22 @@ void Blend::vertexBlend(const TopoDS_Vertex&                    vertex,
   const double scale = pieces[meeting[0].first].rail.scale,
                near  = limit::one(scale, BRep_Tool::Pnt(vertex).XYZ().Modulus());
   const auto refuse  = [&](const char* why) { fail(op, unsupported_geometry, why, {lead}); };
+  // Rounds of one radius make the rolling ball's corner (below); conics of one shape, all convex
+  // or all concave, one corner bounded by their ends in turn (Attach::splitCorner).
+  const Rail& leadRail = pieces[meeting[0].first].rail;
+  bool        rounds = true, conics = true;
   for (const auto& [k, end] : meeting)
   {
-    const Rail& rail  = pieces[k].rail;
-    const bool  round = rail.law == Law::Conic && std::abs(rail.rho - 0.5) < limit::equal
-                       && std::abs(rail.s[0].distance - r) < limit::equal * scale
-                       && std::abs(rail.s[1].distance - r) < limit::equal * scale;
-    if (!round || rail.sigma != sigma)
-      refuse("where more than three blended edges meet, only the corner of rounds of one "
-             "radius, all convex or all concave, is blended");
+    const Rail& rail = pieces[k].rail;
+    rounds &= rail.law == Law::Conic && std::abs(rail.rho - 0.5) < limit::equal
+              && std::abs(rail.s[0].distance - r) < limit::equal * scale
+              && std::abs(rail.s[1].distance - r) < limit::equal * scale && rail.sigma == sigma;
+    conics &= rail.law == Law::Conic && std::abs(rail.rho - leadRail.rho) < limit::equal
+              && rail.sigma == sigma;
   }
+  if (!rounds && !conics)
+    refuse("where more than three blended edges meet, only the corner of rounds of one "
+           "radius, all convex or all concave, is blended");
   // The faces round the vertex in turn: after[i] is the end of the blend between ring[i] and ring[i
   // + 1].
   const int                        count = int(meeting.size());
@@ -2168,6 +2174,13 @@ void Blend::vertexBlend(const TopoDS_Vertex&                    vertex,
     for (int j = i + 1; j < count; ++j)
       if (ring[i].IsSame(ring[j]))
         refuse(ringless);
+  if (!rounds)
+  {
+    for (const auto& [k, end] : after)
+      pieces[k].joint[end] = {Meets::Corner, int(corners.size()), 0, false};
+    corners.push_back({vertex, after});
+    return;
+  }
   std::vector<Side> sides(count);
   for (int i = 0; i < count; ++i)
     sides[i] = Side{ring[i],
@@ -2859,10 +2872,17 @@ void Blend::sheets()
         continueTerminal(piece, stations, facesOfEdge, edgesOfVertex);
       // An exact sheet needs no fit: its contacts are its own.
       // A conic's corner patch takes its weights from fitted sheets: none extruded there (a
-      // chamfer's corner takes none).
-      const bool corner =
-        piece.rail.law != Law::Chamfer
-        && (piece.joint[0].meets == Meets::Corner || piece.joint[1].meets == Meets::Corner);
+      // chamfer's corner takes none). The corner of more than three conics other than rounds is
+      // split from their extruded sheets (Attach::splitCorner).
+      const bool round =
+        piece.rail.law == Law::Conic && std::abs(piece.rail.rho - 0.5) < limit::equal
+        && std::abs(piece.rail.s[0].distance - piece.rail.s[1].distance)
+             < limit::equal * piece.rail.scale;
+      const auto patched = [&](int end) {
+        return piece.joint[end].meets == Meets::Corner
+               && (round || corners[piece.joint[end].piece].ends.size() <= 3);
+      };
+      const bool corner = piece.rail.law != Law::Chamfer && (patched(0) || patched(1));
       auto exact = exactSheet(piece.rail, stations);
       if (!exact && !corner)
         exact = extrudedSheet(piece.rail, stations);
