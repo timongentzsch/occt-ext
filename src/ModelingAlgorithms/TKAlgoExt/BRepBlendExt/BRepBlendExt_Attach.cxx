@@ -563,6 +563,8 @@ struct Attach
     gp_Vec2d      shift;
   };
   std::map<std::array<int, 3>, std::vector<Passed>> passages;
+  //! The face each part of such a contact lies on, where it is not the support's own.
+  NCollection_DataMap<TopoDS_Shape, TopoDS_Face, TopTools_ShapeMapHasher> partFace;
 
   //! The edges along a side, from its start's corner to its end's.
   std::vector<TopoDS_Edge> sideEdges(int k, int side) const
@@ -3610,7 +3612,23 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
     // that stop it, in the order it crosses them, each with the edge it crosses onto it, that
     // edge's end the blend replaces and where it crosses.
     std::vector<Passage> passed;
+    // Where the contact ends on its support (or a face of its surface) without crossing an edge
+    // of it: that face, and the edge across which the face before it lies, from its end the
+    // blend replaces.
+    TopoDS_Face   open;
+    TopoDS_Edge   openEdge;
+    TopoDS_Vertex openFrom;
   } walk[2];
+  const double carried[2] = {sheet.rail(end == 0 ? 0 : middle), sheet.rail(end == 0 ? middle : 1)};
+  // Whether a side's contact, where it is carried at this end, meets a face's surface: a face
+  // ends the blend only where its surface cuts the whole section, from one contact to the other.
+  const auto meets = [&](int side, const TopoDS_Face& face) {
+    GeomAPI_IntCS meet(new Geom_TrimmedCurve(sheet.contact(side),
+                                             std::min(carried[0], carried[1]),
+                                             std::max(carried[0], carried[1])),
+                       BRep_Tool::Surface(face));
+    return meet.IsDone() && meet.NbPoints() > 0;
+  };
 
   for (int side = 0; side < 2; ++side)
   {
@@ -3655,7 +3673,7 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
                                   own);
       // A sharp stop surface can meet the contact past this edge's vertex. Searching
       // the whole carried contact is necessary: a stop may consume over half its span.
-      if (!found && step == 0)
+      if (!found && step == 0 && meets(1 - side, beyond))
       {
         if (auto more = continuation(piece.fitted.contact[side],
                                      0,
@@ -3685,7 +3703,7 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
           if (!shape.IsSame(edge) && onFace(shape, beyond))
             up = TopoDS::Edge(shape);
         const TopoDS_Face stopFace = up.IsNull() ? TopoDS_Face() : across(up, beyond);
-        if (!stopFace.IsNull() && !support(stopFace))
+        if (!stopFace.IsNull() && !support(stopFace) && meets(1 - side, stopFace))
           if (auto more = continuation(piece.fitted.contact[side],
                                        end == 0 ? 0 : middle,
                                        end == 0 ? middle : 1,
@@ -3757,11 +3775,9 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
         break;
       }
       // Swept over: on to the next edge of the support at its other end.
-      w.swept.push_back(edge);
       TopoDS_Vertex a, z;
       TopExp::Vertices(edge, a, z);
       const TopoDS_Vertex at = a.IsSame(from) ? z : a;
-      w.sweptAt.push_back(at);
       TopoDS_Edge next;
       for (const auto& shape : edgesOfVertex.FindFromKey(at))
         if (!shape.IsSame(edge) && onFace(shape, own))
@@ -3774,6 +3790,42 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
                         "the blend's contact does not reach the faces that stop it",
                         rail.edge,
                         std::vector<TopoDS_Shape>(w.faces.begin(), w.faces.end()));
+      // The contact ends on the face: it crosses none of the face's edges (but the rail's and
+      // the one it came onto the face over) where it is carried, and no other piece of the
+      // blended edges lies on the face beside the other support (over which the ball rolls on,
+      // above). The face that stops the other contact then stops it too, its surface carried
+      // to it.
+      {
+        const double entry  = w.passed.empty() ? middle : w.passed.back().at.first;
+        bool         leaves = false, rollsOn = false;
+        for (TopExp_Explorer x(own, TopAbs_EDGE); x.More() && !leaves && !rollsOn; x.Next())
+        {
+          const TopoDS_Edge& e = TopoDS::Edge(x.Current());
+          if (railEdge(e))
+          {
+            rollsOn = !ownEdge(piece, e) && onFace(e, rail.s[1 - side].face);
+            continue;
+          }
+          if (!w.passed.empty() && e.IsSame(w.passed.back().edge))
+            continue;
+          leaves = crossing(piece.fitted.contact[side],
+                            end == 0 ? 0 : entry,
+                            end == 0 ? entry : 1,
+                            piece.uAt(end),
+                            e,
+                            own)
+                     .has_value();
+        }
+        if (!leaves && !rollsOn)
+        {
+          w.open     = own;
+          w.openEdge = edge;
+          w.openFrom = from;
+          break;
+        }
+      }
+      w.swept.push_back(edge);
+      w.sweptAt.push_back(at);
       if (next.IsNull() || railEdge(next))
         refuse("the blend's contact does not reach the faces that stop it");
       const TopoDS_Face nextBeyond = across(next, own);
@@ -3816,6 +3868,184 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
   from.insert(from.end(), walk[1].from.begin(), walk[1].from.end());
   if (faces.size() != between.size() + 1)
     refuse("the faces that stop the blend do not run from one support to the other");
+  if (!walk[0].open.IsNull() || !walk[1].open.IsNull())
+  {
+    // One contact ends on its face: the face the other crosses onto stops the blend, if its
+    // surface meets this contact too, and grows to the blend. The faces from it round to the
+    // open contact's face are cut by its surface: its new edges with them run from its own
+    // vertex on the first to the open contact's corner, and what lies under the blend goes.
+    const int o = walk[0].open.IsNull() ? 1 : 0, s = 1 - o;
+    if (!walk[s].open.IsNull() || walk[s].crossed.IsNull() || walk[0].continued
+        || walk[1].continued || !walk[s].level.IsNull())
+      refuse("the faces at an end of the edge do not stop it");
+    if (s == 1)
+    {
+      std::reverse(faces.begin(), faces.end());
+      std::reverse(between.begin(), between.end());
+      std::reverse(from.begin(), from.end());
+    }
+    faces.push_back(walk[o].open);
+    between.push_back(walk[o].openEdge);
+    from.push_back(walk[o].openFrom);
+    for (size_t i = 0; i < between.size(); ++i)
+      if (BRep_Tool::IsClosed(between[i], faces[i]) || BRep_Tool::IsClosed(between[i], faces[i + 1]))
+        refuse("the faces that stop the blend do not run from one support to the other");
+    const TopoDS_Face& stopFace = faces.front();
+    const auto         stopSurface = placedFace(stopFace).surface;
+    // Where the open contact meets the stop face's surface: first past where it came onto its
+    // face, on that face.
+    const double entry = walk[o].passed.empty() ? piece.uAt(end) : walk[o].passed.back().at.first;
+    std::optional<double> uOpen;
+    {
+      GeomAPI_IntCS meet(new Geom_TrimmedCurve(sheet.contact(o),
+                                               std::min(carried[0], carried[1]),
+                                               std::max(carried[0], carried[1])),
+                         stopSurface);
+      for (int p = 1; meet.IsDone() && p <= meet.NbPoints(); ++p)
+      {
+        double su, sv, w;
+        meet.Parameters(p, su, sv, w);
+        const double at = (w - sheet.alpha) / sheet.beta;
+        if ((end == 0 ? at < entry : at > entry)
+            && (!uOpen || std::abs(at - entry) < std::abs(*uOpen - entry)))
+          uOpen = at;
+      }
+    }
+    if (!uOpen || Inside(walk[o].open).out(piece.fitted.contact[o]->Value(*uOpen)))
+      refuse("the faces at an end of the edge do not stop it");
+    // Its contact in that face's parameters: by whole periods near the face's edge before it.
+    {
+      double     f, l;
+      const auto pcurve = BRep_Tool::CurveOnSurface(walk[o].openEdge, walk[o].open, f, l);
+      if (pcurve.IsNull())
+        refuse("the faces at an end of the edge do not stop it");
+      const gp_Pnt2d uv = piece.fitted.contact[o]->Value(*uOpen);
+      const gp_Pnt2d near =
+        nearPeriod(uv,
+                   pcurve->Value(BRep_Tool::Parameter(walk[o].openFrom, walk[o].openEdge)),
+                   BRep_Tool::Surface(walk[o].open));
+      walk[o].at = {*uOpen, 0, gp_Vec2d(near, uv)};
+    }
+    for (int side = 0; side < 2; ++side)
+    {
+      u[k][side][end] = walk[side].at.first;
+      builder.MakeVertex(corner[k][side][end],
+                         sheet.contact(side)->Value(sheet.rail(walk[side].at.first)),
+                         tolerance);
+    }
+    const auto onSurface = [](const gp_Pnt& p, const Placed& placed, gp_Pnt2d& uv) {
+      GeomAPI_ProjectPointOnSurf project(p, placed.surface);
+      if (project.NbPoints() == 0 || project.LowerDistance() > tol::length)
+        return false;
+      double pu, pv;
+      project.LowerDistanceParameters(pu, pv);
+      uv.SetCoord(pu, pv);
+      return true;
+    };
+    // The section on the stop face, from side 0's corner to side 1's.
+    gp_Pnt2d onStop;
+    if (!onSurface(BRep_Tool::Pnt(corner[k][0][end]), placedFace(stopFace), onStop))
+      refuse("the faces at an end of the edge do not stop it");
+    auto ended = meetingEdge(placedSheet(sheet),
+                             sheet.uv(sheet.rail(u[k][0][end]), sheet.across[0]),
+                             placedFace(stopFace),
+                             onStop,
+                             corner[k][0][end],
+                             corner[k][1][end],
+                             rail.scale);
+    if (!ended && refineContacts)
+      ended = planeMeeting(sheet,
+                           stopFace,
+                           sheet.uv(sheet.rail(u[k][0][end]), sheet.across[0]),
+                           sheet.uv(sheet.rail(u[k][1][end]), sheet.across[1]),
+                           corner[k][0][end],
+                           corner[k][1][end]);
+    if (!ended)
+      fail(op,
+           no_solution,
+           "the blend's end on the face that stops it does not reach both contacts",
+           {rail.edge});
+    // The stop face's new edges: from its vertex on the first edge between, through where its
+    // surface crosses each further edge between (each cut back to it), to the open corner.
+    std::vector<TopoDS_Vertex> through = {from[0]};
+    for (size_t i = 1; i < between.size(); ++i)
+    {
+      double     f, l;
+      const auto curve = BRep_Tool::Curve(between[i], f, l);
+      if (curve.IsNull())
+        refuse("the faces at an end of the edge do not stop it");
+      GeomAPI_IntCS meet(new Geom_TrimmedCurve(curve, f, l), stopSurface);
+      const gp_Pnt  near = BRep_Tool::Pnt(from[i]);
+      std::optional<std::pair<gp_Pnt, double>> crossed;
+      for (int p = 1; meet.IsDone() && p <= meet.NbPoints(); ++p)
+      {
+        double su, sv, w;
+        meet.Parameters(p, su, sv, w);
+        if (!crossed || meet.Point(p).Distance(near) < crossed->first.Distance(near))
+          crossed = {meet.Point(p), w};
+      }
+      if (!crossed)
+        refuse("the faces at an end of the edge do not stop it");
+      TopoDS_Vertex v;
+      builder.MakeVertex(v, crossed->first, tolerance);
+      cut(between[i], from[i], v, crossed->second);
+      through.push_back(v);
+    }
+    through.push_back(corner[k][o][end]);
+    for (size_t i = 0; i + 1 < through.size(); ++i)
+    {
+      gp_Pnt2d     a, b;
+      const gp_Pnt p = BRep_Tool::Pnt(through[i]);
+      if (!onSurface(p, placedFace(stopFace), a) || !onSurface(p, placedFace(faces[i + 1]), b))
+        refuse("the faces at an end of the edge do not stop it");
+      const auto grown = meetingEdge(placedFace(stopFace),
+                                     a,
+                                     placedFace(faces[i + 1]),
+                                     b,
+                                     through[i],
+                                     through[i + 1],
+                                     rail.scale);
+      if (!grown)
+        fail(op,
+             no_solution,
+             "the face that stops the blend does not grow to the contact that ends before it",
+             {rail.edge});
+      editOf(edits, stopFace).bridges.push_back(*grown);
+      editOf(edits, faces[i + 1]).bridges.push_back(*grown);
+      continued.push_back({*grown, {stopFace, faces[i + 1]}});
+    }
+    // The crossed edge, the edges each contact crossed onto faces of its surface, and what the
+    // contacts swept over; the stop face's vertex on the first edge between stays.
+    cut(walk[s].crossed, walk[s].crossedFrom, corner[k][s][end], walk[s].at.second);
+    for (int side = 0; side < 2; ++side)
+    {
+      const auto& passed = walk[side].passed;
+      for (size_t j = 0; j < passed.size(); ++j)
+      {
+        TopoDS_Vertex at;
+        builder.MakeVertex(at, sheet.contact(side)->Value(sheet.rail(passed[j].at.first)), tolerance);
+        cut(passed[j].edge, passed[j].from, at, passed[j].at.second);
+        passages[{k, side, end}].push_back(
+          {at,
+           passed[j].at.first,
+           passed[j].face,
+           j + 1 < passed.size() ? passed[j + 1].at.shift : walk[side].at.shift});
+      }
+      for (const auto& edge : walk[side].swept)
+      {
+        for (const auto& face : facesOfEdge.FindFromKey(edge))
+          editOf(edits, face).replace.Bind(edge, TopoDS_Edge());
+        swept.push_back(edge);
+      }
+      for (const auto& v : walk[side].sweptAt)
+        if (!v.IsSame(from[0]))
+          swept.push_back(v);
+    }
+    editOf(edits, stopFace).bridges.push_back(*ended);
+    stopAt[k][end]  = stopFace;
+    section[k][end] = *ended;
+    return;
+  }
   // The places: the two corners, and where the sheet crosses each edge between stop faces.
   std::vector<TopoDS_Vertex> at(faces.size() + 1);
   std::vector<double>        param(faces.size() + 1);
@@ -5823,6 +6053,8 @@ void Attach::contacts()
           along.push_back(part);
           if (own)
             contact[k][side] = part;
+          else
+            partFace.Bind(part, face);
         }
         continue;
       }
@@ -6212,7 +6444,8 @@ void Attach::continuity()
           continue;
         if (!bevel && !piece.rail.s[side].cliffCurve
             && (piece.rail.s[side].trim.IsNull() || piece.rail.law == Law::Full))
-          mark(edge, blends[k], piece.rail.s[side].trim.IsNull()
+          mark(edge, blends[k], partFace.IsBound(edge) ? partFace.Find(edge)
+                 : piece.rail.s[side].trim.IsNull()
                  ? piece.rail.s[side].face : piece.rail.s[side].trim,
                JoinRole::Contact, smooth);
         else
@@ -6301,7 +6534,8 @@ void Attach::tolerances()
             }))
           made.push_back({edge,
                           {blends[k],
-                           !s.trim.IsNull() ? s.trim
+                           partFace.IsBound(edge) ? partFace.Find(edge)
+                           : !s.trim.IsNull() ? s.trim
                            : s.cliffCurve   ? beyondCliff(s)
                                             : s.face}});
     }

@@ -2055,6 +2055,52 @@ of the higher mixed derivatives required by a regular tensor spline. The
 current constrained-fill experiment is not an implementation of the paper's
 corner-corrected Gregory sum, and supplies no such reproduction theorem.
 
+### Stops reached past the edge's vertex
+
+At a blend's end each contact is walked over its support from the edge's vertex
+until it crosses an edge onto a face that is not a support. Two cases go past the
+faces at the vertex.
+
+*A face of the support's own surface.* A Boolean leaves a periodic surface's seam,
+or a split, as an edge between two faces that are copies of one surface. Where the
+contact crosses such an edge short of the face before it, it is on the same
+surface, so the blend's sheet touches it there exactly as on the support. The walk
+goes on over that face. The faces are taken as one where both give the same points
+at the contact's parameters, from the crossing to the end of the carried contact
+(16 samples to the length tolerance; this is a sampled test, not an identity proof).
+The crossed edge is cut at the crossing. The contact is one edge on each face, joined
+in one run along the blend's side, and each part keeps its own face's parameters,
+shifted by whole periods where needed.
+
+*A face that stops only one contact.* The blend ends on a face `F` only where the
+surface of `F` cuts the whole section. **Derived:** the end edge is the meeting of
+the sheet with that surface, from a corner on one contact to a corner on the other.
+If the surface meets only one contact where the sheet is carried, the meeting leaves
+the sheet before it reaches the other contact, so `F` cannot end the blend. A stop
+surface carried past the vertex to one contact is therefore taken only where it also
+meets the other contact. A contact that crosses none of its face's edges where it is
+carried, and on whose face no other piece of the blended edges lies beside the
+other support, ends on that face. (Where such a piece lies on the face, the ball rolls
+on over the faces between to it, as before.) The face the other contact reaches
+then stops the blend, and its surface is carried to the open contact. The open corner is where that contact first
+meets the surface, past where it entered its face, and it must lie on that face.
+The stop face grows to the blend: its new edges are its surface's meetings with
+the faces from its own vertex on the first edge between them to the open corner.
+Each further edge between them is cut where the surface crosses it. What lies under
+the blend goes: the swept edges, and the parts cut from those faces.
+
+Measured on a plane meeting a crossed surface of revolution, concave, radii 0.2, 0.5
+and 1, with circular, curvature-continuous and conic sections: all nine return valid
+closed solids.
+- Each round's blend face lies on its rolling balls to 1.3e-8 mm at 401 points per face.
+  Each ball centre's distances to the plane and the wall are computed analytically.
+- The added volume matches the integral of the sections' areas along the centre curve
+  (tube formula, `1 - kappa N.x` weight) to 0.3 %, and a Monte Carlo union of sections
+  within 0.7 standard errors.
+- The corners at both ends agree with a reference modeller's display mesh to 1e-3 mm.
+Before this, all nine were refused.
+No bound was changed, and every earlier route keeps priority where it applies.
+
 ### Split corners of more than three conic blends
 
 Where more than three conic blends meet at a vertex and every face there is a plane, each blend's
