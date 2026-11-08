@@ -611,6 +611,52 @@ static bool setbackAt(const Rail& rail, double t, Station& s, double d0, double 
   return true;
 }
 
+//! The angle between the faces' normals at the edge's point at `t`, or nothing where a face has no
+//! normal there.
+static std::optional<double> turnAt(const Rail& rail, double t)
+{
+  gp_Vec n[2];
+  for (int i = 0; i < 2; ++i)
+  {
+    double     f, l;
+    const auto pcurve = BRep_Tool::CurveOnSurface(rail.edge, rail.s[i].face, f, l);
+    Jet        j;
+    if (pcurve.IsNull() || !jetAt(rail.s[i], pcurve->Value(t).X(), pcurve->Value(t).Y(), j))
+      return {};
+    n[i] = j.n;
+  }
+  // From the sine and cosine both: an angle from its cosine alone is not resolved below
+  // sqrt(2 epsilon), some 2e-8 (gp_Vec::Angle).
+  return std::atan2(n[0].Crossed(n[1]).Magnitude(), n[0].Dot(n[1]));
+}
+
+bool Rail::tangentAt(double t, bool forSize) const
+{
+  const auto turn = turnAt(*this, t);
+  return turn && (forSize ? SectionPolicy::tangentFor(*turn, scale) : *turn <= tol::angle);
+}
+
+double seedPlace(const Rail& rail)
+{
+  const double middle = (rail.first + rail.last) / 2;
+  if (!rail.touching || !rail.tangentAt(middle, true))
+    return middle;
+  // The places k / n of the rail, as the edge's convexity is decided (BRepBlendExt_Solver.cxx).
+  constexpr int n      = 16;
+  double        widest = middle, most = 0;
+  for (int k = 1; k < n; ++k)
+  {
+    const double t    = rail.first + (rail.last - rail.first) * k / n;
+    const auto   turn = turnAt(rail, t);
+    if (turn && *turn > most)
+    {
+      most   = *turn;
+      widest = t;
+    }
+  }
+  return widest;
+}
+
 bool contactAt(const Rail& rail, double t, Station& s, double scale)
 {
   const Station seed = s;
@@ -800,10 +846,17 @@ bool sectionAt(const Rail&                      rail,
   // The apex: where the tangents at the two feet meet, in the plane of the centre and feet.
   const gp_Vec between(s.foot[0], s.foot[1]);
   const double c = t0.Dot(t1), det = 1 - c * c;
-  if (!(det > tol::fineAngle))
+  // Where the faces are all but tangent (a place Rail::touching tells of, or one between the
+  // places convexity is decided at) the tangents are opposite to within sqrt(fineAngle) and the
+  // lines through the feet nearly one: any point between the feet is within |F1 - F0|
+  // sqrt(fineAngle) of both lines (1e-6 of the section's width), and the apex's limit as the
+  // wedge opens to a half turn is their middle.
+  const bool flat =
+    !(det > tol::fineAngle) && c < 0 && (rail.law == Law::Conic || rail.law == Law::Chordal);
+  if (!(det > tol::fineAngle) && !flat)
     return false;
-  const double a = (between.Dot(t0) - c * between.Dot(t1)) / det;
-  const double b = (c * between.Dot(t0) - between.Dot(t1)) / det;
+  const double a = flat ? between.Magnitude() / 2 : (between.Dot(t0) - c * between.Dot(t1)) / det;
+  const double b = flat ? a : (c * between.Dot(t0) - between.Dot(t1)) / det;
   if (!(a > 0 && b > 0))
     return false;
   const gp_Pnt apex = s.foot[0].Translated(t0 * a);

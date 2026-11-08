@@ -458,6 +458,17 @@ struct Rail
   //! ball rests on both at the edge's vertex, and the blend closes to that point [at first, last].
   bool pinch[2] = {false, false};
 
+  //! Whether the faces are tangent at some place inside the edge for a blend of this size
+  //! (tolerance::tangentFor) and turn elsewhere. Where they are tangent to the angular resolution
+  //! (touchesAt) the ball rests on both at the edge's point and the blend narrows to it, as at a
+  //! pinch: the plane of the ball's section, across n0 x n1, is not resolved there.
+  bool touching = false;
+
+  //! Whether the faces' normals at the edge's point at `t` agree to the angular resolution
+  //! (tolerance::angle), or for `forSize` are tangent for a blend of this size
+  //! (tolerance::tangentFor).
+  Standard_EXPORT bool tangentAt(double t, bool forSize = false) const;
+
   //! The edge's parameter at the fit's u, which runs from 0 to 1 over the carried rail, and back.
   std::shared_ptr<const CentreParameter> centreParameter;
 
@@ -481,7 +492,8 @@ struct Rail
   bool pinchedAt(double t) const
   {
     const double near = tol::parameterMerge * (last - first);
-    return (pinch[0] && std::abs(t - first) <= near) || (pinch[1] && std::abs(t - last) <= near);
+    return (pinch[0] && std::abs(t - first) <= near) || (pinch[1] && std::abs(t - last) <= near)
+           || (touching && tangentAt(t));
   }
 };
 
@@ -720,6 +732,10 @@ bool newton(std::array<double, N>& x, double tolerance, Residual residual)
   return norm < tolerance;
 }
 
+//! Where the march of a rail's stations starts: the edge's middle, or where the faces turn most
+//! when they are tangent there (Rail::touching), since no ball has a section of its own there.
+Standard_EXPORT double seedPlace(const Rail& rail);
+
 //! The ball touching both supports whose section's plane passes through the edge's point at `t`.
 Standard_EXPORT bool contactAt(const Rail& rail, double t, Station& s, double scale = 1);
 
@@ -803,7 +819,7 @@ public:
       walk(start, rail_.from);
       return;
     }
-    const double middle = (rail_.first + rail_.last) / 2;
+    const double middle = seedPlace(rail_);
     Station      start;
     start.t = middle;
     for (int i = 0; i < 2; ++i)

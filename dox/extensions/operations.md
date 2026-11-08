@@ -28,6 +28,18 @@ Bézier whose shoulder weight is sin(w/2) rho/(1 - rho) for a wedge angle w, whi
 rho = 1/2 [standard conic form]. Supports are extended past their ends by continuing the last
 polynomial span, which keeps shape and parametrisation [Hu, as restated by Zang et al.].
 
+*Convexity.* The sign of the offsets is decided from (n1 x n2) . t at the interior places k/16 of the
+edge, its middle among them; places where the faces are tangent for the blend's size decide nothing.
+An edge with convex and concave places is refused by name: the ball would change sides where the
+faces are tangent between them. Where the faces are tangent at some places and turn one way at the
+others, the blend narrows to the edge's point there: the march starts where the faces turn most if
+they are tangent at the middle, a station where the normals agree to the angular resolution is the
+ball resting on both at the edge's point (as at a tangent end), and a section whose tangents at the
+feet are opposite to within sqrt(1e-12) takes the middle of the feet as its apex, the limit as the
+wedge opens to a half turn (any point between the feet is then within 1e-6 of the section's width
+of both tangent lines; derived). Not proven: 16 places resolve the sign changes and tangencies of
+the faces' turn; a change between two places is not seen there.
+
 *Sources read.* Jaiswal, Ghosal, Gurumoorthy, "Circular blending", DETC 2001 (theory, algorithm,
 results; Hermann 1995 and Lukacs 1998 are cited second-hand there); Salvi and Várady, "Multi-sided
 surfaces with curvature continuity" (2014; statement of the Linkage Curve Theorem, appendix proof not

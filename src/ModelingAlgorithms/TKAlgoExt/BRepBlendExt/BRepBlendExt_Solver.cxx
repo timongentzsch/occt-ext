@@ -68,43 +68,84 @@ static Blended blendCopy(const Request&                   request,
                          BRepBuilderAPI_Copy&             copy,
                          const std::vector<TopoDS_Shape>& byCentre = {});
 
-//! How the faces beside an edge turn at its middle: -1 where the edge is convex, 1 where it is
-//! concave, 0 where they are tangent for a blend of `size` (tolerance::tangentFor). A face lies to
-//! the left of its boundary seen along its outward normal, so with d the edge's direction in the
-//! first face the edge is convex where (n0 x n1) . d > 0.
+//! How the faces beside an edge turn along it: -1 where the edge is convex, 1 where it is
+//! concave, 0 where they are tangent for a blend of `size` (tolerance::tangentFor) all along. A
+//! face lies to the left of its boundary seen along its outward normal, so with d the edge's
+//! direction in the first face the edge is convex where (n0 x n1) . d > 0. Decided at interior
+//! places of the edge, its middle among them: a place where the faces are tangent leaves the
+//! decision to the others (the blend narrows to nothing there and goes on, as the rolling ball
+//! does), and one where a face is singular too. Places convex and concave both are refused: the
+//! ball would change sides of the faces where they are tangent between them. `touches` tells
+//! whether some place was tangent (Rail::touching).
 static int convexity(const char*        op,
                      const TopoDS_Edge& edge,
                      const TopoDS_Face& first,
                      const TopoDS_Face& second,
-                     double             size)
+                     double             size,
+                     bool*              touches = nullptr)
 {
   const BRepAdaptor_Curve curve(edge);
-  const double            middle = (curve.FirstParameter() + curve.LastParameter()) / 2;
-  gp_Pnt                  at;
-  gp_Vec                  d;
-  curve.D1(middle, at, d);
-  gp_Vec            normals[2];
-  const TopoDS_Face faces[2] = {first, second};
+  const TopoDS_Face       faces[2] = {first, second};
+  Handle(Geom2d_Curve)    pcurves[2];
+  Side                    sides[2];
   for (int side = 0; side < 2; ++side)
   {
-    double         f, l;
-    const gp_Pnt2d uv = BRep_Tool::CurveOnSurface(edge, faces[side], f, l)->Value(middle);
-    const Side     s{faces[side],
-                 BRep_Tool::Surface(faces[side]),
-                 faces[side].Orientation() == TopAbs_REVERSED ? -1.0 : 1.0,
-                 0};
-    Jet            j;
-    if (!jetAt(s, uv.X(), uv.Y(), j))
-      fail(op, invalid_input, "a face beside the edge is singular there", {edge});
-    normals[side] = j.n;
+    double f, l;
+    pcurves[side] = BRep_Tool::CurveOnSurface(edge, faces[side], f, l);
+    sides[side]   = Side{faces[side],
+                         BRep_Tool::Surface(faces[side]),
+                         faces[side].Orientation() == TopAbs_REVERSED ? -1.0 : 1.0,
+                         0};
   }
-  if (SectionPolicy::tangentFor(normals[0].Angle(normals[1]), size))
-    return 0;
   TopAbs_Orientation inFirst = TopAbs_FORWARD;
   for (TopExp_Explorer e(first, TopAbs_EDGE); e.More(); e.Next())
     if (e.Current().IsSame(edge))
       inFirst = e.Current().Orientation();
-  return normals[0].Crossed(normals[1]).Dot(d) * (inFirst == TopAbs_REVERSED ? -1 : 1) > 0 ? -1 : 1;
+  // The places k / n of the edge for 0 < k < n; n even, so that the middle is one of them.
+  constexpr int n        = 16;
+  bool          regular  = false;
+  int           kind     = 0;
+  double        convexAt = 0, concaveAt = 0;
+  for (int k = 1; k < n; ++k)
+  {
+    const double t =
+      curve.FirstParameter() + (curve.LastParameter() - curve.FirstParameter()) * k / n;
+    gp_Pnt at;
+    gp_Vec d;
+    curve.D1(t, at, d);
+    gp_Vec normals[2];
+    bool   found = true;
+    for (int side = 0; side < 2 && found; ++side)
+    {
+      const gp_Pnt2d uv = pcurves[side]->Value(t);
+      Jet            j;
+      found         = jetAt(sides[side], uv.X(), uv.Y(), j);
+      normals[side] = j.n;
+    }
+    if (!found)
+      continue;
+    regular = true;
+    if (SectionPolicy::tangentFor(normals[0].Angle(normals[1]), size))
+    {
+      if (touches)
+        *touches = true;
+      continue;
+    }
+    const int here =
+      normals[0].Crossed(normals[1]).Dot(d) * (inFirst == TopAbs_REVERSED ? -1 : 1) > 0 ? -1 : 1;
+    (here < 0 ? convexAt : concaveAt) = double(k) / n;
+    if (kind != 0 && here != kind)
+      fail(op,
+           unsupported_geometry,
+           "the faces beside the edge turn from convex to concave along it (convex at "
+             + std::to_string(convexAt) + ", concave at " + std::to_string(concaveAt)
+             + " of its length)",
+           {edge});
+    kind = here;
+  }
+  if (!regular)
+    fail(op, invalid_input, "a face beside the edge is singular there", {edge});
+  return kind;
 }
 
 //! How far an edge reaches from the origin: the largest coordinate of its box (Rail::magnitude).
@@ -1960,7 +2001,8 @@ void Blend::rails()
     for (size_t k = 0; k < asked.size() && k < request.radii.size(); ++k)
       if (asked[k].IsSame(edge) && !request.radii[k].empty())
         sizesOf(rail, request.radii[k], request.first);
-    const int kind = convexity(op, edge, rail.s[0].face, rail.s[1].face, rail.scale);
+    const int kind =
+      convexity(op, edge, rail.s[0].face, rail.s[1].face, rail.scale, &rail.touching);
     if (kind == 0)
     {
       pieces.pop_back();

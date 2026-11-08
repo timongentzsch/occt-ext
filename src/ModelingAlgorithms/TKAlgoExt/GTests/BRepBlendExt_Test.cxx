@@ -41,6 +41,7 @@
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
@@ -2201,4 +2202,68 @@ TEST(BRepBlendExt, FiniteContactUsesLiftedTrims)
       EXPECT_DOUBLE_EQ(curve->Value((first + last) / 2).Z(), .25 * scale);
     }
   }
+}
+
+// A block along x whose edge on the x axis lies between the plane z = 0 (y < 0) and the ruled
+// face through the points (x, W, W s(x)) (y > 0): convex where s < 0, concave where s > 0, the
+// faces tangent where s = 0.
+static TopoDS_Shape bentBlock(const std::function<double(double)>& s, double L, double W, double D)
+{
+  BRepOffsetAPI_ThruSections through(true, false);
+  for (int k = 0; k <= 12; ++k)
+  {
+    const double               x = L * k / 12;
+    BRepBuilderAPI_MakePolygon p;
+    p.Add(gp_Pnt(x, 0, 0));
+    p.Add(gp_Pnt(x, -W, 0));
+    p.Add(gp_Pnt(x, -W, -D));
+    p.Add(gp_Pnt(x, W, -D));
+    p.Add(gp_Pnt(x, W, W * s(x)));
+    p.Close();
+    through.AddWire(p.Wire());
+  }
+  through.Build();
+  return through.Shape();
+}
+
+// Convexity is the faces' turn all along the edge, not at its middle alone. Where it changes sign
+// the ball would change sides where the faces are tangent: refused by that name, wherever along
+// the edge the change lies (the middle one was taken for an edge between tangent faces and left
+// out without a word). Where the faces are tangent at the middle only and turn one way elsewhere,
+// the blend narrows to the edge's point there and is the rolling ball's all along.
+TEST(BRepBlendExt, ConvexityIsDecidedAlongTheWholeEdge)
+{
+  const double L = 40, W = 10, D = 10;
+  for (const double s : {0.1, 1.0, 10.0})
+    for (const double a : {0.5, -0.5})
+      for (const double x0 : {0.3, 0.5, 0.7})
+      {
+        const gp_Trsf      pose = s == 1 ? gp_Trsf() : posed(s);
+        const TopoDS_Shape body =
+          BRepBuilderAPI_Transform(
+            bentBlock([=](double x) { return 2 * a * (x / L - x0); }, L, W, D),
+            pose,
+            true)
+            .Shape();
+        const TopoDS_Edge edge = edgeThrough(body, gp_Pnt(L * 0.37, 0, 0).Transformed(pose), s * L);
+        ASSERT_FALSE(edge.IsNull());
+        try
+        {
+          BRepExt::blending::blend(roundOf(body, {edge}, s));
+          ADD_FAILURE() << "delivered: s=" << s << " a=" << a << " x0=" << x0;
+        }
+        catch (const std::exception& refused)
+        {
+          EXPECT_NE(std::string(refused.what()).find("from convex to concave"), std::string::npos)
+            << refused.what();
+        }
+      }
+  const TopoDS_Shape body =
+    bentBlock([=](double x) { return -2 * (x / L - 0.5) * (x / L - 0.5); }, L, W, D);
+  const TopoDS_Edge  edge = edgeThrough(body, gp_Pnt(L * 0.37, 0, 0), L);
+  const TopoDS_Shape made = blended(roundOf(body, {edge}, 1));
+  ASSERT_FALSE(made.IsNull());
+  EXPECT_TRUE(BRepExt::invalidity(made).empty());
+  EXPECT_LT(volume(made), volume(body) - 0.02);
+  EXPECT_LT(std::abs(ballDefect(made, body, 1).worst), 1e-6);
 }
