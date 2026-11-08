@@ -345,6 +345,27 @@ must be equal where the size changes (refused by name otherwise); such edges add
 take the plain construction (no island, re-blend or mixed-convexity routes). A range keeps the change
 the blend of the edge alone makes between the planes square to the edge at its limits, as
 `filletRange` does for the round.
+The limited change is isolated before the stopping planes clip it. Where the blend reports which
+faces it kept unchanged, those pairs cancel and only the remaining skins are intersected, once, in one
+non-destructive intersection structure shared by both oriented differences (the separation of
+intersection and building, Open CASCADE SAS, *Boolean Operations*, sections *Intersection Part* and
+*Safe processing mode*). The retained pieces of the source faces are substituted in place and the new
+sheets enter reversed; the pieces are grouped by their shared topological edges, never by a
+tolerance merge or sewing, so the source surfaces and the edges' curve representations are kept as
+they were. Each group is then a closed shell of the removed (positive signed volume) or the added
+(negative) material. **Derived here:** that grouping gives whole outer shells when both bodies are one
+solid bounded by one shell and share an unchanged face. A cavity shell of O\N with a face on the old
+boundary would put points outside O inside a region enclosed by O\N, so O would have a void; one
+with all faces on the new boundary would hold all of the connected body N, the shared face included,
+which then lies on the old boundary inside that region: the same contradiction. N\O follows with the
+roles exchanged. Bodies outside that domain, and the stock builder, intersect the whole bodies instead.
+The stopping-plane clips and the final cut and fuse are still Boolean operations. Against whole-body
+isolation, the result is the same shape: on the generated box and cylinder family (convex and concave,
+three sections, three scales) every result has the same surfaces, curve representations, ranges,
+tolerances and incidence, up to the edge a closed wire starts at, except two concave G2 cylinder rows
+whose two trim curves now end on their vertices (whole-body isolation left them 1.2e-6 past, twelve
+times the edge tolerance) and one large concave G2 box where whole-body isolation returned the body
+unblended and the local assembly blends it (volume gain matching the scaled smaller case).
 
 Measured: against the reference modeller's results (box edge and the flat-to-curved edge of a half cylinder, laws
 linear, falling, peak and valley, Round and Conic rho 0.3) the blend's lie within 1e-12 to 1.1e-6 mm both ways;

@@ -23,6 +23,10 @@
 #include <GCPnts_AbscissaPoint.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepTools_ReShape.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRep_Builder.hxx>
+#include <BOPAlgo_PaveFiller.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -61,6 +65,138 @@ static std::vector<blending::Join> rangeJoins(const std::vector<blending::Join>&
   }
   return after;
 }
+
+//! True when `shape` is one solid bounded by one shell.
+static bool oneShell(const TopoDS_Shape& shape)
+{
+  int solids = 0, shells = 0;
+  for (TopExp_Explorer solid(shape, TopAbs_SOLID); solid.More(); solid.Next())
+    ++solids;
+  for (TopExp_Explorer shell(shape, TopAbs_SHELL); shell.More(); shell.Next())
+    ++shells;
+  return solids == 1 && shells == 1;
+}
+
+//! Assemble the signed boundary difference from support-face provenance.
+//! Unchanged faces cancel. The remaining skins share one intersection inventory;
+//! new sheets enter with reversed orientation in the removed-material boundary.
+//! Each connected component is then a whole outer shell of the removed or the added
+//! material, told apart by its signed volume. That holds when both bodies are single
+//! shells sharing an unchanged face: neither difference then has a cavity shell
+//! (derived; see the operations documentation).
+struct RangeDelta
+{
+  TopoDS_Compound             removed, added;
+  std::vector<blending::Join> joins;
+};
+
+static RangeDelta localDelta(const char*              op,
+                             const TopoDS_Shape&      shape,
+                             const blending::Blended& made)
+{
+  RangeDelta   delta;
+  BRep_Builder builder;
+  builder.MakeCompound(delta.removed);
+  builder.MakeCompound(delta.added);
+  TopoDS_Compound oldSkin, newSkin;
+  builder.MakeCompound(oldSkin);
+  builder.MakeCompound(newSkin);
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> cancelled;
+  for (const auto& [old, now] : made.unchanged)
+  {
+    cancelled.Add(old);
+    cancelled.Add(now);
+  }
+  for (TopExp_Explorer face(shape, TopAbs_FACE); face.More(); face.Next())
+    if (!cancelled.Contains(face.Current()))
+      builder.Add(oldSkin, face.Current());
+  for (TopExp_Explorer face(made.shape, TopAbs_FACE); face.More(); face.Next())
+    if (!cancelled.Contains(face.Current()))
+      builder.Add(newSkin, face.Current());
+
+  // Both oriented boundary differences must share the split edge inventory.
+  NCollection_List<TopoDS_Shape> arguments;
+  arguments.Append(oldSkin);
+  arguments.Append(newSkin);
+  BOPAlgo_PaveFiller intersections;
+  intersections.SetArguments(arguments);
+  intersections.SetNonDestructive(true);
+  intersections.Perform();
+  BRepAlgoAPI_Cut oldOnly(oldSkin, newSkin, intersections);
+  BRepAlgoAPI_Cut newOnly(newSkin, oldSkin, intersections);
+  if (!oldOnly.IsDone() || !newOnly.IsDone())
+    fail(op, no_solution, "support boundary difference failed");
+
+  // Substitute only retained source-face pieces. No sewing is allowed to
+  // rewrite the surfaces or the edge representation lists during assembly.
+  BRepTools_ReShape reshape;
+  for (TopExp_Explorer face(shape, TopAbs_FACE); face.More(); face.Next())
+  {
+    if (cancelled.Contains(face.Current()) || oldOnly.IsDeleted(face.Current()))
+      reshape.Remove(face.Current());
+    else if (!oldOnly.Modified(face.Current()).IsEmpty())
+    {
+      TopoDS_Compound images;
+      builder.MakeCompound(images);
+      for (const auto& image : oldOnly.Modified(face.Current()))
+        if (image.ShapeType() == TopAbs_FACE)
+          builder.Add(images, image);
+      reshape.Replace(face.Current(), images);
+    }
+  }
+  std::vector<TopoDS_Shape> patches;
+  const auto                retained = reshape.Apply(shape);
+  for (TopExp_Explorer face(retained, TopAbs_FACE); face.More(); face.Next())
+    patches.push_back(face.Current());
+  for (TopExp_Explorer face(newOnly.Shape(), TopAbs_FACE); face.More(); face.Next())
+    patches.push_back(face.Current().Reversed());
+
+  // Connected components are determined by topological edges, never by a
+  // tolerance merge. Each component carries the signed boundary orientation.
+  std::vector<bool> used(patches.size(), false);
+  for (size_t seed = 0; seed < patches.size(); ++seed)
+  {
+    if (used[seed])
+      continue;
+    TopoDS_Shell shell;
+    builder.MakeShell(shell);
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+    std::vector<size_t>                                        pending{seed};
+    used[seed] = true;
+    for (size_t cursor = 0; cursor < pending.size(); ++cursor)
+    {
+      const auto& face = patches[pending[cursor]];
+      builder.Add(shell, face);
+      TopExp::MapShapes(face, TopAbs_EDGE, edges);
+      for (size_t i = 0; i < patches.size(); ++i)
+      {
+        if (used[i])
+          continue;
+        for (TopExp_Explorer edge(patches[i], TopAbs_EDGE); edge.More(); edge.Next())
+          if (edges.Contains(edge.Current()))
+          {
+            used[i] = true;
+            pending.push_back(i);
+            break;
+          }
+      }
+    }
+    auto solid = BRepBuilderAPI_MakeSolid(shell).Solid();
+    if (!BRepCheck_Analyzer(solid).IsValid())
+      fail(op, no_solution, "material boundary is not closed");
+    GProp_GProps mass;
+    BRepGProp::VolumeProperties(solid, mass);
+    const bool removed = mass.Mass() > 0;
+    if (!removed)
+      solid.Reverse();
+    builder.Add(removed ? delta.removed : delta.added, solid);
+  }
+  delta.joins         = rangeJoins(made.joins, oldOnly);
+  const auto newJoins = rangeJoins(made.joins, newOnly);
+  delta.joins.insert(delta.joins.end(), newJoins.begin(), newJoins.end());
+  return delta;
+}
+
 //! The part of the change `made` makes to `shape` that lies between the planes square to `edge`
 //! at the fractions `start` and `end` of it (the contour's other edges, `others`, must not come
 //! back between them): the material removed and added there only, the rest of `shape` as it was.
@@ -74,14 +210,46 @@ static EvolutionData withinRange(OcctKernel&                     kernel,
                                  double                          end,
                                  const std::vector<TopoDS_Edge>& others,
                                  FaceHistory&                    history,
-                                 std::vector<blending::Join>*     joins = nullptr)
+                                 std::vector<blending::Join>*     joins = nullptr,
+                                 const blending::Blended*         provenance = nullptr)
 {
   BRepAdaptor_Curve curve(edge);
   // Isolate both sides of the change. Concave blends add material; convex
   // blends remove it. Mixed contours can do both in one operation.
-  Untouched<BRepAlgoAPI_Cut> removed(shape, made), added(made, shape);
-  if (!removed.IsDone() || !added.IsDone())
-    fail(op, no_solution, "could not isolate fillet volume");
+  // Use the explicit boundary provenance where the blend owns it and the
+  // signed-shell ownership is proven. Otherwise, and for the stock builder,
+  // the two differences share one safe intersection data structure.
+  TopoDS_Shape removedShape, addedShape;
+  std::vector<blending::Join> removedIntent, addedIntent;
+  if (provenance && !provenance->unchanged.empty() && oneShell(shape) && oneShell(made))
+  {
+    const auto delta = localDelta(op, shape, *provenance);
+    removedShape = delta.removed;
+    addedShape = delta.added;
+    removedIntent = delta.joins;
+    addedIntent = delta.joins;
+  }
+  else
+  {
+    NCollection_List<TopoDS_Shape> arguments;
+    arguments.Append(shape);
+    arguments.Append(made);
+    BOPAlgo_PaveFiller intersections;
+    intersections.SetArguments(arguments);
+    intersections.SetNonDestructive(true);
+    intersections.Perform();
+    BRepAlgoAPI_Cut removed(shape, made, intersections);
+    BRepAlgoAPI_Cut added(made, shape, intersections);
+    if (!removed.IsDone() || !added.IsDone())
+      fail(op, no_solution, "could not isolate fillet volume");
+    removedShape = removed.Shape();
+    addedShape = added.Shape();
+    if (joins)
+    {
+      removedIntent = rangeJoins(*joins, removed);
+      addedIntent = rangeJoins(*joins, added);
+    }
+  }
   double a = curve.FirstParameter(), b = curve.LastParameter();
   if (edge.Orientation() == TopAbs_REVERSED)
     std::swap(a, b);
@@ -149,12 +317,10 @@ static EvolutionData withinRange(OcctKernel&                     kernel,
     }
     return tool;
   };
-  auto removedIntent = joins ? rangeJoins(*joins, removed) : std::vector<blending::Join>{};
-  auto addedIntent = joins ? rangeJoins(*joins, added) : std::vector<blending::Join>{};
-  Untouched<BRepAlgoAPI_Cut> cut(shape, clip(removed.Shape(), removedIntent));
+  Untouched<BRepAlgoAPI_Cut> cut(shape, clip(removedShape, removedIntent));
   if (!cut.IsDone())
     fail(op, no_solution, "limited fillet subtraction failed");
-  BRepAlgoAPI_Fuse fuse(cut.Shape(), clip(added.Shape(), addedIntent));
+  BRepAlgoAPI_Fuse fuse(cut.Shape(), clip(addedShape, addedIntent));
   if (!fuse.IsDone() || !BRepExt::invalidity(fuse.Shape(), shape).empty())
     fail(op, no_solution, "limited fillet is invalid");
   history.collectComposed(cut, fuse, shape);
@@ -303,6 +469,6 @@ EvolutionData blendRange(OcctKernel&                kernel,
     history.collect(*blended.history, shape);
     return history.finish(store(kernel, blended.shape));
   }
-  return withinRange(kernel, op, shape, blended.shape, edge, start, end, {}, history, joins);
+  return withinRange(kernel, op, shape, blended.shape, edge, start, end, {}, history, joins, &blended);
 }
 } // namespace BRepExt
