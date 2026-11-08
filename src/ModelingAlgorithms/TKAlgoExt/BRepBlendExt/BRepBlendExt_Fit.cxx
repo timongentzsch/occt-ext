@@ -19,7 +19,6 @@
 #include <GeomAlgoExt_Hermite.hxx>
 
 #include <Geom2dAdaptor_Curve.hxx>
-#include <GeomLib_IsPlanarSurface.hxx>
 #include <GeomConvert_CompCurveToBSplineCurve.hxx>
 
 namespace BRepExt::blending::detail
@@ -881,10 +880,9 @@ std::vector<Fold> capFolds(Dips& dips, std::vector<Fold>* open)
   const double  u0 = rail.u(rail.first), u1 = rail.u(rail.last);
   for (int side = 0; side < 2; ++side)
   {
-    // A flat cap, whatever its surface's kind (a plane scaled unevenly is a spline): only a plane
-    // is patched (a cliff is not patched either).
-    if (rail.s[side].cliffCurve
-        || !GeomLib_IsPlanarSurface(rail.s[side].surface, tol::length).IsPlanar())
+    // The contact crosses itself in the face's parameters, whatever its surface (a cliff's
+    // contact is its edge, and is not patched).
+    if (rail.s[side].cliffCurve)
       continue;
     if (!runsBack(dips, side))
       continue;

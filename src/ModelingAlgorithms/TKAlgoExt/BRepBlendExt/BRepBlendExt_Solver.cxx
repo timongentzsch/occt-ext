@@ -3064,6 +3064,7 @@ void Blend::sheets()
                {piece.rail.edge});
         }
       }
+      std::optional<std::vector<Fold>> loops; // where a contact crosses itself, found once
       for (int s2 = 0; s2 < 2 && side < 0; ++s2)
       {
         Inside&    onFace = inside(piece.rail.s[s2].face);
@@ -3260,11 +3261,30 @@ void Blend::sheets()
             break;
           }
           if (side < 0 && !trimmed)
-            fail(
-              op,
-              unsupported_geometry,
-              "a blend's contact leaves its face where the blend does not find the edge it crosses",
-              {piece.rail.edge});
+          {
+            // Inside the loop where the contact crosses itself it may leave its face over the
+            // blended edge itself (the loop's tail past the edge): that part of the contact is
+            // cut away with the loop (capFolds), and the scan goes on past the loop's end.
+            if (!loops)
+            {
+              Dips dips{piece.rail, piece.fitted};
+              loops = capFolds(dips);
+            }
+            const auto loop = std::find_if(loops->begin(), loops->end(), [&](const Fold& f) {
+              return f.side == s2 && f.from < u && u < f.to;
+            });
+            if (loop == loops->end())
+              fail(op,
+                   unsupported_geometry,
+                   "a blend's contact leaves its face where the blend does not find the edge it "
+                   "crosses",
+                   {piece.rail.edge});
+            while (i < samples && u0 + (u1 - u0) * i / samples <= loop->to)
+              ++i;
+            previous  = u0 + (u1 - u0) * i / samples;
+            startsOut = out(previous);
+            continue;
+          }
           if (trimmed)
           {
             // A stop at one end may be followed by a support crossing at the other.

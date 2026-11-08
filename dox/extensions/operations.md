@@ -441,6 +441,26 @@ A hole tangent to a face beside the edge pinches the body: the hole meets the fa
 which four faces meet. No blend passes it and the blend is refused by name, as the reference modeller does; with a gap of
 0.25 to 2 every round, chamfer and G2 lies within 1.3e-6 mm (G2 1e-4) of the reference modeller's mesh.
 
+*Where a contact folds on any face.* A contact folds where the blend's size passes the radius of the
+face's curve it follows (a setback r on a cylinder's wall beside a rim leaning a degrees off the axis
+folds once r passes the rim's geodesic radius of curvature on the unrolled wall, about R / tan a): its
+run back lies between two cusps, and the contact crosses itself at X. The crossing is found in the face's
+parameters whatever its surface (formerly planes only), and the blend is cut at the two sections through
+X. A round's loop is patched by its ball at X. A chamfer is the outer envelope of its sections (on the
+cap, the contact trimmed at X: the distance set), so its two sheets meet in their crease, S(ra, va) =
+S(rb, vb) on the one sheet, traced from X as the two sections close to the sheet's swallowtail point V;
+from V to the other contact the two faces meet along one section, smoothly. No patch. Where the loop's
+tail leaves the face over the blended edge itself, the face-crossing scan goes on past the loop, which
+is cut away. A setback's side of the edge is read from both faces' normals at the edge's point, not at
+its feet (a foot a setback round a curved face has its normal turned by the setback's angle, which where
+the faces meet nearly flat or nearly closed turns the feet's direction over), and a chamfer contact's
+speed is read along the edge, the normal of its section plane.
+Measured: the slanted rims of a 4 or 8 thick plate, leaning 70 to 85 degrees, hole 1 or 2, setback 0.3
+to 1, are chamfered in all 16 cases: every contact point lies at distance r from the rim within 8.6e-8 mm
+and no blend point lies beyond r; the removed volume matches the union of the section triangles
+(Monte Carlo, 2e5 points) within 2.5 standard errors (0.6 to 0.8%). The planar-cap chamfers of the
+trimmed-outline corpus keep their distance-field volumes.
+
 *Beyond the reference.* Three constructions go past what the reference modeller makes, and stay: a chamfer whose
 distances vary along the edge (the reference modeller keeps the base distance or refuses), G2 where a narrow side is
 lower than the ball (h < r; the reference modeller refuses it), and a chamfer larger than a round it runs over

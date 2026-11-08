@@ -18,6 +18,10 @@
 #include <GC_MakeSegment.hxx>
 #include <math_SVD.hxx>
 #include <math_ComputeGaussPointsAndWeights.hxx>
+#include <math_Vector.hxx>
+#include <math_Matrix.hxx>
+#include <Geom2dAPI_Interpolate.hxx>
+#include <GeomAPI_Interpolate.hxx>
 
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -68,6 +72,7 @@ struct Attach
   void foldPatches();
   struct Folded;
   Handle(Geom_BSplineSurface) ballPatch(const Folded& f, int nv);
+  void                             creaseFold(int a, int ea, int b, int eb);
   std::optional<TopoDS_Face>  ballFace(Folded&                            f,
                                        const Handle(Geom_BSplineSurface)& surface,
                                        int                                nv);
@@ -427,6 +432,9 @@ struct Attach
     int              a, ea, b, eb;
     std::vector<Run> run;
     TopoDS_Face      patch;
+    //! A chamfer's: the crease where its two sheets cross, from X, and the section beyond it to
+    //! the other contact, where the two pieces' faces meet on the one sheet (creaseFold).
+    std::vector<TopoDS_Edge> crease;
   };
 
   std::vector<Folded> folded;
@@ -1027,6 +1035,8 @@ void Attach::chainEnds()
 //! runs on end, cut back to it as at any joint.
 void Attach::fold(int a, int ea, int b, int eb)
 {
+  if (pieces[a].rail.law == Law::Chamfer)
+    return creaseFold(a, ea, b, eb);
   const Piece& one = pieces[a];
   const Piece& two = pieces[b];
   const int    cap = one.joint[ea].side, capB = two.joint[eb].side;
@@ -1137,6 +1147,304 @@ void Attach::fold(int a, int ea, int b, int eb)
       cut(shape, V, J, on.LowerDistanceParameter());
     }
   }
+  folded.push_back(f);
+}
+
+//! Where a chamfer's contact on the cap crosses itself at X, its two sheets (one surface, the
+//! sections before the loop and after it) cross each other along a crease from X, and every
+//! section of the loop between lies inside the material the others cut away, above that crease:
+//! the chamfer is the outer envelope of its sections, which on the cap is the contact trimmed at
+//! X (the points the setback away from the edge and no nearer, the distance set). The crease is
+//! the curve S(ra, va) = S(rb, vb) of the sheet S(rail, across), traced from X (ra and rb the
+//! sections of piece a's end and piece b's start, va = vb on the cap) as the gap rb - ra between
+//! the two sections closes, to where they are one section (the swallowtail point V of the
+//! sheet). Beyond V the sheet folds no more: the two faces meet along that section, from V to the
+//! other contact, and the loop's sections are taken by both faces up to it. Each face is bounded
+//! there by the crease and that section, an end of two edges (chain).
+void Attach::creaseFold(int a, int ea, int b, int eb)
+{
+  const Piece& one = pieces[a];
+  const Piece& two = pieces[b];
+  const int    cap = one.joint[ea].side, other = 1 - cap;
+  if (two.joint[eb].side != cap)
+    fail(op, no_solution, "the two sides of a chamfer's fold are not on one cap", {one.rail.edge});
+  const Sheet& sa = one.sheet;
+  const Sheet& sb = two.sheet;
+  const double c = sa.across[cap], o = sa.across[other];
+  if (std::abs(sb.across[cap] - c) > tol::parameter
+      || std::abs(sb.across[other] - o) > tol::parameter)
+    fail(op,
+         no_solution,
+         "the two sides of a chamfer's fold are not on one sheet",
+         {one.rail.edge});
+  const auto at = [](const Sheet& sheet, double r, double v, gp_Pnt& p, gp_Vec& pr, gp_Vec& pv) {
+    const gp_Pnt2d q = sheet.uv(r, v);
+    gp_Vec         du, dv;
+    sheet.surface->D1(q.X(), q.Y(), p, du, dv);
+    pr = sheet.swapped ? dv : du;
+    pv = sheet.swapped ? du : dv;
+  };
+  // Both branches are traced on piece a's surface: the pieces' sheets are one surface, each
+  // with its own parameters for the fit's u (Sheet::rail), which carry b's back to its own.
+  double       ra = sa.rail(one.uAt(ea)), rb = sa.rail(two.uAt(eb)), va = c, vb = c;
+  const gp_Pnt X   = sa.contact(cap)->Value(ra);
+  const double gap = X.Distance(sb.contact(cap)->Value(sb.rail(two.uAt(eb))));
+  const auto   onB = [&](double r) { return sb.rail((r - sa.alpha) / sa.beta); };
+  if (gap > one.rail.resolved(limit::together))
+    fail(op,
+         no_solution,
+         "the contact on the cap does not cross itself where the blend folds",
+         {one.rail.edge});
+  // The gap closes from its value at X to nothing: each step a share of what is left, more finely
+  // as the sections close (the crease turns into the sheet's cuspidal edge there), until the two
+  // sections lie within the length tolerance of each other.
+  const double first = rb - ra;
+
+  struct Place
+  {
+    double ra, va, rb, vb;
+    gp_Pnt p;
+  };
+
+  std::vector<Place>    path = {{ra, va, rb, vb, X}};
+  std::array<double, 4> seed{}; // the first step: ra, va, vb and the gap
+  const double          length = tolerance;
+  double                delta = first, share = 1.0 / 16;
+  // Two branches of S(ra, va) = S(rb, vb) leave X: the crease into the sheet, along the line the
+  // two sheets' tangent planes there share, towards the other contact, and the loop's tail beyond
+  // the cap. The first step goes along that line into the sheet, a sixteenth of the section's
+  // length, each foot moved in its own sheet's tangent plane (least squares on its two tangents).
+  {
+    gp_Pnt pa, pb;
+    gp_Vec ar, av, br, bv;
+    at(sa, ra, c, pa, ar, av);
+    at(sa, rb, c, pb, br, bv);
+    gp_Vec d = ar.Crossed(av).Crossed(br.Crossed(bv));
+    if (!(d.Magnitude() > tol::angle * ar.Crossed(av).Magnitude() * br.Crossed(bv).Magnitude()))
+      fail(op,
+           no_solution,
+           "the chamfer's sheets touch where its contact crosses itself",
+           {one.rail.edge});
+    d.Normalize();
+    if (d.Dot(av) * (o - c) < 0)
+      d.Reverse();
+    gp_Pnt far;
+    gp_Vec fr, fv;
+    at(sa, ra, o, far, fr, fv);
+    const gp_Vec h  = d * (X.Distance(far) / 16);
+    const auto   in = [&](const gp_Vec& tr, const gp_Vec& tv, double& dr, double& dv) {
+      const double a11 = tr.Dot(tr), a12 = tr.Dot(tv), a22 = tv.Dot(tv),
+                   det = a11 * a22 - a12 * a12;
+      if (!(std::abs(det) > 0))
+        return false;
+      dr = (h.Dot(tr) * a22 - h.Dot(tv) * a12) / det;
+      dv = (h.Dot(tv) * a11 - h.Dot(tr) * a12) / det;
+      return true;
+    };
+    double dra, dva, drb, dvb;
+    if (!in(ar, av, dra, dva) || !in(br, bv, drb, dvb))
+      fail(op,
+           no_solution,
+           "the chamfer's sheets are singular where its contact crosses itself",
+           {one.rail.edge});
+    seed = {ra + dra, va + dva, vb + dvb, (rb + drb) - (ra + dra)};
+  }
+  for (int guard = 0;; ++guard)
+  {
+    checkCancelled(op);
+    gp_Pnt pa, pb;
+    gp_Vec ar, av, br, bv;
+    at(sa, path.back().ra, path.back().va, pa, ar, av);
+    if (std::abs(delta) * std::max(ar.Magnitude(), length) <= length || guard > 4096)
+      break;
+    const double target = path.size() == 1 ? seed[3] : delta * (1 - share);
+    // From the place before, along the step the last two places took (the first from X along
+    // the crease's tangent).
+    double x[3] = {path.back().ra, path.back().va, path.back().vb};
+    if (path.size() == 1)
+    {
+      x[0] = seed[0];
+      x[1] = seed[1];
+      x[2] = seed[2];
+    }
+    else
+    {
+      const Place& p0 = path[path.size() - 2];
+      const Place& p1 = path.back();
+      const double f  = (target - delta) / ((p1.rb - p1.ra) - (p0.rb - p0.ra));
+      x[0] += (p1.ra - p0.ra) * f;
+      x[1] += (p1.va - p0.va) * f;
+      x[2] += (p1.vb - p0.vb) * f;
+    }
+    bool solved = false;
+    for (int it = 0; it < 40; ++it)
+    {
+      at(sa, x[0], x[1], pa, ar, av);
+      at(sa, x[0] + target, x[2], pb, br, bv);
+      const gp_Vec F(pa, pb);
+      if (F.Magnitude() <= 1e-3 * length)
+      {
+        solved = true;
+        break;
+      }
+      // d(pb - pa) / d(ra, va, vb), the gap held.
+      const gp_Vec cols[3] = {br - ar, -av, bv};
+      math_Matrix  J(1, 3, 1, 3);
+      math_Vector  rhs(1, 3);
+      for (int r = 0; r < 3; ++r)
+      {
+        for (int k = 0; k < 3; ++k)
+          J(r + 1, k + 1) = cols[k].Coord(r + 1);
+        rhs(r + 1) = -F.Coord(r + 1);
+      }
+      math_SVD svd(J);
+      if (!svd.IsDone())
+        break;
+      math_Vector dx(1, 3);
+      svd.Solve(rhs, dx);
+      for (int k = 0; k < 3; ++k)
+        x[k] += dx(k + 1);
+      if (!std::isfinite(x[0] + x[1] + x[2]))
+        break;
+    }
+    // On the sheet between the cap and the other contact, and both sections between X's.
+    const bool inside = solved && (x[1] - c) * (o - c) >= -tol::parameter
+                        && (x[2] - c) * (o - c) >= -tol::parameter && (x[1] - o) * (o - c) < 0
+                        && (x[2] - o) * (o - c) < 0;
+    if (!inside)
+    {
+      if (path.size() == 1)
+      {
+        seed[0] = ra + (seed[0] - ra) / 2;
+        seed[1] = va + (seed[1] - va) / 2;
+        seed[2] = vb + (seed[2] - vb) / 2;
+        seed[3] = first + (seed[3] - first) / 2;
+      }
+      share /= 2;
+      if (share < 1e-6)
+        fail(op,
+             no_solution,
+             "the crease where the chamfer's sheets cross cannot be traced to where they part",
+             {one.rail.edge});
+      continue;
+    }
+    path.push_back({x[0], x[1], x[0] + target, x[2], pa.Translated(gp_Vec(pa, pb) / 2)});
+    delta = target;
+    share = std::min(0.25, share * 1.5);
+  }
+  if (path.size() < 4)
+    fail(op,
+         no_solution,
+         "the crease where the chamfer's sheets cross is too short to make",
+         {one.rail.edge});
+  // The crease's end: where the sections are one (within the tolerance), its place on both.
+  const Place&                 end = path.back();
+  const double                 rm = (end.ra + end.rb) / 2, vm = (end.va + end.vb) / 2;
+  const int                    count = int(path.size());
+  NCollection_Array1<gp_Pnt>   points(1, count);
+  NCollection_Array1<gp_Pnt2d> onA(1, count), onBs(1, count);
+  NCollection_Array1<double>   params(1, count);
+  double                       along = 0;
+  for (int i = 0; i < count; ++i)
+  {
+    if (i > 0)
+      along += path[i].p.Distance(path[i - 1].p);
+    params(i + 1) = along;
+    points(i + 1) = path[i].p;
+    onA(i + 1)    = sa.uv(path[i].ra, path[i].va);
+    onBs(i + 1)   = sb.uv(onB(path[i].rb), path[i].vb);
+  }
+  // Repeated places at the end (steps under the resolution) are merged: interpolation needs
+  // rising parameters.
+  std::vector<int> keep;
+  for (int i = 1; i <= count; ++i)
+    if (keep.empty() || params(i) - params(keep.back()) > 1e-3 * length || i == count)
+    {
+      if (!keep.empty() && i == count && params(i) - params(keep.back()) <= 1e-3 * length)
+        keep.back() = i;
+      else
+        keep.push_back(i);
+    }
+  const int m = int(keep.size());
+  if (m < 4)
+    fail(op,
+         no_solution,
+         "the crease where the chamfer's sheets cross is too short to make",
+         {one.rail.edge});
+  const Handle(NCollection_HArray1<gp_Pnt>)   p3  = new NCollection_HArray1<gp_Pnt>(1, m);
+  const Handle(NCollection_HArray1<gp_Pnt2d>) pa2 = new NCollection_HArray1<gp_Pnt2d>(1, m),
+                                              pb2 = new NCollection_HArray1<gp_Pnt2d>(1, m);
+  const Handle(NCollection_HArray1<double>) t     = new NCollection_HArray1<double>(1, m);
+  for (int i = 1; i <= m; ++i)
+  {
+    p3->SetValue(i, points(keep[i - 1]));
+    pa2->SetValue(i, onA(keep[i - 1]));
+    pb2->SetValue(i, onBs(keep[i - 1]));
+    t->SetValue(i, params(keep[i - 1]));
+  }
+  Handle(Geom_Curve)   curve;
+  Handle(Geom2d_Curve) curveA, curveB;
+  try
+  {
+    GeomAPI_Interpolate   i3(p3, t, false, tol::parameter);
+    Geom2dAPI_Interpolate ia(pa2, t, false, tol::parameter), ib(pb2, t, false, tol::parameter);
+    i3.Perform();
+    ia.Perform();
+    ib.Perform();
+    if (!i3.IsDone() || !ia.IsDone() || !ib.IsDone())
+      fail(op,
+           no_solution,
+           "the crease where the chamfer's sheets cross cannot be interpolated",
+           {one.rail.edge});
+    curve  = i3.Curve();
+    curveA = ia.Curve();
+    curveB = ib.Curve();
+  }
+  catch (const Standard_Failure&)
+  {
+    fail(op,
+         no_solution,
+         "the crease where the chamfer's sheets cross cannot be interpolated",
+         {one.rail.edge});
+  }
+  const double tEnd = t->Value(m);
+  // X, V and W (where the section through V meets the other contact).
+  builder.MakeVertex(corner[a][cap][ea], X, std::max(tolerance, gap));
+  corner[b][cap][eb] = corner[a][cap][ea];
+  gp_Pnt V, W;
+  gp_Vec d1, d2;
+  at(sa, rm, vm, V, d1, d2);
+  at(sa, rm, o, W, d1, d2);
+  TopoDS_Vertex vertexV;
+  builder.MakeVertex(vertexV, V, tolerance);
+  builder.MakeVertex(corner[a][other][ea], W, tolerance);
+  corner[b][other][eb] = corner[a][other][ea];
+  u[a][cap][ea]        = one.uAt(ea);
+  u[b][cap][eb]        = two.uAt(eb);
+  u[a][other][ea]      = (rm - sa.alpha) / sa.beta;
+  u[b][other][eb]      = (rm - sa.alpha) / sa.beta;
+  const TopoDS_Edge creaseEdge =
+    edgeBetween(curve,
+                corner[a][cap][ea],
+                0,
+                vertexV,
+                tEnd,
+                {{curveA, sa.surface, TopLoc_Location()}, {curveB, sb.surface, TopLoc_Location()}},
+                tolerance);
+  const TopoDS_Edge beyond = edgeBetween(sa.section(rm),
+                                         vertexV,
+                                         vm,
+                                         corner[a][other][ea],
+                                         o,
+                                         {{sa.sectionUV(rm), sa.surface, TopLoc_Location()},
+                                          {sb.sectionUV(onB(rm)), sb.surface, TopLoc_Location()}},
+                                         tolerance);
+  // An end of two edges, from side 0's corner to side 1's.
+  const std::vector<TopoDS_Edge> ends = cap == 0 ? std::vector<TopoDS_Edge>{creaseEdge, beyond}
+                                                 : std::vector<TopoDS_Edge>{beyond, creaseEdge};
+  chain[a][ea] = chain[b][eb] = ends;
+  section[a][ea] = section[b][eb] = ends.front();
+  Folded f{a, ea, b, eb, {}, {}, {creaseEdge, beyond}};
   folded.push_back(f);
 }
 
@@ -1282,6 +1590,8 @@ void Attach::foldPatches()
       loop.push_back(run.edge);
     loop.push_back(sb);
     // Sampled more densely until the loop's edges lie on it within the patch tolerance.
+    if (!f.crease.empty())
+      continue; // a chamfer's sheets meet in their crease: no patch
     if (round(rail))
       for (int nv = 65; nv <= 257 && f.patch.IsNull(); nv = 2 * nv - 1)
         if (const auto ball = ballPatch(f, nv))
@@ -5782,6 +6092,17 @@ void Attach::continuity()
         mark(section[k][end], blends[k], blends[joint.piece],
              breaks ? JoinRole::SupportBreak : JoinRole::Joint, breaks ? GeomAbs_G1 : smooth);
       }
+      else if (joint.meets == Meets::Fold && !foldAt(k, end).crease.empty())
+      {
+        // Once, at its first piece: the crease G0, the section beyond it within the one sheet.
+        const Folded& f = foldAt(k, end);
+        if (f.a == k && f.ea == end)
+        {
+          record(f.crease[0], JoinRole::Fold, 0);
+          mark(f.crease[1], blends[f.a], blends[f.b], JoinRole::Joint, smooth);
+        }
+        continue;
+      }
       else if (joint.meets == Meets::Fold)
         mark(section[k][end], blends[k], foldAt(k, end).patch, JoinRole::Fold, GeomAbs_G1);
       else if (const Roll* roll = rollAt(k, end))
@@ -5856,6 +6177,13 @@ void Attach::tolerances()
                         patches[joint.piece].IsNull()
                           ? std::vector<TopoDS_Face>{blends[k]}
                           : std::vector<TopoDS_Face>{blends[k], patches[joint.piece]}});
+      else if (joint.meets == Meets::Fold && !foldAt(k, end).crease.empty())
+      {
+        const Folded& f = foldAt(k, end);
+        if (f.a == k && f.ea == end)
+          for (const auto& edge : f.crease)
+            made.push_back({edge, {blends[f.a], blends[f.b]}});
+      }
       else if (joint.meets == Meets::Fold)
         made.push_back({section[k][end], {blends[k], foldAt(k, end).patch}});
       else if (const Roll* roll = rollAt(k, end))
@@ -6011,7 +6339,8 @@ void Attach::collisions()
     for (const auto& faces : parts)
       made.insert(made.end(), faces.begin(), faces.end());
     for (const auto& f : folded)
-      made.push_back(f.patch);
+      if (!f.patch.IsNull())
+        made.push_back(f.patch);
     for (const auto& roll : rolls)
       made.push_back(roll.patch);
     NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> beside;
@@ -6123,7 +6452,8 @@ TopoDS_Shape Attach::assemble()
   }
   for (const auto& f : folded)
   {
-    history->AddGenerated(pieces[f.a].rail.edge, f.patch);
+    if (!f.patch.IsNull())
+      history->AddGenerated(pieces[f.a].rail.edge, f.patch);
     for (const auto& run : f.run)
       history->AddGenerated(pieces[f.a].rail.edge, run.edge);
   }
@@ -6206,7 +6536,7 @@ TopoDS_Shape Attach::assemble()
             builder.Add(next, part);
         }
       for (const auto& f : folded)
-        if (std::find(here.begin(), here.end(), f.a) != here.end())
+        if (!f.patch.IsNull() && std::find(here.begin(), here.end(), f.a) != here.end())
           builder.Add(next, f.patch);
       for (const auto& roll : rolls)
         if (std::find(here.begin(), here.end(), roll.a) != here.end())
