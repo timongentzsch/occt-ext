@@ -1703,21 +1703,22 @@ TEST(BRepBlendExt, PlanarConicCornerRetainsItsExactTensor)
 
 // Where more than three conic blends meet between planes the corner is split about a centre into
 // one rational patch per crossing of contacts, made directly and G1 everywhere (accepted reads
-// every seam), on regular and uneven apexes of four to six faces, posed and scaled. The G2 law
-// keeps its refusal there.
+// every seam), on regular and uneven apexes of four to six faces, posed and scaled, and on a steep
+// pentagon whose faces span 12 to 38 degrees at the apex (its middle normals once misread the
+// split as folded). The G2 law keeps its refusal there.
 TEST(BRepBlendExt, ConicCornerOfMoreThanThreeBlendsIsSplitIntoExactPatches)
 {
   using namespace BRepExt::blending;
-  const auto pyramid = [](int n, double off) {
+  const auto pyramid = [](int n, double off, double uneven, double height) {
     BRepBuilderAPI_Sewing      sew(1e-6);
     std::vector<gp_Pnt>        base;
     BRepBuilderAPI_MakePolygon bottom;
     for (int i = 0; i < n; ++i)
     {
-      const double angle = 2 * M_PI * i / n + 0.3 * std::sin(3.1 * i + n);
+      const double angle = 2 * M_PI * i / n + uneven * std::sin(3.1 * i + n);
       base.emplace_back(6 * std::cos(angle), 6 * std::sin(angle), 0);
     }
-    const gp_Pnt apex(off, off / 2, 9);
+    const gp_Pnt apex(off, off / 2, height);
     for (int i = n - 1; i >= 0; --i)
       bottom.Add(base[i]);
     bottom.Close();
@@ -1732,11 +1733,21 @@ TEST(BRepBlendExt, ConicCornerOfMoreThanThreeBlendsIsSplitIntoExactPatches)
       solid.Add(TopoDS::Shell(x.Current()));
     return std::make_pair(TopoDS_Shape(solid.Solid()), apex);
   };
+  struct Member
+  {
+    int    n;
+    double off, uneven, height;
+  };
+  std::vector<Member> members;
   for (int n = 4; n <= 6; ++n)
     for (double off : {0., 1.5})
-      for (double scale : {1., 5.})
+      members.push_back({n, off, 0.3, 9});
+  members.push_back({5, 0., 0.37, 14});
+  for (const Member& m : members)
+    for (double scale : {1., 5.})
       {
-        const auto [shape, apex] = pyramid(n, off);
+        const int  n             = m.n;
+        const auto [shape, apex] = pyramid(n, m.off, m.uneven, m.height);
         const gp_Trsf pose       = scale == 1. ? gp_Trsf() : posed(scale);
         const auto    body       = BRepBuilderAPI_Transform(shape, pose, true).Shape();
         const gp_Pnt  at         = apex.Transformed(pose);
@@ -1752,7 +1763,8 @@ TEST(BRepBlendExt, ConicCornerOfMoreThanThreeBlendsIsSplitIntoExactPatches)
         ASSERT_EQ(int(selected.size()), n);
         for (double rho : {.3, .7})
         {
-          SCOPED_TRACE(::testing::Message() << n << " " << off << " " << scale << " " << rho);
+          SCOPED_TRACE(::testing::Message() << n << " " << m.off << " " << m.uneven << " "
+                                            << m.height << " " << scale << " " << rho);
           auto request = roundOf(body, selected, .8 * scale);
           request.rho  = rho;
           const auto made = blend(request);

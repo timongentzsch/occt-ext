@@ -2010,26 +2010,58 @@ of the patch it ends at `u = 1` and of the one it ends at `v = 1`. The condition
 construction: the offsets next to `M_i` are `l_i (1 - cos(2 pi / n) / 6)`, with `l_i` at `M_i`
 (derived). The remaining coefficients are solved for together with the free poles, which are kept
 fair by the least thin-plate energy of the nets. That is one symmetric system for all three
-coordinates; it is solved by singular values, because the centre's equations are dependent. Its
-last coefficient makes the inner curves' tangents at `C` an affine image of the regular n-gon's.
+coordinates, with one more row that holds `C` at a point `c`; it is solved by singular values,
+because the centre's equations are dependent. Its solution is `x0 + g c`, with one `g` for every
+coordinate. Its last coefficient makes the inner curves' tangents at `C` an affine image of the
+regular n-gon's.
+
+*Centre.* `c` is where the surface bends least: the least bending energy `integral (k1^2 + k2^2) dA`
+over the patches [Moreton and Séquin 1992]. The thin-plate energy of the nets stands in for it only
+where a patch is parametrised evenly. On uneven corners the patches differ widely in shape (a narrow
+face's crossing lies far from the corner), and the nets' energy pulls the centre towards the long
+patches, below the corner's top, where the patch at a near crossing has to bend back sharply
+(measured: at the optimum the corner bends 4 times as tightly as its blends on a member where the
+nets' centre gives 130). Only `c` is chosen so; every other pole stays the nets' fairest for it, so
+the conditions above hold for every `c`. The energy is a sum of squares of the shape operator's
+entries in an orthonormal frame, `k1^2 + k2^2 = a^2 + 2 b^2 + c^2`, at the points of a composite
+Gauss rule (4 x 4 squares of 8 x 8 points per patch: the minimiser moves by less than 0.7 % of the
+corner's size from that of 8 x 8 squares of 6 x 6 points on the uneven family). It is minimised from
+the nets' fairest centre, which is closed form along `x0 + g c`, by quasi-Newton steps (BFGS from
+the Gauss-Newton matrix [Dennis and Schnabel 1983, 9.2]), each halved until it lowers the energy,
+until none lowers it by more than its rounding. The result therefore never bends more than the
+nets' centre does, by this energy.
+
+*Orientation.* At a crossing `Q_i` a patch is tangent to the face blends `i` and `i + 1` share, and
+its sides leave along both blends' edges in that face; so its normal there is that face's, up to
+sign, exactly. Each patch faces out of the body as that face does. (Its normal at its middle, against
+the sum of the faces' normals, decided this before; on steep uneven corners that normal is nearly
+perpendicular to the sum, and a sign error refused 24 valid corners as folded.)
 `l_i` is a sixth of the chord from `M_i` to the splits' mean: the first leg of a straight curve to
 the centre's likely place. This is a judgement; in measurements the peak curvature of the corner
 depends strongly on `l_i`. Choosing it by the same fairness instead left a split with no positive
 offset on uneven pentagons.
 
 *Measured.* Every seam is within rounding: gaps up to 1e-14 of the size and angles up to 1e-7 degrees
-on regular apexes and pockets of four to six faces (rho 0.3 and 0.7). On
-regular apexes the corner bends at most 1.9 times as tightly as its blends. Uneven apexes (apex
-moved up to half the base radius, faces from 30 to 114 degrees, sizes 1e-3 to 1e3) build in 120 of
-144 members, without folds: the smallest ratio of `|S_u x S_v|` to its largest on a patch is 0.068.
-The other 24, all on one pentagon whose faces span 30 and 113 degrees at height 14, fold and are
-refused (the patches do not face one way). The worst delivered corner on that family bends 59 times
-as tightly as its blends. A symmetric template of tangents at `C` is the likely cause; a template
-from the splits' actual directions, with the matching non-symmetric condition
-`t_(i+1) + alpha_i t_(i-1) = beta_i t_i` (`alpha_i` constant along a curve, so the ends are split at
-speed ratio `alpha_i`), was measured and folded more often.
+on regular apexes and pockets of four to six faces (rho 0.3 and 0.7). On regular apexes the corner
+bends at most 1.9 times as tightly as its blends, and its bending energy is up to 7.6 % below the
+nets' centre's. Uneven apexes (apex moved up to half the base radius, faces from 12 to 114 degrees at
+the apex, heights 6 and 14, sizes 1e-3 to 1e3) build in all 144 members, without folds: the smallest
+ratio of `|S_u x S_v|` to its largest on a patch is 0.020. The corner bends more than 10 times as
+tightly as its blends on 22 of them, all on one pentagon whose faces span 12 to 38 degrees at the
+apex at height 14 (at most 34 times); on the others at most 7.6 times. That pentagon's crossing on its
+wide face lies near the corner's top; neither the centre alone nor centre and first legs together
+(measured by direct search) bring it below 10. A template of tangents at `C` from the splits' actual
+directions, with the matching non-symmetric condition `t_(i+1) + alpha_i t_(i-1) = beta_i t_i`
+(`alpha_i` constant along a curve, so the ends are split at speed ratio `alpha_i`), was measured
+earlier and delivered fewer corners. Choosing the centre by rules from the corner's points (along the
+line from the boundary's mean to the vertex, or the point nearest the lines along which the inner
+curves start), or the nets' energy weighted by the patches' side lengths or taken relative to their
+Coons nets, did not lower the peak curvature on every member.
 
 Charrot and Gregory, *A pentagonal surface patch for computer aided geometric design*, CAGD 1 (1984).
 Chiyokura and Kimura, *Design of solids with free-form surfaces*, SIGGRAPH (1983).
 Loop, *Smooth spline surfaces over irregular meshes*, SIGGRAPH (1994).
 Peters, *Patching Catmull-Clark meshes*, SIGGRAPH (2000).
+Moreton and Séquin, *Functional optimization for fair surface design*, SIGGRAPH (1992).
+Dennis and Schnabel, *Numerical Methods for Unconstrained Optimization and Nonlinear Equations*,
+Prentice-Hall (1983).
