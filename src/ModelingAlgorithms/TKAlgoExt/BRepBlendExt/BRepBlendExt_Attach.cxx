@@ -551,6 +551,18 @@ struct Attach
   //! A side whose contact ridges cross: its contact's parts and the ridges, from its corner at the
   //! start to the one at the end.
   std::map<std::pair<int, int>, std::vector<TopoDS_Edge>> runs;
+  //! Where a side's contact, short of the faces that stop its end, crosses onto other faces of
+  //! its support's own surface, in the order it crosses them: the place, the fit's u there, the
+  //! face it crosses onto and the whole periods its contact is moved by to lie in that face's
+  //! parameters. [piece, side, end]
+  struct Passed
+  {
+    TopoDS_Vertex at;
+    double        u;
+    TopoDS_Face   face;
+    gp_Vec2d      shift;
+  };
+  std::map<std::array<int, 3>, std::vector<Passed>> passages;
 
   //! The edges along a side, from its start's corner to its end's.
   std::vector<TopoDS_Edge> sideEdges(int k, int side) const
@@ -3571,6 +3583,13 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
   };
   const double middle = piece.uAt(0) / 2 + piece.uAt(1) / 2;
 
+  struct Passage
+  {
+    TopoDS_Edge   edge;
+    TopoDS_Vertex from;
+    Meeting       at;
+    TopoDS_Face   face;
+  };
   struct Walk
   {
     std::vector<TopoDS_Face>   faces;   // out from the vertex
@@ -3587,13 +3606,17 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
     std::optional<Continuation> continued;
     // Where the crossed edge's face across goes on from the support: that face.
     TopoDS_Face level;
+    // Faces of the support's own surface the contact crosses onto before it reaches the faces
+    // that stop it, in the order it crosses them, each with the edge it crosses onto it, that
+    // edge's end the blend replaces and where it crosses.
+    std::vector<Passage> passed;
   } walk[2];
 
   for (int side = 0; side < 2; ++side)
   {
     Walk&              w   = walk[side];
-    const TopoDS_Face& own = rail.s[side].face;
-    TopoDS_Edge        edge;
+    TopoDS_Face own = rail.s[side].face;
+    TopoDS_Edge edge;
     for (const auto& shape : edgesOfVertex.FindFromKey(vertex))
       if (!ownEdge(piece, shape) && onFace(shape, own))
         edge = TopoDS::Edge(shape);
@@ -3606,9 +3629,9 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
     // Each edge of the support is swept over at most once.
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> ofOwn;
     TopExp::MapShapes(own, TopAbs_EDGE, ofOwn);
-    for (int step = 0;; ++step)
+    for (int step = 0, onOwn = 0;; ++step, ++onOwn)
     {
-      if (step > ofOwn.Extent())
+      if (onOwn > ofOwn.Extent())
         refuse("the blend's contact does not reach the faces that stop it");
       const TopoDS_Face beyond = across(edge, own);
       // A split may have reached the next edge between the same supports.
@@ -3688,6 +3711,41 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
         // face's with the face across.
         if (step > 0 && smoothAt(own, beyond, edge, from))
         {
+          // A face of the support's own surface, where the contact crosses onto it short of
+          // the face before (the crossed edge does not lie in that face's surface): the blend's
+          // sheet lies on it as on the support, and the contact runs on over it to the faces
+          // that stop it, as over the support (the faces around the vertex up to it are those).
+          // The two faces' surfaces are one where they give the same points at the contact's
+          // parameters from the crossing to the end of the carried contact (copies of one
+          // surface, as a Boolean leaves the parts of a face).
+          const auto&  contact = piece.fitted.contact[side];
+          const auto   ownSurface = BRep_Tool::Surface(own), nextSurface = BRep_Tool::Surface(beyond);
+          const double away = end == 0 ? 0 : 1;
+          bool         one  = true;
+          for (int i = 0; i <= 16 && one; ++i)
+          {
+            const gp_Pnt2d uv = contact->Value(found->first + (away - found->first) * i / 16);
+            one = ownSurface->Value(uv.X(), uv.Y()).Distance(nextSurface->Value(uv.X(), uv.Y()))
+                  <= tol::length;
+          }
+          const gp_Pnt2d onOwnUV = contact->Value(found->first);
+          const gp_Pnt   at      = ownSurface->Value(onOwnUV.X(), onOwnUV.Y());
+          GeomAPI_ProjectPointOnSurf onBefore(at, BRep_Tool::Surface(w.faces[facesBefore - 1]));
+          if (one && w.faces.size() > facesBefore && w.faces.back().IsSame(beyond)
+              && (onBefore.NbPoints() == 0
+                  || onBefore.LowerDistance() > rail.resolved(limit::together)))
+          {
+            w.passed.push_back({edge, from, *found, beyond});
+            own  = beyond;
+            edge = w.between.back();
+            w.faces.pop_back();
+            w.between.pop_back();
+            w.from.pop_back();
+            ofOwn.Clear();
+            TopExp::MapShapes(own, TopAbs_EDGE, ofOwn);
+            onOwn = -1;
+            continue;
+          }
           w.faces.resize(facesBefore);
           w.between.resize(betweenBefore);
           w.from.resize(betweenBefore);
@@ -3903,6 +3961,20 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
     }
     else
       cut(walk[side].crossed, walk[side].crossedFrom, corner[k][side][end], walk[side].at.second);
+    // Each edge the contact crosses onto a face of its support's surface is cut back to the
+    // crossing; the contact's part on that face lies in its parameters as the next crossing's.
+    const auto& passed = walk[side].passed;
+    for (size_t j = 0; j < passed.size(); ++j)
+    {
+      TopoDS_Vertex at;
+      builder.MakeVertex(at, sheet.contact(side)->Value(sheet.rail(passed[j].at.first)), tolerance);
+      cut(passed[j].edge, passed[j].from, at, passed[j].at.second);
+      passages[{k, side, end}].push_back(
+        {at,
+         passed[j].at.first,
+         passed[j].face,
+         j + 1 < passed.size() ? passed[j + 1].at.shift : walk[side].at.shift});
+    }
     if (const TopoDS_Face& level = walk[side].level; !level.IsNull())
     {
       // The crossed edge from the vertex the blend replaces to the corner, now between the
@@ -5683,6 +5755,77 @@ void Attach::contacts()
         continue;
       }
       const auto [support, location] = surfaceOf(piece.rail.s[side].face);
+      // A contact that crosses onto other faces of its support's surface at an end: one edge
+      // on each face, from corner to corner, as one run along the side.
+      if (passages.count({k, side, 0}) || passages.count({k, side, 1}))
+      {
+        if (piece.joint[0].meets == Meets::Split || piece.joint[1].meets == Meets::Split
+            || std::any_of(ridged.begin(),
+                           ridged.end(),
+                           [&](const Ridge& r) {
+                             return (r.k == k && r.sk == side) || (r.m == k && r.sm == side);
+                           }))
+          fail(op,
+               unsupported_geometry,
+               "a contact crosses onto another face of its support beside a split or a ridge, "
+               "which the blend does not do yet",
+               {piece.rail.edge});
+        const Handle(Geom2d_Curve) onSupport = alongRail(piece.fitted.contact[side], sheet);
+        struct Place
+        {
+          double        u;
+          TopoDS_Vertex at;
+        };
+        // The places in order from the start's corner to the end's, and the face after each.
+        std::vector<Place>                                   places = {{u[k][side][0], corner[k][side][0]}};
+        std::vector<std::pair<TopoDS_Face, gp_Vec2d>>        on;
+        const auto&                                          start  = passages[{k, side, 0}];
+        for (auto p = start.rbegin(); p != start.rend(); ++p)
+        {
+          on.push_back({p->face, p->shift});
+          places.push_back({p->u, p->at});
+        }
+        on.push_back({piece.rail.s[side].face, gp_Vec2d()});
+        for (const auto& p : passages[{k, side, 1}])
+        {
+          places.push_back({p.u, p.at});
+          on.push_back({p.face, p.shift});
+        }
+        places.push_back({u[k][side][1], corner[k][side][1]});
+        std::vector<TopoDS_Edge>& along = runs[{k, side}];
+        for (size_t i = 0; i < on.size(); ++i)
+        {
+          const double s0 = sheet.rail(places[i].u), s1 = sheet.rail(places[i + 1].u);
+          const auto& [face, shift] = on[i];
+          const Handle(Geom2d_Curve) laid =
+            shift.SquareMagnitude() == 0 ? onSupport
+                                         : Handle(Geom2d_Curve)::DownCast(onSupport->Translated(-shift));
+          const bool own = face.IsSame(piece.rail.s[side].face);
+          const auto [surface, place] = surfaceOf(face);
+          if (own && piece.rail.parameterSupports && !contactWithinFace(face, laid, s0, s1))
+            fail(op,
+                 unsupported_geometry,
+                 "a retained blend contact lies outside its finite support",
+                 {piece.rail.edge});
+          const TopoDS_Edge part =
+            edgeBetween(sheet.contact(side),
+                        places[i].at,
+                        s0,
+                        places[i + 1].at,
+                        s1,
+                        {{sheet.contactUV(side), sheet.surface, {}}, {laid, surface, place}},
+                        tolerance);
+          Edit& edit = editOf(edits, face);
+          if (own && onFace(piece.rail.edge, edit.face) && !edit.replace.IsBound(piece.rail.edge))
+            edit.replace.Bind(piece.rail.edge, part);
+          else
+            edit.bridges.push_back(part);
+          along.push_back(part);
+          if (own)
+            contact[k][side] = part;
+        }
+        continue;
+      }
       // Where ridges take the contact's place: its parts between them, each an edge of the
       // support, which bridge the cap's gaps (two islands of it where a neck closes), and the
       // ridges, as one run along the side.
