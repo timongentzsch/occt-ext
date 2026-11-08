@@ -1793,8 +1793,9 @@ TEST(BRepBlendExt, ConnectedRationalSheetsShareTwoCentreLengthJets)
   for (double scale : {0.001, 1., 1000.})
     for (bool rational : {false, true})
       for (bool turned : {false, true})
+      for (bool preserveContact : {false, true})
       {
-        SCOPED_TRACE(::testing::Message() << scale << " " << rational << " " << turned);
+        SCOPED_TRACE(::testing::Message() << scale << " " << rational << " " << turned << " " << preserveContact);
         gp_Trsf transform;
         transform.SetScale(gp::Origin(), scale);
         if (turned) transform = posed(scale);
@@ -1823,19 +1824,48 @@ TEST(BRepBlendExt, ConnectedRationalSheetsShareTwoCentreLengthJets)
           for (int i=1;i<=6;++i) for (int j=1;j<=6;++j)
           {
             const double u=(i-1)/5., v=(j-1)/5.;
-            const double z=(last ? i==3 : i==4) ? (last ? -1 : 1)*1e-6*v*(1-v) : 0;
+            const double z=(!preserveContact && (last ? i==3 : i==4)) ? (last ? -1 : 1)*1e-6*v*(1-v) : 0;
             poles(i,j)=gp_Pnt(last ? 1+2*u : u,v,z).Transformed(transform);
             weights(i,j)=rational ? 1+.1*v*(1-v) : 1;
-            if (rational && (last ? i==2 : i==5)) weights(i,j)*=1.000001;
+            if (rational && !preserveContact && (last ? i==2 : i==5)) weights(i,j)*=1.000001;
           }
           NCollection_Array1<double> k(1,2);k(1)=0;k(2)=1;
           NCollection_Array1<int> m(1,2);m.Init(6);
-          return Handle(Geom_BSplineSurface)(new Geom_BSplineSurface(poles,weights,k,k,m,m,5,5));
+          auto result = Handle(Geom_BSplineSurface)(new Geom_BSplineSurface(poles,weights,k,k,m,m,5,5));
+          if (preserveContact)
+          {
+            result->InsertVKnot(.25, 3, 1e-12, false);
+            result->InsertVKnot(.75, 3, 1e-12, false);
+            // The held contact ribbons are compatible; the interior second
+            // jets differ. Both polynomial and rational interior fields vary.
+            for (int j = 4; j <= result->NbVPoles()-3; ++j)
+            {
+              const int i = last ? 3 : 4;
+              const gp_Vec delta = gp_Vec(0, 0, (last ? -1 : 1)*1e-6).Transformed(transform);
+              result->SetPole(i, j, result->Pole(i, j).Translated(delta),
+                              result->Weight(i, j) * (rational ? 1.000001 : 1));
+            }
+          }
+          return result;
         };
         auto sa=sheet(false), sb=sheet(true);
         const auto oldA=Handle(Geom_BSplineSurface)::DownCast(sa->Copy());
         const auto oldB=Handle(Geom_BSplineSurface)::DownCast(sb->Copy());
-        ASSERT_NO_THROW(coupleSplitJets(sa,sb,a,b));
+        ASSERT_NO_THROW(coupleSplitJets(sa,sb,a,b,preserveContact));
+        if (preserveContact)
+          for (double u : {0., .03, .1, .5, .9, .97, 1.})
+            for (double v : {0., 1.})
+              for (const auto& pair : {std::make_pair(sa, oldA), std::make_pair(sb, oldB)})
+              {
+                const auto now = BRepExt::surfaceJet("test", pair.first, u, v);
+                const auto old = BRepExt::surfaceJet("test", pair.second, u, v);
+                EXPECT_LT(now.p.Distance(old.p), 1e-11*scale);
+                EXPECT_LT((now.u-old.u).Magnitude(), 1e-10*scale);
+                EXPECT_LT((now.v-old.v).Magnitude(), 1e-10*scale);
+                EXPECT_LT((now.uu-old.uu).Magnitude(), 1e-8*scale);
+                EXPECT_LT((now.vv-old.vv).Magnitude(), 1e-8*scale);
+                EXPECT_LT((now.uv-old.uv).Magnitude(), 1e-8*scale);
+              }
         for (double v : {0.,.13,.37,.5,.83,1.})
         {
           gp_Pnt pa,pb;gp_Vec au,av,auu,avv,auv,bu,bv,buu,bvv,buv;
@@ -2266,4 +2296,77 @@ TEST(BRepBlendExt, ConvexityIsDecidedAlongTheWholeEdge)
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
   EXPECT_LT(volume(made), volume(body) - 0.02);
   EXPECT_LT(std::abs(ballDefect(made, body, 1).worst), 1e-6);
+}
+
+// The graph z=a*(x_+)^3 is C2 at zero. Its two polynomial extensions give
+// independently known contact positions/normals on either side of that knot.
+TEST(BRepBlendExt, ContinuedSectionsCarryTheirCompleteSupportBranch)
+{
+  using namespace BRepExt::blending;
+  using namespace BRepExt::blending::detail;
+  for (double scale : {0.01, 1.0, 100.0})
+    for (double amplitude : {-0.1, 0.1, 0.2})
+      for (bool turned : {false, true})
+      {
+        SCOPED_TRACE(::testing::Message() << scale << " " << amplitude << " " << turned);
+        NCollection_Array2<gp_Pnt> poles(1, 5, 1, 2);
+        const double x[5] = {-1, -2.0 / 3, 0, 2.0 / 3, 1};
+        for (int i = 1; i <= 5; ++i)
+          for (int j = 1; j <= 2; ++j)
+            poles(i, j) = gp_Pnt(scale * x[i - 1], scale * (j == 1 ? -1 : 1),
+                                 i == 5 ? amplitude * scale : 0);
+        NCollection_Array1<double> uk(1, 3), vk(1, 2);
+        NCollection_Array1<int> um(1, 3), vm(1, 2);
+        uk(1) = -scale; uk(2) = 0; uk(3) = scale;
+        um(1) = 4; um(2) = 1; um(3) = 4;
+        vk(1) = -scale; vk(2) = scale; vm(1) = vm(2) = 2;
+        Handle(Geom_BSplineSurface) support =
+          new Geom_BSplineSurface(poles, uk, vk, um, vm, 3, 1);
+        Handle(Geom_Surface) plane = new Geom_Plane(
+          gp_Ax3(gp::Origin(), gp_Dir(0, -1, 0), gp_Dir(1, 0, 0)));
+        auto source = support->VIso(0);
+        gp_Trsf pose;
+        if (turned)
+          pose = posed(1);
+        support->Transform(pose); plane->Transform(pose); source->Transform(pose);
+        Rail rail;
+        rail.edge = BRepBuilderAPI_MakeEdge(source, -scale / 2, scale / 2);
+        rail.curve = BRepAdaptor_Curve(rail.edge);
+        rail.first = rail.from = -scale / 2;
+        rail.last = rail.to = scale / 2;
+        rail.scale = 0.2 * scale;
+        rail.s[0].surface = support; rail.s[1].surface = plane;
+        rail.s[0].distance = rail.s[1].distance = rail.scale;
+        rail.law = Law::Conic;
+        for (double fraction : {-0.05, 0.05})
+        {
+          Station seed;
+          seed.t = fraction * scale;
+          seed.uv[0][0] = seed.uv[1][0] = seed.t;
+          seed.uv[0][1] = rail.scale; seed.uv[1][1] = -rail.scale;
+          ASSERT_TRUE(contactAt(rail, seed.t, seed));
+          for (int end = 0; end < 2; ++end)
+          {
+            Section section;
+            ASSERT_TRUE(sectionAcrossSupportKnot(rail, seed, 0, 0, 2, end, section));
+            const gp_Pnt foot = section.poles.front().Transformed(pose.Inverted());
+            const gp_Pnt other = section.poles.back().Transformed(pose.Inverted());
+            const double a = end ? amplitude / (scale * scale) : 0;
+            EXPECT_NEAR(foot.Z(), a * foot.X() * foot.X() * foot.X(), 1e-8 * scale);
+            EXPECT_NEAR(other.Y(), 0, 1e-8 * scale);
+            const gp_Pnt centre(other.X(), rail.scale, other.Z());
+            EXPECT_NEAR(centre.Distance(foot), rail.scale, 1e-8 * scale);
+            const gp_Vec normal = gp_Vec(-3 * a * foot.X() * foot.X(), 0, 1).Normalized();
+            EXPECT_LT((gp_Vec(foot, centre) + normal * rail.scale).Magnitude(), 1e-8 * scale);
+            gp_Pnt p; gp_Vec tangent;
+            sectionCurve(section)->D1(0, p, tangent);
+            tangent.Transform(pose.Inverted());
+            EXPECT_NEAR(tangent.Normalized().Dot(normal), 0, 1e-8);
+          }
+          Section mixed;
+          ASSERT_TRUE(sectionAcrossSupportKnot(rail, seed, 0, 0, 2, 0.5, mixed));
+          for (double weight : mixed.weights)
+            EXPECT_GT(weight, 0);
+        }
+      }
 }

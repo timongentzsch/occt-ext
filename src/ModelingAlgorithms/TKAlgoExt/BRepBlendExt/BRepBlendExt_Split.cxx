@@ -115,15 +115,26 @@ static CouplingWindow couplingWindow(const Handle(Geom_BSplineSurface)& surface,
 // through order two at each window's inner boundary.
 void coupleSplitJets(Handle(Geom_BSplineSurface)& a,
                             Handle(Geom_BSplineSurface)& b,
-                            const Rail& railA, const Rail& railB)
+                            const Rail& railA, const Rail& railB,
+                            bool preserveContactJets,
+                            const std::array<double, 4>* rates)
 {
   if (!commonSections({a, b}))
     fail(railA.op, no_solution, "connected section jets need a common basis");
   const double scaleA = a->Weight(a->NbUPoles(), 1), scaleB = b->Weight(1, 1);
-  const double lengthA = railA.centreParameter->length(railA.to)
-                         - railA.centreParameter->length(railA.from);
-  const double lengthB = railB.centreParameter->length(railB.to)
-                         - railB.centreParameter->length(railB.from);
+  // Centre length l against u at the join: speed dl/du and its rate d2l/du2. Along a centre
+  // parameter u is proportional to l (the rate is zero); else the caller supplies them.
+  const auto total = [](const Rail& rail) {
+    return rail.centreParameter->length(rail.to) - rail.centreParameter->length(rail.from);
+  };
+  const double speedA = rates ? (*rates)[0] : total(railA), rateA = rates ? (*rates)[1] : 0;
+  const double speedB = rates ? (*rates)[2] : total(railB), rateB = rates ? (*rates)[3] : 0;
+  // The jets in centre length (chain rule): P_l = P_u / s, P_ll = (P_uu - P_l s') / s^2.
+  const auto inLength = [](const std::array<std::array<double, 4>, 2>& jet, double speed,
+                           double rate, int c, int order) {
+    const double first = jet[0][c] / speed;
+    return order == 0 ? first : (jet[1][c] - first * rate) / (speed * speed);
+  };
   const auto terminalJets = [](const Handle(Geom_BSplineSurface)& s, bool last) {
     std::vector<double> full;
     for (int i = 1; i <= s->NbUKnots(); ++i)
@@ -147,9 +158,38 @@ void coupleSplitJets(Handle(Geom_BSplineSurface)& a,
     return result;
   };
   const auto ja = terminalJets(a, true), jb = terminalJets(b, false);
+  // Where the contacts are kept, the window is also no longer than keeps the interior's move
+  // within the section's limit less the fit's tolerance (derived): each side moves by half the
+  // jets' difference D1, D2 (in centre length) times the transports' displacements, at most
+  // 0.19753 D1 reach (max |x^3 (-4 + 7x - 3x^2)|) and 0.01728 D2 reach^2 (max x^3 (1-x)^2 / 2).
+  double reach = 0;
+  if (preserveContactJets)
+  {
+    double d1 = 0, d2 = 0;
+    for (int j = 4; j <= a->NbVPoles() - 3; ++j)
+    {
+      double e1 = 0, e2 = 0;
+      for (int c = 0; c < 4; ++c)
+      {
+        const double unit = c == 3 ? std::max(railA.scale, railB.scale) : 1;
+        e1 += std::pow((inLength(ja[j-1], speedA, rateA, c, 0)
+                        - inLength(jb[j-1], speedB, rateB, c, 0)) * unit, 2);
+        e2 += std::pow((inLength(ja[j-1], speedA, rateA, c, 1)
+                        - inLength(jb[j-1], speedB, rateB, c, 1)) * unit, 2);
+      }
+      d1 = std::max(d1, std::sqrt(e1) / 2);
+      d2 = std::max(d2, std::sqrt(e2) / 2);
+    }
+    const double share = limit::section * std::min(railA.scale, railB.scale)
+                         - std::max(fitTolerance(railA), fitTolerance(railB));
+    const double p = 16.0 / 81 * d1, q = 0.01728 * d2;
+    if (share > 0 && (p > 0 || q > 0))
+      reach = q > 0 ? (std::sqrt(p * p + 4 * q * share) - p) / (2 * q) : share / p;
+  }
   const auto apply = [&](const Handle(Geom_BSplineSurface)& s, const Rail& rail,
-                         bool last, double length, double scale, const auto& own) {
-    const auto window = couplingWindow(s, rail, last);
+                         bool last, double speed, double rate, double scale, const auto& own) {
+    const double radius = std::max(std::abs(rail.s[0].distance), std::abs(rail.s[1].distance));
+    const auto   window = couplingWindow(s, rail, last, reach > 0 ? std::min(reach, radius) : 0);
     if (window.derivative.empty())
       fail(rail.op, no_solution, "a connected jet has no coupling window");
     std::vector<double> full;
@@ -169,16 +209,26 @@ void coupleSplitJets(Handle(Geom_BSplineSurface)& a,
     }
     if (!GeomAlgoExt::interpolateHermite(s->UDegree(), full, sites, second))
       fail(rail.op, no_solution, "a connected second jet cannot be interpolated");
-    for (int j = 1; j <= s->NbVPoles(); ++j)
+    // A clamped transverse spline's first three homogeneous coefficients
+    // determine its endpoint jet through order two. Keeping those coefficients
+    // on each side leaves both complete contact jets unchanged throughout the
+    // longitudinal window, including rational weights and mixed derivatives.
+    // The remaining split residual in these preserved ribbons is not removed
+    // by this construction; its caller must measure it independently.
+    const int firstColumn = preserveContactJets ? 4 : 1;
+    const int lastColumn = s->NbVPoles() - (preserveContactJets ? 3 : 0);
+    for (int j = firstColumn; j <= lastColumn; ++j)
     {
       std::array<double, 4> first{}, bend{};
       for (int c = 0; c < 4; ++c)
       {
-        first[c] = ((ja[j-1][0][c] / lengthA + jb[j-1][0][c] / lengthB)
-                    * (.5 * length) - own[j-1][0][c]) * scale;
-        bend[c] = ((ja[j-1][1][c] / (lengthA*lengthA)
-                    + jb[j-1][1][c] / (lengthB*lengthB))
-                    * (.5 * length*length) - own[j-1][1][c]) * scale;
+        // The mean jets in centre length, back in this part's u (chain rule).
+        const double sum1 = inLength(ja[j-1], speedA, rateA, c, 0)
+                            + inLength(jb[j-1], speedB, rateB, c, 0);
+        const double sum2 = inLength(ja[j-1], speedA, rateA, c, 1)
+                            + inLength(jb[j-1], speedB, rateB, c, 1);
+        first[c] = (sum1 * (.5 * speed) - own[j-1][0][c]) * scale;
+        bend[c]  = (sum2 * (.5 * speed * speed) + sum1 * (.5 * rate) - own[j-1][1][c]) * scale;
       }
       for (int i = 1; i <= s->NbUPoles(); ++i)
       {
@@ -195,8 +245,8 @@ void coupleSplitJets(Handle(Geom_BSplineSurface)& a,
       }
     }
   };
-  apply(a, railA, true, lengthA, scaleA, ja);
-  apply(b, railB, false, lengthB, scaleB, jb);
+  apply(a, railA, true, speedA, rateA, scaleA, ja);
+  apply(b, railB, false, speedB, rateB, scaleB, jb);
 }
 
 // A regularized section law must retain the sheet orientation and immersion.
@@ -1047,6 +1097,30 @@ static void sheetJoins(const char*                                op,
   }
 }
 
+//! Whether two consecutive G2 parts meeting where their contacts' supports agree through
+//! curvature (a local join) still bend apart across their shared section by more than a
+//! delivered G2 seam may (limit::seamBend), as defectiveRailKnot reads an inherited rail knot.
+static bool defectiveLocalJoin(const Piece& a, const Piece& b)
+{
+  const auto& sa = a.fitted.blend;
+  const auto& sb = b.fitted.blend;
+  double      u0, u1, v0, v1, w0, w1, t0, t1;
+  sa->Bounds(u0, u1, v0, v1);
+  sb->Bounds(w0, w1, t0, t1);
+  const double scale = std::max(a.rail.scale, b.rail.scale);
+  for (int q = 1; q < 18; ++q)
+  {
+    const auto x = surfaceJet(a.rail.op, sa, u1, v0 + (v1 - v0) * q / 18.);
+    const auto y = surfaceJet(a.rail.op, sb, w0, t0 + (t1 - t0) * q / 18.);
+    if (!(x.v.Magnitude() > 0))
+      continue;
+    if (bendDifference(x, y, x.v.Normalized(), x.n.Dot(y.n) < 0 ? -1 : 1).first * scale
+        > limit::seamBend)
+      return true;
+  }
+  return false;
+}
+
 void joinSplitPieces(const char*                                op,
                      std::vector<Piece>&                        pieces,
                      const std::vector<std::optional<Station>>& seeds)
@@ -1176,7 +1250,49 @@ void joinSplitPieces(const char*                                op,
       for (size_t m = 1; m < group.size(); ++m)
         if (!requirements.framedJoins.count(m))
           coupleSplitJets(pieces[group[m-1]].fitted.blend, pieces[group[m]].fitted.blend,
-                           pieces[group[m-1]].rail, pieces[group[m]].rail);
+                          pieces[group[m-1]].rail, pieces[group[m]].rail);
+    // At a local join both contacts already agree through curvature (coupleSplitNormals). Where
+    // the parts still bend apart by more than a delivered seam, couple the second jets of the
+    // section's interior only, in centre length at the join: along a centre parameter, or by
+    // the chain rule from the stations' centres, without refitting the parts.
+    for (const size_t m : requirements.localJoins)
+    {
+      auto& a = pieces[group[m - 1]];
+      auto& b = pieces[group[m]];
+      if (!defectiveLocalJoin(a, b))
+        continue;
+      if (reparameterized)
+      {
+        coupleSplitJets(a.fitted.blend, b.fitted.blend, a.rail, b.rail, true);
+        continue;
+      }
+      std::array<double, 4> rates{};
+      for (int end = 0; end < 2; ++end)
+      {
+        const auto& piece = end ? b : a;
+        Stations    along(piece.rail);
+        along.march(seeds[group[m - 1 + end]]);
+        // One-sided fifth-order differences of the centre in the fit's u (Fornberg 1988).
+        const double step = (end ? 1 : -1) * 1e-3;
+        gp_XYZ       c[5];
+        for (int i = 0; i < 5; ++i)
+        {
+          Station station;
+          if (!along.at(piece.rail.t((end ? 0 : 1) + i * step), station))
+            fail(op, no_solution, "a local split join has no station beside it");
+          c[i] = station.centre.XYZ();
+        }
+        const gp_XYZ d1 = (c[0] * -25 + c[1] * 48 - c[2] * 36 + c[3] * 16 - c[4] * 3) / (12 * step);
+        const gp_XYZ d2 =
+          (c[0] * 35 - c[1] * 104 + c[2] * 114 - c[3] * 56 + c[4] * 11) / (12 * step * step);
+        const double speed = d1.Modulus();
+        if (!(speed > limit::degenerate * piece.rail.scale))
+          fail(op, no_solution, "a local split join's centre does not move");
+        rates[2 * end]     = speed;
+        rates[2 * end + 1] = d1.Dot(d2) / speed;
+      }
+      coupleSplitJets(a.fitted.blend, b.fitted.blend, a.rail, b.rail, true, &rates);
+    }
     bool coupled = false;
     for (int index : group)
       coupled = coupleInnerKinks(op, pieces[index]) || coupled;

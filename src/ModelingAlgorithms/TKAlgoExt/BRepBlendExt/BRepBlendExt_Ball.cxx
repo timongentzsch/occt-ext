@@ -221,7 +221,21 @@ bool jetAt(const Side& side, double u, double v, Jet& j)
     j.ndv         = f.b * c - f.n * s;
     return true;
   }
-  supportD2(side.surface, u, v, j.p, j.du, j.dv, j.duu, j.dvv, j.duv);
+  if (side.polynomialSpan[0] || side.polynomialSpan[1])
+  {
+    const auto spline = Handle(Geom_BSplineSurface)::DownCast(basisOf(side.surface));
+    if (spline.IsNull())
+      return false;
+    const int u0 = side.polynomialSpan[0] ? side.polynomialSpan[0] : 1;
+    const int u1 = side.polynomialSpan[0] ? u0 + 1 : spline->NbUKnots();
+    const int v0 = side.polynomialSpan[1] ? side.polynomialSpan[1] : 1;
+    const int v1 = side.polynomialSpan[1] ? v0 + 1 : spline->NbVKnots();
+    if (u0 < 1 || u1 > spline->NbUKnots() || v0 < 1 || v1 > spline->NbVKnots())
+      return false;
+    spline->LocalD2(u, v, u0, u1, v0, v1, j.p, j.du, j.dv, j.duu, j.dvv, j.duv);
+  }
+  else
+    supportD2(side.surface, u, v, j.p, j.du, j.dv, j.duu, j.dvv, j.duv);
   const gp_Vec cross  = j.du.Crossed(j.dv);
   const double length = cross.Magnitude();
   if (!(length > limit::degenerate))
@@ -771,11 +785,101 @@ bool sectionAt(const Rail& rail, const Station& s, Section& out)
   return sectionAt(rail, s, out, {});
 }
 
+bool sectionsBesideSupportKnot(const Rail&                      rail,
+                               const Station&                   seed,
+                               int                              side,
+                               int                              parameter,
+                               int                              knot,
+                               Section                          out[2],
+                               const std::vector<SectionFrame>& frames)
+{
+  if (side < 0 || side > 1 || parameter < 0 || parameter > 1 || rail.s[side].cliffCurve)
+    return false;
+  const auto spline = Handle(Geom_BSplineSurface)::DownCast(basisOf(rail.s[side].surface));
+  if (spline.IsNull())
+    return false;
+  const int count = parameter ? spline->NbVKnots() : spline->NbUKnots();
+  if (knot < 2 || knot >= count)
+    return false;
+  const int continuity = parameter ? spline->VDegree() - spline->VMultiplicity(knot)
+                                   : spline->UDegree() - spline->UMultiplicity(knot);
+  if (continuity < 2)
+    return false;
+  for (int end = 0; end < 2; ++end)
+  {
+    Rail branch = rail;
+    branch.knotWindows.reset();
+    // Continue all uses of this carrier, including the source-normal station
+    // plane. Keeping that plane on the original branch leaves an independent
+    // frame break even if the support-curvature scalar has been smoothed.
+    const auto continueSide = [&](Side& support) {
+      if (basisOf(support.surface) == spline)
+        support.polynomialSpan[parameter] = knot - 1 + end;
+    };
+    for (auto& support : branch.s)
+      continueSide(support);
+    if (branch.parameterSupports)
+      for (auto& support : *branch.parameterSupports)
+        continueSide(support);
+    Station station = seed;
+    if (!contactAt(branch, seed.t, station) || !sectionAt(branch, station, out[end], frames))
+      return false;
+  }
+  const auto& a = out[0];
+  const auto& b = out[1];
+  if (a.degree != b.degree || a.knots != b.knots || a.multiplicities != b.multiplicities
+      || a.poles.size() != b.poles.size() || a.weights.size() != a.poles.size()
+      || b.weights.size() != b.poles.size())
+    return false;
+  for (size_t j = 0; j < a.poles.size(); ++j)
+    if (!(a.weights[j] > 0 && b.weights[j] > 0))
+      return false;
+  return true;
+}
+
+bool sectionAcrossSupportKnot(const Rail&                      rail,
+                              const Station&                   seed,
+                              int                              side,
+                              int                              parameter,
+                              int                              knot,
+                              double                           position,
+                              Section&                         out,
+                              const std::vector<SectionFrame>& frames)
+{
+  Section sections[2];
+  if (!std::isfinite(position) || position < 0 || position > 1
+      || !sectionsBesideSupportKnot(rail, seed, side, parameter, knot, sections, frames))
+    return false;
+  const auto&  a     = sections[0];
+  const auto&  b     = sections[1];
+  const double blend = smoothActivation(position);
+  Section      result = a;
+  for (size_t j = 0; j < a.poles.size(); ++j)
+  {
+    const double wa = (1 - blend) * a.weights[j], wb = blend * b.weights[j];
+    const double weight = wa + wb;
+    // Anchored homogeneous interpolation retains small differences at a
+    // translated model origin, and preserves positive section weights.
+    result.poles[j] = a.poles[j].Translated(gp_Vec(a.poles[j], b.poles[j]) * (wb / weight));
+    result.weights[j] = weight;
+  }
+  out = std::move(result);
+  return true;
+}
+
 bool sectionAt(const Rail&                      rail,
                const Station&                   s,
                Section&                         out,
                const std::vector<SectionFrame>& frames)
 {
+  if (rail.law == Law::G2 && rail.knotWindows)
+    for (const auto& window : *rail.knotWindows)
+    {
+      const double x = s.uv[window.side][window.parameter] - window.value;
+      if (std::abs(x) < window.half)
+        return sectionAcrossSupportKnot(rail, s, window.side, window.parameter, window.knot,
+                                        (x + window.half) / (2 * window.half), out, frames);
+    }
   if (rail.law == Law::Chamfer)
   {
     // The straight line between the feet.

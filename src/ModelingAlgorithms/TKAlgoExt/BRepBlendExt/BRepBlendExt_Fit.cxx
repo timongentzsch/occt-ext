@@ -98,10 +98,24 @@ std::map<double, int> breaksOf(const Rail& rail, Stations& stations, bool sought
     };
     if (const auto spline = Handle(Geom_BSplineSurface)::DownCast(surface))
     {
+      // Within a knot window the section is C-infinity in the support's coordinate and the
+      // transition's ends are C2 (supportKnotWindows); the feet stay C1 at the knot.
+      const auto knotLine = [&](int parameter, int k, int degree, int multiplicity) {
+        const double value = parameter ? spline->VKnot(k) : spline->UKnot(k);
+        if (!path && rail.knotWindows)
+          for (const auto& window : *rail.knotWindows)
+            if (window.side == side && window.parameter == parameter && window.knot == k)
+            {
+              for (double x : {-window.half, 0.0, window.half})
+                lines.push_back({parameter, value + x, kDegree - 2});
+              return;
+            }
+        lines.push_back({parameter, value, needed(degree, multiplicity)});
+      };
       for (int k = 2; k < spline->NbUKnots(); ++k)
-        lines.push_back({0, spline->UKnot(k), needed(spline->UDegree(), spline->UMultiplicity(k))});
+        knotLine(0, k, spline->UDegree(), spline->UMultiplicity(k));
       for (int k = 2; k < spline->NbVKnots(); ++k)
-        lines.push_back({1, spline->VKnot(k), needed(spline->VDegree(), spline->VMultiplicity(k))});
+        knotLine(1, k, spline->VDegree(), spline->VMultiplicity(k));
     }
     else if (const auto extrusion = Handle(Geom_SurfaceOfLinearExtrusion)::DownCast(surface))
       curveLines(extrusion->BasisCurve(), 0);
@@ -176,6 +190,170 @@ std::map<double, int> breaksOf(const Rail& rail, Stations& stations, bool sought
     }
   }
   return breaks;
+}
+
+std::shared_ptr<const std::vector<Rail::KnotWindow>> supportKnotWindows(const Rail& rail,
+                                                                        Stations&   stations)
+{
+  if (rail.law != Law::G2)
+    return {};
+  // The section is the continued spans' P_a + S(z) (P_b - P_a), S the quintic activation and
+  // z = (x + h) / 2h in the support's coordinate x from the knot. On either half it departs
+  // from the exact law's own branch by S(z) D(x), D = P_b - P_a, which vanishes at the knot,
+  // where the spans agree through order two (derived bounds, the constants maximised over z):
+  // - with |D(x)| <= |x| m (the poles, and the section's curvature at the foot, which is the
+  //   contact's across the blend), the departure is at most c m h, c = max r S((1 - r) / 2),
+  //   the maximiser solving 4 - 15 r + 20 r^3 - 9 r^5 = 0;
+  // - the feet, on spans agreeing through order two, part as |D(x)| <= |x|^3 m; the normal
+  //   curvature along the contact then departs by at most k m h / v^2, v the feet's speed in x
+  //   and k = max |(S(z) (2z - 1)^3)''| / 4 over z in [0, 1/2].
+  // The poles bound the section (homogeneous, as the fit measures them). The window is the
+  // widest that keeps the section within its limit, less the fit's tolerance, and the contact
+  // within the fit's own limit on its curvature (limit::bend); its departures across and along
+  // add.
+  constexpr double spread       = 0.070552878102991504; // c
+  constexpr double bending      = 0.32818934415354306;  // k
+  const double     sectionShare = limit::section * rail.scale - fitTolerance(rail);
+  const double     bendShare    = limit::bend / rail.scale;
+  if (!(sectionShare > 0))
+    return {};
+  auto       windows = std::make_shared<std::vector<Rail::KnotWindow>>();
+  const auto station = [&](double u, Station& s) {
+    if (!stations.at(rail.t(u), s))
+      fail(rail.op, no_solution, "the ball cannot roll the length of the edge at this size",
+           {rail.edge}, FailureKind::SupportContact);
+  };
+  for (int side = 0; side < 2; ++side)
+  {
+    if (rail.s[side].cliffCurve)
+      continue;
+    const auto spline = Handle(Geom_BSplineSurface)::DownCast(basisOf(rail.s[side].surface));
+    if (spline.IsNull())
+      continue;
+    for (int parameter = 0; parameter < 2; ++parameter)
+    {
+      const int count = parameter ? spline->NbVKnots() : spline->NbUKnots();
+      const int degree = parameter ? spline->VDegree() : spline->UDegree();
+      const auto knot = [&](int k) { return parameter ? spline->VKnot(k) : spline->UKnot(k); };
+      for (int k = 2; k < count; ++k)
+      {
+        if (degree - (parameter ? spline->VMultiplicity(k) : spline->UMultiplicity(k)) != 2)
+          continue;
+        const double value = knot(k);
+        // Both continued spans must stay within their neighbours, and neighbouring windows apart.
+        const double widest = std::min(value - knot(k - 1), knot(k + 1) - value) / 2;
+        const auto   coordinate = [&](double u) {
+          Station s;
+          station(u, s);
+          return s.uv[side][parameter] - value;
+        };
+        constexpr int scan   = 256;
+        double        before = coordinate(0);
+        for (int n = 1; n <= scan; ++n)
+        {
+          const double after = coordinate(double(n) / scan);
+          if ((before > 0) == (after > 0))
+          {
+            before = after;
+            continue;
+          }
+          double low = double(n - 1) / scan, high = double(n) / scan;
+          for (int i = 0; i < 60 && high - low > limit::degenerate; ++i)
+          {
+            const double middle = (low + high) / 2;
+            ((coordinate(middle) > 0) == (before > 0) ? low : high) = middle;
+          }
+          before = after;
+          const double event = (low + high) / 2;
+          // The rate of the coordinate along the fit's u, to place the probes.
+          const double step = std::min({1e-6, event, 1 - event});
+          if (!(step > 0))
+            continue;
+          const double rate = (coordinate(event + step) - coordinate(event - step)) / (2 * step);
+          if (!(std::abs(rate) > limit::degenerate))
+            continue;
+          // The window's ratio of departure to its limit, from both spans at x = -h and h.
+          const auto ratio = [&](double h) {
+            double  worst = 0, across = 0, along = 0;
+            gp_Pnt  feet[2];
+            double  places[2];
+            for (int end = 0; end < 2; ++end)
+            {
+              const double u = event + (end ? h : -h) / rate;
+              if (!(u > 0 && u < 1))
+                return HUGE_VAL;
+              Station s;
+              station(u, s);
+              const double x = s.uv[side][parameter] - value;
+              Section      pair[2];
+              if (!(std::abs(x) > 0)
+                  || !sectionsBesideSupportKnot(rail, s, side, parameter, k, pair))
+                return HUGE_VAL;
+              double poles = 0;
+              for (size_t j = 0; j < pair[0].poles.size(); ++j)
+                poles = std::max(poles,
+                                 pair[0].poles[j].Distance(pair[1].poles[j])
+                                   + std::abs(pair[0].weights[j] - pair[1].weights[j])
+                                       * rail.scale);
+              double bend[2];
+              for (int branch = 0; branch < 2; ++branch)
+              {
+                const auto curve = sectionCurve(pair[branch]);
+                gp_Pnt     p;
+                gp_Vec     d1, d2;
+                curve->D2(side ? curve->LastParameter() : curve->FirstParameter(), p, d1, d2);
+                bend[branch] = d1.Crossed(d2).Magnitude() / std::pow(d1.Magnitude(), 3);
+              }
+              const size_t foot = side ? pair[0].poles.size() - 1 : 0;
+              const double apart =
+                std::abs(gp_Vec(pair[0].poles[foot], pair[1].poles[foot]).Dot(s.normal[side]));
+              feet[end]   = s.foot[side];
+              places[end] = x;
+              along       = std::max(along, apart / std::pow(std::abs(x), 3));
+              const double scaled = spread * h / std::abs(x);
+              worst  = std::max(worst, scaled * poles / sectionShare);
+              across = std::max(across, scaled * std::abs(bend[0] - bend[1]));
+            }
+            const double speed = feet[0].Distance(feet[1]) / std::abs(places[1] - places[0]);
+            if (!(speed > 0))
+              return HUGE_VAL;
+            return std::max(worst, (across + bending * along * h / (speed * speed)) / bendShare);
+          };
+          // At the knot the window's middle departs by |D(0)| / 2 however narrow it is. The
+          // spans agree there unless the foot is on the support's extension past its edge,
+          // which no polynomial span continues: then the exact law keeps its break.
+          {
+            Station s;
+            station(event, s);
+            Section pair[2];
+            if (!sectionsBesideSupportKnot(rail, s, side, parameter, k, pair))
+              continue;
+            double apart = 0;
+            for (size_t j = 0; j < pair[0].poles.size(); ++j)
+              apart = std::max(apart, pair[0].poles[j].Distance(pair[1].poles[j]));
+            if (!(apart / 2 <= sectionShare))
+              continue;
+          }
+          double h = widest;
+          if (!(ratio(h) <= 1))
+          {
+            // The departure grows with h: bisect, in proportion, down to where it meets the limit.
+            double low = widest * 1e-9, high = widest;
+            for (int i = 0; i < 48 && high > low * (1 + 1e-3); ++i)
+            {
+              const double middle = std::sqrt(low * high);
+              (ratio(middle) <= 1 ? low : high) = middle;
+            }
+            h = low;
+          }
+          windows->push_back({side, parameter, k, value, h});
+        }
+      }
+    }
+  }
+  if (windows->empty())
+    return {};
+  return windows;
 }
 
 double fitTolerance(const Rail& rail)
@@ -1188,6 +1366,7 @@ bool defectiveRailKnot(const Rail& rail, const Fitted& fitted)
 
 Fitted fit(Rail& rail, Stations& stations, bool contactPilot)
 {
+  rail.knotWindows = contactPilot ? nullptr : supportKnotWindows(rail, stations);
   Fitted original = fit(rail, stations, contactPilot, {});
   if (contactPilot || rail.law != Law::G2 || rail.centreParameter || rail.parameterSupports
       || !rail.sizes.places.empty()

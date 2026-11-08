@@ -198,6 +198,9 @@ struct Side
   Handle(Geom_Surface) surface;
   double               outward  = 1;
   double               distance = 0;
+  //! Explicit polynomial spans of a spline support, for a continued section branch.
+  //! Zero retains the support's ordinary span ownership and boundary extension.
+  std::array<int, 2> polynomialSpan = {0, 0};
   //! A cliff: the ball rests on this edge of `face`, its far edge, instead of on the face. The
   //! parameters are then the edge's and an angle about it: the foot is on the edge and the
   //! normal points from it at that angle (the ball's centre is on the edge's tube).
@@ -380,6 +383,15 @@ struct Rail
     double halfWidth = 0;
   };
   std::optional<ConicWindow> conicWindow;
+  //! Where a G2 section law crosses a knot of a spline support that is only C2 there, the law is
+  //! C0 in its poles; within `half` of the knot's `value`, in the support's parameter, the
+  //! section is that of both continued spans in transition (supportKnotWindows).
+  struct KnotWindow
+  {
+    int    side = 0, parameter = 0, knot = 0;
+    double value = 0, half = 0;
+  };
+  std::shared_ptr<const std::vector<KnotWindow>> knotWindows;
   bool boundedFit = false;
   const char*       op = "blendEdges";
   TopoDS_Edge       edge;
@@ -766,6 +778,29 @@ Standard_EXPORT bool sectionAt(const Rail&                      rail,
                                const Station&                   s,
                                Section&                         out,
                                const std::vector<SectionFrame>& frames);
+
+//! The sections of both support spans beside a knot, each continued over the other's domain
+//! with its own station solve and frame.
+Standard_EXPORT bool sectionsBesideSupportKnot(const Rail&                      rail,
+                                               const Station&                   seed,
+                                               int                              side,
+                                               int                              parameter,
+                                               int                              knot,
+                                               Section                          out[2],
+                                               const std::vector<SectionFrame>& frames = {});
+
+//! Continue both adjacent support spans, including their station solves and frames,
+//! then blend the complete homogeneous section data with a quintic activation.
+//! `position` is the transition coordinate in [0,1]; sectionAt takes it from the rail's
+//! knot windows (supportKnotWindows), which bound the departure from the exact law.
+Standard_EXPORT bool sectionAcrossSupportKnot(const Rail&                      rail,
+                                              const Station&                   seed,
+                                              int                              side,
+                                              int                              parameter,
+                                              int                              knot,
+                                              double                           position,
+                                              Section&                         out,
+                                              const std::vector<SectionFrame>& frames = {});
 
 //! A ball resting on several faces at once: its centre and its foot and outward normal on each.
 struct Ball
@@ -1182,6 +1217,12 @@ Standard_EXPORT std::map<double, int> breaksOf(const Rail& rail,
 //! How closely a blend is fitted to its exact sections (and the sections of its parts meet).
 Standard_EXPORT double fitTolerance(const Rail& rail);
 
+//! The transition windows of a G2 rail across the C2 knots of its spline supports
+//! (Rail::KnotWindow), each as wide as the section and contact bounds allow.
+Standard_EXPORT std::shared_ptr<const std::vector<Rail::KnotWindow>> supportKnotWindows(
+  const Rail& rail,
+  Stations&   stations);
+
 // Contact discovery keeps the requested tolerance but uses circular pilot
 // sections; the caller must replace these with the requested law before
 // attachment.
@@ -1193,9 +1234,16 @@ Standard_EXPORT Fitted fit(const Rail&                      rail,
                            const Fitted*                    terminalReference = nullptr,
                            bool                             reparameterizedTerminal = false);
 
+//! With clamped transverse ends, preserveContactJets retains both contact jets
+//! through order two. The remaining split residual requires an independent check.
+//! `rates` gives each part's centre length against its u at the join, (dl/du, d2l/du2) for
+//! the first part's end then the second's start; without it both carry a centre parameter,
+//! along which u is proportional to centre length.
 Standard_EXPORT void coupleSplitJets(Handle(Geom_BSplineSurface)& a,
                                       Handle(Geom_BSplineSurface)& b,
-                                      const Rail& railA, const Rail& railB);
+                                      const Rail& railA, const Rail& railB,
+                                      bool preserveContactJets = false,
+                                      const std::array<double, 4>* rates = nullptr);
 Standard_EXPORT bool defectiveRailKnot(const Rail& rail, const Fitted& fitted);
 Standard_EXPORT std::shared_ptr<CentreParameter> centreParameter(
   const Rail& rail, const std::function<gp_Pnt(double)>& pointAt,

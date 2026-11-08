@@ -74,12 +74,46 @@ window formulas are derived applications of the chain rule and Hermite
 interpolation. They do not prove that an arbitrary prescribed section law is
 C2 across a support event; such events retain their knots and framed law.
 
+*Support knots of continuity C2.* A curvature-continuous section follows the support's curvature,
+so where a foot crosses a knot at which a spline support is only C2 the exact law is C0 in its poles:
+the sheet's second form jumps there. Within a window of half-width h in the support's coordinate x
+from the knot, the section is that of both adjacent polynomial spans, each continued with its own
+station solve and frame, as P_a + S(z)(P_b - P_a) in homogeneous coordinates, S(z) = 6z^5 - 15z^4 +
+10z^3 and z = (x + h)/2h [Perlin, *Implementing Improved Perlin Noise*, GPU Gems (2004), section
+5.4]. S has zero first and second derivatives at both ends, so the law is C2 there and the fit takes
+knots of multiplicity three at the window's ends and at the knot. The window is derived, not tuned
+(derived here): the spans agree through order two at the knot, so on either half the law departs
+from its own exact branch by S(z)|D(x)|, D = P_b - P_a. Where |D(x)| <= |x| m, the departure is at
+most c m h with c = max r S((1-r)/2) = 0.0705529 (r solving 4 - 15r + 20r^3 - 9r^5 = 0); this bounds
+the poles, hence the section, and the section's curvature at the foot, which is the contact's across
+the blend. The feet part as |x|^3 m', and the contact's normal curvature along the blend departs by
+at most k m' h / v^2, v the feet's speed in x, k = max |(S(z)(2z-1)^3)''|/4 = 0.328189 over
+[0, 1/2]. h is the widest window (within half of each adjacent span) whose departures, read from
+both spans at x = -h and h, keep the section within its limit less the fit tolerance and the
+contact within the fit's own limit on its curvature (limit::bend). These are
+leading-order bounds: m and m' are secants over the window, not certified suprema. A local split
+join (contacts whose supports agree through curvature) whose parts still bend apart by more than a
+delivered seam receives the connected centre-length fitting above, with second jets coupled in the
+section's interior only: the first and last three homogeneous columns of a clamped section fix both
+contact jets through order two, so the contacts stay exactly as fitted.
+
 Sources: Patrikalakis, Maekawa and Cho, *Shape Interrogation for Computer Aided
 Design and Manufacturing* (2009), section 2.1, equations 2.6--2.11; Peters,
 *Geometric Continuity* (2001), sections 2--3. Centre fitting and geometric
 acceptance remain sampled numerical checks. The generated polynomial and
 rational-sheet family checks common terminal jets through order two, unchanged
 window exteriors, rigid transforms and scales 1e-3 through 1e3.
+
+The internal jet-transport primitive also provides contact-preserving coupling
+for a clamped transverse basis. Its first and last three homogeneous coefficient
+columns determine the value, first derivative and second derivative at each
+contact. Leaving these columns unchanged therefore preserves the complete
+contact jets throughout the longitudinal window, including mixed derivatives
+and rational weights. Only interior columns receive the split-jet correction.
+This is a derived endpoint identity, not a proof of compatibility in the
+preserved ribbons: their remaining split residual still needs checking. The
+ordinary production caller retains its existing coupling. The generated family
+also checks all six components of the contact jets before and after transport.
 
 *Arc length beyond a trimmed rail.* A rail can outlive the edge that supplied its parameter
 range: the adjoining supports still carry the ball beyond an endpoint. For a nonperiodic multi-span
