@@ -345,7 +345,31 @@ must be equal where the size changes (refused by name otherwise); such edges add
 take the plain construction (no island, re-blend or mixed-convexity routes). A range keeps the change
 the blend of the edge alone makes between the planes square to the edge at its limits, as
 `filletRange` does for the round.
-The limited change is isolated before the stopping planes clip it. Where the blend reports which
+Where the premise below holds, the limited change is built directly (`directPremise`, `directRange`).
+The premise: the blend is this module's own, of the one edge, whose two faces each change into one face;
+the blend makes one new face (the sheet) that meets each of them in one edge (its contact); both limits
+lie strictly inside the edge; every other edge the blend changed or made lies strictly outside the slab
+between the limits, and each contact enters and leaves the slab once, through the two limits (sampled, as
+the range's other checks are; not an interval certificate). Within the slab the change is then the strip
+of each face between the edge and its contact and the sheet between the contacts, so each limit plane
+meets it in three curves: across each face from the edge to the contact, and across the sheet between
+the contacts. The result is the body in which, in each face's wire, the edge's piece within the slab
+gives way to the curve across the face, the contact between the limits (the blend's curve and both of
+its curves on the surfaces, restricted in range only) and the curve back; the sheet between the limits
+enters with the side the blend gave it; and each limit is closed by a planar cap bounded by its three
+curves, the cap using the sheet's section in the opposite sense. A plane meets a plane, cylinder, cone,
+sphere or torus in lines and conics, taken exact (OpenCascade's analytic intersection) and their curves
+on the face and in the cap by projection, which is exact for them. On other faces each sample of the
+section is one Newton step sequence across, in the face's parameters, onto the plane; where the solved
+points lie on an iso curve of the face to rounding, that iso curve is the section; otherwise the curve
+on the face and the curve in the plane are interpolated at the same parameters, refined while they come
+closer, and the edge takes their measured distance as its tolerance. Each new vertex takes the largest
+distance from it to the ends of its curves and of their curves on the surfaces, at least 1e-7, and the
+construction is refused where a gap exceeds the tolerances its curves carry (a construction that does
+not close). Every other face, edge and vertex is the body's own, and the faces go back into the body's
+shell. Outside the premise (the stock builder, a limit at an end of the edge, a blend of several new
+faces), the change is isolated by Boolean operations as follows.
+Where the blend reports which
 faces it kept unchanged, those pairs cancel and only the remaining skins are intersected, once, in one
 non-destructive intersection structure shared by both oriented differences (the separation of
 intersection and building, Open CASCADE SAS, *Boolean Operations*, sections *Intersection Part* and
@@ -359,13 +383,13 @@ boundary would put points outside O inside a region enclosed by O\N, so O would 
 with all faces on the new boundary would hold all of the connected body N, the shared face included,
 which then lies on the old boundary inside that region: the same contradiction. N\O follows with the
 roles exchanged. Bodies outside that domain, and the stock builder, intersect the whole bodies instead.
-The stopping-plane clips and the final cut and fuse are still Boolean operations. Against whole-body
-isolation, the result is the same shape: on the generated box and cylinder family (convex and concave,
-three sections, three scales) every result has the same surfaces, curve representations, ranges,
-tolerances and incidence, up to the edge a closed wire starts at, except two concave G2 cylinder rows
-whose two trim curves now end on their vertices (whole-body isolation left them 1.2e-6 past, twelve
-times the edge tolerance) and one large concave G2 box where whole-body isolation returned the body
-unblended and the local assembly blends it (volume gain matching the scaled smaller case).
+The stopping-plane clips and the final cut and fuse are Boolean operations.
+Measured, direct against Boolean isolation on the generated family (box edge and cylinder rim, convex
+and in a cavity, conic, G2 and chamfer, scales 0.01, 1 and 100, limits 0.17 and 0.63): the same face
+kinds, faces within 5.2e-8 both ways and volumes within 4e-12 of each other, except where isolation was
+wrong: a large G2 box in a cavity it returned unblended (the direct change is the range's share of the
+whole blend's change to 3e-11, as at the smaller scale, the sections being the same all along) and two G2 rims in a cavity whose trim curves ended 1.2e-6 past their vertices. Vertex
+tolerances fall to the real gaps: 1e-7 at scale 1 where isolation left up to 1.1e-4.
 
 Measured: against the reference modeller's results (box edge and the flat-to-curved edge of a half cylinder, laws
 linear, falling, peak and valley, Round and Conic rho 0.3) the blend's lie within 1e-12 to 1.1e-6 mm both ways;

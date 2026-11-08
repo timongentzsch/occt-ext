@@ -21,6 +21,11 @@
 #include <GeomAlgoExt_Failure.hxx>
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBuilderAPI_NurbsConvert.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepFilletExt_Blend.hxx>
@@ -263,6 +268,61 @@ TEST(BRepFilletExt, ChamferInARangeRemovesThePrismThereOnly)
     const double removed = grows ? integral(z1) - integral(z0) : 0.5 * d0 * d0 * (z1 - z0);
     EXPECT_NEAR(volume(made), a * b * c - removed, 1e-9 * a * b * c) << (grows ? "grows" : "");
   }
+}
+
+// A blend kept between the planes square to the edge at 0.17 and 0.63 of it, on a box edge and on
+// a cylinder's rim, convex and in a cavity, conic and chamfer (G2 takes the application's section
+// policy), at two scales. The
+// sections are the same all along, so the change within the range is that share of the change the
+// blend of the whole edge makes (of length along the box edge, of angle round the rim; volumes of
+// NURBS copies, as OpenCascade's volume of extrusion faces is off by 1e-3 here), and no vertex of
+// the result is looser than the body's.
+TEST(BRepFilletExt, LimitedBlendTakesTheRangeShareOfTheChange)
+{
+  const auto exactVolume = [](const TopoDS_Shape& shape) {
+    GProp_GProps properties;
+    BRepGProp::VolumeProperties(BRepBuilderAPI_NurbsConvert(shape).Shape(), properties, 1e-12);
+    return properties.Mass();
+  };
+  for (bool rim : {false, true})
+    for (bool cavity : {false, true})
+      for (int law : {0, 2})
+        for (double scale : {1., 100.})
+        {
+          SCOPED_TRACE(testing::Message() << "rim " << rim << " cavity " << cavity << " law " << law
+                                          << " scale " << scale);
+          TopoDS_Shape body = rim ? BRepPrimAPI_MakeCylinder(10, 20).Shape()
+                                  : BRepPrimAPI_MakeBox(20, 20, 20).Shape();
+          const auto onEdge = [&](const double* b) {
+            return rim ? b[2] > 19.999 && b[5] < 20.001
+                       : near(b[0], 0) && near(b[3], 0) && near(b[1], 0) && near(b[4], 0) && b[5] - b[2] > 19;
+          };
+          if (cavity)
+            body = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(-30, -30, -10), gp_Pnt(30, 30, 30)).Shape(), body)
+                     .Shape();
+          const auto edges = edgesWhere(body, onEdge);
+          ASSERT_EQ(edges.size(), 1u);
+          gp_Trsf scaling;
+          scaling.SetScale(gp_Pnt(0, 0, 0), scale);
+          BRepBuilderAPI_Transform transform(body, scaling, true);
+          body             = transform.Shape();
+          const auto edge  = transform.ModifiedShape(edges[0]);
+          double loosest = 0;
+          for (TopExp_Explorer v(body, TopAbs_VERTEX); v.More(); v.Next())
+            loosest = std::max(loosest, BRep_Tool::Tolerance(TopoDS::Vertex(v.Current())));
+          const uint32_t id = BRepExt::store(session(), body), picked = BRepExt::store(session(), edge);
+          const double   before = exactVolume(body);
+          const auto     whole  = BRepExt::blendRange(session(), id, picked, scale, 0, law, .5, 0, 0, 0, 1, {},
+                                                 BRepExt::failureHashBound);
+          const auto     ranged = BRepExt::blendRange(session(), id, picked, scale, 0, law, .5, 0, 0, .17, .63, {},
+                                                  BRepExt::failureHashBound);
+          const TopoDS_Shape& made = BRepExt::get(session(), ranged.resultId);
+          EXPECT_TRUE(BRepExt::invalidity(made).empty());
+          const double change = exactVolume(BRepExt::get(session(), whole.resultId)) - before;
+          EXPECT_NEAR(exactVolume(made) - before, (.63 - .17) * change, 1e-6 * std::abs(change));
+          for (TopExp_Explorer v(made, TopAbs_VERTEX); v.More(); v.Next())
+            EXPECT_LE(BRep_Tool::Tolerance(TopoDS::Vertex(v.Current())), loosest);
+        }
 }
 
 // A chamfer at 30 degrees off a reference face whose setback on it grows along the edge, over the
