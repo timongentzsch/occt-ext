@@ -590,6 +590,15 @@ A hole tangent to a face beside the edge pinches the body: the hole meets the fa
 which four faces meet. No blend passes it and the blend is refused by name, as the reference modeller does; with a gap of
 0.25 to 2 every round, chamfer and G2 lies within 1.3e-6 mm (G2 1e-4) of the reference modeller's mesh.
 
+*A run back of no length.* A dip in a contact's speed the way the balls roll is a run back only
+where the stretch of contact between the zeros of that speed either side of it (bisected) is longer
+than `together` (1e-6 of the size), its length summed over 16 chords. Where the fit's own parameter
+stalls (a stationary point of the sheet's parameterisation) both contacts stop together and go on the
+same way, and the sampled least is rounding on no length: on a torus beside a B-spline face, |dS/du|
+at the middle section was 2.6e-2, 2.6e-3 and 4.5e-8 at du = 2e-3, 2e-4 and 0, both contact speeds
+positive on either side, run back 8.5e-14 mm. Those requests now refuse for their own reasons further
+on. The 16 chords are a judgement (a chord sum is below the arc's length).
+
 *Where a contact folds on any face.* A contact folds where the blend's size passes the radius of the
 face's curve it follows (a setback r on a cylinder's wall beside a rim leaning a degrees off the axis
 folds once r passes the rim's geodesic radius of curvature on the unrolled wall, about R / tan a): its

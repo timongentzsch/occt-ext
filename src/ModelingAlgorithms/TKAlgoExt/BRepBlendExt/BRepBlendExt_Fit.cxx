@@ -999,6 +999,41 @@ static std::vector<std::pair<double, double>> dips(const Rail& rail, const Fitte
       if (fb < least.first)
         least = {fb, b};
     }
+    // A run back is the contact moving against the way the balls roll between two places where
+    // it stops: only where that stretch of the contact has a length (more than the places two
+    // constructions must share) is it a fold of the contact. Where the fit's own parameter stalls
+    // (a stationary point of the sheet's parameterisation, at which both contacts stop together
+    // and go on the same way), the speed's least is a rounding of nothing, on no length.
+    if (least.first <= 0)
+    {
+      const auto zero = [&](int way) {
+        double inside = least.second, outside = inside;
+        for (int k = i + way; k >= 0 && k <= samples; k += way)
+          if (speed(at[k]) > 0)
+          {
+            outside = at[k];
+            break;
+          }
+        if (outside == inside)
+          return inside;
+        for (int k = 0; k < 60 && std::abs(outside - inside) > limit::degenerate; ++k)
+          (speed((inside + outside) / 2) > 0 ? outside : inside) = (inside + outside) / 2;
+        return inside;
+      };
+      const double from = zero(-1), to = zero(1);
+      double       length = 0;
+      gp_Pnt       previous;
+      for (int k = 0; k <= 16; ++k)
+      {
+        const gp_Pnt2d uv = fitted.contact[side]->Value(from + (to - from) * k / 16);
+        const gp_Pnt   p  = rail.s[side].surface->Value(uv.X(), uv.Y());
+        if (k > 0)
+          length += p.Distance(previous);
+        previous = p;
+      }
+      if (length <= rail.resolved(limit::together))
+        continue;
+    }
     out.push_back(least);
   }
   return out;
