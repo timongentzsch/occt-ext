@@ -28,17 +28,31 @@ Bézier whose shoulder weight is sin(w/2) rho/(1 - rho) for a wedge angle w, whi
 rho = 1/2 [standard conic form]. Supports are extended past their ends by continuing the last
 polynomial span, which keeps shape and parametrisation [Hu, as restated by Zang et al.].
 
-*Convexity.* The sign of the offsets is decided from (n1 x n2) . t at the interior places k/16 of the
-edge, its middle among them; places where the faces are tangent for the blend's size decide nothing.
-An edge with convex and concave places is refused by name: the ball would change sides where the
-faces are tangent between them. Where the faces are tangent at some places and turn one way at the
-others, the blend narrows to the edge's point there: the march starts where the faces turn most if
-they are tangent at the middle, a station where the normals agree to the angular resolution is the
-ball resting on both at the edge's point (as at a tangent end), and a section whose tangents at the
-feet are opposite to within sqrt(1e-12) takes the middle of the feet as its apex, the limit as the
-wedge opens to a half turn (any point between the feet is then within 1e-6 of the section's width
-of both tangent lines; derived). Not proven: 16 places resolve the sign changes and tangencies of
-the faces' turn; a change between two places is not seen there.
+*Convexity.* The sign of the offsets is the sign of the turn h = (n1 x n2) . d/|d| = +-sin(theta)
+along the edge, proven on every part of it (BRepBlendExt_Convexity.cxx). With the unnormalised normals
+X = S_u x S_v and the tangent d = d/dt S(u(t), v(t)) as polynomials in one parameter, H = (X1 x X2) . d
+is a polynomial with h = H/(|X1| |X2| |d|); its Bernstein coefficients bound it with the correlation
+between the faces kept (faces tangent along the edge give coefficients at rounding), |X|^2 is bounded
+below by its least coefficient, and halving a part brings the coefficients to the values quadratically
+[Lane and Riesenfeld 1981]. Rational pieces compose homogeneously; a quadric's or torus's normal is the
+gradient of its implicit equation at the edge's point (a point within the edge's tolerance of it), a
+plane's is constant. A part is halved until it is proven of the edge's sign or tangent all over (|h|
+below the sine of the tangency angle for the blend's size), or its middle shows the other sign: an edge
+with convex and concave parts is refused by name, since the ball would change sides where the faces are
+tangent between them. Certified for spline and Bezier surfaces and extrusions of spline curves (with
+spline, Bezier or line parameter curves), planes, cylinders, cones, spheres and tori; revolutions and
+offsets are read at the places k/16 of the edge. Where the faces are tangent at some places and turn one way at the others, the blend narrows to the
+edge's point there: the march starts where the faces turn most if they are tangent at the middle, a
+station where the normals agree to the angular resolution is the ball resting on both at the edge's
+point (as at a tangent end), a section whose tangents at the feet are opposite to within sqrt(1e-12)
+takes the middle of the feet as its apex (the limit as the wedge opens to a half turn; derived), and
+the ball's Newton solve accepts a residual that stops falling below its forward error bound: with
+the faces' first derivatives off by eta <= gamma_k (k their evaluation's operation count, Higham 2002,
+3.1), the unit normals are off by 2 (2 eta + gamma_2) |S_u||S_v|/|S_u x S_v| each, and the plane
+residual arm . (n1 x n2)/|n1 x n2| by |arm| 2 e/|n1 x n2| + gamma_3 (|arm| + |c| + |E|) with e the two
+normals' errors and sqrt(6) gamma_2 (derived; no chosen constant), and only where the section's width
+times the plane's uncertainty 2e/|n1 x n2| stays within the solve's tolerance (a narrow section between
+all but tangent faces; not a ball held between faces turned against each other).
 
 *Sources read.* Jaiswal, Ghosal, Gurumoorthy, "Circular blending", DETC 2001 (theory, algorithm,
 results; Hermann 1995 and Lukacs 1998 are cited second-hand there); Salvi and Várady, "Multi-sided

@@ -2237,12 +2237,16 @@ TEST(BRepBlendExt, FiniteContactUsesLiftedTrims)
 // A block along x whose edge on the x axis lies between the plane z = 0 (y < 0) and the ruled
 // face through the points (x, W, W s(x)) (y > 0): convex where s < 0, concave where s > 0, the
 // faces tangent where s = 0.
-static TopoDS_Shape bentBlock(const std::function<double(double)>& s, double L, double W, double D)
+static TopoDS_Shape bentBlock(const std::function<double(double)>& s,
+                              double                               L,
+                              double                               W,
+                              double                               D,
+                              int                                  sections = 12)
 {
   BRepOffsetAPI_ThruSections through(true, false);
-  for (int k = 0; k <= 12; ++k)
+  for (int k = 0; k <= sections; ++k)
   {
-    const double               x = L * k / 12;
+    const double               x = L * k / sections;
     BRepBuilderAPI_MakePolygon p;
     p.Add(gp_Pnt(x, 0, 0));
     p.Add(gp_Pnt(x, -W, 0));
@@ -2288,14 +2292,46 @@ TEST(BRepBlendExt, ConvexityIsDecidedAlongTheWholeEdge)
             << refused.what();
         }
       }
-  const TopoDS_Shape body =
-    bentBlock([=](double x) { return -2 * (x / L - 0.5) * (x / L - 0.5); }, L, W, D);
-  const TopoDS_Edge  edge = edgeThrough(body, gp_Pnt(L * 0.37, 0, 0), L);
-  const TopoDS_Shape made = blended(roundOf(body, {edge}, 1));
-  ASSERT_FALSE(made.IsNull());
-  EXPECT_TRUE(BRepExt::invalidity(made).empty());
-  EXPECT_LT(volume(made), volume(body) - 0.02);
-  EXPECT_LT(std::abs(ballDefect(made, body, 1).worst), 1e-6);
+  // A concave dip between two of any 16 places along the edge, convex elsewhere: refused all the
+  // same, the sign being proven on every part of the edge rather than read at places.
+  {
+    const TopoDS_Shape dipped = bentBlock(
+      [=](double x) { return -0.05 + 0.2 * std::exp(-std::pow((x / L - 0.53) / 0.015, 2)); },
+      L,
+      W,
+      D,
+      48);
+    const TopoDS_Edge on = edgeThrough(dipped, gp_Pnt(L * 0.37, 0, 0), L);
+    ASSERT_FALSE(on.IsNull());
+    try
+    {
+      BRepExt::blending::blend(roundOf(dipped, {on}, 1));
+      ADD_FAILURE() << "the dipped edge delivered";
+    }
+    catch (const std::exception& refused)
+    {
+      EXPECT_NE(std::string(refused.what()).find("from convex to concave"), std::string::npos)
+        << refused.what();
+    }
+  }
+  // Faces tangent at the middle only (to 4.7e-8 rad, the swept surface's own), turned and
+  // scaled: the same blend in every pose.
+  for (const double s : {1.0, 0.1, 10.0})
+  {
+    const gp_Trsf      pose = s == 1 ? gp_Trsf() : posed(s);
+    const TopoDS_Shape body =
+      BRepBuilderAPI_Transform(
+        bentBlock([=](double x) { return -2 * (x / L - 0.5) * (x / L - 0.5); }, L, W, D),
+        pose,
+        true)
+        .Shape();
+    const TopoDS_Edge  edge = edgeThrough(body, gp_Pnt(L * 0.37, 0, 0).Transformed(pose), s * L);
+    const TopoDS_Shape made = blended(roundOf(body, {edge}, s));
+    ASSERT_FALSE(made.IsNull()) << "s=" << s;
+    EXPECT_TRUE(BRepExt::invalidity(made).empty());
+    EXPECT_NEAR((volume(body) - volume(made)) / (s * s * s), 0.0260952, 1e-6) << "s=" << s;
+    EXPECT_LT(std::abs(ballDefect(made, body, s).worst), 1e-6 * s) << "s=" << s;
+  }
 }
 
 // The graph z=a*(x_+)^3 is C2 at zero. Its two polynomial extensions give

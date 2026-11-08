@@ -700,10 +700,16 @@ bool solve(std::array<std::array<double, N + 1>, N> m, std::array<double, N>& x)
 //! Newton's method on N unknowns, with the step halved while it does not reduce the residual.
 //! `residual` fills the N equations and their Jacobian at `x`. Within the tolerance it goes on
 //! with whole steps while they still reduce the residual (at most two, quadratic convergence
-//! takes it to rounding), so that the solution does not depend on the seed.
+//! takes it to rounding), so that the solution does not depend on the seed. Where the residual
+//! cannot be evaluated finer than `rounding` (its rounding where it was last evaluated, when
+//! given), a residual that stops falling below that floor is as converged as the evaluation allows.
 template <size_t N, typename Residual>
-bool newton(std::array<double, N>& x, double tolerance, Residual residual)
+bool newton(std::array<double, N>& x,
+            double                 tolerance,
+            Residual               residual,
+            const double*          rounding = nullptr)
 {
+  const auto attainable = [&] { return rounding ? std::max(tolerance, *rounding) : tolerance; };
   std::array<std::array<double, N + 1>, N> m{};
   double                                   norm = 0;
   if (!residual(x, m, norm))
@@ -716,7 +722,7 @@ bool newton(std::array<double, N>& x, double tolerance, Residual residual)
       return true;
     std::array<double, N> dx{};
     if (!solve<N>(m, dx))
-      return within;
+      return norm < attainable();
     double step     = 1;
     bool   improved = false;
     for (int halving = 0; halving < (within ? 1 : 12) && !improved; ++halving, step /= 2)
@@ -738,11 +744,31 @@ bool newton(std::array<double, N>& x, double tolerance, Residual residual)
     {
       // A rejected trial may have changed the residual's cached surface jets.
       // Restore them at the accepted point before reporting convergence.
-      return norm < tolerance && residual(x, m, norm) && norm < tolerance;
+      return norm < attainable() && residual(x, m, norm) && norm < attainable();
     }
   }
-  return norm < tolerance;
+  return norm < attainable();
 }
+
+//! How the faces beside an edge turn along it, proven on every part of it
+//! (BRepBlendExt_Convexity.cxx): `kind` -1 convex, 1 concave, 0 tangent for a blend of `size` all
+//! along; `touches` whether they are tangent somewhere. Refused where convex and concave both.
+struct Turn
+{
+  int  kind     = 0;
+  bool touches  = false;
+  int  unproven = 0; // parts no bound was found for, decided at their middle
+};
+
+Standard_EXPORT Turn turnAlong(const char*        op,
+                               const TopoDS_Edge& edge,
+                               const TopoDS_Face& first,
+                               const TopoDS_Face& second,
+                               double             size);
+
+//! A bound of the relative error of a support's computed first derivatives (BRepBlendExt_Ball.cxx),
+//! or nothing where its evaluation is not counted (swept and offset surfaces, cliffs).
+Standard_EXPORT std::optional<double> relativeError(const Side& side);
 
 //! Where the march of a rail's stations starts: the edge's middle, or where the faces turn most
 //! when they are tangent there (Rail::touching), since no ball has a section of its own there.

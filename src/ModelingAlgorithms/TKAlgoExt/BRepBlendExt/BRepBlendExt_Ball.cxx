@@ -330,6 +330,20 @@ static bool ballAt(const Rail& rail, double t, Station& s, double r0, double r1)
   std::array<double, 4> x = {s.uv[0][0], s.uv[0][1], s.uv[1][0], s.uv[1][1]};
   Jet                   a, b;
   gp_XYZ                along;
+  // The floor Newton's residual can reach (newton), a forward error bound of its evaluation, unit
+  // roundoff u, gamma_k = k u / (1 - k u) [Higham, Accuracy and Stability of Numerical Algorithms,
+  // 2002, 3.1 and 3.5]. Each face's first derivatives come with relative error eta <= gamma_k,
+  // k their evaluation's operation count (relativeError; derived for a derivative without
+  // cancellation among its terms). Then, derived: the computed X = S_u x S_v is off by at most
+  // (2 eta + gamma_2) |S_u||S_v|, and the unit normal by 2 (2 eta + gamma_2) s with s = |S_u||S_v|
+  // / |S_u x S_v| (|x/|x| - y/|y|| <= 2|x - y|/|x|); n0 x n1 then by e = e0 + e1 + sqrt(6) gamma_2,
+  // its direction by 2 e / |n0 x n1|, and arm . along by |arm| 2 e / |n0 x n1| + gamma_3 (|arm| +
+  // |c0| + |E|), the last for rounding arm and the product. Near tangent faces the first term is
+  // the floor; no constant is chosen. Zero where the error of a face's derivatives is not
+  // bounded, and where the section's width times the plane's uncertainty exceeds the solve's
+  // tolerance.
+  double     rounding = 0;
+  const auto eta0 = relativeError(rail.s[0]), eta1 = relativeError(rail.s[1]);
   // The ball whose own section passes through the edge's point: the section of a rolling ball
   // lies in the plane through its centre across the centres' path, whose direction is n0 x n1
   // (the path lies on both offsets). The ball's place along the edge depends then only on the
@@ -348,6 +362,26 @@ static bool ballAt(const Rail& rail, double t, Station& s, double r0, double r1)
       along            = cross / length;
       const gp_XYZ arm = c0 - E.XYZ();
       const double g   = arm.Dot(along);
+      if (eta0 && eta1)
+      {
+        const double u     = std::numeric_limits<double>::epsilon() / 2;
+        const auto   gamma = [u](double k) { return k * u / (1 - k * u); };
+        const auto   unit  = [&](const Jet& j, double eta) {
+          const double cross = j.du.Crossed(j.dv).Magnitude();
+          return 2 * (2 * eta + gamma(2)) * j.du.Magnitude() * j.dv.Magnitude() / cross;
+        };
+        const double e = unit(a, *eta0) + unit(b, *eta1) + std::sqrt(6.0) * gamma(2);
+        // The plane's direction is known to 2 e / |n0 x n1|. That uncertainty turns the section
+        // about the centre, moving it by its width times as much: the floor stands only where
+        // that stays within the solve's tolerance (a narrow section between all but tangent
+        // faces), not where the plane decides a wide section (faces turned against each other,
+        // the ball held between them).
+        const double uncertain = 2 * e / length;
+        rounding = a.p.Distance(b.p) * uncertain <= rail.resolved(limit::solved)
+                     ? arm.Modulus() * uncertain
+                         + gamma(3) * (arm.Modulus() + c0.Modulus() + E.XYZ().Modulus())
+                     : 0;
+      }
       // The derivative of the unit direction from that of the cross product.
       const auto turn = [&](const gp_XYZ& dcross) {
         return arm.Dot(dcross - along * along.Dot(dcross)) / length;
@@ -369,7 +403,7 @@ static bool ballAt(const Rail& rail, double t, Station& s, double r0, double r1)
       norm = f.Modulus() + std::abs(g);
       return std::isfinite(norm);
     };
-  if (!newton(x, rail.resolved(limit::solved), residual))
+  if (!newton(x, rail.resolved(limit::solved), residual, &rounding))
     return false;
   s.t         = t;
   s.uv[0][0]  = x[0];
@@ -642,6 +676,26 @@ static std::optional<double> turnAt(const Rail& rail, double t)
   // From the sine and cosine both: an angle from its cosine alone is not resolved below
   // sqrt(2 epsilon), some 2e-8 (gp_Vec::Angle).
   return std::atan2(n[0].Crossed(n[1]).Magnitude(), n[0].Dot(n[1]));
+}
+
+std::optional<double> relativeError(const Side& side)
+{
+  if (side.cliffCurve)
+    return {};
+  const double u     = std::numeric_limits<double>::epsilon() / 2;
+  const auto   gamma = [u](double k) { return k * u / (1 - k * u); };
+  // Operation counts of the first derivatives: the basis functions' Cox-de Boor recursion over the
+  // degrees in u and v (each level a difference, a division, a product and a sum: four), and the
+  // derivative's difference and scale (two); elementary surfaces as products of at most three
+  // factors with a faithfully rounded sine or cosine.
+  const auto surface = basisOf(side.surface);
+  if (const auto b = Handle(Geom_BSplineSurface)::DownCast(surface))
+    return gamma(4 * (b->UDegree() + b->VDegree()) + 2);
+  if (const auto b = Handle(Geom_BezierSurface)::DownCast(surface))
+    return gamma(4 * (b->UDegree() + b->VDegree()) + 2);
+  if (surface->IsKind(STANDARD_TYPE(Geom_ElementarySurface)))
+    return gamma(4);
+  return {};
 }
 
 bool Rail::tangentAt(double t, bool forSize) const
