@@ -17,6 +17,8 @@ set(OCCT_BRepBlendExt_FILES
   BRepBlendExt_Request.hxx
   BRepBlendExt_Sheet.cxx
   BRepBlendExt_Solver.cxx
+  BRepBlendExt_Stages.cxx
+  BRepBlendExt_Stages.hxx
   BRepBlendExt_Spine.cxx
   BRepBlendExt_Split.cxx
   BRepBlendExt_Topology.cxx
