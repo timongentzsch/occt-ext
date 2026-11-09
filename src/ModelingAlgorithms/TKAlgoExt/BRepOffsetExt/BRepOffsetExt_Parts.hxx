@@ -48,6 +48,7 @@ struct OffsetFate
   std::vector<TopoDS_Shape> vanish, partial;
 };
 
+//! The faces of `body` that an offset by `distance` cannot keep (OffsetFate).
 Standard_EXPORT OffsetFate classifyForOffset(const TopoDS_Shape& body, double distance);
 
 //! Whether faces of `shape` cross each other, which BRepCheck_Analyzer does not look for.

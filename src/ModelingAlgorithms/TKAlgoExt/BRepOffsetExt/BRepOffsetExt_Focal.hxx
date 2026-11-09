@@ -14,5 +14,6 @@ enum class FocalSweep
   Crosses,
   Unknown
 };
+//! Whether moving `face` along its normal by `distance` folds it, proven by interval bounds.
 Standard_EXPORT FocalSweep focalSweep(const TopoDS_Face& face, double distance);
 } // namespace BRepExt

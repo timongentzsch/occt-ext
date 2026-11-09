@@ -118,6 +118,8 @@ struct Blended
   std::vector<Join> joins;
 };
 
+//! The blend `request` asks for, made on a copy of its body. Fails naming its operation where
+//! the blend cannot be made.
 Standard_EXPORT Blended blend(const Request& request);
 
 //! A result the blend may return for this input: valid, closed where the input was, and every edge

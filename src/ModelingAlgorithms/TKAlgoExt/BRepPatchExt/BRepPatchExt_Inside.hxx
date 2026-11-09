@@ -43,6 +43,7 @@ struct InsideCurvature
   double tightest() const;
 };
 
+//! The least and greatest principal curvature over the inside of `face`, sampled on a grid.
 Standard_EXPORT InsideCurvature insideCurvature(const TopoDS_Face& face);
 //! Largest normal-curvature step across a knot below C2, away from the rim.
 Standard_EXPORT double insideStep(const TopoDS_Face& face);
