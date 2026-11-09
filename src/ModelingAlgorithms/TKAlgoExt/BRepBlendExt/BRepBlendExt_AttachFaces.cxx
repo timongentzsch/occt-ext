@@ -4,6 +4,7 @@
 // Blend: The contacts, the blend faces, their continuity, tolerances and collisions.
 
 #include <BRepBlendExt_Attach.hxx>
+#include <BRepBlendExt_Separation.hxx>
 
 namespace BRepExt::blending::detail
 {
@@ -1136,7 +1137,8 @@ void Attach::collisions()
           continue;
         const double tolerance = tol::own(face) + tol::own(f.Current());
         if (separatedByPlane(face, TopoDS::Face(f.Current()), tolerance)
-            || separatedByPlane(TopoDS::Face(f.Current()), face, tolerance))
+            || separatedByPlane(TopoDS::Face(f.Current()), face, tolerance)
+            || separated(face, TopoDS::Face(f.Current()), tolerance))
           continue;
         BRepExtrema_DistShapeShape distance(face, f.Current());
         if (distance.IsDone() && distance.Value() <= tol::own(face) + tol::own(f.Current()))

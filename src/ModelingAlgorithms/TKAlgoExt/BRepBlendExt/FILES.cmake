@@ -15,6 +15,8 @@ set(OCCT_BRepBlendExt_FILES
   BRepBlendExt_Policy.hxx
   BRepBlendExt_Smooth.hxx
   BRepBlendExt_Request.hxx
+  BRepBlendExt_Separation.cxx
+  BRepBlendExt_Separation.hxx
   BRepBlendExt_Sheet.cxx
   BRepBlendExt_Solver.cxx
   BRepBlendExt_Stages.cxx

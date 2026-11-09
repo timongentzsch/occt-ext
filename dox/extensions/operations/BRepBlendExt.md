@@ -15,6 +15,7 @@ Part of the [operations reference](../operations.md). Each entry gives the const
 - [Arc length beyond a trimmed rail](#arc-length-beyond-a-trimmed-rail)
 - [Fixed-contact conic windows](#fixed-contact-conic-windows)
 - [Rigid-motion invariant collision prefilter](#rigid-motion-invariant-collision-prefilter)
+- [Separation certificate before the exact collision distance](#separation-certificate-before-the-exact-collision-distance)
 - [Contacts beyond an entire smooth support](#contacts-beyond-an-entire-smooth-support)
 - [Closed offset-intersection station carriers](#closed-offset-intersection-station-carriers)
 - [Open offset spines walked by arc length](#open-offset-spines-walked-by-arc-length)
@@ -322,6 +323,54 @@ The enclosure is the standard NURBS convex-hull property: Alexander Efremov,
 <https://dcgi.fel.cvut.cz/~havran/ARTICLES/EfremovMasterThesis.pdf>.
 The separation inference above is derived. It avoids expensive distance queries
 caused solely by rotation of long thin surfaces' world-axis boxes.
+
+### Separation certificate before the exact collision distance
+
+The collision stage asks one yes/no question per pair of a new blend face and a face it is
+not next to: do they come within the sum of their tolerances? The exact query
+(`BRepExtrema_DistShapeShape`) answers it with a global minimum distance, through a Lipschitz
+optimiser on every edge pair. Face boxes cannot help when one face wraps around the other, as
+the far half of a closed tube does, so most of the stage's time went to pairs many millimetres
+apart. `BRepBlendExt_Separation.cxx` decides those pairs first, and the exact query decides the
+rest, so no verdict can change.
+
+- **Cover.** A face lies on its surface inside the parameter box of its edges' curves on it
+  (curves bounded by their poles or exactly: lines, circles, B-splines, Beziers). That patch is
+  converted exactly into a rational B-spline with positive weights: planes, quadrics, tori,
+  B-splines, Beziers, and surfaces of revolution and extrusion of lines, circles, ellipses,
+  B-splines and Beziers. An offset surface's points lie within its offset of its basis, so the
+  basis is converted and the offset added to the face's growth. Edges and vertices lie within
+  the face's largest tolerance of the patch (derived). Bounded directions must hold the box;
+  an extrapolated patch is not covered.
+- **Hulls.** A positive-weight rational patch lies in the convex hull of its poles
+  [PT97 P4.4, tensor-product form]. Two hulls whose pole projections on a unit direction are
+  further apart than the tolerance plus both growths and coordinate rounding hold faces that
+  are (derived: projection does not lengthen). Tried directions: the coordinate axes (box
+  distance), the line between the cells' middle points, and each cell's normal there. The
+  normal direction makes the bound converge to second order for nearly parallel pieces.
+- **Halving.** Pairs not separated halve the cell with the larger pole box, across its longer
+  control polygon, from the whole cover each time (so the rounding is that of one
+  segmentation) [JC98].
+- **Stops, all derived.** Not proven, and left to the exact query, when two cover points are
+  found within the tolerance (the middle points, or a local closest pair from
+  `Extrema_GenLocateExtSS` started there when the hulls overlap): no hull of these covers can
+  then separate them. Also when both cells' pole boxes are within the tolerance across: their
+  points are within three tolerances, which no finer cell resolves. There is no work budget.
+
+Measured on a matrix of blend supports and a set of blend requests (1,505 pairs that reach the exact query on the
+unchanged code): 1,474 certified, none of them within the tolerance by the exact query (smallest
+certified distance 0.0067 mm); exact query time 84.9 s before, 0.57 s on the 31 pairs left; the
+certificate 0.19 s in all. Every result is identical. CPU per request, warm medians:
+
+| Request | Before (ms) | After (ms) | Ratio |
+|---|---:|---:|---:|
+| Torus beside a B-spline, concave groove, round, r 1 | 1,093 | 222 | 0.20 |
+| Same, conic (rho 0.3) | 1,112 | 212 | 0.19 |
+| Same groove, curvature-continuous, r 0.2 | 1,825 | 175 | 0.10 |
+
+[PT97] L. Piegl, W. Tiller, *The NURBS Book*, 2nd ed., Springer 1997, P4.4.
+[JC98] D. Johnson, E. Cohen, "A framework for efficient minimum distance computations",
+ICRA 1998.
 
 ### Contacts beyond an entire smooth support
 
@@ -820,6 +869,8 @@ stagnation budgets. There is no published bound for a G2 conic or quintic sectio
 curvature [searched; none found]; curvature-continuous requests therefore refuse in this tree until a caller
 supplies a policy. Where a result is delivered it is measured again from outside (seam gaps, tangent angle,
 curvature difference) and refused if it misses; that measurement is sampled, not a global certificate.
+The separation certificate's split rule (the larger pole box, across its longer control polygon) affects
+only its cost.
 
 ### Stock counterpart
 
