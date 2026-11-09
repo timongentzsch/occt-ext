@@ -114,9 +114,6 @@ enum class SweepCorner
   Round       = 2
 };
 
-//! Clear the triangulation of the shape behind `shape`. Defined by the embedding program.
-Standard_EXPORT void clearTriangulation(OcctKernel& kernel, uint32_t shape);
-
 //! An axis-aligned box from the origin with sides `dx`, `dy`, `dz`. Fails where a side is at
 //! most the kernel resolution.
 Standard_EXPORT EvolutionData makeBox(OcctKernel& kernel, double dx, double dy, double dz);
@@ -176,10 +173,6 @@ Standard_EXPORT EvolutionData interpolateClosed(OcctKernel&                kerne
 Standard_EXPORT EvolutionData skinPeriodic(OcctKernel&                  kernel,
                                            const std::vector<uint32_t>& sections,
                                            double                       tolerance);
-//! The shapes of IGES file content. Defined by the embedding program.
-Standard_EXPORT EvolutionData importIges(OcctKernel& kernel, const std::string& text);
-//! The shape behind `shape` as IGES file content. Defined by the embedding program.
-Standard_EXPORT std::string exportIges(OcctKernel& kernel, uint32_t shape);
 //! A lone face whose support is refitted as a B-spline of the degrees and `spans`, its trims and
 //! holes kept. Fails where the trim boundary misses `tolerance`.
 Standard_EXPORT EvolutionData rebuildFace(OcctKernel& kernel,
