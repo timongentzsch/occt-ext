@@ -10,13 +10,13 @@ The repository is OCCT with its history, followed by commits that add
 * **numerical utilities** in `TKGeomAlgo` and `TKMesh`: interval enclosures, Bernstein products, constrained tensor-spline fitting, certified knot compaction, trim integration, surface jets;
 * **corrections** to existing OCCT algorithms, one commit each, with the derivation and limits of each. One of them makes face classification 30 times faster on the benchmark plate.
 
-The base is OCCT `b8f597c6` (30 July 2026). Nothing here has been proposed upstream yet; it is organised so that it can be proposed in pieces ([Upstreaming](#upstreaming)).
+This is the first release, v0.1.0. The base is OCCT `b8f597c6` (30 July 2026). Nothing here has been proposed upstream yet; it is organised so that it can be proposed in pieces ([Upstreaming](#upstreaming)).
 
 ## What you get that stock OCCT does not give you
 
 | Capability | Stock OCCT | This tree | Evidence |
 | --- | --- | --- | --- |
-| **Rolling-ball fillets** on curved supports, chains of rounds and corners | `BRepFilletAPI_MakeFillet` leaves a defect of up to 7e-3 where a round runs into earlier rounds and 3e-3 on crossed cylinders | Blends exact to the sampling (defect 1e-8 to 1e-14); radius laws along an edge, ranges, stations, chamfers, corners of three or more blends, junctions of two curved surfaces | [Results](#results), `BRepBlendExt`, `BRepFilletExt` |
+| **Rolling-ball fillets** on curved supports, chains of rounds and corners | `BRepFilletAPI_MakeFillet` leaves a defect of up to 7e-3 where a round runs into earlier rounds and 3e-3 on crossed cylinders | Blends exact to the sampling (defect 1e-8 to 1e-14); radius laws along an edge, ranges, stations, chamfers, corners of three or more blends, junctions of two curved surfaces; limited blends built from the blend's own faces, blends that end on a face reached past the vertex, open rails walked along their traced offset spine | [Results](#results), `BRepBlendExt`, `BRepFilletExt` |
 | **Patch**: fill a loop of edges with G0, G1 or G2 to the neighbouring faces | `BRepFill_Filling` / `GeomPlate` plate fit: 0.11 to 0.45 off the defining surface on four cubic sides | Fill 1e-12 from it; n-sided loops, open boundaries chained and closed, interior guides and points; loops that are a height over no plane (rims whose faces sweep a half circle or more) filled over a conformal chart of their own; the same net at a thousandth and a thousand times the size; a G1 request that is geometrically impossible is refused with the reason | [operations.md](dox/extensions/operations.md#breppatchext-boundary-first-fill) |
 | **Smooth skins** through sections, and Gordon skins through networks of profiles and guides | `BRepOffsetAPI_ThruSections` bulges to half-width 19.3 through six circles of radius at most 10 | Stays within the sections (10.0); closed rings joined seam to seam; guided skins that contain their guides | [benchmarks.md](dox/extensions/benchmarks.md) |
 | **Framed sweeps and drafts** | `MakePipeShell` twists a profile unless the path starts square to it; `DraftAngle` takes planes, cylinders and cones | Rotation-minimising frames (double reflection, fourth-order error); draft of any wall by its isocline surface | [operations.md](dox/extensions/operations.md) |
@@ -222,20 +222,37 @@ review.
 Current limits and what remains, with the cause of each:
 
 1. **Blend solver.** An edge whose faces meet at a steady angle is blended at any opening from 5 to 175 degrees,
-   convex or concave. Where the angle turns along the edge so far that the balls' centre path bends more tightly than
-   the ball (the rim of a hole leaning at a with `r >= (R + r) cos a`: from about 70 degrees), the rolling-ball surface
-   crosses itself and is refused by name until it is trimmed there; short of that the rim is the balls' envelope. A
-   fixed-contact conic replacement on a cylindrical cavity and transverse plane retains the envelope outside its crossing
-   sector; continuous spline and embedding certificates for it remain open (see the conic-window section of
-   [operations.md](dox/extensions/operations.md)). Isolated shared-edge events between joined contact strips are
+   convex or concave. Convexity is proven along the whole edge in Bernstein form for spline and Bezier surfaces,
+   extrusions of spline curves, planes, cylinders, cones, spheres and tori; revolutions and offsets are read at the
+   places k/16 of the edge, which is sampling. An edge with convex and concave parts is refused by name. Where the
+   angle turns along the edge so far that the balls' centre path bends more tightly than the ball (the rim of a hole
+   leaning at a with `r >= (R + r) cos a`: from about 70 degrees), the rolling-ball surface crosses itself. A
+   contact that crosses itself is now found in its face's parameters on any surface and cut at the crossing: a
+   round's loop is patched by its ball, and a chamfer's two sheets meet in their crease (measured on the slanted
+   rims of a plate, leaning 70 to 85 degrees: all 16 cases chamfered). A spine that bends more tightly than the ball
+   still meets the interior-crossing check, which refuses the self-crossing envelope by name; that trimming is not
+   built. A fixed-contact conic replacement on a cylindrical cavity and transverse plane retains the envelope outside
+   its crossing sector; continuous spline and embedding certificates for it remain open (see the conic-window section
+   of [operations.md](dox/extensions/operations.md)). Isolated shared-edge events between joined contact strips are
    partitioned; overlapping or simultaneous boundary events need a more general contact arrangement (see
-   [operations.md](dox/extensions/operations.md#contact-ownership-on-a-joined-blend-sheet)). Some configurations where
+   [operations.md](dox/extensions/operations.md#contact-ownership-on-a-joined-blend-sheet)). A blend ends on a face
+   reached past the vertex only where that face's surface also meets the other contact. Some configurations where
    several blends meet are refused although a valid result exists: trimming a blend group needs an owner for every
-   retained region and contact before chain ends are cut, and the centre path must be parametrised by arc length along
-   the marched curve, not by the edge's parameter. Curvature-continuous sections at corners where four or more blends meet
-   are refused, and so are conic ones there unless every face at the corner is a plane (see
-   [operations.md](dox/extensions/operations.md#split-corners-of-more-than-three-conic-blends)); a
-   curvature-continuous blend must meet the current seam and section-law bounds.
+   retained region and contact before chain ends are cut, and the centre path is parametrised by arc length along the
+   traced offset spine only for an open constant-distance rail whose own stations fold. The later construction
+   passes (extended fits, refined contacts, offset spines) each run only where the pass before read the input they
+   change; where one refuses and a later pass measured the obstruction on its sheet, the refusal names that
+   obstruction. Corners where four or more blends meet: conic sections are built, split into exact rational patches
+   of degree 6 that are G1 to the sheets, where every face at the corner is a plane (all 144 members of an uneven
+   family build; the corner bends more than ten times as tightly as its blends on 22 of them, all on one steep
+   pentagon). Curvature-continuous and chamfer corners of four or more blends, and conic ones with a face that is not
+   a plane, are refused (see
+   [operations.md](dox/extensions/operations.md#split-corners-of-more-than-three-conic-blends)). Across a knot where a
+   spline support is only C2 the curvature-continuous section is smoothed in a window derived from leading-order
+   secants, not certified suprema; where the spans do not meet at the knot the exact law is kept. A
+   curvature-continuous blend must meet the current seam and section-law bounds. A limited blend is built directly
+   from the blend's faces only under the premise stated in operations.md (one edge, both limits inside it, every other
+   changed edge outside the slab, checked by sampling); otherwise the Boolean isolation stays.
 2. **Section law for curvature continuity.** `BRepBlendExt_Policy` supplies the conic section only. A published bound
    for a curvature-continuous conic or quintic section as a function of the support's curvature is missing.
 3. **Fill.** The interior acceptance gate and the flat-support curvature limit have no derivation. Across two rims of an
