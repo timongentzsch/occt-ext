@@ -19,6 +19,24 @@ Part of the [operations reference](../operations.md). Each entry gives the const
 - [Ordering, chart covariance and symmetric requests](#ordering-chart-covariance-and-symmetric-requests)
 - [Unproven](#unproven)
 - [Stock counterpart](#stock-counterpart)
+- [Source files](#source-files)
+
+## Source files
+
+| File | Stage |
+| --- | --- |
+| `BRepPatchExt_Patch.cxx` | Entry: the sides in turn, the constructions in order, the checks every result passes |
+| `BRepPatchExt_Fill.hxx` | What a loop asks, what a fill built is, the stages shared between the files |
+| `BRepPatchExt_Loop.cxx` | Mean plane, polygon, and inside tests of the loop seen flat |
+| `BRepPatchExt_Net.cxx` | Fit conditions, the least-squares fit, net knots |
+| `BRepPatchExt_Measure.cxx` | Misses along edges and at corners, interior and sewn readings |
+| `BRepPatchExt_Trim.cxx` | Sides laid into the surface's parameters, trimmed face, spline rim frame |
+| `BRepPatchExt_Exact.cxx` | Plane and exact continuations (torus, ball, plane/round/plane, spline face) |
+| `BRepPatchExt_Quad.cxx` | Four sides: Coons patch with G1/G2 inner poles; chained quads |
+| `BRepPatchExt_OverPlane.cxx` | Any loop: height over the mean plane, trimmed |
+| `BRepPatchExt_OverChart.cxx` | Any loop that is a height over no plane: fit over its own chart |
+| `BRepPatchExt_Adjacent.cxx` | Adjacent: fit over a conformal chart of the loop and its faces |
+| `BRepPatchExt_Chart.cxx`, `BRepPatchExt_Inside.cxx`, `BRepPatchExt_Chain.cxx` | Chart of a loop, inside-fault check, open boundaries |
 
 ## Notes by topic
 
@@ -302,7 +320,7 @@ function], found by Gilbert's iteration [Gilbert66]; every answer is a direction
 below.
 
 A loop refused by the plane route whose margin, read at 65 places of every side asked G1 or G2 with their ends,
-is below the same 0.17 is filled over a chart (`overChart` in `BRepPatchExt_Patch.cxx`, chart in
+is below the same 0.17 is filled over a chart (`overChart` in `BRepPatchExt_OverChart.cxx`, chart in
 `BRepPatchExt_Chart.cxx`); any other loop is filled over the plane, and a loop the chart does not fill is
 refused as over the plane.
 

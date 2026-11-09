@@ -1,10 +1,20 @@
 set(OCCT_BRepPatchExt_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
 set(OCCT_BRepPatchExt_FILES
+  BRepPatchExt_Adjacent.cxx
   BRepPatchExt_Chain.cxx
   BRepPatchExt_Chart.cxx
   BRepPatchExt_Chart.hxx
+  BRepPatchExt_Exact.cxx
+  BRepPatchExt_Fill.hxx
   BRepPatchExt_Inside.cxx
   BRepPatchExt_Inside.hxx
+  BRepPatchExt_Loop.cxx
+  BRepPatchExt_Measure.cxx
+  BRepPatchExt_Net.cxx
+  BRepPatchExt_OverChart.cxx
+  BRepPatchExt_OverPlane.cxx
   BRepPatchExt_Patch.cxx
+  BRepPatchExt_Quad.cxx
   BRepPatchExt_Side.hxx
+  BRepPatchExt_Trim.cxx
 )
