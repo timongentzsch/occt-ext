@@ -1,17 +1,12 @@
 # This workflow builds and tests OCCT on multiple platforms (Windows, macOS, Linux with Clang, and Linux with GCC).
-# It is triggered on pull requests to any branch.
+# In this fork it runs by hand only (workflow_dispatch): the hours-long all-platform build of the whole of OCCT is
+# not run on every pull request. The lean build of the extension toolkits is extensions.yml.
 # The workflow includes steps to prepare and build the project on each platform, run tests, and upload the results.
 # Concurrency is set to ensure that only one instance of the workflow runs per pull request at a time.
 
 name: Build and Test OCCT on Multiple Platforms
 
 on:
-  pull_request:
-    branches:
-      - '**'
-  push:
-    branches:
-      - 'master'
   # Run by hand on any branch, for example to try the Windows build of the extension packages.
   workflow_dispatch:
 

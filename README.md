@@ -2,6 +2,8 @@
 
 # OCCT extensions
 
+[![Extensions](https://github.com/timongentzsch/occt-ext/actions/workflows/extensions.yml/badge.svg)](https://github.com/timongentzsch/occt-ext/actions/workflows/extensions.yml)
+
 **A modelling layer for [Open CASCADE Technology](https://dev.opencascade.org) 8: blends that are exact where stock's are approximate, fills and skins with real continuity control, offsets that survive vanishing faces, and fixes to the algorithms underneath.** Every result is checked against a definition or a closed form, and every operation checks its own answer before returning it.
 
 The repository is OCCT with its history, followed by commits that add
