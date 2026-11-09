@@ -218,7 +218,7 @@ struct Side
 };
 
 //! A size along an edge (Request::radii): the cubic spline through the places, natural (no
-//! curvature at its ends, as the reference modeller's variable blends are, measured) or round an edge that
+//! curvature at its ends) or round an edge that
 //! closes periodic. Past the ends the natural one goes on along its end tangents, which keeps it
 //! twice differentiable there (its second derivative is zero at the ends).
 struct SizeLaw

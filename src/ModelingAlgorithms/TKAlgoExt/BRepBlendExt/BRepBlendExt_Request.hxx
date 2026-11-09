@@ -88,8 +88,8 @@ struct Request
   //! A size that changes along an edge: for edges[i], where radii[i] is not empty, (place, size)
   //! pairs, the place a fraction of the edge's parameter range from its first parameter to its
   //! last, the size that of `first` there (`second` keeps its ratio to it), interpolated by the
-  //! cubic spline with no curvature at its ends (periodic round an edge that closes), as
-  //! The reference modeller's variable blends are. Each section is the one of that size in the ball's plane
+  //! cubic spline with no curvature at its ends (periodic round an edge that closes).
+  //! Each section is the one of that size in the ball's plane
   //! across the edge. For a round, a conic or a G2 blend of equal distances, or a chamfer; such
   //! edges add no tangent edges.
   std::vector<std::vector<std::pair<double, double>>> radii;

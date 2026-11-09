@@ -1584,7 +1584,7 @@ std::vector<gp_Pnt> insideOf(const TopoDS_Face& face, int grid = 24)
 // A window that wraps a cylinder by more than half of it, its four edges G2 to strips of the
 // cylinder beyond them, seen along any direction folds over itself: its rim's normals sweep the
 // whole half circle and more, so it is a height over no plane (see graphMargin). It is filled
-// over a chart of its own (overChart): at 200 degrees, the application's fixture, and at 180, 240 and 300 and
+// over a chart of its own (overChart): at 200 degrees, and at 180, 240 and 300 and
 // on a taller and wider cylinder, held out from the design. Each is made alike at rest, turned,
 // mirrored and turned at a thousandth and a thousand times the size, by the same net; and read
 // without Patch's help, it meets every edge within the tolerance, the strips' tangent planes

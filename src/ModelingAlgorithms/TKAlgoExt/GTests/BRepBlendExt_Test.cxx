@@ -133,7 +133,7 @@ TopoDS_Shape blended(const BRepExt::blending::Request& request)
   }
 }
 
-//! A size law (Request::radii) as the reference modeller's variable blends take it, measured: the cubic spline
+//! A size law (Request::radii): the cubic spline
 //! through the places with no curvature at its ends (periodic round a closed edge), by the
 //! place's fraction of [first, last]. Built here by eliminating the slopes' continuity conditions
 //! in turn (the Thomas algorithm), apart from the kernel's own solve; periodic by repeating the
@@ -430,8 +430,7 @@ TEST(BRepBlendExt, RoundInAWedgeOfACylinderRollsAtDistanceR)
       }
 }
 
-// A size that changes along a box's edge (planes x = a, y = b, the edge along z), as the reference modeller
-// makes it (its exported bodies, sectioned): each section across the edge is the circle of radius r(z)
+// A size that changes along a box's edge (planes x = a, y = b, the edge along z): each section across the edge is the circle of radius r(z)
 // tangent to both faces, about (a - r, b - r, z), and r(z) the natural cubic spline through the
 // places. The section removed is r^2 (1 - pi / 4), so the volume is (1 - pi / 4) times the integral
 // of r^2, here in closed form: linear, and the natural splines through a peak and a valley, which
@@ -692,7 +691,7 @@ TEST(BRepBlendExt, RoundOfASphereOnAPlaneWhoseSizeChangesHasCircularSections)
 
 // A hole of radius 3 beside the top edge x = 0 of a block, a gap g from the face x = 0. Tangent
 // (g = 0) the body is pinched: the hole meets the face in a line of four faces, which no blend
-// passes; it is refused by name, as the reference modeller refuses it. With a gap the round is made and rolls
+// passes; it is refused by name. With a gap the round is made and rolls
 // at distance r from both faces where its ball stays clear of the hole and of the faces that stop
 // the edge.
 TEST(BRepBlendExt, RoundBesideAHoleTangentToItsFaceIsRefusedByName)
@@ -733,7 +732,7 @@ TEST(BRepBlendExt, RoundBesideAHoleTangentToItsFaceIsRefusedByName)
 }
 
 // The top rim of a cylinder of radius R whose side is h high, rounded or chamfered by r >= h: the
-// side is used up (the reference modeller makes these, one face of the blend between the two caps). The round's
+// side is used up (the blend is one face between the two caps). The round's
 // ball rests on the top and on the bottom rim, its centre (R - sqrt(r^2 - (r - h)^2), h - r) in the
 // plane through the axis, and the chamfer's bevel from the top's foot at 45 degrees runs on to the
 // bottom, which cuts it. Each removes pi times the integral over z of R^2 - x(z)^2, x(z) the
@@ -795,8 +794,7 @@ TEST(BRepBlendExt, BlendOfARimOverASideNarrowerThanItUsesTheSideUp)
     }
 }
 
-// The rim of a hole of radius R leaning a through a plate t thick (the slanted-rim family of the
-// application's tests), rounded by r. The balls' centres lie r below the top and R + r from the
+// The rim of a hole of radius R leaning a through a plate t thick (the slanted-rim family), rounded by r. The balls' centres lie r below the top and R + r from the
 // hole's axis: on an ellipse of semi-axes R + r and (R + r) / cos a, whose radius of curvature at
 // its acute end is (R + r) cos a. Below that the round is the balls' envelope, every point r from
 // the ellipse (at 75 degrees its sections turn by up to 165 degrees and are made of two spans);

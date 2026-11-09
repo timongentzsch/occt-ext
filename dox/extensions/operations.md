@@ -462,20 +462,15 @@ whole chain) is therefore made of two spans, split at its middle by de Casteljau
 poles, the same curve (the 120 degrees, where the weight is a half, is a judgement; the 5040 straight
 wedges are unchanged to 1e-9 of their volume). Where the surface does cross itself, the fitted sheet's
 sections run back against the way the balls roll (S_u . (n0 x n1) < 0, sampled 65 x 7 places): refused
-by name. Measured (the same 16 rims): the reference modeller makes the exact rolling ball
-(8 faces) at 70 degrees and at 75 for the two rims with r / (R + r) < cos 75, and splits the blend
-(11 faces, off the ball by up to 0.34 mm) for the other two at 75 and all at 80 and 85: exactly the
-criterion above. The blend now makes all four at 70 and the two at 75 as the balls' envelope (every point r
-from the centres' ellipse to 1e-6), and refuses the crossing ones; trimming them is open. The reference modeller
-refuses G2 on every one of these rims.
+by name. Measured (the same 16 rims): the blend makes all four rims at 70 degrees and the two with
+r / (R + r) < cos 75 at 75 as the balls' envelope (every point r from the centres' ellipse to 1e-6), and refuses
+the crossing ones, exactly the criterion above; trimming them is open.
 
-*A size that changes along the edge* (`Request::radii`, `blendRange`). As the reference modeller makes it,
-measured on its own results (its exported bodies of variable rounds, conics and G2 blends, sectioned across
-the edge): the size r(t) is the cubic spline through the given places with no curvature at its ends
-(the natural spline: the reference modeller's peak 1, 3, 1 on a box edge is r = 1 + 6 s - 8 s^3 on its first half
-to the last digit), periodic round an edge that closes; and every section is the section of one size,
-r(t), in the ball's own plane across the edge, the ball of that size resting on both faces with its
-feet there (the reference modeller's rounds are circles there to 1e-12). The blend is G1 to both faces: at a foot
+*A size that changes along the edge* (`Request::radii`, `blendRange`). The size r(t) is the cubic spline through
+the given places with no curvature at its ends (the natural spline: the peak 1, 3, 1 on a box edge is
+r = 1 + 6 s - 8 s^3 on its first half), periodic round an edge that closes; and every section is the section of
+one size, r(t), in the ball's own plane across the edge, the ball of that size resting on both faces with its
+feet there (the sections are circles there to 1e-12). The blend is G1 to both faces: at a foot
 its tangent plane holds the section's tangent, normal to the face's normal in that plane, and the
 contact's tangent, which lies in the face. Past the edge's ends the spline goes on along its end
 tangents (its second derivative is zero there, so it stays twice differentiable), and the ball is
@@ -484,10 +479,9 @@ steep law reaches nothing within twice the blend's size); the carry is twice the
 places are breaks of the fit (the spline is C2 there and the stations follow its value). Not taken: the
 rolling-ball envelope of balls of radius r(t), whose characteristic circle lies in the plane
 (x - c).c' = -r r' (the derivative of |x - c|^2 = r^2; the feet lie on it since n.c' = r'); it was built
-first and differs from the reference modeller by 0.06 mm^3 on a box edge with a linear law, and with the cubic of
-`Law_Interpol` (OpenCascade's variable fillet's interpolation, the application's variable round's) by up to
-2.4 mm^3 on a peak. A chamfer's setbacks follow the same law (the reference modeller has no variable chamfer: it
-keeps the base distance or refuses); at an angle off a reference face the other setback is
+first and differs from the chosen section by 0.06 mm^3 on a box edge with a linear law, and with the cubic of
+`Law_Interpol` (OpenCascade's variable fillet's interpolation) by up to
+2.4 mm^3 on a peak. A chamfer's setbacks follow the same law; at an angle off a reference face the other setback is
 d sin a / sin(theta + a), theta the opening between the faces' tangent planes at the edge's point (the
 triangle of the edge's point and the feet). Distances off the two faces of a round, conic or G2 blend
 must be equal where the size changes (refused by name otherwise); such edges add no tangent edges and
@@ -540,16 +534,12 @@ wrong: a large G2 box in a cavity it returned unblended (the direct change is th
 whole blend's change to 3e-11, as at the smaller scale, the sections being the same all along) and two G2 rims in a cavity whose trim curves ended 1.2e-6 past their vertices. Vertex
 tolerances fall to the real gaps: 1e-7 at scale 1 where isolation left up to 1.1e-4.
 
-Measured: against the reference modeller's results (box edge and the flat-to-curved edge of a half cylinder, laws
-linear, falling, peak and valley, Round and Conic rho 0.3) the blend's lie within 1e-12 to 1.1e-6 mm both ways;
-round a closed rim the alternating law within 8e-6, but a law of three uneven places (1, 2, 1.5) 0.04 off,
-the reference modeller's closed interpolation being neither the periodic nor the natural spline (open). Native
-(`BRepBlendExt_Test`): rounds on a box edge (linear, steep, peak, valley) lie on their circles to 1e-6
+Measured (`BRepBlendExt_Test`): rounds on a box edge (linear, steep, peak, valley) lie on their circles to 1e-6
 and remove (1 - pi / 4) times the integral of r^2 to 1e-9 of the body, at rest, turned and at scale 1e-3
 and 1e3; a cylinder's rim (periodic) and, held out, the ring of a sphere on a plane on their circles to
 1e-6; chamfers of a growing setback, also at 30 degrees off a reference face and within a range, remove
-the integral of their sections to 1e-9. G2 in the application (the audit's variable
-and range rows): seams G1 to 0.01 degrees and G2 to 1e-4 / r.
+the integral of their sections to 1e-9. G2 with a variable size or a range: seams G1 to 0.01 degrees and G2 to
+1e-4 / r.
 
 *Why spatial stations stay.* `filletStations` (`BRepFilletAPI_MakeFillet` with a `Law_Interpol` law
 through sizes at points in space, cut at limit planes) stays beside the section law, which cannot express
@@ -582,13 +572,13 @@ notch's edge on the face beyond is a loop of its own, which takes the far edge's
 seam section ends on it. Measured: the top rim of a cylinder of radius 10 whose side is 0.5 to 2 high,
 rounded or chamfered by 1 to 3 at least as high, keeps three faces and removes pi times the integral of
 R^2 - x(z)^2 (the arc by its angle, the bevel in closed form) to 1e-9 of the body (round) and to the
-length tolerance over the bevel (its edge on the bottom is interpolated); against the reference modeller's meshes of
-the same rims (side 1 to 8, radius 1 and 3) every round and chamfer within 6.5e-7 mm, and its G2 at a
-side as high as the ball within 1e-3 mm^3 of its volume. The reference modeller refuses G2 where the side is lower
-than the ball; the blend makes it (the G2 section cut by the bottom face, its seams G2 to 1e-14 / r).
+length tolerance over the bevel (its edge on the bottom is interpolated); the same rims (side 1 to 8, radius 1 and 3)
+agree with independent meshes within 6.5e-7 mm for every round and chamfer, and G2 at a
+side as high as the ball within 1e-3 mm^3 of its volume. Where the side is lower than the ball the blend makes G2
+too (the G2 section cut by the bottom face, its seams G2 to 1e-14 / r).
 A hole tangent to a face beside the edge pinches the body: the hole meets the face in a line along
-which four faces meet. No blend passes it and the blend is refused by name, as the reference modeller does; with a gap of
-0.25 to 2 every round, chamfer and G2 lies within 1.3e-6 mm (G2 1e-4) of the reference modeller's mesh.
+which four faces meet. No blend passes it and the blend is refused by name; with a gap of
+0.25 to 2 every round, chamfer and G2 lies within 1.3e-6 mm (G2 1e-4) of an independent mesh.
 
 *A run back of no length.* A dip in a contact's speed the way the balls roll is a run back only
 where the stretch of contact between the zeros of that speed either side of it (bisected) is longer
@@ -619,10 +609,9 @@ and no blend point lies beyond r; the removed volume matches the union of the se
 (Monte Carlo, 2e5 points) within 2.5 standard errors (0.6 to 0.8%). The planar-cap chamfers of the
 trimmed-outline corpus keep their distance-field volumes.
 
-*Beyond the reference.* Three constructions go past what the reference modeller makes, and stay: a chamfer whose
-distances vary along the edge (the reference modeller keeps the base distance or refuses), G2 where a narrow side is
-lower than the ball (h < r; the reference modeller refuses it), and a chamfer larger than a round it runs over
-(the reference modeller does not make it). Each is held to the same definitions and checks as the shared cases.
+*Further constructions.* Three constructions go beyond the common cases: a chamfer whose
+distances vary along the edge, G2 where a narrow side is lower than the ball (h < r), and a chamfer larger than a
+round it runs over. Each is held to the same definitions and checks as the others.
 
 *Unproven.* Every marching limit (step counts, stall windows, Newton tolerances), the carry's stray bound
 (4 r, or 4 / sqrt 2 times the ball's distance at the end in a sharper wedge), the radius/curvature
@@ -2212,7 +2201,7 @@ closed solids.
 - The added volume matches the integral of the sections' areas along the centre curve
   (tube formula, `1 - kappa N.x` weight) to 0.3 %, and a Monte Carlo union of sections
   within 0.7 standard errors.
-- The corners at both ends agree with a reference modeller's display mesh to 1e-3 mm.
+- The corners at both ends agree with an independent display mesh to 1e-3 mm.
 Before this, all nine were refused.
 No bound was changed, and every earlier route keeps priority where it applies.
 

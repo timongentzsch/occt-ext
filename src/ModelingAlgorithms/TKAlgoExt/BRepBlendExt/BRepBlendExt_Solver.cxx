@@ -1800,8 +1800,8 @@ const std::optional<Far>& Blend::farOf(const Rail& rail, int side)
 //! along a path that bends more tightly than the ball (a pipe surface c + r (cos a N + sin a B)
 //! moves along the path at |c'| (1 - kappa r cos a), which changes sign there), so its sections
 //! run back against the way the balls roll. Read off the sheet: S_u against the station's rolling
-//! direction, at 65 x 7 places; where it turns against it, the surface has folded. The reference
-//! modeller trims the blend there, which is not done here yet.
+//! direction, at 65 x 7 places; where it turns against it, the surface has folded. Trimming the
+//! blend there is not done yet.
 static void checkCrossing(const Rail& rail, Stations& stations, const Fitted& fitted)
 {
   if (fitted.blend.IsNull())

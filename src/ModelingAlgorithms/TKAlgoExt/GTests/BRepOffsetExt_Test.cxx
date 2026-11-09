@@ -226,7 +226,7 @@ TEST(BRepOffsetExt, OffsetOfABoxIsSteinersParallelBodyOrTheGrownBox)
   EXPECT_NEAR(volume(inward), (a - 2 * d) * (b - 2 * d) * (c - 2 * d), 1e-9 * a * b * c);
 }
 
-// Every face of a box with one edge rounded by r moved by d, as the reference modeller's face offset keeps it:
+// Every face of a box with one edge rounded by r moved by d, with every face kept:
 // the same faces, the sharp edges where the moved planes cross and the round of radius r + d
 // meeting them along the offsets of its edges. The volume is that of the box grown by d each way
 // less the corner the round leaves out along its edge, now a + 2d long:

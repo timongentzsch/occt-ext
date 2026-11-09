@@ -965,7 +965,7 @@ void Attach::chainEnds()
               if (sweepToPole(TopoDS::Edge(shape), ends[end]))
                 continue;
               // A body pinched at the joint (a hole tangent to a support there, which meets it in
-              // a line of four faces): no blend passes it (the reference modeller refuses it too).
+              // a line of four faces): no blend passes it.
               for (const auto& near : edgesOfVertex.FindFromKey(ends[end]))
                 if (facesOfEdge.Contains(near) && facesOfEdge.FindFromKey(near).Extent() > 2)
                   fail(op,

@@ -12,8 +12,7 @@
 // commercial license or contractual agreement.
 
 // The offset that keeps the topology: each face on its own offset surface, each edge and vertex
-// where those surfaces meet. The reference modeller's face offset keeps it (the same number of
-// faces before and after in 536 of its 537 results), which is the intersection join.
+// where those surfaces meet. That is the intersection join.
 //
 // Faces. BRepOffset::Surface gives the offset of a surface in the surface's own parameters: a plane
 // is translated, a cylinder, sphere, torus or cone keeps its axes and (u, v), anything else is a

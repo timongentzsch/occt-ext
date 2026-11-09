@@ -271,8 +271,8 @@ TEST(BRepFilletExt, ChamferInARangeRemovesThePrismThereOnly)
 }
 
 // A blend kept between the planes square to the edge at 0.17 and 0.63 of it, on a box edge and on
-// a cylinder's rim, convex and in a cavity, conic and chamfer (G2 takes the application's section
-// policy), at two scales. The
+// a cylinder's rim, convex and in a cavity, conic and chamfer (G2 takes the section policy of
+// BRepBlendExt_Policy), at two scales. The
 // sections are the same all along, so the change within the range is that share of the change the
 // blend of the whole edge makes (of length along the box edge, of angle round the rim; volumes of
 // NURBS copies, as OpenCascade's volume of extrusion faces is off by 1e-3 here), and no vertex of

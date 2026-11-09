@@ -214,8 +214,8 @@ mutation-checked.
 OCCT would reasonably take this in pieces: (1) the corrections that apply to `master` today, each alone;
 (2) the interval and Bernstein utilities; (3) the spline and rim fits with their GTests; (4) `BRepToolsExt` and
 `BRepCurveExt`, which are self-contained and have the clearest closed-form checks; (5) `BRepOffsetExt`; (6) the
-blend and Patch solvers last. The namespace `BRepExt`, the handle interface and the diagnostic hooks are
-artefacts of how the code was first used. Moving the packages to OCCT's class conventions with
+blend and Patch solvers last. The namespace `BRepExt`, the handle interface and the diagnostic hooks do not follow
+OCCT's class conventions. Moving the packages to OCCT's class conventions with
 `Standard_Failure` is mechanical but changes behaviour (OCCT code catches `Standard_Failure`), so it is left for
 review.
 
