@@ -40,6 +40,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The extension toolkits build with GCC 13 (`BRepBlendExt_AttachFolds.cxx`).
+- GCC and Clang builds compile with `-ffp-contract=off`, except for WebAssembly: products and sums are not fused
+  into FMA on arm64 or on x86-64 with FMA, so the results there are those of baseline x86-64 and WebAssembly.
+  Baseline x86-64 objects are unchanged (GCC 13: 2792 of 2792 identical).
 - `BRepOffsetExt`: a kept offset's edge tolerance is the largest measured distance between the edge's curves where
   that stays within 1e-6, so valid offsets are no longer rejected as invalid shapes.
 - The package README of `TKAlgoExt` no longer lists the removed bridge curves and corner rounding.

@@ -150,6 +150,14 @@ if (MSVC)
   endif()
 elseif (CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX OR (CMAKE_CXX_COMPILER_ID MATCHES "[Cc][Ll][Aa][Nn][Gg]"))
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+  # The same rounding on every target: a product and a sum are not fused into one FMA where the
+  # target has it (arm64, x86-64 with FMA enabled), as baseline x86-64 and wasm32 cannot fuse them
+  # and MSVC's /fp:precise does not. WebAssembly is left as it is compiled: it has no FMA, and the
+  # flag would only reorder its code.
+  if (NOT EMSCRIPTEN)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffp-contract=off")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffp-contract=off")
+  endif()
 
   if ("${BUILD_OPT_PROFILE}" STREQUAL "Production")
     # /Ot (favor speed over size) is similar to -O2 or -O3 in GCC/Clang.
