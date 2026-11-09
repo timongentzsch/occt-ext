@@ -1350,11 +1350,37 @@ Standard_EXPORT bool runsBack(Dips& dips);
 //! out and patched. Empty where a fold lies in no such loop. With `open`, a place where the
 //! contact runs back but crosses itself nowhere within the piece is put there (from = to = its u)
 //! instead: its loop may run on across a joint into the next piece (Blend::sheets).
+struct Crease;
+
 struct Fold
 {
   int    side = 0;
   double from = 0, to = 0;
+  //! Where the sheet crosses itself between its contacts instead (crossings): its crease.
+  std::shared_ptr<const Crease> crease;
 };
+
+//! Where a round blend's sheet S(u, v) (the fit's u, v across from side 0's contact at 0 to side
+//! 1's at 1) crosses itself between its contacts: the curve S(ra, va) = S(rb, vb), ra < rb, along
+//! which the sections before the fold meet those after it (Blend::sheets, crossings). It runs from
+//! the end nearer side 0's contact to the other; at each end the two sections are one, the
+//! sheet's swallowtail points `ends` (u, v), inside the sheet. `curve` is the crease in space, and
+//! `onA` and `onB` its curves in the sheet's parameters before the fold and after it, all over
+//! [first, last].
+struct Crease
+{
+  Handle(Geom_BSplineCurve)   curve;
+  Handle(Geom2d_BSplineCurve) onA, onB;
+  double                      first = 0, last = 0;
+  gp_Pnt2d                    ends[2];
+};
+
+//! The creases where a round blend's fitted sheet crosses itself between its contacts, where the
+//! balls' path bends more tightly than the ball; each lies within the piece's own part of the
+//! sheet. Refused where a crease cannot be traced from end to end there.
+Standard_EXPORT std::vector<std::shared_ptr<const Crease>> crossings(const Rail&   rail,
+                                                                     Stations&     stations,
+                                                                     const Fitted& fitted);
 
 Standard_EXPORT std::vector<Fold> capFolds(Dips& dips, std::vector<Fold>* open = nullptr);
 
@@ -1724,6 +1750,8 @@ struct Piece
     bool        swapped = false;
     int         side    = 0;
     TopoDS_Edge crossed;
+    //! A fold between the contacts (Fold::crease): where the two parts' faces meet.
+    std::shared_ptr<const Crease> crease;
   } joint[2];
 
   struct TerminalContact

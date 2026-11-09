@@ -10,6 +10,8 @@
 
 #include <Geom2dAdaptor_Curve.hxx>
 #include <GeomConvert_CompCurveToBSplineCurve.hxx>
+#include <Geom_TrimmedCurve.hxx>
+#include <math_SVD.hxx>
 
 namespace BRepExt::blending::detail
 {
@@ -1173,6 +1175,672 @@ std::vector<Fold> capFolds(Dips& dips, std::vector<Fold>* open)
     return out;
   }
   return {};
+}
+
+namespace
+{
+
+//! A place on a crease: (ra, va, rb, vb), the sheet's parameters before the fold and after it.
+using CreasePlace = std::array<double, 4>;
+
+//! The sheet and its first derivatives at both of a place's parameters.
+struct CreaseJet
+{
+  gp_Pnt pa, pb;
+  gp_Vec ua, va, ub, vb;
+
+  CreaseJet(const Handle(Geom_BSplineSurface)& sheet, const CreasePlace& x)
+  {
+    sheet->D1(x[0], x[1], pa, ua, va);
+    sheet->D1(x[2], x[3], pb, ub, vb);
+  }
+};
+
+//! The crease's direction in the parameters scaled by `w` (y = w x): the null vector of the 3 x 4
+//! Jacobian of S(ra, va) - S(rb, vb) in y, whose k-th entry is (-1)^k times the determinant of the
+//! other three columns (derived: J t is the expansion of a 4 x 4 determinant with a repeated row).
+CreasePlace creaseDirection(const CreaseJet& j, const CreasePlace& w)
+{
+  const gp_Vec col[4] = {j.ua / w[0], j.va / w[1], -j.ub / w[2], -j.vb / w[3]};
+  CreasePlace  t{};
+  double       norm = 0;
+  for (int k = 0; k < 4; ++k)
+  {
+    gp_Vec m[3];
+    for (int i = 0, n = 0; i < 4; ++i)
+      if (i != k)
+        m[n++] = col[i];
+    t[k] = (k % 2 == 0 ? 1 : -1) * m[0].Dot(m[1].Crossed(m[2]));
+    norm += t[k] * t[k];
+  }
+  norm = std::sqrt(norm);
+  for (double& v : t)
+    v = norm > 0 ? v / norm : 0;
+  return t;
+}
+
+//! A crease place solved by Newton's method from `x` with one of its parameters held, the others
+//! free: `held` 0 to 3 holds that parameter, 4 holds the gap rb - ra. By SVD with no singular value
+//! dropped above rounding: near a swallowtail point the system's least singular values fall with
+//! the gap (the two sections' derivatives part only by it), and dropping them, as the default
+//! cut-off of 1e-6 of the largest does, leaves those directions where the step's prediction put
+//! them, so that the crease drifts with the step size (measured: its end moved by 3e-5 of the
+//! sheet's u, and its face took in 4e-4 mm of the fold). Whether S(ra, va) and S(rb, vb) meet
+//! within a thousandth of the length tolerance.
+bool solveHeld(const Handle(Geom_BSplineSurface)& sheet, CreasePlace& x, int held)
+{
+  for (int it = 0; it < 40; ++it)
+  {
+    const CreaseJet j(sheet, x);
+    const gp_Vec    F(j.pa, j.pb);
+    if (F.Magnitude() <= 1e-3 * tol::length)
+      return true;
+    // d(pb - pa) by each free parameter (the gap held: ra moves rb with it).
+    std::vector<gp_Vec> cols;
+    std::vector<int>    of;
+    const gp_Vec        all[4] = {-j.ua, -j.va, j.ub, j.vb};
+    for (int c = 0; c < 4; ++c)
+      if (c != held && !(held == 4 && c == 2))
+      {
+        cols.push_back(held == 4 && c == 0 ? j.ub - j.ua : all[c]);
+        of.push_back(c);
+      }
+    math_Matrix J(1, 3, 1, 3);
+    math_Vector rhs(1, 3);
+    for (int r = 0; r < 3; ++r)
+    {
+      for (int k = 0; k < 3; ++k)
+        J(r + 1, k + 1) = cols[k].Coord(r + 1);
+      rhs(r + 1) = -F.Coord(r + 1);
+    }
+    math_SVD svd(J);
+    if (!svd.IsDone())
+      return false;
+    math_Vector dx(1, 3);
+    svd.Solve(rhs, dx, std::numeric_limits<double>::epsilon());
+    for (int k = 0; k < 3; ++k)
+      x[of[k]] += dx(k + 1);
+    if (held == 4)
+      x[2] += dx(1);
+    if (!std::isfinite(x[0] + x[1] + x[2] + x[3]))
+      return false;
+  }
+  return false;
+}
+
+//! The crease of one fold of a round blend's sheet, traced from a place on it (Allgower and
+//! Georg, *Introduction to Numerical Continuation Methods*, 2003, chapters 2 and 6, for the
+//! pseudo-arclength steps).
+class CreaseTrace
+{
+public:
+  CreaseTrace(const Handle(Geom_BSplineSurface)& sheet, double lo, double hi, const char* op)
+      : sheet_(sheet),
+        lo_(lo),
+        hi_(hi),
+        op_(op)
+  {
+  }
+
+  //! The places from one swallowtail point to the other through `seed`, a place on the crease
+  //! (ra < rb). Empty where the crease leaves the piece's part of the sheet or cannot be followed.
+  std::optional<std::vector<CreasePlace>> trace(const CreasePlace& seed)
+  {
+    const CreaseJet j(sheet_, seed);
+    w_      = {std::max(j.ua.Magnitude(), j.ub.Magnitude()),
+               std::max(j.va.Magnitude(), j.vb.Magnitude()),
+               0,
+               0};
+    w_[2]   = w_[0];
+    w_[3]   = w_[1];
+    if (!(w_[0] > 0 && w_[1] > 0))
+      return std::nullopt;
+    share_  = 0.25;
+    reach_  = (seed[2] - seed[0]) * w_[0] / 8;
+    auto t  = creaseDirection(j, w_);
+    // Towards the gap rb - ra closing, and away.
+    const double opening = t[2] / w_[2] - t[0] / w_[0];
+    if (opening > 0)
+      for (double& v : t)
+        v = -v;
+    std::vector<CreasePlace> one = {seed}, other = {seed};
+    if (!close(one, t))
+      return std::nullopt;
+    // Away from the closing end the gap opens to its widest and closes again: followed by
+    // arclength steps until it is as narrow as at the seed, then closed as the first.
+    CreasePlace back = t;
+    for (double& v : back)
+      v = -v;
+    if (!across(other, back, seed[2] - seed[0]) || !close(other, {}))
+      return std::nullopt;
+    std::vector<CreasePlace> path(one.rbegin(), one.rend());
+    path.insert(path.end(), other.begin() + 1, other.end());
+    return path;
+  }
+
+  //! The crease's place between two of its places `x` and `y`: on the plane across the chord
+  //! between them through its middle, in the scaled parameters. Empty where it is not found there
+  //! with the sections apart.
+  std::optional<CreasePlace> middle(const CreasePlace& x, const CreasePlace& y) const
+  {
+    CreasePlace d{}, y0{}, z{};
+    double      norm = 0;
+    for (int k = 0; k < 4; ++k)
+    {
+      d[k]  = (y[k] - x[k]) * w_[k];
+      y0[k] = (x[k] + y[k]) / 2 * w_[k];
+      z[k]  = y0[k];
+      norm += d[k] * d[k];
+    }
+    norm = std::sqrt(norm);
+    if (!(norm > 0))
+      return std::nullopt;
+    for (double& v : d)
+      v /= norm;
+    if (!onPlane(z, y0, d).first)
+      return std::nullopt;
+    CreasePlace q;
+    double      off = 0;
+    for (int k = 0; k < 4; ++k)
+    {
+      q[k] = z[k] / w_[k];
+      off += (z[k] - y0[k]) * (z[k] - y0[k]);
+    }
+    // Within half the chord of its middle (the crease bends little over a span), and the sections
+    // not closed to one: at least a quarter of the wider of the two places' gaps (near an end the
+    // gap closes linearly along the crease).
+    if (std::sqrt(off) > norm / 2 || q[2] - q[0] < std::max(x[2] - x[0], y[2] - y[0]) / 4)
+      return std::nullopt;
+    return q;
+  }
+
+private:
+  //! Newton's method in the scaled parameters from `y` for S(ra, va) = S(rb, vb) on the plane
+  //! through `y0` across the unit direction `d`: whether it converged, and in how many steps.
+  std::pair<bool, int> onPlane(CreasePlace& y, const CreasePlace& y0, const CreasePlace& d) const
+  {
+    for (int it = 0; it < 12; ++it)
+    {
+      CreasePlace x;
+      for (int k = 0; k < 4; ++k)
+        x[k] = y[k] / w_[k];
+      const CreaseJet j(sheet_, x);
+      const gp_Vec    F(j.pb, j.pa);
+      double          along = 0;
+      for (int k = 0; k < 4; ++k)
+        along += d[k] * (y[k] - y0[k]);
+      if (F.Magnitude() <= 1e-3 * tol::length && std::abs(along) <= 1e-3 * tol::length)
+        return {true, it};
+      const gp_Vec col[4] = {j.ua / w_[0], j.va / w_[1], -j.ub / w_[2], -j.vb / w_[3]};
+      std::array<std::array<double, 5>, 4> m{};
+      for (int r = 0; r < 3; ++r)
+      {
+        for (int k = 0; k < 4; ++k)
+          m[r][k] = col[k].Coord(r + 1);
+        m[r][4] = -F.Coord(r + 1);
+      }
+      for (int k = 0; k < 4; ++k)
+        m[3][k] = d[k];
+      m[3][4] = -along;
+      std::array<double, 4> dy{};
+      if (!solve<4>(m, dy))
+        return {false, it};
+      for (int k = 0; k < 4; ++k)
+        y[k] += dy[k];
+    }
+    return {false, 12};
+  }
+
+  bool inside(const CreasePlace& x) const
+  {
+    return x[1] > 0 && x[1] < 1 && x[3] > 0 && x[3] < 1 && x[0] >= lo_ && x[2] <= hi_
+           && x[2] > x[0];
+  }
+
+  //! The gap closed in steps of a share of what is left, each solved with the gap held (as a
+  //! chamfer's crease is, Attach::creaseFold), to where the two sections lie within the length
+  //! tolerance of each other: there they are one, the swallowtail point. The first step follows
+  //! `t` where there is no place before it.
+  bool close(std::vector<CreasePlace>& path, const std::optional<CreasePlace>& t)
+  {
+    const double length = tol::length;
+    double       share  = share_ / 4;
+    for (int guard = 0;; ++guard)
+    {
+      checkCancelled(op_);
+      const CreasePlace& last  = path.back();
+      const double       delta = last[2] - last[0];
+      const CreaseJet    here(sheet_, last);
+      if (delta * std::max(here.ua.Magnitude(), length) <= length)
+        return true;
+      if (guard > 1 << 16)
+        return false;
+      const double target = delta * (1 - share);
+      CreasePlace  x      = last;
+      if (path.size() >= 2)
+      {
+        const CreasePlace& before = path[path.size() - 2];
+        const double       f      = (target - delta) / (delta - (before[2] - before[0]));
+        for (int k = 0; k < 4; ++k)
+          x[k] += (last[k] - before[k]) * f;
+      }
+      else if (t)
+      {
+        const double opening = (*t)[2] / w_[2] - (*t)[0] / w_[0];
+        if (!(std::abs(opening) > 0))
+          return false;
+        for (int k = 0; k < 4; ++k)
+          x[k] += (*t)[k] / w_[k] * (target - delta) / opening;
+      }
+      x[2]              = x[0] + target;
+      const bool solved = solveHeld(sheet_, x, 4);
+      if (!solved || !inside(x))
+      {
+        share /= 2;
+        if (share < 1e-6)
+          return false;
+        continue;
+      }
+      path.push_back(x);
+      share = std::min(share_, share * 1.5);
+    }
+  }
+
+  //! Pseudo-arclength steps along `t` from the path's place, past the widest gap, to where the gap
+  //! is `narrow` again and closing.
+  bool across(std::vector<CreasePlace>& path, CreasePlace t, double narrow)
+  {
+    double h = reach_;
+    bool         widest = false;
+    for (int guard = 0;; ++guard)
+    {
+      checkCancelled(op_);
+      if (guard > 1 << 16 || !(h > reach_ * 1e-9))
+        return false;
+      const CreasePlace& from = path.back();
+      CreasePlace        y0, y;
+      for (int k = 0; k < 4; ++k)
+      {
+        y0[k] = from[k] * w_[k] + h * t[k];
+        y[k]  = y0[k];
+      }
+      const auto [solved, steps] = onPlane(y, y0, t);
+      CreasePlace x;
+      for (int k = 0; k < 4; ++k)
+        x[k] = y[k] / w_[k];
+      CreasePlace next = solved ? creaseDirection(CreaseJet(sheet_, x), w_) : CreasePlace{};
+      double      turn = 0;
+      for (int k = 0; k < 4; ++k)
+        turn += next[k] * t[k];
+      // A step that does not converge, or turns the direction by more than a right angle's
+      // half (a branch jumped), is halved.
+      if (!solved || std::abs(turn) < std::sqrt(0.5))
+      {
+        h /= 2;
+        continue;
+      }
+      if (!inside(x))
+        return false;
+      if (turn < 0)
+        for (double& v : next)
+          v = -v;
+      const double gap = x[2] - x[0], before = from[2] - from[0];
+      widest = widest || gap < before;
+      path.push_back(x);
+      t = next;
+      if (widest && gap <= narrow)
+        return true;
+      if (steps <= 3)
+        h = std::min(h * 1.5, reach_);
+    }
+  }
+
+  Handle(Geom_BSplineSurface) sheet_;
+  double                      lo_, hi_;
+  const char*                 op_;
+  CreasePlace                 w_{};
+  double                      share_ = 0.25, reach_ = 0;
+};
+
+} // namespace
+
+std::vector<std::shared_ptr<const Crease>> crossings(const Rail&   rail,
+                                                     Stations&     stations,
+                                                     const Fitted& fitted)
+{
+  const char* op     = rail.op;
+  const auto  refuse = [&] {
+    fail(op,
+         unsupported_geometry,
+         "the blend crosses itself between its contacts, where the balls' path bends more "
+         "tightly than the ball, which the blend does not trim yet",
+         {rail.edge},
+         FailureKind::Curvature);
+  };
+  const Handle(Geom_BSplineSurface)& sheet = fitted.blend;
+  const double                       lo = rail.u(rail.first), hi = rail.u(rail.last);
+  // Where S_u turns against the way the ball rolls (checkCrossing's samples): the folds.
+  constexpr int                       along = 64, across = 8;
+  std::vector<std::array<double, across + 1>> turn(along + 1);
+  std::vector<bool>                           known(along + 1, false);
+  for (int i = 0; i <= along; ++i)
+  {
+    Station s;
+    if (!stations.at(rail.t(double(i) / along), s))
+      continue;
+    known[i] = true;
+    for (int j = 1; j < across; ++j)
+    {
+      gp_Pnt p;
+      gp_Vec du, dv;
+      sheet->D1(double(i) / along, double(j) / across, p, du, dv);
+      turn[i][j] = du.Magnitude() > 0 ? du.Dot(s.along) / du.Magnitude() : 0;
+    }
+  }
+  const auto folded = [&](int i, int j) {
+    return known[i] && turn[i][j] < -limit::agree - 1e-3;
+  };
+  std::vector<std::shared_ptr<const Crease>> out;
+  std::vector<std::pair<double, double>>     spans; // each crease's [least ra, greatest rb]
+  for (int i0 = 0; i0 <= along;)
+  {
+    const auto any = [&](int i) {
+      for (int j = 1; j < across; ++j)
+        if (folded(i, j))
+          return true;
+      return false;
+    };
+    if (!any(i0))
+    {
+      ++i0;
+      continue;
+    }
+    int i1 = i0;
+    while (i1 + 1 <= along && any(i1 + 1))
+      ++i1;
+    // The fold's deepest sample, and the run of its row that turns back about it.
+    int bi = i0, bj = 1;
+    for (int i = i0; i <= i1; ++i)
+      for (int j = 1; j < across; ++j)
+        if (known[i] && turn[i][j] < turn[bi][bj])
+        {
+          bi = i;
+          bj = j;
+        }
+    i0 = i1 + 1;
+    const double u0 = double(bi) / along, v0 = double(bj) / across;
+    if (std::any_of(spans.begin(), spans.end(), [&](const auto& s) {
+          return s.first < u0 && u0 < s.second;
+        }))
+      continue;
+    int ia = bi, ib = bi;
+    while (ia > 0 && known[ia - 1] && turn[ia - 1][bj] < 0)
+      --ia;
+    while (ib < along && known[ib + 1] && turn[ib + 1][bj] < 0)
+      ++ib;
+    const double a1 = double(ia) / along, b0 = double(ib) / along;
+    if (!(a1 > lo && b0 < hi))
+      refuse();
+    // The section line through the fold before it meets the sheet after it, in reaches about the
+    // turn that double from its own width (as capFolds looks for a contact's loop): the
+    // narrowest such meeting is the crease's place on that line.
+    std::optional<CreasePlace> seed;
+    for (double reach = std::max(b0 - a1, 1.0 / along);; reach *= 2)
+    {
+      const double a0 = std::max(lo, a1 - reach), b1 = std::min(hi, b0 + reach);
+      if (a0 < a1 && b0 < b1)
+      {
+        const GeomAPI_IntCS meet(new Geom_TrimmedCurve(sheet->VIso(v0), a0, a1),
+                                 new Geom_RectangularTrimmedSurface(sheet, b0, b1, 0.0, 1.0));
+        if (meet.IsDone())
+          for (int k = 1; k <= meet.NbPoints(); ++k)
+          {
+            double ub, vb, ua;
+            meet.Parameters(k, ub, vb, ua);
+            if (ua < ub && (!seed || ub - ua < (*seed)[2] - (*seed)[0]))
+              seed = CreasePlace{ua, v0, ub, vb};
+          }
+      }
+      if (seed || (a0 <= lo && b1 >= hi))
+        break;
+    }
+    if (!seed)
+      refuse();
+    CreaseTrace trace(sheet, lo, hi, op);
+    const auto  path = trace.trace(*seed);
+    if (!path)
+      refuse();
+    std::vector<CreasePlace> places = *path;
+    // Its ends the swallowtail points: the two sections' middle there.
+    for (CreasePlace* end : {&places.front(), &places.back()})
+    {
+      const double u = ((*end)[0] + (*end)[2]) / 2, v = ((*end)[1] + (*end)[3]) / 2;
+      *end           = {u, v, u, v};
+    }
+    if ((places.front()[1] + places.front()[3]) > (places.back()[1] + places.back()[3]))
+      std::reverse(places.begin(), places.end());
+    // The faces meet along the section through each end, from the contact beside it: where the
+    // crease's places cross that section line on either sheet, the faces cannot be cut there.
+    for (int e = 0; e < 2; ++e)
+    {
+      const CreasePlace& end = e == 0 ? places.front() : places.back();
+      const double       u = end[0], v = end[1];
+      for (size_t i = 1; i < places.size(); ++i)
+        for (int side = 0; side < 2; ++side)
+        {
+          const double u0 = places[i - 1][2 * side], u1 = places[i][2 * side];
+          if ((u0 - u) * (u1 - u) >= 0)
+            continue;
+          const double at = places[i - 1][2 * side + 1]
+                            + (places[i][2 * side + 1] - places[i - 1][2 * side + 1]) * (u - u0)
+                                / (u1 - u0);
+          if (e == 0 ? at < v : at > v)
+            refuse();
+        }
+    }
+    // Where a place crosses a knot line of the sheet at which it is C2 or less, the crease is
+    // only as smooth: a cubic through the places is fourth-order accurate only over smooth data
+    // (de Boor, *A Practical Guide to Splines*, 2001, chapter V). The crease is solved there with
+    // that parameter held, and its curves are interpolated piece by piece between such places,
+    // then joined end to end.
+    const auto breaks = [&](bool alongU) {
+      std::vector<double> at;
+      const int           degree = alongU ? sheet->UDegree() : sheet->VDegree();
+      const int           count  = alongU ? sheet->NbUKnots() : sheet->NbVKnots();
+      for (int i = 2; i < count; ++i)
+        if (degree - (alongU ? sheet->UMultiplicity(i) : sheet->VMultiplicity(i)) <= 2)
+          at.push_back(alongU ? sheet->UKnot(i) : sheet->VKnot(i));
+      return at;
+    };
+    const std::vector<double> knots[2] = {breaks(true), breaks(false)};
+    std::vector<CreasePlace>  split    = {places.front()};
+    std::vector<bool>         cut      = {false};
+    for (size_t i = 1; i < places.size(); ++i)
+    {
+      const CreasePlace&                  x = places[i - 1];
+      const CreasePlace&                  y = places[i];
+      std::vector<std::pair<double, int>> crossing; // (share of the step, held parameter)
+      std::vector<double>                 value;
+      for (int c = 0; c < 4; ++c)
+        for (double knot : knots[c % 2])
+          if ((x[c] - knot) * (y[c] - knot) < 0)
+          {
+            crossing.emplace_back((knot - x[c]) / (y[c] - x[c]), c);
+            value.push_back(knot);
+          }
+      std::vector<size_t> order(crossing.size());
+      for (size_t k = 0; k < order.size(); ++k)
+        order[k] = k;
+      std::sort(order.begin(), order.end(), [&](size_t p, size_t q) {
+        return crossing[p].first < crossing[q].first;
+      });
+      for (size_t k : order)
+      {
+        const auto [share, held] = crossing[k];
+        CreasePlace z;
+        for (int c = 0; c < 4; ++c)
+          z[c] = x[c] + (y[c] - x[c]) * share;
+        z[held]           = value[k];
+        const bool solved = solveHeld(sheet, z, held);
+        // Held between the two places, the sections still apart (not the trivial solution
+        // where they are one).
+        bool between = solved && z[2] - z[0] > 0;
+        for (int c = 0; c < 4 && between; ++c)
+          between = z[c] >= std::min(x[c], y[c]) - 1e-9 && z[c] <= std::max(x[c], y[c]) + 1e-9;
+        if (!between)
+          continue;
+        split.push_back(z);
+        cut.push_back(true);
+      }
+      split.push_back(y);
+      cut.push_back(false);
+      // A place exactly on a knot line is a break as it is.
+      for (int c = 0; c < 4 && i + 1 < places.size(); ++c)
+        for (double knot : knots[c % 2])
+          if (y[c] == knot)
+            cut.back() = true;
+    }
+    // One parameter for all three curves: the length along the crease's place before the fold
+    // in the sheet's parameters, each scaled by the sheet's speed there. The two places of the
+    // crease run round one loop in the parameters (where the sections before and after the
+    // fold meet), smooth through the swallowtail points where they join, so that the parameter
+    // curves are smooth in it at the crease's ends, unlike in its length in space.
+    const CreaseJet at(sheet, *seed);
+    const double    su = std::max(at.ua.Magnitude(), at.ub.Magnitude()),
+                 sv    = std::max(at.va.Magnitude(), at.vb.Magnitude());
+    // Interpolated, and spans whose curves part from the sheet by more than the length tolerance
+    // halved by a place solved between, until all are within it (as interpolated() halves a
+    // parameter curve's spans), or until the curves would need more poles than that takes.
+    std::shared_ptr<Crease> crease;
+    while (!crease)
+    {
+      // Places within the parameter's resolution of the one before are one.
+      std::vector<CreasePlace> kept;
+      std::vector<bool>        keptCut;
+      std::vector<double>      params;
+      double                   s = 0;
+      for (size_t i = 0; i < split.size(); ++i)
+      {
+        const CreasePlace& p = split[i];
+        if (!kept.empty())
+        {
+          const double d = std::hypot(su * (p[0] - kept.back()[0]), sv * (p[1] - kept.back()[1]));
+          if (d <= 1e-3 * tol::length)
+          {
+            if (i + 1 == split.size() || cut[i])
+            {
+              kept.back()    = p;
+              keptCut.back() = keptCut.back() || cut[i];
+            }
+            continue;
+          }
+          s += d;
+        }
+        kept.push_back(p);
+        keptCut.push_back(cut[i]);
+        params.push_back(s);
+      }
+      split      = kept;
+      cut        = keptCut;
+      const int m = int(kept.size());
+      if (m < 4 || m > 4096)
+        refuse();
+      auto made = std::make_shared<Crease>();
+      try
+      {
+        std::vector<Handle(Geom_BSplineCurve)>   parts3;
+        std::vector<Handle(Geom2d_BSplineCurve)> partsA, partsB;
+        for (int i0 = 0; i0 + 1 < m;)
+        {
+          int i1 = i0 + 1;
+          while (i1 + 1 < m && !keptCut[i1])
+            ++i1;
+          const int n = i1 - i0 + 1;
+          const Handle(NCollection_HArray1<gp_Pnt>)   p3 = new NCollection_HArray1<gp_Pnt>(1, n);
+          const Handle(NCollection_HArray1<gp_Pnt2d>) pa = new NCollection_HArray1<gp_Pnt2d>(1, n),
+                                                      pb = new NCollection_HArray1<gp_Pnt2d>(1, n);
+          const Handle(NCollection_HArray1<double>)   t  = new NCollection_HArray1<double>(1, n);
+          for (int i = 0; i < n; ++i)
+          {
+            const CreasePlace& q = kept[i0 + i];
+            const CreaseJet    j(sheet, q);
+            p3->SetValue(i + 1, gp_Pnt((j.pa.XYZ() + j.pb.XYZ()) / 2));
+            pa->SetValue(i + 1, gp_Pnt2d(q[0], q[1]));
+            pb->SetValue(i + 1, gp_Pnt2d(q[2], q[3]));
+            t->SetValue(i + 1, params[i0 + i]);
+          }
+          GeomAPI_Interpolate   i3(p3, t, false, tol::parameter);
+          Geom2dAPI_Interpolate ia2(pa, t, false, tol::parameter), ib2(pb, t, false, tol::parameter);
+          i3.Perform();
+          ia2.Perform();
+          ib2.Perform();
+          if (!i3.IsDone() || !ia2.IsDone() || !ib2.IsDone())
+            refuse();
+          parts3.push_back(i3.Curve());
+          partsA.push_back(ia2.Curve());
+          partsB.push_back(ib2.Curve());
+          i0 = i1;
+        }
+        made->curve = endToEnd(parts3, tol::length);
+        made->onA   = endToEnd(partsA, tol::parameter);
+        made->onB   = endToEnd(partsB, tol::parameter);
+        if (made->curve.IsNull() || made->onA.IsNull() || made->onB.IsNull())
+          refuse();
+      }
+      catch (const Standard_Failure&)
+      {
+        refuse();
+      }
+      made->first   = params.front();
+      made->last    = params.back();
+      made->ends[0] = gp_Pnt2d(kept.front()[0], kept.front()[1]);
+      made->ends[1] = gp_Pnt2d(kept.back()[0], kept.back()[1]);
+      // Each span within the length tolerance of both sheets at its quarters.
+      std::vector<CreasePlace> next;
+      std::vector<bool>        nextCut;
+      bool                     within = true;
+      for (int i = 0; i < m; ++i)
+      {
+        next.push_back(kept[i]);
+        nextCut.push_back(keptCut[i]);
+        if (i + 1 == m)
+          break;
+        double worst = 0;
+        for (int q = 1; q < 4; ++q)
+        {
+          const double   tq = params[i] + (params[i + 1] - params[i]) * q / 4;
+          const gp_Pnt   c  = made->curve->Value(tq);
+          const gp_Pnt2d a = made->onA->Value(tq), b = made->onB->Value(tq);
+          worst            = std::max({worst,
+                                       c.Distance(sheet->Value(a.X(), a.Y())),
+                                       c.Distance(sheet->Value(b.X(), b.Y()))});
+        }
+        if (worst <= tol::length)
+          continue;
+        within         = false;
+        const auto mid = trace.middle(kept[i], kept[i + 1]);
+        if (!mid)
+          refuse();
+        next.push_back(*mid);
+        nextCut.push_back(false);
+      }
+      if (within)
+      {
+        crease       = made;
+        double least = 1, most = 0;
+        for (const auto& p : kept)
+        {
+          least = std::min(least, p[0]);
+          most  = std::max(most, p[2]);
+        }
+        spans.emplace_back(least, most);
+      }
+      split = next;
+      cut   = nextCut;
+    }
+    out.push_back(crease);
+  }
+  return out;
 }
 
 } // namespace BRepExt::blending::detail

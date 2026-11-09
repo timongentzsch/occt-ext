@@ -27,6 +27,7 @@ Part of the [operations reference](../operations.md). Each entry gives the const
 - [Over a side narrower than the blend, and a pinched body](#over-a-side-narrower-than-the-blend-and-a-pinched-body)
 - [A run back of no length](#a-run-back-of-no-length)
 - [Where a contact folds on any face](#where-a-contact-folds-on-any-face)
+- [Where a round crosses itself between its contacts](#where-a-round-crosses-itself-between-its-contacts)
 - [Further constructions](#further-constructions)
 - [Unproven choices](#unproven-choices)
 - [Stock counterpart](#stock-counterpart)
@@ -734,6 +735,62 @@ chamfered in all 16 cases: every contact point lies at distance r from the rim w
 point lies beyond r; the removed volume matches the union of the section triangles (Monte Carlo, 2e5 points)
 within 2.5 standard errors (0.6 to 0.8%). The planar-cap chamfers of the trimmed-outline corpus keep their
 distance-field volumes.
+
+### Where a round crosses itself between its contacts
+
+The pipe c + r (cos a N + sin a B) about the
+balls' centre path moves at |c'| (1 - kappa r cos a), so where the path bends more tightly than the
+ball (kappa r > 1) the sheet folds over the middle of its sections while both contacts roll on: the
+cuspidal edges 1 - kappa r cos a = 0 enclose the fold. A round is the boundary of the balls' union,
+the distance set at r from the centre path, as a chamfer is the outer envelope of its sections: the
+plane offset trimmed at its self-intersection is the analogue (Farouki and Neff, *Analytic
+properties of plane offset curves*, CAGD 7 (1990), sections 1 and 4). Over the fold the sheet before
+it meets the sheet after it in a crease S(ra, va) = S(rb, vb), ra < rb, and every section between
+lies inside the union. The crease's two places run round one loop in the sheet's parameters, closed
+at its two ends, the sheet's swallowtail points, where the sections before and after are one and
+which lie inside the sheet; from each end to the contact beside it the two sheets are one section,
+so the blend is cut along it. The edge's piece becomes two (a fold whose joint carries the crease),
+each on its own copy of the surface, and each face's end is three edges: the section through one
+end, the crease (G0), the section through the other. Further cuts along smooth sections are not
+needed: the two faces are the fewest the crease allows.
+
+Construction (Blend::sheets through checkCrossing, crossings; Attach::crossingFold). The fold is
+read where S_u turns against the rolling direction on 65 x 7 samples. On the section line v = v0 of
+its deepest sample, the sheet before the fold meets the sheet after it (GeomAPI_IntCS) in reaches
+about the fold that double from its width, as a cap's loop is found; the narrowest meeting seeds the
+crease. From there it is traced towards the end where the gap rb - ra closes, the gap held and cut
+by a share each step (the chamfer's crease, Attach::creaseFold), to where the two sections lie
+within the length tolerance of each other; towards the other end by pseudo-arclength steps (the
+null vector of the 3 x 4 Jacobian by its signed minors; Allgower and Georg, *Introduction to
+Numerical Continuation Methods*, 2003, chapters 2 and 6) past the widest gap, then closed the same
+way. Near an end the held-gap system's least singular values fall with the gap; they are kept down
+to rounding (the SVD's default cut-off at 1e-6 of the largest left those directions to the step's
+prediction: the crease's end moved with the step size by 3e-5 of the sheet's u, and a face took in
+4e-4 mm of the fold). The crease's three curves share one parameter, the length along its places
+before the fold in the sheet's parameters (scaled by the sheet's speeds there): the loop is smooth
+through its ends, unlike the crease's length in space, in which the places go as its square root.
+Where a place crosses a knot line at which the sheet is C2 or less (the fit's C1 knots at support
+breaks, the C0 join of a section's two arcs) the crease is solved there with that parameter held,
+and the curves are interpolated piecewise between such places and joined: a cubic is
+fourth-order accurate only on smooth data (de Boor, *A Practical Guide to Splines*, 2001, chapter
+V). A span whose curves part from the sheet by more than the length tolerance is halved by a place
+solved on the plane across its chord, as interpolated() halves a parameter curve's spans. Refused,
+with the earlier message, where the crease leaves the piece, a place crosses the section through an
+end (the faces cannot be cut there), or the curves would need more than 4096 places. Other laws keep
+the refusal: their sections are not the balls', so the union does not define them, and a crease
+inside a G2 blend would break the curvature continuity it is asked for.
+
+Unproven choices: a place found between two must lie within half their chord of its middle and keep
+a gap of at least a quarter of the wider of theirs; the first arclength step is an eighth of the
+seed's gap, growing by 1.5 up to it; a step turning the direction by more than 45 degrees is halved.
+Measured on a torus fused with a B-spline surface skinned through three ovals, along their concave groove (kappa r up to 1.35 at
+distance 1): rounds at distance 0.98, 1 and 1.02, single edge and tangent chain, are made with 14
+faces where they were refused; every tessellation point of their blend faces (4951 to 5648) lies at
+distance r from the centre path within 5.0e-7 mm (the tessellation's own error) and none nearer, and
+every contact's ball is r from both supports within 2.8e-8 mm. In a box of side 0.5 about the
+crease, clear of the supports, the result's volume matches the distance set's, integrated by
+columns: they differ by 1.8e-4 and 9.2e-5 of it at 60 x 60 and 100 x 100 columns, which extrapolates
+to agreement. The rounds at 0.9 and 0.95 are unchanged.
 
 ### Further constructions
 

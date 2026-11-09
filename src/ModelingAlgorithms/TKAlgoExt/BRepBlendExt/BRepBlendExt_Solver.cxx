@@ -1790,17 +1790,25 @@ const std::optional<Far>& Blend::farOf(const Rail& rail, int side)
 //! along a path that bends more tightly than the ball (a pipe surface c + r (cos a N + sin a B)
 //! moves along the path at |c'| (1 - kappa r cos a), which changes sign there), so its sections
 //! run back against the way the balls roll. Read off the sheet: S_u against the station's rolling
-//! direction, at 65 x 7 places; where it turns against it, the surface has folded. Trimming the
-//! blend there is not done yet.
-static void checkCrossing(const Rail& rail, Stations& stations, const Fitted& fitted)
+//! direction, at 65 x 7 places; where it turns against it, the surface has folded. A round's sheet
+//! is the balls' envelope, and the blend the boundary of the balls' union, which is the sheet
+//! trimmed where it crosses itself (Farouki and Neff, *Analytic properties of plane offset
+//! curves*, CAGD 7 (1990), on the trimmed offset): its creases are returned (crossings). Other
+//! laws' sections are not the balls', and are refused there.
+static std::vector<std::shared_ptr<const Crease>> checkCrossing(const Rail& rail,
+                                                                Stations&   stations,
+                                                                const Fitted& fitted)
 {
   if (fitted.blend.IsNull())
-    return;
+    return {};
   // Where a contact runs back, its loop is patched or refused as a fold of the contact
   // (capFolds, checkFold): this is the crossing between contacts that both roll on.
   Dips dips{rail, fitted};
   if (runsBack(dips))
-    return;
+    return {};
+  const bool round = rail.law == Law::Conic && std::abs(rail.rho - 0.5) < limit::equal
+                     && std::abs(rail.s[0].distance - rail.s[1].distance)
+                          < limit::equal * rail.scale;
   constexpr int along = 64, across = 8;
   for (int i = 0; i <= along; ++i)
   {
@@ -1814,14 +1822,26 @@ static void checkCrossing(const Rail& rail, Stations& stations, const Fitted& fi
       gp_Vec du, dv;
       fitted.blend->D1(u, double(j) / across, p, du, dv);
       if (du.Dot(s.along) < -limit::agree * du.Magnitude() - 1e-3 * du.Magnitude())
+      {
+        // A crease that cannot be traced within the piece is refused as before.
+        if (round)
+          try
+          {
+            return crossings(rail, stations, fitted);
+          }
+          catch (const Standard_Failure&)
+          {
+          }
         fail(rail.op,
              unsupported_geometry,
              "the blend crosses itself between its contacts, where the balls' path bends more "
              "tightly than the ball, which the blend does not trim yet",
              {rail.edge},
              FailureKind::Curvature);
+      }
     }
   }
+  return {};
 }
 
 //! Whether a conic section of the rail turns by more than 120 degrees somewhere along its edge
@@ -2762,6 +2782,8 @@ void Blend::sheets()
   // there and its second part rolls on that face (the support sequence).
   seeds.assign(pieces.size(), std::nullopt);
   std::vector<std::pair<int, std::vector<Fold>>> folds;
+  // Each piece's creases where its round crosses itself between its contacts, from its last fit.
+  std::vector<std::vector<std::shared_ptr<const Crease>>> creased;
   // Whether a contact that runs back is left to the caller: taken by neither a fold nor a loop
   // across a joint.
   const auto capFoldsOf = [&](int k, Dips& dips) {
@@ -2857,6 +2879,8 @@ void Blend::sheets()
     };
     for (int attempt = 0; attempt < 2; ++attempt)
     {
+      creased.resize(pieces.size());
+      creased[k].clear();
       Stations stations(piece.rail);
       // No ball's plane passes through the edge's points somewhere along it (past a bend
       // tighter than the ball, where the contact on a cap folds): the balls are found through
@@ -2932,7 +2956,7 @@ void Blend::sheets()
         }
         piece.sheet = exact ? *exact : Sheet{piece.fitted.blend};
         if (!exact)
-          checkCrossing(piece.rail, stations, piece.fitted);
+          creased[k] = checkCrossing(piece.rail, stations, piece.fitted);
       }
       const bool onCliff = piece.rail.s[0].cliffCurve || piece.rail.s[1].cliffCurve
                            || !piece.rail.s[0].trim.IsNull() || !piece.rail.s[1].trim.IsNull();
@@ -3509,6 +3533,31 @@ void Blend::sheets()
       attempt = -1;
     }
   }
+  // Where a round crosses itself between its contacts, the edge's blend is cut where the sheets
+  // before and after the fold meet (Attach::crossingFold): its parts end at the sections through
+  // the crease's ends, the crease between them.
+  creased.resize(pieces.size());
+  for (int k = 0; k < int(pieces.size()); ++k)
+  {
+    if (creased[k].empty())
+      continue;
+    auto found = std::find_if(folds.begin(), folds.end(), [&](const auto& f) {
+      return f.first == k;
+    });
+    if (found == folds.end())
+      found = folds.insert(folds.end(), {k, {}});
+    for (const auto& crease : creased[k])
+    {
+      const double a = crease->ends[0].X(), b = crease->ends[1].X();
+      found->second.push_back(Fold{-1, std::min(a, b), std::max(a, b), crease});
+    }
+    std::sort(found->second.begin(), found->second.end(), [](const Fold& x, const Fold& y) {
+      return x.from < y.from;
+    });
+    for (size_t i = 1; i < found->second.size(); ++i)
+      if (found->second[i].from <= found->second[i - 1].to)
+        refuseFold(k, "loops where a contact folds overlap");
+  }
   crossFolds(folds);
   // Where a contact on a flat cap folds over itself, the edge's blend is cut at the two ends of
   // each loop, where the balls are one, and the loop is patched (Attach::fold): a piece on the
@@ -3534,8 +3583,8 @@ void Blend::sheets()
       second.sheet.surface = second.fitted.blend;
       const int  index     = int(pieces.size());
       const auto outer     = pieces[k].joint[1];
-      first.joint[1]       = {Meets::Fold, index, 0, false, fold.side, {}};
-      second.joint[0]      = {Meets::Fold, k, 1, false, fold.side, {}};
+      first.joint[1]       = {Meets::Fold, index, 0, false, fold.side, {}, fold.crease};
+      second.joint[0]      = {Meets::Fold, k, 1, false, fold.side, {}, fold.crease};
       pieces[k]            = first;
       pieces.push_back(second);
       seeds.push_back(std::nullopt);

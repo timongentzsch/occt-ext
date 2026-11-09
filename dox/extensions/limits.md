@@ -18,8 +18,9 @@ itself. A contact that crosses itself is now found in its face's parameters on a
 crossing: a round's loop is patched by its ball, and a chamfer's two sheets meet in their crease (measured on
 the slanted rims of a plate, leaning 70 to 85 degrees: all 16 cases chamfered).
 
-A spine that bends more tightly than the ball still meets the interior-crossing check, which refuses the
-self-crossing envelope by name; that trimming is not built. A fixed-contact conic replacement on a cylindrical
+Where the spine bends more tightly than the ball, a round's sheet crosses itself between its contacts and is
+trimmed along that crossing to the balls' union (see [the section](operations/BRepBlendExt.md#where-a-round-crosses-itself-between-its-contacts));
+other laws are still refused there by name. A fixed-contact conic replacement on a cylindrical
 cavity and transverse plane retains the envelope outside its crossing sector; continuous spline and embedding
 certificates for it remain open (see [the conic-window section](operations/BRepBlendExt.md#fixed-contact-conic-windows)).
 

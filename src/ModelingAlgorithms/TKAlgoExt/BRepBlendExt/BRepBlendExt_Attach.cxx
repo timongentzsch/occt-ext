@@ -73,6 +73,7 @@ struct Attach
   struct Folded;
   Handle(Geom_BSplineSurface) ballPatch(const Folded& f, int nv);
   void                             creaseFold(int a, int ea, int b, int eb);
+  void                             crossingFold(int a, int ea, int b, int eb);
   std::optional<TopoDS_Face>  ballFace(Folded&                            f,
                                        const Handle(Geom_BSplineSurface)& surface,
                                        int                                nv);
@@ -1051,6 +1052,8 @@ void Attach::chainEnds()
 //! runs on end, cut back to it as at any joint.
 void Attach::fold(int a, int ea, int b, int eb)
 {
+  if (pieces[a].joint[ea].crease)
+    return crossingFold(a, ea, b, eb);
   if (pieces[a].rail.law == Law::Chamfer)
     return creaseFold(a, ea, b, eb);
   const Piece& one = pieces[a];
@@ -1462,6 +1465,65 @@ void Attach::creaseFold(int a, int ea, int b, int eb)
   section[a][ea] = section[b][eb] = ends.front();
   Folded f{a, ea, b, eb, {}, {}, {creaseEdge, beyond}};
   folded.push_back(f);
+}
+
+//! Where a round crosses itself between its contacts (Fold::crease): piece `a`'s end `ea` and
+//! piece `b`'s end `eb` are the sheet before the fold and after it, each on its own copy of the one
+//! surface. The blend is the boundary of the balls' union, so the two meet along the crease where
+//! the sheet crosses itself, between its swallowtail points P0 and P1, which lies inside the
+//! sheet; from each of those to the contact beside it they meet along the section through it, where
+//! the sheet is one. Each face's end is so
+//! three edges from side 0's contact to side 1's: the section through P0, the crease, the section
+//! through P1 (chain).
+void Attach::crossingFold(int a, int ea, int b, int eb)
+{
+  const Piece&  one    = pieces[a];
+  const Piece&  two    = pieces[b];
+  const Crease& crease = *one.joint[ea].crease;
+  const Sheet&  sa     = one.sheet;
+  const Sheet&  sb     = two.sheet;
+  if (sa.swapped || sb.swapped || sa.alpha != 0 || sa.beta != 1 || sb.alpha != 0 || sb.beta != 1
+      || sa.across[0] != 0 || sa.across[1] != 1 || sb.across[0] != 0 || sb.across[1] != 1)
+    fail(op,
+         no_solution,
+         "the two sides of a blend's crease are not on its fitted sheet",
+         {one.rail.edge});
+  // The sections through the crease's ends, and the contacts' corners there.
+  TopoDS_Vertex ends[2];
+  TopoDS_Edge   sections[2];
+  for (int side = 0; side < 2; ++side)
+  {
+    const gp_Pnt2d& end = crease.ends[side];
+    const double    r   = end.X();
+    builder.MakeVertex(ends[side], crease.curve->Value(side == 0 ? crease.first : crease.last),
+                       tolerance);
+    builder.MakeVertex(corner[a][side][ea], sa.contact(side)->Value(r), tolerance);
+    corner[b][side][eb] = corner[a][side][ea];
+    u[a][side][ea]      = r;
+    u[b][side][eb]      = r;
+    const TopoDS_Vertex& from = side == 0 ? corner[a][0][ea] : ends[1];
+    const TopoDS_Vertex& to   = side == 0 ? ends[0] : corner[a][1][ea];
+    sections[side]            = edgeBetween(sa.section(r),
+                                 from,
+                                 side == 0 ? sa.across[0] : end.Y(),
+                                 to,
+                                 side == 0 ? end.Y() : sa.across[1],
+                                 {{sa.sectionUV(r), sa.surface, TopLoc_Location()},
+                                  {sb.sectionUV(r), sb.surface, TopLoc_Location()}},
+                                 tolerance);
+  }
+  const TopoDS_Edge creaseEdge =
+    edgeBetween(crease.curve,
+                ends[0],
+                crease.first,
+                ends[1],
+                crease.last,
+                {{Handle(Geom2d_Curve)(crease.onA), sa.surface, TopLoc_Location()},
+                 {Handle(Geom2d_Curve)(crease.onB), sb.surface, TopLoc_Location()}},
+                tolerance);
+  chain[a][ea] = chain[b][eb] = {sections[0], creaseEdge, sections[1]};
+  section[a][ea] = section[b][eb] = sections[0];
+  folded.push_back(Folded{a, ea, b, eb, {}, {}, {creaseEdge, sections[0], sections[1]}});
 }
 
 //! The bicubic through a grid of points at uniform parameters in [0, 1] both ways, its knots
@@ -6478,7 +6540,8 @@ void Attach::continuity()
         if (f.a == k && f.ea == end)
         {
           record(f.crease[0], JoinRole::Fold, 0);
-          mark(f.crease[1], blends[f.a], blends[f.b], JoinRole::Joint, smooth);
+          for (size_t i = 1; i < f.crease.size(); ++i)
+            mark(f.crease[i], blends[f.a], blends[f.b], JoinRole::Joint, smooth);
         }
         continue;
       }
