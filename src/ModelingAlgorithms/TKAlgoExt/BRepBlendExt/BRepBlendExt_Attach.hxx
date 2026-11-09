@@ -70,6 +70,25 @@ struct Attach
   void         collisions();
   TopoDS_Shape assemble();
 
+  //! The steps of contacts: one side's contact edge, by kind.
+  void sideContact(int k, int side);
+  //! A notch's: the blend's edge on the face beyond, in the far edge's place.
+  void notchContact(int k, int side);
+  //! A cliff's: on the far edge, now between the blend and the face beyond.
+  void cliffContact(int k, int side);
+  //! One crossing onto other faces of its support's surface: one edge on each face.
+  void passedContact(int k, int side);
+  //! Where ridges take the contact's place: its parts between them; false where there are none.
+  bool ridgedContact(int                         k,
+                     int                         side,
+                     const Handle(Geom_Surface)& support,
+                     const TopLoc_Location&      location);
+  //! The contact on its support, shared by a split's parts on the face, or with another blend.
+  void plainContact(int                         k,
+                    int                         side,
+                    const Handle(Geom_Surface)& support,
+                    const TopLoc_Location&      location);
+
   void fold(int a, int ea, int b, int eb);
   void foldPatches();
   struct Folded;

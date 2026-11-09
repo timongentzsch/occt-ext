@@ -126,6 +126,445 @@ void Attach::ridges()
         }
 }
 
+void Attach::notchContact(int k, int side)
+{
+  const Piece& piece = pieces[k];
+  const Sheet& sheet = piece.sheet;
+  const Side&  notch = piece.rail.s[side];
+  // A notch: the blend's edge on the face beyond, which takes it in the far edge's
+  // place; the narrow face goes whole, with its far edge.
+  const auto&  trim = trimOf(k, side);
+  const double s0 = sheet.rail(u[k][side][0]), s1 = sheet.rail(u[k][side][1]);
+  const auto   closed =
+    std::find_if(rolled.begin(), rolled.end(), [&](const auto& r) { return r.first.first == k; });
+  if (closed != rolled.end())
+    contact[k][side] = rolledEdge(k, side, closed->second);
+  else
+  {
+    checkTrim(k, side, s0, s1);
+    const auto [surface, location] = surfaceOf(notch.trim);
+    const auto onBeyond            = GeomProjLib::Curve2d(trim.curve,
+                                                          std::min(s0, s1),
+                                                          std::max(s0, s1),
+                                                          BRep_Tool::Surface(notch.trim));
+    if (onBeyond.IsNull())
+      fail(op,
+           no_solution,
+           "the blend's edge on the face beyond a narrow face cannot be laid on it",
+           {piece.rail.edge});
+    contact[k][side] =
+      edgeBetween(trim.curve,
+                  corner[k][side][0],
+                  s0,
+                  corner[k][side][1],
+                  s1,
+                  {{trim.onSheet, sheet.surface, {}}, {onBeyond, surface, location}},
+                  tolerance);
+  }
+  if (piece.rail.law == Law::Full || (piece.rail.closed && notch.cliffWhole))
+  {
+    // A full round's contact takes the far edge's place in the face beyond, running
+    // as it ran (round a closed edge the contact is a loop of its own); so does a
+    // closed blend's that uses up its narrow face (a chamfer rolling off a cylinder's
+    // side onto its other cap).
+    editOf(edits, notch.trim)
+      .replace.Bind(notch.trimEdge, sameWay(contact[k][side], notch.trimEdge));
+    removed.push_back(notch.face);
+    swept.push_back(notch.trimEdge);
+    return;
+  }
+  Edit& edit = editOf(edits, notch.trim);
+  edit.bridges.push_back(contact[k][side]);
+  // From a split partway: the far edge is cut back to the crossing, the rest stays.
+  if (splitNotch(k, side))
+    return;
+  edit.replace.Bind(notch.trimEdge, TopoDS_Edge());
+  const auto F0 = trimFar.find({k, side, 0}), F1 = trimFar.find({k, side, 1});
+  if (notch.cliffWhole)
+  {
+    removed.push_back(notch.face);
+    swept.push_back(notch.trimEdge);
+    return;
+  }
+  // The narrow face goes on past an end: it loses the blended edge and the strip, and
+  // the far edge keeps its parts past the ends where the face goes on, in both faces.
+  Edit& onNarrow = editOf(edits, notch.face);
+  onNarrow.replace.Bind(notch.trimEdge, TopoDS_Edge());
+  onNarrow.replace.Bind(piece.rail.edge, TopoDS_Edge());
+  const TopoDS_Edge forward = TopoDS::Edge(notch.trimEdge.Oriented(TopAbs_FORWARD));
+  TopoDS_Vertex     v0, v1;
+  TopExp::Vertices(forward, v0, v1);
+  double     ff, fl;
+  const auto farCurve = BRep_Tool::Curve(forward, ff, fl);
+  for (const auto& at : {F0, F1})
+  {
+    if (at == trimFar.end())
+      continue;
+    const double w = GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(at->second), farCurve, ff, fl)
+                       .LowerDistanceParameter();
+    // The part on the side of the vertex the blend does not reach.
+    const double w0 =
+      GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(corner[k][side][0]), farCurve, ff, fl)
+        .LowerDistanceParameter();
+    const double w1 =
+      GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(corner[k][side][1]), farCurve, ff, fl)
+        .LowerDistanceParameter();
+    const double      inside = (w0 + w1) / 2;
+    const TopoDS_Edge part =
+      inside > w ? trimmed(forward, v1, at->second, w) : trimmed(forward, v0, at->second, w);
+    onNarrow.bridges.push_back(part);
+    edit.bridges.push_back(part);
+  }
+  swept.push_back(notch.trimEdge);
+}
+
+void Attach::cliffContact(int k, int side)
+{
+  const Piece& piece = pieces[k];
+  const Sheet& sheet = piece.sheet;
+  const Side&  cliff = piece.rail.s[side];
+  // A cliff: its far edge, now between the blend and the face beyond, which keeps
+  // it; the narrow face goes whole.
+  const TopoDS_Face beyond       = beyondCliff(cliff);
+  const auto [surface, location] = surfaceOf(beyond);
+  const double s0 = sheet.rail(u[k][side][0]), s1 = sheet.rail(u[k][side][1]);
+  const auto   onBeyond = GeomProjLib::Curve2d(sheet.contact(side),
+                                               std::min(s0, s1),
+                                               std::max(s0, s1),
+                                               BRep_Tool::Surface(beyond));
+  if (beyond.IsNull() || onBeyond.IsNull())
+    fail(op,
+         no_solution,
+         "the blend's contact on the face's far edge cannot be laid on the face beyond",
+         {piece.rail.edge});
+  contact[k][side] =
+    edgeBetween(sheet.contact(side),
+                corner[k][side][0],
+                s0,
+                corner[k][side][1],
+                s1,
+                {{sheet.contactUV(side), sheet.surface, {}}, {onBeyond, surface, location}},
+                tolerance);
+  if (!cliff.cliffWhole)
+  {
+    // The narrow face goes on past the blend: the far edge keeps its parts outside
+    // the blend's in both faces, the blended edge goes from the narrow one, and the
+    // face beyond takes the contact between those parts.
+    double f, l;
+    BRep_Tool::Range(cliff.cliff, f, l);
+    const auto at = [&](const TopoDS_Vertex& v) {
+      return GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(v), cliff.cliffCurve, f, l)
+        .LowerDistanceParameter();
+    };
+    const double         w0 = at(corner[k][side][0]), w1 = at(corner[k][side][1]);
+    const TopoDS_Vertex& low  = w0 < w1 ? corner[k][side][0] : corner[k][side][1];
+    const TopoDS_Vertex& high = w0 < w1 ? corner[k][side][1] : corner[k][side][0];
+    TopoDS_Vertex        v0, v1;
+    TopExp::Vertices(TopoDS::Edge(cliff.cliff.Oriented(TopAbs_FORWARD)), v0, v1);
+    Edit& onNarrow = editOf(edits, cliff.face);
+    Edit& onBeyond = editOf(edits, beyond);
+    onNarrow.replace.Bind(cliff.cliff, TopoDS_Edge());
+    onBeyond.replace.Bind(cliff.cliff, TopoDS_Edge());
+    onNarrow.replace.Bind(piece.rail.edge, TopoDS_Edge());
+    const TopoDS_Edge forward = TopoDS::Edge(cliff.cliff.Oriented(TopAbs_FORWARD));
+    if (!low.IsSame(v0))
+    {
+      const TopoDS_Edge part = trimmed(forward, v1, low, std::min(w0, w1));
+      onNarrow.bridges.push_back(part);
+      onBeyond.bridges.push_back(part);
+    }
+    if (!high.IsSame(v1))
+    {
+      const TopoDS_Edge part = trimmed(forward, v0, high, std::max(w0, w1));
+      onNarrow.bridges.push_back(part);
+      onBeyond.bridges.push_back(part);
+    }
+    onBeyond.bridges.push_back(contact[k][side]);
+    return;
+  }
+  editOf(edits, beyond).replace.Bind(cliff.cliff, sameWay(contact[k][side], cliff.cliff));
+  removed.push_back(cliff.face);
+}
+
+void Attach::passedContact(int k, int side)
+{
+  const Piece& piece = pieces[k];
+  const Sheet& sheet = piece.sheet;
+  if (piece.joint[0].meets == Meets::Split || piece.joint[1].meets == Meets::Split
+      || std::any_of(ridged.begin(), ridged.end(), [&](const Ridge& r) {
+           return (r.k == k && r.sk == side) || (r.m == k && r.sm == side);
+         }))
+    fail(op,
+         unsupported_geometry,
+         "a contact crosses onto another face of its support beside a split or a ridge, "
+         "which the blend does not do yet",
+         {piece.rail.edge});
+  const Handle(Geom2d_Curve) onSupport = alongRail(piece.fitted.contact[side], sheet);
+
+  struct Place
+  {
+    double        u;
+    TopoDS_Vertex at;
+  };
+
+  // The places in order from the start's corner to the end's, and the face after each.
+  std::vector<Place>                            places = {{u[k][side][0], corner[k][side][0]}};
+  std::vector<std::pair<TopoDS_Face, gp_Vec2d>> on;
+  const auto&                                   start = passages[{k, side, 0}];
+  for (auto p = start.rbegin(); p != start.rend(); ++p)
+  {
+    on.push_back({p->face, p->shift});
+    places.push_back({p->u, p->at});
+  }
+  on.push_back({piece.rail.s[side].face, gp_Vec2d()});
+  for (const auto& p : passages[{k, side, 1}])
+  {
+    places.push_back({p.u, p.at});
+    on.push_back({p.face, p.shift});
+  }
+  places.push_back({u[k][side][1], corner[k][side][1]});
+  std::vector<TopoDS_Edge>& along = runs[{k, side}];
+  for (size_t i = 0; i < on.size(); ++i)
+  {
+    const double s0 = sheet.rail(places[i].u), s1 = sheet.rail(places[i + 1].u);
+    const auto& [face, shift] = on[i];
+    const Handle(Geom2d_Curve) laid =
+      shift.SquareMagnitude() == 0 ? onSupport
+                                   : Handle(Geom2d_Curve)::DownCast(onSupport->Translated(-shift));
+    const bool own              = face.IsSame(piece.rail.s[side].face);
+    const auto [surface, place] = surfaceOf(face);
+    if (own && piece.rail.parameterSupports && !contactWithinFace(face, laid, s0, s1))
+      fail(op,
+           unsupported_geometry,
+           "a retained blend contact lies outside its finite support",
+           {piece.rail.edge});
+    const TopoDS_Edge part =
+      edgeBetween(sheet.contact(side),
+                  places[i].at,
+                  s0,
+                  places[i + 1].at,
+                  s1,
+                  {{sheet.contactUV(side), sheet.surface, {}}, {laid, surface, place}},
+                  tolerance);
+    Edit& edit = editOf(edits, face);
+    if (own && onFace(piece.rail.edge, edit.face) && !edit.replace.IsBound(piece.rail.edge))
+      edit.replace.Bind(piece.rail.edge, part);
+    else
+      edit.bridges.push_back(part);
+    along.push_back(part);
+    if (own)
+      contact[k][side] = part;
+    else
+      partFace.Bind(part, face);
+  }
+}
+
+bool Attach::ridgedContact(int                         k,
+                           int                         side,
+                           const Handle(Geom_Surface)& support,
+                           const TopLoc_Location&      location)
+{
+  const Piece&                                  piece = pieces[k];
+  const Sheet&                                  sheet = piece.sheet;
+  std::vector<std::pair<double, TopoDS_Vertex>> stops;
+  std::vector<std::pair<double, TopoDS_Edge>>   creases;
+  for (const auto& r : ridged)
+    for (const auto& [p, sp, us] : {std::tuple{r.k, r.sk, r.uk}, std::tuple{r.m, r.sm, r.um}})
+      if (p == k && sp == side)
+      {
+        creases.emplace_back(std::min(us[0], us[1]), r.edge);
+        stops.emplace_back(us[0], r.at[0]);
+        stops.emplace_back(us[1], r.at[1]);
+      }
+  if (stops.empty())
+    return false;
+  if (piece.joint[0].meets == Meets::Split || piece.joint[1].meets == Meets::Split)
+    fail(op,
+         unsupported_geometry,
+         "the blends of two parts of an outline cross over their cap beside a split, which "
+         "the blend does not do yet",
+         {piece.rail.edge});
+  const bool rising = u[k][side][0] < u[k][side][1];
+  const auto order  = [&](const auto& x, const auto& y) {
+    return rising ? x.first < y.first : x.first > y.first;
+  };
+  std::sort(stops.begin(), stops.end(), order);
+  std::sort(creases.begin(), creases.end(), order);
+  stops.insert(stops.begin(), {u[k][side][0], corner[k][side][0]});
+  stops.push_back({u[k][side][1], corner[k][side][1]});
+  // Every part of the edge's contact on the face is a bridge then: the parts of the
+  // cap they bound are islands of it.
+  Edit& edit = editOf(edits, piece.rail.s[side].face);
+  if (edit.replace.IsBound(piece.rail.edge) && !edit.replace.Find(piece.rail.edge).IsNull())
+    edit.bridges.push_back(TopoDS::Edge(edit.replace.Find(piece.rail.edge)));
+  edit.replace.Bind(piece.rail.edge, TopoDS_Edge());
+  std::vector<TopoDS_Edge>& along = runs[{k, side}];
+  for (size_t i = 0; i + 1 < stops.size(); i += 2)
+  {
+    const double s0 = sheet.rail(stops[i].first), s1 = sheet.rail(stops[i + 1].first);
+    if (piece.rail.parameterSupports
+        && !contactWithinFace(piece.rail.s[side].face,
+                              alongRail(piece.fitted.contact[side], sheet),
+                              s0,
+                              s1))
+      fail(op,
+           unsupported_geometry,
+           "a retained blend contact lies outside its finite support",
+           {piece.rail.edge});
+    const TopoDS_Edge part =
+      edgeBetween(sheet.contact(side),
+                  stops[i].second,
+                  s0,
+                  stops[i + 1].second,
+                  s1,
+                  {{sheet.contactUV(side), sheet.surface, {}},
+                   {alongRail(piece.fitted.contact[side], sheet), support, location}},
+                  tolerance);
+    edit.bridges.push_back(part);
+    along.push_back(part);
+    if (i / 2 < creases.size())
+      along.push_back(creases[i / 2].second);
+  }
+  contact[k][side] = along.front();
+  return true;
+}
+
+void Attach::plainContact(int                         k,
+                          int                         side,
+                          const Handle(Geom_Surface)& support,
+                          const TopLoc_Location&      location)
+{
+  const Piece& piece = pieces[k];
+  const Sheet& sheet = piece.sheet;
+  // The parts of a split edge that stay on this face share one contact, as their face
+  // is one: from the first part's start to the last one on the face, its curve on the
+  // face the parts' curves joined.
+  // A seam of the face, which it crosses on itself, ends its edge there all the same.
+  std::vector<int> run = {k};
+  while (
+    pieces[run.back()].joint[1].meets == Meets::Split
+    && pieces[pieces[run.back()].joint[1].piece].rail.s[side].face.IsSame(piece.rail.s[side].face)
+    && !BRep_Tool::IsClosed(pieces[run.back()].joint[1].crossed, piece.rail.s[side].face)
+    && pieces[pieces[run.back()].joint[1].piece].rail.s[side].trim.IsNull())
+    run.push_back(pieces[run.back()].joint[1].piece);
+  const int    last = run.back();
+  TopoDS_Edge& edge = contact[k][side];
+  // On an exact sheet the contact is a line or a circle: laid on the support exactly where
+  // OpenCascade can, else the fit's feet.
+  Handle(Geom2d_Curve) onSupport = alongRail(piece.fitted.contact[side], sheet);
+  if (run.size() > 1)
+  {
+    std::vector<Handle(Geom2d_BSplineCurve)> parts;
+    for (int m : run)
+      parts.push_back(alongRail(pieces[m].fitted.contact[side], pieces[m].sheet));
+    onSupport = endToEnd(parts, piece.rail.resolved(limit::together));
+    if (onSupport.IsNull())
+      fail(op,
+           no_solution,
+           "the contacts of a split blend's parts do not join on their face",
+           {piece.rail.edge});
+  }
+  if (piece.exact())
+  {
+    const double s0 = sheet.rail(u[k][side][0]), s1 = sheet.rail(u[k][side][1]);
+    const auto   exact =
+      GeomProjLib::Curve2d(sheet.contact(side), s0, s1, piece.rail.s[side].surface);
+    if (!exact.IsNull())
+      onSupport = aligned(exact, s0, onSupport->Value(s0), piece.rail.s[side].surface);
+  }
+  const double s0 = sheet.rail(u[k][side][0]), s1 = pieces[last].sheet.rail(u[last][side][1]);
+  if (piece.rail.parameterSupports
+      && !contactWithinFace(piece.rail.s[side].face, onSupport, s0, s1))
+    fail(op,
+         unsupported_geometry,
+         "a retained blend contact lies outside its finite support",
+         {piece.rail.edge});
+  // Where another blend's contact on this face is this one, the face between them is
+  // used up (a box rounded to half its width): the two blends meet along it.
+  if (const auto same = sharedContact(piece.rail.s[side].face,
+                                      corner[k][side][0],
+                                      corner[last][side][1],
+                                      sheet.contact(side)->Value((s0 + s1) / 2),
+                                      piece.rail.scale);
+      !same.IsNull())
+  {
+    double     f, l;
+    const auto curve   = BRep_Tool::Curve(same, f, l);
+    const auto onSheet = laidOn(curve, f, l, sheet.surface);
+    if (onSheet.IsNull())
+      fail(op,
+           no_solution,
+           "a contact two blends share cannot be laid on the second",
+           {piece.rail.edge});
+    builder.UpdateEdge(same, onSheet, sheet.surface, TopLoc_Location(), tolerance);
+    builder.Range(same, f, l);
+    for (int m : run)
+      contact[m][side] = same;
+    usedUp.Add(piece.rail.s[side].face);
+    return;
+  }
+  edge = edgeBetween(sheet.contact(side),
+                     corner[k][side][0],
+                     s0,
+                     corner[last][side][1],
+                     s1,
+                     {{sheet.contactUV(side), sheet.surface, {}}, {onSupport, support, location}},
+                     tolerance);
+  for (int m : run)
+    contact[m][side] = edge;
+  // In a face beside the edge it takes the edge's place; in a face the contact crossed onto,
+  // or beside a part of the edge already taken, it closes the gap it leaves.
+  Edit& edit = editOf(edits, piece.rail.s[side].face);
+  if (onFace(piece.rail.edge, edit.face) && !edit.replace.IsBound(piece.rail.edge))
+    edit.replace.Bind(piece.rail.edge, edge);
+  else
+    edit.bridges.push_back(edge);
+}
+
+void Attach::sideContact(int k, int side)
+{
+  if (!contact[k][side].IsNull())
+    return; // one edge for parts of a split already made
+  if (vanished(k))
+    return;
+  const Piece& piece = pieces[k];
+  // A part that a split's earlier part runs on into on this face is made with that one's.
+  if (const auto& before = piece.joint[0];
+      before.meets == Meets::Split
+      && pieces[before.piece].rail.s[side].face.IsSame(piece.rail.s[side].face)
+      && !BRep_Tool::IsClosed(before.crossed, piece.rail.s[side].face)
+      && piece.rail.s[side].trim.IsNull() && pieces[before.piece].rail.s[side].trim.IsNull())
+    return;
+  if (!piece.rail.s[side].trim.IsNull())
+  {
+    // A notch: the blend's edge on the face beyond, which takes it in the far edge's
+    // place; the narrow face goes whole, with its far edge.
+    notchContact(k, side);
+    return;
+  }
+  if (piece.rail.s[side].cliffCurve)
+  {
+    // A cliff: its far edge, now between the blend and the face beyond, which keeps
+    // it; the narrow face goes whole.
+    cliffContact(k, side);
+    return;
+  }
+  const auto [support, location] = surfaceOf(piece.rail.s[side].face);
+  // A contact that crosses onto other faces of its support's surface at an end: one edge
+  // on each face, from corner to corner, as one run along the side.
+  if (passages.count({k, side, 0}) || passages.count({k, side, 1}))
+  {
+    passedContact(k, side);
+    return;
+  }
+  // Where ridges take the contact's place: its parts between them, each an edge of the
+  // support, which bridge the cap's gaps (two islands of it where a neck closes), and the
+  // ridges, as one run along the side.
+  if (ridgedContact(k, side, support, location))
+    return;
+  plainContact(k, side, support, location);
+}
+
 void Attach::contacts()
 {
   for (const auto& piece : pieces)
@@ -154,399 +593,7 @@ void Attach::contacts()
   // takes the edge's place in its support.
   for (int k = 0; k < n; ++k)
     for (int side = 0; side < 2; ++side)
-    {
-      if (!contact[k][side].IsNull())
-        continue; // one edge for parts of a split already made
-      if (vanished(k))
-        continue;
-      const Piece& piece = pieces[k];
-      // A part that a split's earlier part runs on into on this face is made with that one's.
-      if (const auto& before = piece.joint[0];
-          before.meets == Meets::Split
-          && pieces[before.piece].rail.s[side].face.IsSame(piece.rail.s[side].face)
-          && !BRep_Tool::IsClosed(before.crossed, piece.rail.s[side].face)
-          && piece.rail.s[side].trim.IsNull() && pieces[before.piece].rail.s[side].trim.IsNull())
-        continue;
-      const Sheet& sheet = piece.sheet;
-      if (const Side& notch = piece.rail.s[side]; !notch.trim.IsNull())
-      {
-        // A notch: the blend's edge on the face beyond, which takes it in the far edge's
-        // place; the narrow face goes whole, with its far edge.
-        const auto&  trim = trimOf(k, side);
-        const double s0 = sheet.rail(u[k][side][0]), s1 = sheet.rail(u[k][side][1]);
-        const auto   closed = std::find_if(rolled.begin(), rolled.end(), [&](const auto& r) {
-          return r.first.first == k;
-        });
-        if (closed != rolled.end())
-          contact[k][side] = rolledEdge(k, side, closed->second);
-        else
-        {
-          checkTrim(k, side, s0, s1);
-          const auto [surface, location] = surfaceOf(notch.trim);
-          const auto onBeyond            = GeomProjLib::Curve2d(trim.curve,
-                                                     std::min(s0, s1),
-                                                     std::max(s0, s1),
-                                                     BRep_Tool::Surface(notch.trim));
-          if (onBeyond.IsNull())
-            fail(op,
-                 no_solution,
-                 "the blend's edge on the face beyond a narrow face cannot be laid on it",
-                 {piece.rail.edge});
-          contact[k][side] =
-            edgeBetween(trim.curve,
-                        corner[k][side][0],
-                        s0,
-                        corner[k][side][1],
-                        s1,
-                        {{trim.onSheet, sheet.surface, {}}, {onBeyond, surface, location}},
-                        tolerance);
-        }
-        if (piece.rail.law == Law::Full || (piece.rail.closed && notch.cliffWhole))
-        {
-          // A full round's contact takes the far edge's place in the face beyond, running
-          // as it ran (round a closed edge the contact is a loop of its own); so does a
-          // closed blend's that uses up its narrow face (a chamfer rolling off a cylinder's
-          // side onto its other cap).
-          editOf(edits, notch.trim)
-            .replace.Bind(notch.trimEdge, sameWay(contact[k][side], notch.trimEdge));
-          removed.push_back(notch.face);
-          swept.push_back(notch.trimEdge);
-          continue;
-        }
-        Edit& edit = editOf(edits, notch.trim);
-        edit.bridges.push_back(contact[k][side]);
-        // From a split partway: the far edge is cut back to the crossing, the rest stays.
-        if (splitNotch(k, side))
-          continue;
-        edit.replace.Bind(notch.trimEdge, TopoDS_Edge());
-        const auto F0 = trimFar.find({k, side, 0}), F1 = trimFar.find({k, side, 1});
-        if (notch.cliffWhole)
-        {
-          removed.push_back(notch.face);
-          swept.push_back(notch.trimEdge);
-          continue;
-        }
-        // The narrow face goes on past an end: it loses the blended edge and the strip, and
-        // the far edge keeps its parts past the ends where the face goes on, in both faces.
-        Edit& onNarrow = editOf(edits, notch.face);
-        onNarrow.replace.Bind(notch.trimEdge, TopoDS_Edge());
-        onNarrow.replace.Bind(piece.rail.edge, TopoDS_Edge());
-        const TopoDS_Edge forward = TopoDS::Edge(notch.trimEdge.Oriented(TopAbs_FORWARD));
-        TopoDS_Vertex     v0, v1;
-        TopExp::Vertices(forward, v0, v1);
-        double     ff, fl;
-        const auto farCurve = BRep_Tool::Curve(forward, ff, fl);
-        for (const auto& at : {F0, F1})
-        {
-          if (at == trimFar.end())
-            continue;
-          const double w = GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(at->second), farCurve, ff, fl)
-                             .LowerDistanceParameter();
-          // The part on the side of the vertex the blend does not reach.
-          const double w0 =
-            GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(corner[k][side][0]), farCurve, ff, fl)
-              .LowerDistanceParameter();
-          const double w1 =
-            GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(corner[k][side][1]), farCurve, ff, fl)
-              .LowerDistanceParameter();
-          const double      inside = (w0 + w1) / 2;
-          const TopoDS_Edge part =
-            inside > w ? trimmed(forward, v1, at->second, w) : trimmed(forward, v0, at->second, w);
-          onNarrow.bridges.push_back(part);
-          edit.bridges.push_back(part);
-        }
-        swept.push_back(notch.trimEdge);
-        continue;
-      }
-      if (const Side& cliff = piece.rail.s[side]; cliff.cliffCurve)
-      {
-        // A cliff: its far edge, now between the blend and the face beyond, which keeps
-        // it; the narrow face goes whole.
-        const TopoDS_Face beyond       = beyondCliff(cliff);
-        const auto [surface, location] = surfaceOf(beyond);
-        const double s0 = sheet.rail(u[k][side][0]), s1 = sheet.rail(u[k][side][1]);
-        const auto   onBeyond = GeomProjLib::Curve2d(sheet.contact(side),
-                                                   std::min(s0, s1),
-                                                   std::max(s0, s1),
-                                                   BRep_Tool::Surface(beyond));
-        if (beyond.IsNull() || onBeyond.IsNull())
-          fail(op,
-               no_solution,
-               "the blend's contact on the face's far edge cannot be laid on the face beyond",
-               {piece.rail.edge});
-        contact[k][side] =
-          edgeBetween(sheet.contact(side),
-                      corner[k][side][0],
-                      s0,
-                      corner[k][side][1],
-                      s1,
-                      {{sheet.contactUV(side), sheet.surface, {}}, {onBeyond, surface, location}},
-                      tolerance);
-        if (!cliff.cliffWhole)
-        {
-          // The narrow face goes on past the blend: the far edge keeps its parts outside
-          // the blend's in both faces, the blended edge goes from the narrow one, and the
-          // face beyond takes the contact between those parts.
-          double f, l;
-          BRep_Tool::Range(cliff.cliff, f, l);
-          const auto at = [&](const TopoDS_Vertex& v) {
-            return GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(v), cliff.cliffCurve, f, l)
-              .LowerDistanceParameter();
-          };
-          const double         w0 = at(corner[k][side][0]), w1 = at(corner[k][side][1]);
-          const TopoDS_Vertex& low  = w0 < w1 ? corner[k][side][0] : corner[k][side][1];
-          const TopoDS_Vertex& high = w0 < w1 ? corner[k][side][1] : corner[k][side][0];
-          TopoDS_Vertex        v0, v1;
-          TopExp::Vertices(TopoDS::Edge(cliff.cliff.Oriented(TopAbs_FORWARD)), v0, v1);
-          Edit& onNarrow = editOf(edits, cliff.face);
-          Edit& onBeyond = editOf(edits, beyond);
-          onNarrow.replace.Bind(cliff.cliff, TopoDS_Edge());
-          onBeyond.replace.Bind(cliff.cliff, TopoDS_Edge());
-          onNarrow.replace.Bind(piece.rail.edge, TopoDS_Edge());
-          const TopoDS_Edge forward = TopoDS::Edge(cliff.cliff.Oriented(TopAbs_FORWARD));
-          if (!low.IsSame(v0))
-          {
-            const TopoDS_Edge part = trimmed(forward, v1, low, std::min(w0, w1));
-            onNarrow.bridges.push_back(part);
-            onBeyond.bridges.push_back(part);
-          }
-          if (!high.IsSame(v1))
-          {
-            const TopoDS_Edge part = trimmed(forward, v0, high, std::max(w0, w1));
-            onNarrow.bridges.push_back(part);
-            onBeyond.bridges.push_back(part);
-          }
-          onBeyond.bridges.push_back(contact[k][side]);
-          continue;
-        }
-        editOf(edits, beyond).replace.Bind(cliff.cliff, sameWay(contact[k][side], cliff.cliff));
-        removed.push_back(cliff.face);
-        continue;
-      }
-      const auto [support, location] = surfaceOf(piece.rail.s[side].face);
-      // A contact that crosses onto other faces of its support's surface at an end: one edge
-      // on each face, from corner to corner, as one run along the side.
-      if (passages.count({k, side, 0}) || passages.count({k, side, 1}))
-      {
-        if (piece.joint[0].meets == Meets::Split || piece.joint[1].meets == Meets::Split
-            || std::any_of(ridged.begin(),
-                           ridged.end(),
-                           [&](const Ridge& r) {
-                             return (r.k == k && r.sk == side) || (r.m == k && r.sm == side);
-                           }))
-          fail(op,
-               unsupported_geometry,
-               "a contact crosses onto another face of its support beside a split or a ridge, "
-               "which the blend does not do yet",
-               {piece.rail.edge});
-        const Handle(Geom2d_Curve) onSupport = alongRail(piece.fitted.contact[side], sheet);
-        struct Place
-        {
-          double        u;
-          TopoDS_Vertex at;
-        };
-        // The places in order from the start's corner to the end's, and the face after each.
-        std::vector<Place>                                   places = {{u[k][side][0], corner[k][side][0]}};
-        std::vector<std::pair<TopoDS_Face, gp_Vec2d>>        on;
-        const auto&                                          start  = passages[{k, side, 0}];
-        for (auto p = start.rbegin(); p != start.rend(); ++p)
-        {
-          on.push_back({p->face, p->shift});
-          places.push_back({p->u, p->at});
-        }
-        on.push_back({piece.rail.s[side].face, gp_Vec2d()});
-        for (const auto& p : passages[{k, side, 1}])
-        {
-          places.push_back({p.u, p.at});
-          on.push_back({p.face, p.shift});
-        }
-        places.push_back({u[k][side][1], corner[k][side][1]});
-        std::vector<TopoDS_Edge>& along = runs[{k, side}];
-        for (size_t i = 0; i < on.size(); ++i)
-        {
-          const double s0 = sheet.rail(places[i].u), s1 = sheet.rail(places[i + 1].u);
-          const auto& [face, shift] = on[i];
-          const Handle(Geom2d_Curve) laid =
-            shift.SquareMagnitude() == 0 ? onSupport
-                                         : Handle(Geom2d_Curve)::DownCast(onSupport->Translated(-shift));
-          const bool own = face.IsSame(piece.rail.s[side].face);
-          const auto [surface, place] = surfaceOf(face);
-          if (own && piece.rail.parameterSupports && !contactWithinFace(face, laid, s0, s1))
-            fail(op,
-                 unsupported_geometry,
-                 "a retained blend contact lies outside its finite support",
-                 {piece.rail.edge});
-          const TopoDS_Edge part =
-            edgeBetween(sheet.contact(side),
-                        places[i].at,
-                        s0,
-                        places[i + 1].at,
-                        s1,
-                        {{sheet.contactUV(side), sheet.surface, {}}, {laid, surface, place}},
-                        tolerance);
-          Edit& edit = editOf(edits, face);
-          if (own && onFace(piece.rail.edge, edit.face) && !edit.replace.IsBound(piece.rail.edge))
-            edit.replace.Bind(piece.rail.edge, part);
-          else
-            edit.bridges.push_back(part);
-          along.push_back(part);
-          if (own)
-            contact[k][side] = part;
-          else
-            partFace.Bind(part, face);
-        }
-        continue;
-      }
-      // Where ridges take the contact's place: its parts between them, each an edge of the
-      // support, which bridge the cap's gaps (two islands of it where a neck closes), and the
-      // ridges, as one run along the side.
-      std::vector<std::pair<double, TopoDS_Vertex>> stops;
-      std::vector<std::pair<double, TopoDS_Edge>>   creases;
-      for (const auto& r : ridged)
-        for (const auto& [p, sp, us] : {std::tuple{r.k, r.sk, r.uk}, std::tuple{r.m, r.sm, r.um}})
-          if (p == k && sp == side)
-          {
-            creases.emplace_back(std::min(us[0], us[1]), r.edge);
-            stops.emplace_back(us[0], r.at[0]);
-            stops.emplace_back(us[1], r.at[1]);
-          }
-      if (!stops.empty())
-      {
-        if (piece.joint[0].meets == Meets::Split || piece.joint[1].meets == Meets::Split)
-          fail(op,
-               unsupported_geometry,
-               "the blends of two parts of an outline cross over their cap beside a split, which "
-               "the blend does not do yet",
-               {piece.rail.edge});
-        const bool rising = u[k][side][0] < u[k][side][1];
-        const auto order  = [&](const auto& x, const auto& y) {
-          return rising ? x.first < y.first : x.first > y.first;
-        };
-        std::sort(stops.begin(), stops.end(), order);
-        std::sort(creases.begin(), creases.end(), order);
-        stops.insert(stops.begin(), {u[k][side][0], corner[k][side][0]});
-        stops.push_back({u[k][side][1], corner[k][side][1]});
-        // Every part of the edge's contact on the face is a bridge then: the parts of the
-        // cap they bound are islands of it.
-        Edit& edit = editOf(edits, piece.rail.s[side].face);
-        if (edit.replace.IsBound(piece.rail.edge) && !edit.replace.Find(piece.rail.edge).IsNull())
-          edit.bridges.push_back(TopoDS::Edge(edit.replace.Find(piece.rail.edge)));
-        edit.replace.Bind(piece.rail.edge, TopoDS_Edge());
-        std::vector<TopoDS_Edge>& along = runs[{k, side}];
-        for (size_t i = 0; i + 1 < stops.size(); i += 2)
-        {
-          const double s0 = sheet.rail(stops[i].first), s1 = sheet.rail(stops[i + 1].first);
-          if (piece.rail.parameterSupports
-              && !contactWithinFace(piece.rail.s[side].face,
-                                    alongRail(piece.fitted.contact[side], sheet),
-                                    s0,
-                                    s1))
-            fail(op,
-                 unsupported_geometry,
-                 "a retained blend contact lies outside its finite support",
-                 {piece.rail.edge});
-          const TopoDS_Edge part =
-            edgeBetween(sheet.contact(side),
-                        stops[i].second,
-                        s0,
-                        stops[i + 1].second,
-                        s1,
-                        {{sheet.contactUV(side), sheet.surface, {}},
-                         {alongRail(piece.fitted.contact[side], sheet), support, location}},
-                        tolerance);
-          edit.bridges.push_back(part);
-          along.push_back(part);
-          if (i / 2 < creases.size())
-            along.push_back(creases[i / 2].second);
-        }
-        contact[k][side] = along.front();
-        continue;
-      }
-      // The parts of a split edge that stay on this face share one contact, as their face
-      // is one: from the first part's start to the last one on the face, its curve on the
-      // face the parts' curves joined.
-      // A seam of the face, which it crosses on itself, ends its edge there all the same.
-      std::vector<int> run = {k};
-      while (pieces[run.back()].joint[1].meets == Meets::Split
-             && pieces[pieces[run.back()].joint[1].piece].rail.s[side].face.IsSame(
-               piece.rail.s[side].face)
-             && !BRep_Tool::IsClosed(pieces[run.back()].joint[1].crossed, piece.rail.s[side].face)
-             && pieces[pieces[run.back()].joint[1].piece].rail.s[side].trim.IsNull())
-        run.push_back(pieces[run.back()].joint[1].piece);
-      const int    last = run.back();
-      TopoDS_Edge& edge = contact[k][side];
-      // On an exact sheet the contact is a line or a circle: laid on the support exactly where
-      // OpenCascade can, else the fit's feet.
-      Handle(Geom2d_Curve) onSupport = alongRail(piece.fitted.contact[side], sheet);
-      if (run.size() > 1)
-      {
-        std::vector<Handle(Geom2d_BSplineCurve)> parts;
-        for (int m : run)
-          parts.push_back(alongRail(pieces[m].fitted.contact[side], pieces[m].sheet));
-        onSupport = endToEnd(parts, piece.rail.resolved(limit::together));
-        if (onSupport.IsNull())
-          fail(op,
-               no_solution,
-               "the contacts of a split blend's parts do not join on their face",
-               {piece.rail.edge});
-      }
-      if (piece.exact())
-      {
-        const double s0 = sheet.rail(u[k][side][0]), s1 = sheet.rail(u[k][side][1]);
-        const auto   exact =
-          GeomProjLib::Curve2d(sheet.contact(side), s0, s1, piece.rail.s[side].surface);
-        if (!exact.IsNull())
-          onSupport = aligned(exact, s0, onSupport->Value(s0), piece.rail.s[side].surface);
-      }
-      const double s0 = sheet.rail(u[k][side][0]), s1 = pieces[last].sheet.rail(u[last][side][1]);
-      if (piece.rail.parameterSupports
-          && !contactWithinFace(piece.rail.s[side].face, onSupport, s0, s1))
-        fail(op,
-             unsupported_geometry,
-             "a retained blend contact lies outside its finite support",
-             {piece.rail.edge});
-      // Where another blend's contact on this face is this one, the face between them is
-      // used up (a box rounded to half its width): the two blends meet along it.
-      if (const auto same = sharedContact(piece.rail.s[side].face,
-                                          corner[k][side][0],
-                                          corner[last][side][1],
-                                          sheet.contact(side)->Value((s0 + s1) / 2),
-                                          piece.rail.scale);
-          !same.IsNull())
-      {
-        double     f, l;
-        const auto curve   = BRep_Tool::Curve(same, f, l);
-        const auto onSheet = laidOn(curve, f, l, sheet.surface);
-        if (onSheet.IsNull())
-          fail(op,
-               no_solution,
-               "a contact two blends share cannot be laid on the second",
-               {piece.rail.edge});
-        builder.UpdateEdge(same, onSheet, sheet.surface, TopLoc_Location(), tolerance);
-        builder.Range(same, f, l);
-        for (int m : run)
-          contact[m][side] = same;
-        usedUp.Add(piece.rail.s[side].face);
-        continue;
-      }
-      edge =
-        edgeBetween(sheet.contact(side),
-                    corner[k][side][0],
-                    s0,
-                    corner[last][side][1],
-                    s1,
-                    {{sheet.contactUV(side), sheet.surface, {}}, {onSupport, support, location}},
-                    tolerance);
-      for (int m : run)
-        contact[m][side] = edge;
-      // In a face beside the edge it takes the edge's place; in a face the contact crossed onto,
-      // or beside a part of the edge already taken, it closes the gap it leaves.
-      Edit& edit = editOf(edits, piece.rail.s[side].face);
-      if (onFace(piece.rail.edge, edit.face) && !edit.replace.IsBound(piece.rail.edge))
-        edit.replace.Bind(piece.rail.edge, edge);
-      else
-        edit.bridges.push_back(edge);
-    }
+      sideContact(k, side);
   // A face used up between the blends goes: each of its edges is a blend's that has no length,
   // or whose contact on it another blend shares.
   for (int k = 0; k < n; ++k)
