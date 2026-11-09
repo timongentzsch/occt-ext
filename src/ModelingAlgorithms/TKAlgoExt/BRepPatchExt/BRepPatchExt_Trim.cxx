@@ -32,6 +32,10 @@ namespace BRepExt::patch_fill
 namespace
 {
 
+//! A knot inserted into a laid curve is merged with one already there within this share of
+//! its parameter range (of at least one). Chosen.
+constexpr double knotMerge = 1e-10;
+
 // Shared pole access keeps private Bezier and nonperiodic B-spline copies on the same
 // frame/budget path. Positive unchanged weights retain the convex-hull displacement bound.
 struct RimPoles
@@ -157,14 +161,14 @@ bool intrinsicOrder(std::vector<Side>& sides, double& perimeter)
       return false;
     centre += side.at(.5).XYZ() * side.length;
     perimeter += side.length;
-    if (side.length > sides[first].length * (1 + 1e-12))
+    if (side.length > sides[first].length * (1 + sameShare))
       first = i;
   }
   if (!(perimeter > 0) || !std::isfinite(perimeter))
     return false;
   // A tied anchor has no unique intrinsic ordering; retain the original path.
   for (size_t i = 0; i < sides.size(); ++i)
-    if (i != first && std::abs(sides[i].length - sides[first].length) <= 1e-12 * perimeter)
+    if (i != first && std::abs(sides[i].length - sides[first].length) <= sameShare * perimeter)
       return false;
   centre /= perimeter;
   if (!finite(centre))
@@ -176,7 +180,7 @@ bool intrinsicOrder(std::vector<Side>& sides, double& perimeter)
   {
     const double a = sides[first].at(f).SquareDistance(middle);
     const double b = sides[first].at(1 - f).SquareDistance(middle);
-    if (std::abs(a - b) > 1e-12 * perimeter * perimeter)
+    if (std::abs(a - b) > sameShare * perimeter * perimeter)
     {
       reverse  = b > a;
       directed = true;
@@ -238,7 +242,7 @@ std::optional<gp_Trsf> localSplineRim(Asked& asked, bool* copyBudgetMiss)
                   frame.y.Z(),
                   frame.z.Z(),
                   frame.origin.Z());
-  const double allowance = asked.limits.g0 * 1e-6;
+  const double allowance = asked.limits.g0 * privateCopyShare;
   if (!(allowance > 0) || !std::isfinite(allowance))
     return std::nullopt;
   const double step = std::min(std::ldexp(1.0, std::ilogb(perimeter) - 40), allowance);
@@ -430,7 +434,7 @@ void heldKnots(const occ::handle<Geom2d_BSplineCurve>& flat,
       knots.SetValue(1, t);
       NCollection_Array1<int> times(1, 1);
       times.SetValue(1, flat->Degree() - spline->Degree() + spline->Multiplicity(k));
-      flat->InsertKnots(knots, times, 1e-10 * std::max(1.0, last - first), false);
+      flat->InsertKnots(knots, times, knotMerge * std::max(1.0, last - first), false);
     }
   }
 }

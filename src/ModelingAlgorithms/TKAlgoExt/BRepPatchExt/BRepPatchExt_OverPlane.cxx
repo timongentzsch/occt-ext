@@ -27,6 +27,17 @@ namespace BRepExt::patch_fill
 namespace
 {
 
+//! The share of the positional tolerance to which the rim is projected onto a section
+//! reference, and to which the section's pieces are joined end to end. Chosen.
+constexpr double sectionProjection = 1e-3, joinShare = 1e-6;
+
+//! A turned frame replaces the best so far only where it is better by more than this, so that
+//! rounding does not choose between equals. Chosen.
+constexpr double clearlyBetter = 1e-9;
+
+//! Two rounds have the same radius within this share of it. Chosen.
+constexpr double sameRadius = 1e-9;
+
 //! How much less the surface moved onto its curves must bend than the one fitted at the
 //! tolerance to be kept instead.
 constexpr double clearlyFairer = 0.75;
@@ -155,7 +166,7 @@ std::optional<Built> sweptReference(const Asked&                          asked,
                                                                            cross->Degree());
   ShapeAnalysis_Surface                  project(surface);
   const auto                             layout = [&](const gp_Pnt& p) {
-    return project.ValueOfUV(p, asked.limits.g0 * 1e-3).XY();
+    return project.ValueOfUV(p, asked.limits.g0 * sectionProjection).XY();
   };
   std::vector<Rim> traces(asked.sides.size());
   for (size_t i = 0; i < asked.sides.size(); ++i)
@@ -249,9 +260,12 @@ std::optional<Built> sectionReference(const Asked& asked, const Frame& frame)
     db = d1;
   profile->IncreaseDegree(5);
   GeomConvert_CompCurveToBSplineCurve joined(hermiteSpan(a, da, ea, g0, d0, e0, h0));
-  if (!joined.Add(profile, asked.limits.g0 * 1e-6, true, false, 3)
-      || !joined
-            .Add(hermiteSpan(g1, d1, e1, b, db, eb, h1), asked.limits.g0 * 1e-6, true, false, 3))
+  if (!joined.Add(profile, asked.limits.g0 * joinShare, true, false, 3)
+      || !joined.Add(hermiteSpan(g1, d1, e1, b, db, eb, h1),
+                     asked.limits.g0 * joinShare,
+                     true,
+                     false,
+                     3))
     return {};
   const auto cross = joined.BSplineCurve();
   return sweptReference(asked, frame, rim, foot, rail, cross, a);
@@ -328,7 +342,7 @@ Frame turnedFrame(const Asked&               asked,
                                         std::abs(apart.X()) / (high.X() - low.X()) * apartSpans,
                                         std::abs(apart.Y()) / (high.Y() - low.Y()) * apartSpans});
         }
-      if (worst > best + 1e-9)
+      if (worst > best + clearlyBetter)
       {
         best  = worst;
         angle = turn;
@@ -818,7 +832,7 @@ SplineNet PlaneFill::layNet(int spans, int spansU, int spansV) const
       const double f = (i + 0.5) / turningSteps, step = 0.25 / turningSteps;
       const double turning =
         side.jet(f - step).n.Angle(side.jet(f + step).n) / (2 * step * side.length);
-      const double span = turnPerSpan * ladder[0] / spans / std::max(turning, 1e-12);
+      const double span = turnPerSpan * ladder[0] / spans / std::max(turning, vanishing);
       if (span >= larger / spans)
         continue;
       const gp_XY at = frame.project(side.at(f));
@@ -1393,7 +1407,7 @@ Built PlaneFill::tangentFill(const Built& strict)
         continue;
       const double radius = BRepAdaptor_Surface(side.support).Cylinder().Radius();
       repeated            = repeated || std::any_of(radii.begin(), radii.end(), [&](double other) {
-                   return std::abs(other - radius) < 1e-9 * std::max(other, radius);
+                   return std::abs(other - radius) < sameRadius * std::max(other, radius);
                  });
       rounds.push_back(side.support);
       radii.push_back(radius);

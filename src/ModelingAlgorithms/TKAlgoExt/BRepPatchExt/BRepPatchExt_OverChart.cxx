@@ -26,6 +26,10 @@ namespace BRepExt::patch_fill
 namespace
 {
 
+//! How far beside an edge, as a share of the diagonal of its face's parameters, the face is
+//! looked for on either side of it. Chosen.
+constexpr double sideProbe = 1e-4;
+
 //! The places along a guide that the loop's chart is drawn through (see proxyChart).
 constexpr int guidePins = 32;
 
@@ -52,7 +56,7 @@ double leaving(const Side& side)
   double u0, u1, v0, v1;
   BRepTools::UVBounds(side.support, u0, u1, v0, v1);
   const gp_Vec2d left =
-    gp_Vec2d(-along.Y(), along.X()).Normalized() * (1e-4 * std::hypot(u1 - u0, v1 - v0));
+    gp_Vec2d(-along.Y(), along.X()).Normalized() * (sideProbe * std::hypot(u1 - u0, v1 - v0));
   gp_Pnt point;
   gp_Vec su, sv;
   BRepAdaptor_Surface(side.support).D1(uv.X(), uv.Y(), point, su, sv);

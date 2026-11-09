@@ -29,6 +29,17 @@
 
 namespace BRepExt::patch_fill
 {
+namespace
+{
+
+//! The precision to which places are projected onto an exact surface to lay its sides out,
+//! as a length. Chosen: far below Precision::Confusion().
+constexpr double projectionPrecision = 1e-10;
+
+//! The mean plane's origin counts as a ball's centre within this share of its radius. Chosen.
+constexpr double centredShare = 1e-9;
+
+} // namespace
 
 std::optional<TopoDS_Face> planar(const Asked& asked, const Frame& frame)
 {
@@ -142,7 +153,7 @@ std::optional<Built> splineContinuation(const Asked& asked, const Frame&)
         return std::nullopt;
     for (int i = 1; i <= surface->NbUPoles(); ++i)
       for (int j = 1; j <= surface->NbVPoles(); ++j)
-        if (surface->Pole(i, j).Distance(other->Pole(i, j)) > 1e-12 * asked.size
+        if (surface->Pole(i, j).Distance(other->Pole(i, j)) > sameShare * asked.size
             || surface->Weight(i, j) != other->Weight(i, j))
           return std::nullopt;
   }
@@ -183,19 +194,20 @@ std::optional<Built> toroidal(const Asked& asked, const Frame& frame)
     if (side.support.IsNull() || BRepAdaptor_Surface(side.support).GetType() != GeomAbs_Torus)
       return std::nullopt;
     const auto here = BRepAdaptor_Surface(side.support).Torus();
-    if (here.Location().Distance(torus.Location()) > 1e-12 * asked.size
-        || std::abs(here.MajorRadius() - torus.MajorRadius()) > 1e-12 * asked.size
-        || std::abs(here.MinorRadius() - torus.MinorRadius()) > 1e-12 * asked.size
+    if (here.Location().Distance(torus.Location()) > sameShare * asked.size
+        || std::abs(here.MajorRadius() - torus.MajorRadius()) > sameShare * asked.size
+        || std::abs(here.MinorRadius() - torus.MinorRadius()) > sameShare * asked.size
         || !here.Axis().IsParallel(torus.Axis(), BRepExt::tolerance::fineAngle))
       return std::nullopt;
   }
   ShapeAnalysis_Surface angular(first.held);
-  const gp_XY           anchor = angular.ValueOfUV(first.meet(.5), 1e-10).XY();
+  const gp_XY           anchor = angular.ValueOfUV(first.meet(.5), projectionPrecision).XY();
   gp_XY                 low = anchor, high = anchor;
   for (const Side& side : asked.sides)
     for (int k = 0; k <= places; ++k)
     {
-      const gp_XY uv = angular.ValueOfUV(side.meet(static_cast<double>(k) / places), 1e-10).XY();
+      const gp_XY uv =
+        angular.ValueOfUV(side.meet(static_cast<double>(k) / places), projectionPrecision).XY();
       const gp_XY at(anchor.X() + std::remainder(uv.X() - anchor.X(), 2 * M_PI),
                      anchor.Y() + std::remainder(uv.Y() - anchor.Y(), 2 * M_PI));
       low.SetCoord(std::min(low.X(), at.X()), std::min(low.Y(), at.Y()));
@@ -209,7 +221,9 @@ std::optional<Built> toroidal(const Asked& asked, const Frame& frame)
   const auto surface = GeomConvert::SurfaceToBSplineSurface(
     new Geom_RectangularTrimmedSurface(first.held, low.X(), high.X(), low.Y(), high.Y()));
   ShapeAnalysis_Surface projection(surface);
-  const auto layout = [&](const gp_Pnt& point) { return projection.ValueOfUV(point, 1e-10).XY(); };
+  const auto            layout = [&](const gp_Pnt& point) {
+    return projection.ValueOfUV(point, projectionPrecision).XY();
+  };
   return continued(surface, asked, frame, layout);
 }
 
@@ -233,8 +247,8 @@ std::optional<Built> spherical(const Asked& asked, const Frame& flat)
       return std::nullopt;
     const gp_Sphere here = support.Sphere();
     if (ball
-        && (ball->Location().Distance(here.Location()) > 1e-12 * asked.size
-            || std::abs(ball->Radius() - here.Radius()) > 1e-12 * asked.size))
+        && (ball->Location().Distance(here.Location()) > sameShare * asked.size
+            || std::abs(ball->Radius() - here.Radius()) > sameShare * asked.size))
       return std::nullopt;
     ball = here;
   }
@@ -268,15 +282,15 @@ std::optional<Built> spherical(const Asked& asked, const Frame& flat)
       cylinders.front().Radius());
   }
   for (const auto& cylinder : cylinders)
-    if (std::abs(cylinder.Radius() - ball->Radius()) > 1e-12 * asked.size
+    if (std::abs(cylinder.Radius() - ball->Radius()) > sameShare * asked.size
         || gp_Vec(cylinder.Location(), ball->Location())
                .Crossed(gp_Vec(cylinder.Axis().Direction()))
                .Magnitude()
-             > 1e-12 * asked.size)
+             > sameShare * asked.size)
       return std::nullopt;
   const double radius = ball->Radius();
   gp_Vec       z(ball->Location(), flat.origin);
-  if (z.Magnitude() < 1e-9 * radius)
+  if (z.Magnitude() < centredShare * radius)
     return std::nullopt;
   z.Normalize();
   const gp_Vec x = (flat.x - z * flat.x.Dot(z)).Normalized(), y = z.Crossed(x);
@@ -355,10 +369,10 @@ std::optional<Built> ruledRound(const Asked& asked, const Frame& frame)
     {
       const gp_Cylinder here = cylinder->Cylinder();
       if (round
-          && (std::abs(here.Radius() - round->Radius()) > 1e-12 * asked.size
+          && (std::abs(here.Radius() - round->Radius()) > sameShare * asked.size
               || !here.Axis().IsCoaxial(round->Axis(),
                                         BRepExt::tolerance::fineAngle,
-                                        1e-12 * asked.size)))
+                                        sameShare * asked.size)))
         return std::nullopt;
       round = here;
     }
@@ -367,7 +381,7 @@ std::optional<Built> ruledRound(const Asked& asked, const Frame& frame)
       const gp_Pln here = plane->Pln();
       if (std::none_of(planes.begin(), planes.end(), [&](const gp_Pln& p) {
             return p.Axis().IsParallel(here.Axis(), BRepExt::tolerance::fineAngle)
-                   && p.Distance(here.Location()) < 1e-12 * asked.size;
+                   && p.Distance(here.Location()) < sameShare * asked.size;
           }))
         planes.push_back(here);
     }
@@ -385,7 +399,7 @@ std::optional<Built> ruledRound(const Asked& asked, const Frame& frame)
     const gp_Vec n(planes[i].Axis().Direction());
     const double distance = gp_Vec(centre, planes[i].Location()).Dot(n);
     if (std::abs(n.Dot(axis)) > BRepExt::tolerance::fineAngle
-        || std::abs(std::abs(distance) - radius) > 1e-12 * asked.size)
+        || std::abs(std::abs(distance) - radius) > sameShare * asked.size)
       return std::nullopt;
     radial[i] = n * distance;
   }

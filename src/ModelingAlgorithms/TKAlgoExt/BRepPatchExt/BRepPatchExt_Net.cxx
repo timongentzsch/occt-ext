@@ -17,6 +17,17 @@ namespace BRepExt::patch_fill
 namespace
 {
 
+//! How near none the derivative across a side along the axis of the flow asked must come for
+//! the condition to count as met. Chosen.
+constexpr double flowWithin = 1e-7;
+
+//! Where curves are only met approximately, a quadratic is near enough to start from where it
+//! misses them by less than this share of the loop's size. Chosen.
+constexpr double approximateShare = 1e-3;
+
+//! Two breaks of a net closer than this share of an even span count as one. Chosen.
+constexpr double sameBreak = 1e-6;
+
 //! What the change of the bend counts for against the bend, with the loop's size as the unit
 //! of length: in full where a bend is asked or wished for along the rim, and by these shares
 //! where the rim is only tangent to its faces, and where curves are only met. With more of
@@ -98,7 +109,7 @@ std::vector<FitCondition> conditions(const std::vector<Target>&              tar
                      0,
                      target.share * tangentWeight,
                      false,
-                     1e-7});
+                     flowWithin});
     }
     if (target.leave)
     {
@@ -439,7 +450,7 @@ bool polynomialHeight(const Asked& asked, const Frame& frame, SplineNet& net, bo
       measure(at);
     // An interior constraint must identify the quadratic within the actual tolerance.
     // Approximate harmonic free rims are corrected afterwards, as before.
-    if (miss >= (interior && !approximate ? .1 * asked.limits.g0 : 1e-3 * asked.size))
+    if (miss >= (interior && !approximate ? .1 * asked.limits.g0 : approximateShare * asked.size))
       continue;
     for (int i = 0; i < net.countU(); ++i)
       for (int j = 0; j < net.countV(); ++j)
@@ -506,7 +517,7 @@ std::vector<double> gradedKnots(double                     from,
   std::vector<std::pair<double, int>> inner;
   for (double value : at)
     if (value > from && value < to
-        && (inner.empty() || value - inner.back().first > 1e-6 * (to - from) / count))
+        && (inner.empty() || value - inner.back().first > sameBreak * (to - from) / count))
       inner.emplace_back(value, degree - 1);
   const size_t broken = inner.size();
   for (size_t i = 1; i + 1 < even.size(); ++i)

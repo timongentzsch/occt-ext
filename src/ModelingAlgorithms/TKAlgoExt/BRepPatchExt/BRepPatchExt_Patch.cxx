@@ -47,6 +47,11 @@ namespace BRepExt
 namespace
 {
 
+//! The plate's tolerances: of distance in its parameters and in space, as a share of the
+//! loop's size, of angle in radians and of curvature. As tight as asked anywhere in this
+//! kernel, whatever the limits: the plate is measured like the others afterwards. Chosen.
+constexpr double plateLength = 1e-7, plateAngle = 1e-5, plateCurvature = 1e-4;
+
 using namespace patch_fill;
 
 Side sideOf(const TopoDS_Shape& shape, const TopoDS_Shape& face, int order, int input)
@@ -162,10 +167,10 @@ Built plate(const Asked& asked)
                         30,
                         3,
                         false,
-                        1e-7 * asked.size,
-                        1e-7 * asked.size,
-                        1e-5,
-                        1e-4,
+                        plateLength * asked.size,
+                        plateLength * asked.size,
+                        plateAngle,
+                        plateCurvature,
                         8,
                         64);
   for (const Side& side : asked.sides)
@@ -210,7 +215,8 @@ void quantizePeriodic(Asked& asked, bool& canonical)
       for (int i = 1; i <= curve->NbPoles(); ++i)
         for (int axis = 1; axis <= 3; ++axis)
           scale = std::max(scale, std::abs(curve->Pole(i).Coord(axis)));
-      const double step = std::min(std::ldexp(1.0, std::ilogb(scale) - 38), asked.limits.g0 * 1e-6);
+      const double step =
+        std::min(std::ldexp(1.0, std::ilogb(scale) - 38), asked.limits.g0 * privateCopyShare);
       for (int i = 1; i <= curve->NbPoles(); ++i)
       {
         gp_Pnt point = curve->Pole(i);

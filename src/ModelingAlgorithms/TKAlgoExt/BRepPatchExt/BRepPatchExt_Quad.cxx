@@ -32,6 +32,10 @@ namespace BRepExt::patch_fill
 namespace
 {
 
+//! Where two guides come nearest is narrowed down until the step of their parameters, which
+//! run from 0 to 1, is below this: some thousands of roundings of a double. Chosen.
+constexpr double finestStep = 1e-12;
+
 //! What share of the tolerance a side that has no polynomial form (an arc, a rational spline)
 //! may be off the spline that stands for it in a four-sided surface, and the most pieces of
 //! degree 5 that spline is given: a half circle is within 1e-8 of its radius with 16.
@@ -303,7 +307,7 @@ gp_XY laidAt(std::vector<std::pair<double, gp_XY>> stops, double f)
   size_t i = 0;
   while (i + 2 < stops.size() && f > stops[i + 1].first)
     ++i;
-  const double t = (f - stops[i].first) / std::max(stops[i + 1].first - stops[i].first, 1e-12);
+  const double t = (f - stops[i].first) / std::max(stops[i + 1].first - stops[i].first, vanishing);
   return gp_XY(stops[i].second + (stops[i + 1].second - stops[i].second) * t);
 }
 
@@ -557,7 +561,7 @@ gp_Vec QuadFill::axis(size_t s, double f) const
     return part->tangent(g);
   const auto square = [&](const gp_Vec& way, double t) {
     const gp_Vec along = runs[s].tangent(t).Normalized(), out = way - along * way.Dot(along);
-    return out.Magnitude() > 1e-12 ? out.Normalized() : out;
+    return out.Magnitude() > vanishing ? out.Normalized() : out;
   };
   if (fromGap)
     before = asked.controls.flow == PatchFlow::Next ? chord(0) : square(after, 0);
@@ -773,7 +777,7 @@ void QuadFill::crossLaid(std::vector<Across>& across) const
           }
         }
       // Closer, each way round the nearest places, to well below the tolerance.
-      for (double step = 1.0 / crossingPlaces; step > 1e-12; step /= 8)
+      for (double step = 1.0 / crossingPlaces; step > finestStep; step /= 8)
       {
         const double x0 = fg, y0 = fh;
         for (int i = -8; i <= 8; ++i)
@@ -831,7 +835,7 @@ void QuadFill::layEnds(std::vector<Across>& across, ShapeAnalysis_Surface& proje
             foot  = x;
           }
         }
-        for (double step = 1.0 / crossingPlaces; step > 1e-12; step /= 8)
+        for (double step = 1.0 / crossingPlaces; step > finestStep; step /= 8)
         {
           const double x0 = foot;
           for (int i = -8; i <= 8; ++i)

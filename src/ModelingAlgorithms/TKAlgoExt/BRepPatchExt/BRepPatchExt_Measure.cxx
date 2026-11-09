@@ -46,6 +46,22 @@ namespace BRepExt::patch_fill
 namespace
 {
 
+//! The parameters' metric counts as degenerate where E G - F^2 is below this share of E G: the
+//! sine of the angle between the derivatives below 1e-6. Chosen.
+constexpr double degenerateMetric = 1e-12;
+
+//! A Newton step counts as none where its squared length on the surface is below this share of
+//! the metric's scale: the square of 1e-14, some fifty roundings of the parameters. Chosen.
+constexpr double settledStep = 1e-28;
+
+//! What is added to the diagonal of the normal equations of a bend, where the edge runs straight
+//! on and nothing says how the surface bends across it: far below the rows' weights. Chosen.
+constexpr double straightRidge = 1e-9;
+
+//! A side is taken to lie on the edge of its original face where their middles are within this
+//! share of the loop's size. Chosen.
+constexpr double sameEdgeShare = 1e-5;
+
 //! The parameters of the surface's point nearest `point`, looked for from `uv` within the
 //! surface's parameter bounds: steps of Gauss and Newton, and along the border once a step
 //! would leave it, until the step falls to the rounding of the parameters. A coordinate held at
@@ -65,7 +81,7 @@ std::optional<gp_XY> nearestWithin(const occ::handle<Geom_Surface>& surface,
     surface->D1(uv.X(), uv.Y(), at, su, sv);
     const gp_Vec to(at, point);
     const double E = su.Dot(su), F = su.Dot(sv), G = sv.Dot(sv), det = E * G - F * F;
-    if (!(E > 0) || !(G > 0) || !(det > 1e-12 * E * G))
+    if (!(E > 0) || !(G > 0) || !(det > degenerateMetric * E * G))
       return std::nullopt;
     double move[2] = {(G * to.Dot(su) - F * to.Dot(sv)) / det,
                       (E * to.Dot(sv) - F * to.Dot(su)) / det};
@@ -93,7 +109,7 @@ std::optional<gp_XY> nearestWithin(const occ::handle<Geom_Surface>& surface,
     }
     const double du = next[0] - uv.X(), dv = next[1] - uv.Y();
     uv.SetCoord(next[0], next[1]);
-    if (du * du * E + dv * dv * G <= 1e-28 * (E + G) * (1 + uv.SquareModulus()))
+    if (du * du * E + dv * dv * G <= settledStep * (E + G) * (1 + uv.SquareModulus()))
       return uv;
   }
   return std::nullopt;
@@ -134,7 +150,7 @@ CornerBend cornerBend(const Side& a, const Side& b, bool bends)
   gp_Vec           tb = b.tangent(cornerInset);
   double           c = tb.Dot(ta), s = tb.Dot(na);
   const double     length = std::hypot(c, s);
-  if (length < 1e-12)
+  if (length < vanishing)
     return {};
   c /= length;
   s /= length;
@@ -168,7 +184,7 @@ CornerBend cornerBend(const Side& a, const Side& b, bool bends)
   }
   // Where the edge runs straight on, nothing says how the surface bends across it.
   for (int i = 1; i <= 3; ++i)
-    normal(i, i) += 1e-9;
+    normal(i, i) += straightRidge;
   math_Gauss solve(normal);
   if (!solve.IsDone())
     return {};
@@ -420,7 +436,7 @@ double rimBend(const Asked& asked)
       gp_Vec       first, second;
       side.curve->D2(side.parameter(fraction), at, first, second);
       const double speed = first.Magnitude();
-      if (speed > 1e-12)
+      if (speed > vanishing)
         bend = std::max(bend, first.Crossed(second).Magnitude() / (speed * speed * speed));
       if (!support || side.support.IsNull() || side.order < 1)
         continue;
@@ -1009,7 +1025,7 @@ void verifySewn(Built& built, const Asked& asked)
         for (const Side& side : asked.sides)
         {
           if (!side.support.IsSame(original)
-              || side.at(.5).Distance(curve.Value((from + to) / 2)) > 1e-5 * asked.size)
+              || side.at(.5).Distance(curve.Value((from + to) / 2)) > sameEdgeShare * asked.size)
             continue;
           double geometric = 0, parameter = 0;
           if (gap > allowance)

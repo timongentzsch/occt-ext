@@ -68,6 +68,23 @@ constexpr double steepest = 0.17;
 //! curved side (a full circle of 32 chords is 0.5 % of its radius inside the circle).
 constexpr double outsideSlack = 0.01;
 
+//! Below this a length, a speed or a step counts as none, where it only keeps a quotient
+//! finite. Chosen: far below any length a model has (Precision::Confusion() is 1e-7).
+constexpr double vanishing = 1e-12;
+
+//! Two lengths or places count as the same where they differ by less than this share of their
+//! scale (the loop's size or length round): some thousands of roundings of a double (2.2e-16),
+//! far below any tolerance. Chosen.
+constexpr double sameShare = 1e-12;
+
+//! How far a private copy of a side may move from the side, as a share of the positional
+//! tolerance: a millionth, which the original side is measured against afterwards. Chosen.
+constexpr double privateCopyShare = 1e-6;
+
+//! Room `Inside` adds to `slack` for the rounding of the distances it measures, as a share of
+//! the loop's largest coordinate (of at least one). Chosen.
+constexpr double reachRounding = 1e-9;
+
 struct Limits
 {
   double g0, g1, g2;
@@ -147,7 +164,7 @@ public:
     for (const gp_XY& point : loop)
       reach = std::max({reach, std::abs(point.X()), std::abs(point.Y())});
     // Beyond this from its box no side's measured distance is within `slack`.
-    reach = slack + 1e-9 * (1 + reach);
+    reach = slack + reachRounding * (1 + reach);
   }
 
   bool operator()(const gp_XY& point) const
