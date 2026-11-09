@@ -1619,6 +1619,78 @@ struct Blend
   //! face.
   void sheets();
   bool continueWholeSupport(int k, int side, Stations& stations);
+
+  //! The loops found on each piece, and each piece's creases where its round crosses itself.
+  using Folds   = std::vector<std::pair<int, std::vector<Fold>>>;
+  using Creases = std::vector<std::vector<std::shared_ptr<const Crease>>>;
+  //! What a step of a piece's sheet leads to: on, the same attempt again, or sheets() ends.
+  enum class Next
+  {
+    Go,
+    Retry,
+    Stop
+  };
+
+  //! Where a contact first changes between inside its face and outside: its side, the fit's u
+  //! there, the edge it crosses (and that edge's parameter), whether it enters the face, whether
+  //! the face beyond trims it (a notch), and over a seam the period it is carried by.
+  struct Crossing
+  {
+    int         side = -1;
+    double      at = 0, overAt = 0;
+    bool        entering = false, notched = false;
+    TopoDS_Edge over;
+    bool        overSeam = false;
+    gp_Vec2d    seamShift;
+  };
+
+  //! A piece's sheet as fitted: exact where it can be, the exact contacts, and whether the fit is
+  //! the circular pilot that finds the support crossings of a G2 section first.
+  struct SheetFit
+  {
+    std::optional<Sheet>  exact;
+    std::optional<Fitted> contacts;
+    bool                  contactPilot = false;
+  };
+
+  //! The steps of sheets(): the sections' spans shared along each chain.
+  void shareHalves();
+  //! Piece k's sheet, split where a contact crosses an edge; false where sheets() ends.
+  bool sheetOf(int k, Folds& folds, Creases& creased);
+  //! The rail's windows, chord, meeting radius and reach made ready for the fit.
+  void prepareRail(Piece& piece, Stations& stations);
+  //! The sheet fitted (or exact); false where the chain is found through its centres instead.
+  bool fitSheet(int                                         k,
+                int                                         attempt,
+                Stations&                                   stations,
+                SheetFit&                                   out,
+                std::vector<std::shared_ptr<const Crease>>& creases);
+  //! A contact wholly off its face: a cliff or a notch tried again, or a chain's end absorbed.
+  Next offFace(int k, Stations& stations, double u0, double u1);
+  //! The first edge of its face a contact crosses between the piece's ends.
+  void crossingOverEdge(int k, double u0, double u1, Crossing& c);
+  //! Whether the faces either side of `over` are tangent where the contact crosses it.
+  bool smoothOver(const Piece& piece, int s2, const TopoDS_Edge& over, const Meeting& found) const;
+  //! Refused where the contact runs over `over` into a hole or a boss that stays.
+  void refuseFeature(const Piece& piece, int s2, const TopoDS_Edge& over) const;
+  //! Whether what stops the blend at an end trims the contact where it crosses `over`.
+  bool stopsNearEnd(const Piece& piece, const TopoDS_Edge& over, const Meeting& found) const;
+  //! The first seam of its face a contact crosses, where it crosses no edge.
+  void crossingOverSeam(int k, double u0, double u1, Crossing& c);
+  //! The piece split at the crossing, the part off the face rolling on the next face.
+  void splitAt(int k, Stations& stations, const Crossing& c);
+  //! The folds of piece k's contacts on a cap; whether a contact that runs back is left over.
+  bool capFoldsOf(int k, Dips& dips, Folds& folds);
+  //! The folds settled; false where the chain is found through its centres instead.
+  bool settleFolds(int k, Folds& folds, bool onCliff);
+  //! Whether through the centres piece k is fitted and no contact runs back.
+  bool centreMends(int k);
+  //! Whether the edge a contact on face s2 leaves over at `at` is convex there.
+  bool convexOver(const Rail& rail, int s2, const TopoDS_Edge& edge, const Meeting& at) const;
+  //! Each round's creases added to its folds, in order along it.
+  void creaseFolds(Folds& folds, Creases& creased);
+  //! Each edge cut at its folds' ends, a piece on the one sheet between each loop and the next.
+  void cutAtFolds(const Folds& folds);
   //! The loops where a contact on a cap runs back across a joint into the next piece.
   void crossFolds(const std::vector<std::pair<int, std::vector<Fold>>>& folds);
   //! One kind of sheet along each chain: exact where every piece of it can be, else fitted.
@@ -2760,7 +2832,14 @@ bool Blend::continueWholeSupport(int k, int side, Stations& stations)
   return transferred;
 }
 
-void Blend::sheets()
+namespace
+{
+//! Where a piece's contacts are tested against their faces: at this many equal steps of its fit
+//! (chosen: fine enough to find each edge a contact crosses; every 16th for a whole contact).
+constexpr int contactSamples = 256;
+} // namespace
+
+void Blend::shareHalves()
 {
   // Sections in two spans along a whole chain, or along none of it: its sections share their
   // form at its joints.
@@ -2776,763 +2855,804 @@ void Blend::sheets()
           changed                                             = true;
         }
   }
-  // Each piece's blend, exact where every piece of its chain can be; a chain's sections then
-  // share one parameter at each joint.
-  // Where a contact leaves its face across a smooth edge onto the next face, the piece is split
-  // there and its second part rolls on that face (the support sequence).
-  seeds.assign(pieces.size(), std::nullopt);
-  std::vector<std::pair<int, std::vector<Fold>>> folds;
-  // Each piece's creases where its round crosses itself between its contacts, from its last fit.
-  std::vector<std::vector<std::shared_ptr<const Crease>>> creased;
-  // Whether a contact that runs back is left to the caller: taken by neither a fold nor a loop
-  // across a joint.
-  const auto capFoldsOf = [&](int k, Dips& dips) {
-    std::vector<Fold> across;
-    auto              found = capFolds(dips, &across);
-    const bool        taken = !found.empty() || !across.empty();
-    if (!found.empty())
-      folds.emplace_back(k, std::move(found));
-    if (!across.empty())
-      open.emplace_back(k, std::move(across));
-    return !taken;
-  };
-  // Where a contact on face `s2` leaves it over `edge` at `at`: whether the edge is convex there
-  // (towards the blended edge, in the face, runs under the face beyond).
-  const auto convexOver = [&](const Rail&        rail,
-                              int                s2,
-                              const TopoDS_Edge& edge,
-                              const Meeting&     at,
-                              const Handle(Geom2d_Curve)&,
-                              double) {
-    for (const auto& face : facesOfEdge.FindFromKey(edge))
-    {
-      if (face.IsSame(rail.s[s2].face))
-        continue;
-      double     f, l;
-      const auto pc = BRep_Tool::CurveOnSurface(edge, TopoDS::Face(face), f, l);
-      if (pc.IsNull())
-        return false;
-      Side beyond    = rail.s[s2];
-      beyond.face    = TopoDS::Face(face);
-      beyond.surface = BRep_Tool::Surface(beyond.face);
-      beyond.outward = face.Orientation() == TopAbs_REVERSED ? -1 : 1;
-      beyond.cliffCurve.Nullify();
-      const gp_Pnt2d there = pc->Value(at.second);
-      Jet            b;
-      if (!jetAt(beyond, there.X(), there.Y(), b))
-        return false;
-      gp_Pnt inside;
-      rail.curve.D0(rail.t(at.first), inside);
-      return gp_Vec(b.p, inside).Dot(b.n) < 0;
-    }
-    return false;
-  };
-  for (size_t k = 0; k < pieces.size(); ++k)
+}
+
+bool Blend::capFoldsOf(int k, Dips& dips, Folds& folds)
+{
+  std::vector<Fold> across;
+  auto              found = capFolds(dips, &across);
+  const bool        taken = !found.empty() || !across.empty();
+  if (!found.empty())
+    folds.emplace_back(k, std::move(found));
+  if (!across.empty())
+    open.emplace_back(k, std::move(across));
+  return !taken;
+}
+
+bool Blend::convexOver(const Rail& rail, int s2, const TopoDS_Edge& edge, const Meeting& at) const
+{
+  for (const auto& face : facesOfEdge.FindFromKey(edge))
   {
-    if (pieces.size() >= pieces.capacity())
+    if (face.IsSame(rail.s[s2].face))
+      continue;
+    double     f, l;
+    const auto pc = BRep_Tool::CurveOnSurface(edge, TopoDS::Face(face), f, l);
+    if (pc.IsNull())
+      return false;
+    Side beyond    = rail.s[s2];
+    beyond.face    = TopoDS::Face(face);
+    beyond.surface = BRep_Tool::Surface(beyond.face);
+    beyond.outward = face.Orientation() == TopAbs_REVERSED ? -1 : 1;
+    beyond.cliffCurve.Nullify();
+    const gp_Pnt2d there = pc->Value(at.second);
+    Jet            b;
+    if (!jetAt(beyond, there.X(), there.Y(), b))
+      return false;
+    gp_Pnt inside;
+    rail.curve.D0(rail.t(at.first), inside);
+    return gp_Vec(b.p, inside).Dot(b.n) < 0;
+  }
+  return false;
+}
+
+bool Blend::centreMends(int k)
+{
+  const Piece& piece = pieces[k];
+  if (!mayCentre(k))
+    return false;
+  Rail rail     = piece.rail;
+  rail.byCentre = true;
+  Stations stations(rail);
+  try
+  {
+    stations.march(seeds[k]);
+    const Fitted fitted = fit(rail, stations);
+    Dips         centred{rail, fitted};
+    return !runsBack(centred);
+  }
+  catch (const Failure& failure)
+  {
+    if (failure.reason == std::string("cancelled"))
+      throw;
+    return false;
+  }
+}
+
+bool Blend::settleFolds(int k, Folds& folds, bool onCliff)
+{
+  Dips dips{pieces[k].rail, pieces[k].fitted};
+  if (onCliff || capFoldsOf(k, dips, folds))
+  {
+    if (runsBack(dips) && centreMends(k))
+    {
+      centreChain(k);
+      return false;
+    }
+    checkFold(dips);
+  }
+  return true;
+}
+
+void Blend::prepareRail(Piece& piece, Stations& stations)
+{
+  if (request.intersectSpines)
+    prepareConicWindow(piece.rail);
+  if (piece.rail.law == Law::Chordal)
+    roundOfChord(piece.rail, stations);
+  if (request.meet > 0)
+    meetsAt(piece.rail, stations, request.meet);
+  // A carry that stopped short ends where the ball last went on with the rail.
+  if (const auto reached = stations.reached(0))
+    piece.rail.from = std::max(piece.rail.from, *reached);
+  if (const auto reached = stations.reached(1))
+    piece.rail.to = std::min(piece.rail.to, *reached);
+  if (request.intersectSpines)
+    continueTerminal(piece, stations, facesOfEdge, edgesOfVertex);
+  else if (request.reads && continuesTerminal(piece.rail))
+    request.reads->spines.push_back([] { return true; });
+}
+
+bool Blend::fitSheet(int                                         k,
+                     int                                         attempt,
+                     Stations&                                   stations,
+                     SheetFit&                                   out,
+                     std::vector<std::shared_ptr<const Crease>>& creases)
+{
+  Piece& piece = pieces[k];
+  // An exact sheet needs no fit: its contacts are its own.
+  // A conic's corner patch takes its weights from fitted sheets: none extruded there (a
+  // chamfer's corner takes none). The corner of more than three conics other than rounds is
+  // split from their extruded sheets (Attach::splitCorner).
+  const bool round   = piece.rail.law == Law::Conic && std::abs(piece.rail.rho - 0.5) < limit::equal
+                       && std::abs(piece.rail.s[0].distance - piece.rail.s[1].distance)
+                            < limit::equal * piece.rail.scale;
+  const auto patched = [&](int end) {
+    return piece.joint[end].meets == Meets::Corner
+           && (round || corners[piece.joint[end].piece].ends.size() <= 3);
+  };
+  const bool corner = piece.rail.law != Law::Chamfer && (patched(0) || patched(1));
+  auto&      exact  = out.exact;
+  exact             = exactSheet(piece.rail, stations);
+  if (!exact && !corner)
+    exact = extrudedSheet(piece.rail, stations);
+  out.contacts         = exact ? exactContacts(piece.rail, stations, *exact) : std::nullopt;
+  const auto& contacts = out.contacts;
+  // Locate support crossings from the ball's contacts before fitting the G2 section.
+  // A finite spline support's tangent continuation is only G1: its curvature jumps,
+  // so fitting a curvature-dependent section across it before splitting cannot converge.
+  // The circular pilot uses the same balls and contact parameters. It is always replaced
+  // by the requested G2 section after crossing discovery, and never reaches attachment.
+  out.contactPilot = !contacts && attempt == 0 && piece.rail.law == Law::G2
+                     && !piece.rail.s[0].cliffCurve && !piece.rail.s[1].cliffCurve
+                     && piece.rail.s[0].trim.IsNull() && piece.rail.s[1].trim.IsNull();
+  if (contacts)
+  {
+    piece.fitted = *contacts;
+    piece.sheet  = *exact;
+  }
+  else
+  {
+    try
+    {
+      piece.fitted = fit(piece.rail, stations, out.contactPilot);
+    }
+    catch (const Failure& failure)
+    {
+      if (failure.reason == std::string("cancelled") || !centreMends(k))
+        throw;
+      centreChain(k);
+      return false;
+    }
+    piece.sheet = exact ? *exact : Sheet{piece.fitted.blend};
+    if (!exact)
+      creases = checkCrossing(piece.rail, stations, piece.fitted);
+  }
+  return true;
+}
+
+Blend::Next Blend::offFace(int k, Stations& stations, double u0, double u1)
+{
+  Piece& piece = pieces[k];
+  // A contact wholly off its face: on both, the blend rests on neither and does not fit;
+  // on one, the ball may roll over onto the next face, which the blend does not do yet.
+  int off = 0, offSide = -1;
+  for (int s2 = 0; s2 < 2; ++s2)
+  {
+    Inside& onFace = inside(piece.rail.s[s2].face);
+    // On the face's far edge all along counts as off it: the ball rests on the face and that
+    // edge at once (a side exactly as high as the ball is wide), and the blend uses the face
+    // up as where the side is narrower.
+    const auto&       far = farOf(piece.rail, s2);
+    BRepAdaptor_Curve farCurve;
+    if (far)
+      farCurve.Initialize(far->edge);
+    const auto onFar = [&](double u) {
+      if (!far)
+        return false;
+      const gp_Pnt2d      uv = piece.fitted.contact[s2]->Value(u);
+      const gp_Pnt        p  = footAt(piece.rail.s[s2], uv.X(), uv.Y());
+      const Extrema_ExtPC to(p, farCurve);
+      if (!to.IsDone() || to.NbExt() == 0)
+        return false;
+      double nearest = HUGE_VAL;
+      for (int i = 1; i <= to.NbExt(); ++i)
+        nearest = std::min(nearest, to.SquareDistance(i));
+      return std::sqrt(nearest) <= piece.rail.resolved(limit::together);
+    };
+    const auto out    = [&](double u) { return onFace.out(piece.fitted.contact[s2]->Value(u)); };
+    bool       wholly = true, along = true;
+    for (int i = 0; i <= contactSamples && (wholly || along); i += contactSamples / 16)
+    {
+      wholly = wholly && out(u0 + (u1 - u0) * i / contactSamples);
+      along  = along && onFar(u0 + (u1 - u0) * i / contactSamples);
+    }
+    if (!wholly && !along)
+      continue;
+    ++off;
+    offSide = s2;
+    // A flat face all of whose edges are blended: the blends use the cap up.
+    if (GeomAdaptor_Surface(piece.rail.s[s2].surface).GetType() != GeomAbs_Plane)
+      continue;
+    bool all = true;
+    for (TopExp_Explorer e(piece.rail.s[s2].face, TopAbs_EDGE); e.More() && all; e.Next())
+      all = std::any_of(pieces.begin(), pieces.end(), [&](const Piece& other) {
+        return other.rail.edge.IsSame(e.Current());
+      });
+    if (all)
+      fail(op,
+           no_solution,
+           "the blend consumes the cap: the face beside its edge vanishes",
+           {piece.rail.edge},
+           FailureKind::CapConsumed);
+  }
+  if (off == 2)
+    fail(op,
+         no_solution,
+         "the blend does not fit: it is wider than both faces beside its edge",
+         {piece.rail.edge},
+         FailureKind::Overflow);
+  if (off == 1)
+  {
+    // A face narrower than the blend: the ball rests on its far edge (a cliff).
+    // Between stops at both ends, or round a closed edge (a band narrower than the blend).
+    const bool stopped = piece.joint[0].meets == Meets::Stop && piece.joint[1].meets == Meets::Stop;
+    // Not on an edge blended too: it is not there for the ball to rest on, nor to trim by.
+    const auto blended = [&](const TopoDS_Edge& edge) {
+      return std::any_of(pieces.begin(), pieces.end(), [&](const Piece& other) {
+        return other.rail.edge.IsSame(edge);
+      });
+    };
+    const auto& far = farOf(piece.rail, offSide);
+    if (far && !blended(far->edge) && (stopped || piece.rail.closed)
+        && cliffOf(piece.rail, offSide, *far))
+    {
+      return Next::Retry;
+    }
+    // Else the face beyond the far edge trims the blend (a notch), between stops or round a
+    // closed edge.
+    if (far && !blended(far->edge) && (stopped || piece.rail.closed))
+    {
+      TopoDS_Face beyond;
+      for (const auto& face : facesOfEdge.FindFromKey(far->edge))
+        if (!face.IsSame(piece.rail.s[offSide].face))
+          beyond = TopoDS::Face(face);
+      if (!beyond.IsNull() && !beyond.IsSame(piece.rail.s[1 - offSide].face))
+      {
+        piece.rail.s[offSide].trim       = beyond;
+        piece.rail.s[offSide].trimEdge   = far->edge;
+        piece.rail.s[offSide].cliffWhole = far->whole;
+        return Next::Retry;
+      }
+    }
+    // A part of a split, wholly past the place its contact leaves the face: that is seen
+    // along the whole edge, which came first.
+    if (piece.rail.parameterSupports)
+      off = 0;
+    else if ((piece.joint[0].meets == Meets::Stop) != (piece.joint[1].meets == Meets::Stop)
+             && piece.joint[piece.joint[0].meets == Meets::Stop ? 1 : 0].meets == Meets::Joint)
+    {
+      ending.push_back(TopoDS::Edge(piece.rail.edge));
+      again = true;
+      return Next::Stop;
+    }
+    else
+    {
+      if (continueWholeSupport(k, offSide, stations))
+      {
+        return Next::Retry;
+      }
       fail(op,
            unsupported_geometry,
-           "the blend crosses too many faces along one edge",
-           {pieces[k].rail.edge});
-    Piece& piece = pieces[k];
-    if (centred(piece.rail.edge))
-      piece.rail.byCentre = true;
-    // An open rail is walked along its spine only where its own stations fold there
-    // (stationsFold): elsewhere they are the same balls, by the edge's parameter.
-    if (request.intersectSpines && piece.rail.spine.IsNull()
-        && intersectSpine(piece.rail)
-        && piece.rail.spineArc && stationsFold(piece.rail) != true)
-    {
-      piece.rail.spine.Nullify();
-      piece.rail.spineArc.reset();
-    }
-    else if (!request.intersectSpines && request.reads && piece.rail.spine.IsNull())
-      request.reads->spines.push_back([rail = piece.rail]() mutable {
-        return intersectSpine(rail) && !(rail.spineArc && stationsFold(rail) != true);
-      });
-    // Where the planes through the edge's points cross before they reach it, the balls found
-    // through those points do not go on along it, and through their centres they do (the
-    // same balls, placed by another parameter: Rail::byCentre); the piece's chain is made so
-    // (centreChain). Through the edge's points the march stalls there, or near there the
-    // balls' place along the edge turns back (a contact runs back) or changes too sharply
-    // to fit. Only where through the centres the blend is fitted and no contact runs back:
-    // else the fold or the failure is the blend's own, and stands.
-    const auto centreMends = [&] {
-      if (!mayCentre(int(k)))
-        return false;
-      Rail rail     = piece.rail;
-      rail.byCentre = true;
-      Stations stations(rail);
-      try
-      {
-        stations.march(seeds[k]);
-        const Fitted fitted = fit(rail, stations);
-        Dips         centred{rail, fitted};
-        return !runsBack(centred);
-      }
-      catch (const Failure& failure)
-      {
-        if (failure.reason == std::string("cancelled"))
-          throw;
-        return false;
-      }
-    };
-    for (int attempt = 0; attempt < 2; ++attempt)
-    {
-      creased.resize(pieces.size());
-      creased[k].clear();
-      Stations stations(piece.rail);
-      // No ball's plane passes through the edge's points somewhere along it (past a bend
-      // tighter than the ball, where the contact on a cap folds): the balls are found through
-      // their centres instead (Rail::byCentre), the same balls.
-      try
-      {
-        stations.march(seeds[k]);
-      }
-      catch (const Failure&)
-      {
-        if (!stations.stalled() || !mayCentre(int(k)))
-          throw;
-        centreChain(int(k));
-        return;
-      }
-      if (request.intersectSpines)
-        prepareConicWindow(piece.rail);
-      if (piece.rail.law == Law::Chordal)
-        roundOfChord(piece.rail, stations);
-      if (request.meet > 0)
-        meetsAt(piece.rail, stations, request.meet);
-      // A carry that stopped short ends where the ball last went on with the rail.
-      if (const auto reached = stations.reached(0))
-        piece.rail.from = std::max(piece.rail.from, *reached);
-      if (const auto reached = stations.reached(1))
-        piece.rail.to = std::min(piece.rail.to, *reached);
-      if (request.intersectSpines)
-        continueTerminal(piece, stations, facesOfEdge, edgesOfVertex);
-      else if (request.reads && continuesTerminal(piece.rail))
-        request.reads->spines.push_back([] { return true; });
-      // An exact sheet needs no fit: its contacts are its own.
-      // A conic's corner patch takes its weights from fitted sheets: none extruded there (a
-      // chamfer's corner takes none). The corner of more than three conics other than rounds is
-      // split from their extruded sheets (Attach::splitCorner).
-      const bool round =
-        piece.rail.law == Law::Conic && std::abs(piece.rail.rho - 0.5) < limit::equal
-        && std::abs(piece.rail.s[0].distance - piece.rail.s[1].distance)
-             < limit::equal * piece.rail.scale;
-      const auto patched = [&](int end) {
-        return piece.joint[end].meets == Meets::Corner
-               && (round || corners[piece.joint[end].piece].ends.size() <= 3);
-      };
-      const bool corner = piece.rail.law != Law::Chamfer && (patched(0) || patched(1));
-      auto exact = exactSheet(piece.rail, stations);
-      if (!exact && !corner)
-        exact = extrudedSheet(piece.rail, stations);
-      const auto contacts = exact ? exactContacts(piece.rail, stations, *exact) : std::nullopt;
-      // Locate support crossings from the ball's contacts before fitting the G2 section.
-      // A finite spline support's tangent continuation is only G1: its curvature jumps,
-      // so fitting a curvature-dependent section across it before splitting cannot converge.
-      // The circular pilot uses the same balls and contact parameters. It is always replaced
-      // by the requested G2 section after crossing discovery, and never reaches attachment.
-      const bool contactPilot = !contacts && attempt == 0 && piece.rail.law == Law::G2
-                                && !piece.rail.s[0].cliffCurve && !piece.rail.s[1].cliffCurve
-                                && piece.rail.s[0].trim.IsNull() && piece.rail.s[1].trim.IsNull();
-      if (contacts)
-      {
-        piece.fitted = *contacts;
-        piece.sheet  = *exact;
-      }
-      else
-      {
-        try
-        {
-          piece.fitted = fit(piece.rail, stations, contactPilot);
-        }
-        catch (const Failure& failure)
-        {
-          if (failure.reason == std::string("cancelled") || !centreMends())
-            throw;
-          centreChain(int(k));
-          return;
-        }
-        piece.sheet = exact ? *exact : Sheet{piece.fitted.blend};
-        if (!exact)
-          creased[k] = checkCrossing(piece.rail, stations, piece.fitted);
-      }
-      const bool onCliff = piece.rail.s[0].cliffCurve || piece.rail.s[1].cliffCurve
-                           || !piece.rail.s[0].trim.IsNull() || !piece.rail.s[1].trim.IsNull();
-      if (attempt == 1 || onCliff)
-      {
-        if (!contacts)
-        {
-          Dips dips{piece.rail, piece.fitted};
-          if (onCliff || capFoldsOf(int(k), dips))
-          {
-            if (runsBack(dips) && centreMends())
-            {
-              centreChain(int(k));
-              return;
-            }
-            checkFold(dips);
-          }
-        }
-        break;
-      }
-      // The first place where a contact changes between inside its face and outside, and
-      // the edge of that face it crosses there: leaving it, or entering it from the face it
-      // started on.
-      const double  u0 = piece.uAt(0), u1 = piece.uAt(1);
-      constexpr int samples = 256;
-      double        at = 0, overAt = 0;
-      int           side     = -1;
-      bool          entering = false, notched = false;
-      TopoDS_Edge   over;
-      // A contact wholly off its face: on both, the blend rests on neither and does not fit;
-      // on one, the ball may roll over onto the next face, which the blend does not do yet.
-      int off = 0, offSide = -1;
-      for (int s2 = 0; s2 < 2; ++s2)
-      {
-        Inside& onFace = inside(piece.rail.s[s2].face);
-        // On the face's far edge all along counts as off it: the ball rests on the face and that
-        // edge at once (a side exactly as high as the ball is wide), and the blend uses the face
-        // up as where the side is narrower.
-        const auto&       far = farOf(piece.rail, s2);
-        BRepAdaptor_Curve farCurve;
-        if (far)
-          farCurve.Initialize(far->edge);
-        const auto onFar = [&](double u) {
-          if (!far)
-            return false;
-          const gp_Pnt2d      uv = piece.fitted.contact[s2]->Value(u);
-          const gp_Pnt        p  = footAt(piece.rail.s[s2], uv.X(), uv.Y());
-          const Extrema_ExtPC to(p, farCurve);
-          if (!to.IsDone() || to.NbExt() == 0)
-            return false;
-          double nearest = HUGE_VAL;
-          for (int i = 1; i <= to.NbExt(); ++i)
-            nearest = std::min(nearest, to.SquareDistance(i));
-          return std::sqrt(nearest) <= piece.rail.resolved(limit::together);
-        };
-        const auto out = [&](double u) { return onFace.out(piece.fitted.contact[s2]->Value(u)); };
-        bool       wholly = true, along = true;
-        for (int i = 0; i <= samples && (wholly || along); i += samples / 16)
-        {
-          wholly = wholly && out(u0 + (u1 - u0) * i / samples);
-          along  = along && onFar(u0 + (u1 - u0) * i / samples);
-        }
-        if (!wholly && !along)
-          continue;
-        ++off;
-        offSide = s2;
-        // A flat face all of whose edges are blended: the blends use the cap up.
-        if (GeomAdaptor_Surface(piece.rail.s[s2].surface).GetType() != GeomAbs_Plane)
-          continue;
-        bool all = true;
-        for (TopExp_Explorer e(piece.rail.s[s2].face, TopAbs_EDGE); e.More() && all; e.Next())
-          all = std::any_of(pieces.begin(), pieces.end(), [&](const Piece& other) {
-            return other.rail.edge.IsSame(e.Current());
-          });
-        if (all)
-          fail(op,
-               no_solution,
-               "the blend consumes the cap: the face beside its edge vanishes",
-               {piece.rail.edge},
-               FailureKind::CapConsumed);
-      }
-      if (off == 2)
-        fail(op,
-             no_solution,
-             "the blend does not fit: it is wider than both faces beside its edge",
-             {piece.rail.edge},
-             FailureKind::Overflow);
-      if (off == 1)
-      {
-        // A face narrower than the blend: the ball rests on its far edge (a cliff).
-        // Between stops at both ends, or round a closed edge (a band narrower than the blend).
-        const bool stopped =
-          piece.joint[0].meets == Meets::Stop && piece.joint[1].meets == Meets::Stop;
-        // Not on an edge blended too: it is not there for the ball to rest on, nor to trim by.
-        const auto blended = [&](const TopoDS_Edge& edge) {
-          return std::any_of(pieces.begin(), pieces.end(), [&](const Piece& other) {
-            return other.rail.edge.IsSame(edge);
-          });
-        };
-        const auto& far = farOf(piece.rail, offSide);
-        if (far && !blended(far->edge) && (stopped || piece.rail.closed)
-            && cliffOf(piece.rail, offSide, *far))
-        {
-          --attempt;
-          continue;
-        }
-        // Else the face beyond the far edge trims the blend (a notch), between stops or round a
-        // closed edge.
-        if (far && !blended(far->edge) && (stopped || piece.rail.closed))
-        {
-          TopoDS_Face beyond;
-          for (const auto& face : facesOfEdge.FindFromKey(far->edge))
-            if (!face.IsSame(piece.rail.s[offSide].face))
-              beyond = TopoDS::Face(face);
-          if (!beyond.IsNull() && !beyond.IsSame(piece.rail.s[1 - offSide].face))
-          {
-            piece.rail.s[offSide].trim       = beyond;
-            piece.rail.s[offSide].trimEdge   = far->edge;
-            piece.rail.s[offSide].cliffWhole = far->whole;
-            --attempt;
-            continue;
-          }
-        }
-        // A part of a split, wholly past the place its contact leaves the face: that is seen
-        // along the whole edge, which came first.
-        if (piece.rail.parameterSupports)
-          off = 0;
-        else if ((piece.joint[0].meets == Meets::Stop) != (piece.joint[1].meets == Meets::Stop)
-                 && piece.joint[piece.joint[0].meets == Meets::Stop ? 1 : 0].meets == Meets::Joint)
-        {
-          ending.push_back(TopoDS::Edge(piece.rail.edge));
-          again = true;
-          return;
-        }
-        else
-        {
-          if (continueWholeSupport(int(k), offSide, stations))
-          {
-            --attempt;
-            continue;
-          }
-          fail(op,
-               unsupported_geometry,
-               "the blend's contact runs off the face beside the edge, onto faces the blend does "
-               "not roll it over yet",
-               {piece.rail.edge});
-        }
-      }
-      std::optional<std::vector<Fold>> loops; // where a contact crosses itself, found once
-      for (int s2 = 0; s2 < 2 && side < 0; ++s2)
-      {
-        Inside&    onFace = inside(piece.rail.s[s2].face);
-        const auto out = [&](double u) { return onFace.out(piece.fitted.contact[s2]->Value(u)); };
-        bool       startsOut = out(u0);
-        double     previous  = u0;
-        bool       trimmed   = false;
-        for (int i = 1; i <= samples && side < 0; ++i)
-        {
-          trimmed        = false;
-          const double u = u0 + (u1 - u0) * i / samples;
-          // ON is a tolerance band, not a side of the boundary. Retain
-          // the last definite side so a delayed exit cannot discard
-          // the geometric crossing while traversing that band.
-          const auto state = onFace.classify(piece.fitted.contact[s2]->Value(u));
-          if (state == TopAbs_ON)
-            continue;
-          if ((state == TopAbs_OUT) == startsOut)
-          {
-            previous = u;
-            continue;
-          }
-          // Keep the scan's forward lookahead, with its lower bound
-          // still on the definite side before the boundary band.
-          const double past = std::min(u1, u + (u1 - u0) / samples);
-          for (TopExp_Explorer e(piece.rail.s[s2].face, TopAbs_EDGE); e.More(); e.Next())
-          {
-            // A seam has the face on both sides: crossing it, the contact stays on it.
-            if (e.Current().IsSame(piece.rail.edge)
-                || BRep_Tool::IsClosed(TopoDS::Edge(e.Current()), piece.rail.s[s2].face))
-              continue;
-            // Over another blended edge the contact runs past the corner or mitre where
-            // the other blend's contact trims it: not a face it rolls on.
-            if (std::any_of(pieces.begin(), pieces.end(), [&](const Piece& other) {
-                  return other.rail.edge.IsSame(e.Current());
-                }))
-            {
-              if (crossing(piece.fitted.contact[s2],
-                           previous,
-                           past,
-                           previous,
-                           TopoDS::Edge(e.Current()),
-                           piece.rail.s[s2].face))
-              {
-                trimmed = true;
-                break;
-              }
-              continue;
-            }
-            const auto found = crossing(piece.fitted.contact[s2],
-                                        previous,
-                                        past,
-                                        previous,
-                                        TopoDS::Edge(e.Current()),
-                                        piece.rail.s[s2].face);
-            if (!found)
-              continue;
-            // At an end of the piece: the place a split already made it end.
-            const auto placeAt = [&](double v) {
-              const gp_Pnt2d uv = piece.fitted.contact[s2]->Value(v);
-              return supportPoint(piece.rail.s[s2].surface, uv.X(), uv.Y());
-            };
-            if (placeAt(found->first).Distance(placeAt(u0)) <= piece.rail.resolved(limit::together)
-                || placeAt(found->first).Distance(placeAt(u1))
-                     <= piece.rail.resolved(limit::together))
-            {
-              trimmed = true;
-              break;
-            }
-            // Over an edge where the faces are not tangent the contact meets what ends the
-            // blend: near an end of the piece, that end's stopping face trims it there.
-            bool smooth = false;
-            for (const auto& next : facesOfEdge.FindFromKey(e.Current()))
-            {
-              if (next.IsSame(piece.rail.s[s2].face))
-                continue;
-              double     f, l;
-              const auto pc =
-                BRep_Tool::CurveOnSurface(TopoDS::Edge(e.Current()), TopoDS::Face(next), f, l);
-              if (pc.IsNull())
-                continue;
-              Side beyond          = piece.rail.s[s2];
-              beyond.face          = TopoDS::Face(next);
-              beyond.surface       = BRep_Tool::Surface(beyond.face);
-              beyond.outward       = next.Orientation() == TopAbs_REVERSED ? -1 : 1;
-              const gp_Pnt2d here  = pc->Value(found->second),
-                             there = piece.fitted.contact[s2]->Value(found->first);
-              Jet a, b;
-              smooth = jetAt(beyond, here.X(), here.Y(), a)
-                       && jetAt(piece.rail.s[s2], there.X(), there.Y(), b)
-                       && SectionPolicy::tangentFor(a.n.Angle(b.n), piece.rail.scale);
-            }
-            if (!smooth)
-            {
-              // Into a hole of its face, a feature that can be lifted off and put back
-              // (liftFeatures): the blend runs into its walls.
-              for (TopoDS_Iterator w(TopoDS::Face(piece.rail.s[s2].face.Oriented(TopAbs_FORWARD)));
-                   w.More();
-                   w.Next())
-              {
-                bool holds = false;
-                for (TopoDS_Iterator x(w.Value()); x.More() && !holds; x.Next())
-                  holds = x.Value().IsSame(e.Current());
-                if (!holds
-                    || !holeOf(w.Value(),
-                               TopoDS::Face(piece.rail.s[s2].face.Oriented(TopAbs_FORWARD))))
-                  continue;
-                std::vector<TopoDS_Shape> walls;
-                for (const auto& next : facesOfEdge.FindFromKey(e.Current()))
-                  if (!next.IsSame(piece.rail.s[s2].face))
-                    walls.push_back(next);
-                // Only a feature that is put back as it is: a hole (its rim convex)
-                // beside a convex blend, a boss (its foot concave) beside a concave one.
-                if (walls.size() != 1
-                    || convexity(op,
-                                 TopoDS::Edge(e.Current()),
-                                 piece.rail.s[s2].face,
-                                 TopoDS::Face(walls.front()),
-                                 piece.rail.scale)
-                         != (piece.rail.sigma < 0 ? -1 : 1))
-                  continue;
-                const auto feature = featuresOf(body, walls);
-                if (std::none_of(feature.begin(), feature.end(), [&](const TopoDS_Shape& f) {
-                      return std::any_of(pieces.begin(), pieces.end(), [&](const Piece& p) {
-                        return f.IsSame(p.rail.s[0].face) || f.IsSame(p.rail.s[1].face);
-                      });
-                    }))
-                  throw Collision(op,
-                                  "the blend's contact runs into a hole or a boss in its face",
-                                  piece.rail.edge,
-                                  walls);
-              }
-              // An edge of the face at an end vertex of the blended edge is what stops the
-              // blend there, however far from the end the contact crosses it (at a wedge of
-              // angle w, its offset over tan w); else near an end, within three radii.
-              const double reach = 3 * piece.rail.scale;
-              gp_Pnt       p0, p1, pc;
-              piece.rail.curve.D0(piece.rail.first, p0);
-              piece.rail.curve.D0(piece.rail.last, p1);
-              piece.rail.curve.D0(piece.rail.t(found->first), pc);
-              // Or over the edge onto a face that stops the blend at an end of its edge
-              // (a top narrowing to an oblique end): that stop trims it there,
-              // wherever along the edge the contact reaches it.
-              bool          ontoStop = false;
-              TopoDS_Vertex ends[2];
-              TopExp::Vertices(TopoDS::Edge(piece.rail.edge.Oriented(TopAbs_FORWARD)),
-                               ends[0],
-                               ends[1]);
-              const bool atEnd =
-                std::any_of(std::begin(ends), std::end(ends), [&](const TopoDS_Vertex& v) {
-                  const auto& at = edgesOfVertex.FindFromKey(v);
-                  return std::any_of(at.begin(), at.end(), [&](const TopoDS_Shape& edge) {
-                    return edge.IsSame(e.Current());
-                  });
-                });
-              for (const auto& next : facesOfEdge.FindFromKey(e.Current()))
-                for (int end = 0; end < 2 && !next.IsSame(piece.rail.s[0].face)
-                                  && !next.IsSame(piece.rail.s[1].face);
-                     ++end)
-                {
-                  const TopoDS_Vertex& v = ends[end];
-                  if (piece.joint[end].meets != Meets::Stop || v.IsNull()
-                      || !edgesOfVertex.Contains(v))
-                    continue;
-                  for (const auto& at : edgesOfVertex.FindFromKey(v))
-                    for (const auto& face : facesOfEdge.FindFromKey(at))
-                      ontoStop = ontoStop || face.IsSame(next);
-                }
-              if (atEnd || ontoStop || pc.Distance(p0) <= reach || pc.Distance(p1) <= reach)
-              {
-                trimmed = true;
-                break;
-              }
-              // Partway over a convex edge the blend goes on as it is on the face carried
-
-              if (!convexOver(piece.rail,
-                              s2,
-                              TopoDS::Edge(e.Current()),
-                              *found,
-                              piece.fitted.contact[s2],
-                              previous))
-                fail(op,
-                     unsupported_geometry,
-                     "a blend's contact runs off its face partway along the edge, which the blend "
-                     "does not do yet",
-                     {piece.rail.edge});
-              notched = true;
-            }
-            side     = s2;
-            at       = found->first;
-            overAt   = found->second;
-            over     = TopoDS::Edge(e.Current());
-            entering = startsOut;
-            break;
-          }
-          if (side < 0 && !trimmed)
-          {
-            // Inside the loop where the contact crosses itself it may leave its face over the
-            // blended edge itself (the loop's tail past the edge): that part of the contact is
-            // cut away with the loop (capFolds), and the scan goes on past the loop's end.
-            if (!loops)
-            {
-              Dips dips{piece.rail, piece.fitted};
-              loops = capFolds(dips);
-            }
-            const auto loop = std::find_if(loops->begin(), loops->end(), [&](const Fold& f) {
-              return f.side == s2 && f.from < u && u < f.to;
-            });
-            if (loop == loops->end())
-              fail(op,
-                   unsupported_geometry,
-                   "a blend's contact leaves its face where the blend does not find the edge it "
-                   "crosses",
-                   {piece.rail.edge});
-            while (i < samples && u0 + (u1 - u0) * i / samples <= loop->to)
-              ++i;
-            previous  = u0 + (u1 - u0) * i / samples;
-            startsOut = out(previous);
-            continue;
-          }
-          if (trimmed)
-          {
-            // A stop at one end may be followed by a support crossing at the other.
-            // Continue from this side of the ignored transition, rather than dropping
-            // the rest of the contact after its first entry into the face.
-            startsOut = out(u);
-            previous  = u;
-          }
-        }
-      }
-      // Over a seam of its face the contact stays on the face, a period on, which the test
-      // above does not see. Where it crosses one between the piece's ends (a rim whose
-      // dihedral turns along it, so that its sections lean off the seam), the face's new
-      // boundary has its vertex there on the seam: the piece is split there as where it
-      // crosses onto the next face, the part after rolling on the same face a period over.
-      bool     overSeam = false;
-      gp_Vec2d seamShift; // the period the part off the face's own parameters is carried by
-      if (side < 0 && !contacts)
-        for (int s2 = 0; s2 < 2 && side < 0; ++s2)
-        {
-          const TopoDS_Face&          face    = piece.rail.s[s2].face;
-          const Handle(Geom_Surface)& surface = piece.rail.s[s2].surface;
-          // Only a face on a closed surface has a seam.
-          if (!surface->IsUClosed() && !surface->IsVClosed())
-            continue;
-          const auto pointAt = [&](double u) {
-            const gp_Pnt2d uv = piece.fitted.contact[s2]->Value(u);
-            return surface->Value(uv.X(), uv.Y());
-          };
-          for (TopExp_Explorer e(face, TopAbs_EDGE); e.More() && side < 0; e.Next())
-          {
-            const TopoDS_Edge seam = TopoDS::Edge(e.Current());
-            if (!BRep_Tool::IsClosed(seam, face)
-                || !acrossSeam(piece.fitted.contact[s2], seam, face, surface)
-                || poleInStrip(piece, s2, seam))
-              continue;
-            const auto found =
-              crossing(piece.fitted.contact[s2], u0, u1, (u0 + u1) / 2, seam, face);
-            if (!found)
-              continue;
-            const gp_Pnt there = pointAt(found->first);
-            const double near  = piece.rail.resolved(limit::together);
-            if (there.Distance(pointAt(u0)) <= near || there.Distance(pointAt(u1)) <= near)
-              continue;
-            // The part that lies off the face's own parameters, before the crossing or
-            // after it, is the one carried a period over onto them.
-            double ua, ub, va, vb;
-            BRepTools::UVBounds(face, ua, ub, va, vb);
-            // Each parameter's slack a share of its own range: an angle's and a length's
-            // ranges differ by the face's size.
-            const double su = 1e-9 * (ub - ua), sv = 1e-9 * (vb - va);
-            const auto   within = [&](const gp_Pnt2d& p) {
-              return p.X() >= ua - su && p.X() <= ub + su && p.Y() >= va - sv && p.Y() <= vb + sv;
-            };
-            const gp_Pnt2d ahead =
-              piece.fitted.contact[s2]->Value(found->first + (u1 - found->first) * 1e-3);
-            const gp_Pnt2d behind =
-              piece.fitted.contact[s2]->Value(found->first - (found->first - u0) * 1e-3);
-            if (within(ahead) == within(behind))
-              continue;
-            const gp_Pnt2d off      = within(ahead) ? behind : ahead;
-            const double   tu       = surface->IsUPeriodic() ? surface->UPeriod() : 0,
-                         tv         = surface->IsVPeriodic() ? surface->VPeriod() : 0;
-            const gp_Vec2d shifts[] = {{tu, 0}, {-tu, 0}, {0, tv}, {0, -tv}};
-            for (const auto& shift : shifts)
-              if (shift.SquareMagnitude() > 0 && within(off.Translated(shift)))
-              {
-                seamShift = shift;
-                side      = s2;
-                at        = found->first;
-                overAt    = found->second;
-                over      = seam;
-                overSeam  = true;
-                entering  = within(ahead);
-                break;
-              }
-            if (side < 0)
-              fail(op,
-                   unsupported_geometry,
-                   "a blend's contact crosses its face's seam where the blend does not find the "
-                   "face's period beyond",
-                   {piece.rail.edge});
-          }
-        }
-      if (side < 0)
-      {
-        if (contactPilot)
-        {
-          piece.fitted = fit(piece.rail, stations);
-          piece.sheet  = exact ? *exact : Sheet{piece.fitted.blend};
-        }
-        // An exact sheet's contacts are lines or circles at constant speed: they cannot fold.
-        if (!contacts)
-        {
-          Dips dips{piece.rail, piece.fitted};
-          if (capFoldsOf(int(k), dips))
-          {
-            if (runsBack(dips) && centreMends())
-            {
-              centreChain(int(k));
-              return;
-            }
-            checkFold(dips);
-          }
-        }
-        break;
-      }
-      // The next face across that edge, smooth with this one there.
-      TopoDS_Face next = overSeam ? piece.rail.s[side].face : TopoDS_Face();
-      for (const auto& face : facesOfEdge.FindFromKey(over))
-        if (!face.IsSame(piece.rail.s[side].face))
-          next = TopoDS::Face(face);
-      const double t = piece.rail.t(at);
-      Station      station;
-      if (next.IsNull() || !stations.at(t, station))
-        fail(op, unsupported_geometry, "a blend's contact runs off its face", {piece.rail.edge});
-      station.t = t;
-      // The edge's part before the crossing and its part after; the one off the face the
-      // edge lies on rolls on the next face, from the station there moved onto it.
-      Piece first = piece, second = piece;
-      if (!first.rail.parameterSupports)
-        first.rail.parameterSupports = std::array<Side, 2>{piece.rail.s[0], piece.rail.s[1]};
-      second.rail.parameterSupports = first.rail.parameterSupports;
-      first.rail.last = first.rail.to = t;
-      second.rail.first = second.rail.from = t;
-      Piece&  moved                        = entering ? first : second;
-      Station onNext                       = station;
-      if (notched)
-      {
-        moved.rail.s[side].trim       = next;
-        moved.rail.s[side].trimEdge   = over;
-        moved.rail.s[side].cliffWhole = false;
-      }
-      else
-      {
-        moved.rail.s[side].face    = next;
-        moved.rail.s[side].surface = BRep_Tool::Surface(next);
-        moved.rail.s[side].outward = next.Orientation() == TopAbs_REVERSED ? -1 : 1;
-        GeomAPI_ProjectPointOnSurf onto(station.foot[side], moved.rail.s[side].surface);
-        if (onto.NbPoints() == 0 || onto.LowerDistance() > piece.rail.resolved(limit::together))
-          fail(op,
-               unsupported_geometry,
-               "a blend's contact runs off its face onto one it does not meet",
-               {piece.rail.edge});
-        onto.LowerDistanceParameters(onNext.uv[side][0], onNext.uv[side][1]);
-        // Across its own seam, a period over (seamShift).
-        if (overSeam)
-        {
-          onNext.uv[side][0] = station.uv[side][0] + seamShift.X();
-          onNext.uv[side][1] = station.uv[side][1] + seamShift.Y();
-        }
-        else
-        {
-          // In the period of the next face's own parameters where the contact crosses onto
-          // it: two faces on one periodic surface meet at the seam's place a period apart.
-          double     f, l;
-          const auto onOver = BRep_Tool::CurveOnSurface(over, next, f, l);
-          if (!onOver.IsNull())
-          {
-            const gp_Pnt2d near = nearPeriod(gp_Pnt2d(onNext.uv[side][0], onNext.uv[side][1]),
-                                             onOver->Value(overAt),
-                                             moved.rail.s[side].surface);
-            onNext.uv[side][0]  = near.X();
-            onNext.uv[side][1]  = near.Y();
-          }
-        }
-      }
-      Jet before, after;
-      if (!jetAt(piece.rail.s[side], station.uv[side][0], station.uv[side][1], before)
-          || !jetAt(moved.rail.s[side], onNext.uv[side][0], onNext.uv[side][1], after)
-          || !SectionPolicy::tangentFor(before.n.Angle(after.n), piece.rail.scale))
-        fail(op,
-             unsupported_geometry,
-             "a blend's contact runs over an edge where its faces are not tangent, which the blend "
-             "does not do yet",
-             {piece.rail.edge});
-      // `piece` refers into `pieces`, which must not grow past what it holds.
-      if (pieces.size() >= pieces.capacity())
-        fail(op,
-             unsupported_geometry,
-             "the blend crosses too many faces along one edge",
-             {piece.rail.edge});
-      const int  index = int(pieces.size());
-      const auto outer = piece.joint[1];
-      first.joint[1]   = {Meets::Split, index, 0, false, side, over};
-      second.joint[0]  = {Meets::Split, int(k), 1, false, side, over};
-      seeds[k]         = entering ? onNext : station;
-      seeds.push_back(entering ? station : onNext);
-      piece = first;
-      // What met the edge's far end meets the second part's: on a closed edge, the first
-      // part's own start.
-      if (outer.meets == Meets::Joint || outer.meets == Meets::Miter || outer.meets == Meets::Split)
-      {
-        pieces[outer.piece].joint[outer.end].piece = index;
-        pieces[outer.piece].joint[outer.end].end   = 1;
-      }
-      if (outer.meets == Meets::Corner)
-        for (auto& [p2, e2] : corners[outer.piece].ends)
-          if (p2 == int(k) && e2 == 1)
-            p2 = index;
-      pieces.push_back(second);
-      // The first part is looked at again, as the second will be: its other contact may cross
-      // an edge too (the other face's seam just before a joint at a cone's, an edge of the
-      // other support just after a joint of crossed extrusions).
-      attempt = -1;
+           "the blend's contact runs off the face beside the edge, onto faces the blend does "
+           "not roll it over yet",
+           {piece.rail.edge});
     }
   }
+  return Next::Go;
+}
+
+bool Blend::smoothOver(const Piece&       piece,
+                       int                s2,
+                       const TopoDS_Edge& over,
+                       const Meeting&     found) const
+{
+  // Over an edge where the faces are not tangent the contact meets what ends the
+  // blend: near an end of the piece, that end's stopping face trims it there.
+  bool smooth = false;
+  for (const auto& next : facesOfEdge.FindFromKey(over))
+  {
+    if (next.IsSame(piece.rail.s[s2].face))
+      continue;
+    double     f, l;
+    const auto pc = BRep_Tool::CurveOnSurface(over, TopoDS::Face(next), f, l);
+    if (pc.IsNull())
+      continue;
+    Side beyond          = piece.rail.s[s2];
+    beyond.face          = TopoDS::Face(next);
+    beyond.surface       = BRep_Tool::Surface(beyond.face);
+    beyond.outward       = next.Orientation() == TopAbs_REVERSED ? -1 : 1;
+    const gp_Pnt2d here  = pc->Value(found.second),
+                   there = piece.fitted.contact[s2]->Value(found.first);
+    Jet            a, b;
+    smooth = jetAt(beyond, here.X(), here.Y(), a)
+             && jetAt(piece.rail.s[s2], there.X(), there.Y(), b)
+             && SectionPolicy::tangentFor(a.n.Angle(b.n), piece.rail.scale);
+  }
+  return smooth;
+}
+
+void Blend::refuseFeature(const Piece& piece, int s2, const TopoDS_Edge& over) const
+{
+  // Into a hole of its face, a feature that can be lifted off and put back
+  // (liftFeatures): the blend runs into its walls.
+  for (TopoDS_Iterator w(TopoDS::Face(piece.rail.s[s2].face.Oriented(TopAbs_FORWARD))); w.More();
+       w.Next())
+  {
+    bool holds = false;
+    for (TopoDS_Iterator x(w.Value()); x.More() && !holds; x.Next())
+      holds = x.Value().IsSame(over);
+    if (!holds || !holeOf(w.Value(), TopoDS::Face(piece.rail.s[s2].face.Oriented(TopAbs_FORWARD))))
+      continue;
+    std::vector<TopoDS_Shape> walls;
+    for (const auto& next : facesOfEdge.FindFromKey(over))
+      if (!next.IsSame(piece.rail.s[s2].face))
+        walls.push_back(next);
+    // Only a feature that is put back as it is: a hole (its rim convex)
+    // beside a convex blend, a boss (its foot concave) beside a concave one.
+    if (walls.size() != 1
+        || convexity(op, over, piece.rail.s[s2].face, TopoDS::Face(walls.front()), piece.rail.scale)
+             != (piece.rail.sigma < 0 ? -1 : 1))
+      continue;
+    const auto feature = featuresOf(body, walls);
+    if (std::none_of(feature.begin(), feature.end(), [&](const TopoDS_Shape& f) {
+          return std::any_of(pieces.begin(), pieces.end(), [&](const Piece& p) {
+            return f.IsSame(p.rail.s[0].face) || f.IsSame(p.rail.s[1].face);
+          });
+        }))
+      throw Collision(op,
+                      "the blend's contact runs into a hole or a boss in its face",
+                      piece.rail.edge,
+                      walls);
+  }
+}
+
+bool Blend::stopsNearEnd(const Piece& piece, const TopoDS_Edge& over, const Meeting& found) const
+{
+  // An edge of the face at an end vertex of the blended edge is what stops the
+  // blend there, however far from the end the contact crosses it (at a wedge of
+  // angle w, its offset over tan w); else near an end, within three radii.
+  const double reach = 3 * piece.rail.scale;
+  gp_Pnt       p0, p1, pc;
+  piece.rail.curve.D0(piece.rail.first, p0);
+  piece.rail.curve.D0(piece.rail.last, p1);
+  piece.rail.curve.D0(piece.rail.t(found.first), pc);
+  // Or over the edge onto a face that stops the blend at an end of its edge
+  // (a top narrowing to an oblique end): that stop trims it there,
+  // wherever along the edge the contact reaches it.
+  bool          ontoStop = false;
+  TopoDS_Vertex ends[2];
+  TopExp::Vertices(TopoDS::Edge(piece.rail.edge.Oriented(TopAbs_FORWARD)), ends[0], ends[1]);
+  const bool atEnd = std::any_of(std::begin(ends), std::end(ends), [&](const TopoDS_Vertex& v) {
+    const auto& at = edgesOfVertex.FindFromKey(v);
+    return std::any_of(at.begin(), at.end(), [&](const TopoDS_Shape& edge) {
+      return edge.IsSame(over);
+    });
+  });
+  for (const auto& next : facesOfEdge.FindFromKey(over))
+    for (int end = 0;
+         end < 2 && !next.IsSame(piece.rail.s[0].face) && !next.IsSame(piece.rail.s[1].face);
+         ++end)
+    {
+      const TopoDS_Vertex& v = ends[end];
+      if (piece.joint[end].meets != Meets::Stop || v.IsNull() || !edgesOfVertex.Contains(v))
+        continue;
+      for (const auto& at : edgesOfVertex.FindFromKey(v))
+        for (const auto& face : facesOfEdge.FindFromKey(at))
+          ontoStop = ontoStop || face.IsSame(next);
+    }
+  return atEnd || ontoStop || pc.Distance(p0) <= reach || pc.Distance(p1) <= reach;
+}
+
+void Blend::crossingOverEdge(int k, double u0, double u1, Crossing& c)
+{
+  Piece&                           piece    = pieces[k];
+  int&                             side     = c.side;
+  double&                          at       = c.at;
+  double&                          overAt   = c.overAt;
+  bool&                            entering = c.entering;
+  bool&                            notched  = c.notched;
+  TopoDS_Edge&                     over     = c.over;
+  std::optional<std::vector<Fold>> loops; // where a contact crosses itself, found once
+  for (int s2 = 0; s2 < 2 && side < 0; ++s2)
+  {
+    Inside&    onFace    = inside(piece.rail.s[s2].face);
+    const auto out       = [&](double u) { return onFace.out(piece.fitted.contact[s2]->Value(u)); };
+    bool       startsOut = out(u0);
+    double     previous  = u0;
+    bool       trimmed   = false;
+    for (int i = 1; i <= contactSamples && side < 0; ++i)
+    {
+      trimmed        = false;
+      const double u = u0 + (u1 - u0) * i / contactSamples;
+      // ON is a tolerance band, not a side of the boundary. Retain
+      // the last definite side so a delayed exit cannot discard
+      // the geometric crossing while traversing that band.
+      const auto state = onFace.classify(piece.fitted.contact[s2]->Value(u));
+      if (state == TopAbs_ON)
+        continue;
+      if ((state == TopAbs_OUT) == startsOut)
+      {
+        previous = u;
+        continue;
+      }
+      // Keep the scan's forward lookahead, with its lower bound
+      // still on the definite side before the boundary band.
+      const double past = std::min(u1, u + (u1 - u0) / contactSamples);
+      for (TopExp_Explorer e(piece.rail.s[s2].face, TopAbs_EDGE); e.More(); e.Next())
+      {
+        // A seam has the face on both sides: crossing it, the contact stays on it.
+        if (e.Current().IsSame(piece.rail.edge)
+            || BRep_Tool::IsClosed(TopoDS::Edge(e.Current()), piece.rail.s[s2].face))
+          continue;
+        // Over another blended edge the contact runs past the corner or mitre where
+        // the other blend's contact trims it: not a face it rolls on.
+        if (std::any_of(pieces.begin(), pieces.end(), [&](const Piece& other) {
+              return other.rail.edge.IsSame(e.Current());
+            }))
+        {
+          if (crossing(piece.fitted.contact[s2],
+                       previous,
+                       past,
+                       previous,
+                       TopoDS::Edge(e.Current()),
+                       piece.rail.s[s2].face))
+          {
+            trimmed = true;
+            break;
+          }
+          continue;
+        }
+        const auto found = crossing(piece.fitted.contact[s2],
+                                    previous,
+                                    past,
+                                    previous,
+                                    TopoDS::Edge(e.Current()),
+                                    piece.rail.s[s2].face);
+        if (!found)
+          continue;
+        // At an end of the piece: the place a split already made it end.
+        const auto placeAt = [&](double v) {
+          const gp_Pnt2d uv = piece.fitted.contact[s2]->Value(v);
+          return supportPoint(piece.rail.s[s2].surface, uv.X(), uv.Y());
+        };
+        if (placeAt(found->first).Distance(placeAt(u0)) <= piece.rail.resolved(limit::together)
+            || placeAt(found->first).Distance(placeAt(u1)) <= piece.rail.resolved(limit::together))
+        {
+          trimmed = true;
+          break;
+        }
+        if (!smoothOver(piece, s2, TopoDS::Edge(e.Current()), *found))
+        {
+          refuseFeature(piece, s2, TopoDS::Edge(e.Current()));
+          if (stopsNearEnd(piece, TopoDS::Edge(e.Current()), *found))
+          {
+            trimmed = true;
+            break;
+          }
+          // Partway over a convex edge the blend goes on as it is on the face carried
+
+          if (!convexOver(piece.rail, s2, TopoDS::Edge(e.Current()), *found))
+            fail(op,
+                 unsupported_geometry,
+                 "a blend's contact runs off its face partway along the edge, which the blend "
+                 "does not do yet",
+                 {piece.rail.edge});
+          notched = true;
+        }
+        side     = s2;
+        at       = found->first;
+        overAt   = found->second;
+        over     = TopoDS::Edge(e.Current());
+        entering = startsOut;
+        break;
+      }
+      if (side < 0 && !trimmed)
+      {
+        // Inside the loop where the contact crosses itself it may leave its face over the
+        // blended edge itself (the loop's tail past the edge): that part of the contact is
+        // cut away with the loop (capFolds), and the scan goes on past the loop's end.
+        if (!loops)
+        {
+          Dips dips{piece.rail, piece.fitted};
+          loops = capFolds(dips);
+        }
+        const auto loop = std::find_if(loops->begin(), loops->end(), [&](const Fold& f) {
+          return f.side == s2 && f.from < u && u < f.to;
+        });
+        if (loop == loops->end())
+          fail(op,
+               unsupported_geometry,
+               "a blend's contact leaves its face where the blend does not find the edge it "
+               "crosses",
+               {piece.rail.edge});
+        while (i < contactSamples && u0 + (u1 - u0) * i / contactSamples <= loop->to)
+          ++i;
+        previous  = u0 + (u1 - u0) * i / contactSamples;
+        startsOut = out(previous);
+        continue;
+      }
+      if (trimmed)
+      {
+        // A stop at one end may be followed by a support crossing at the other.
+        // Continue from this side of the ignored transition, rather than dropping
+        // the rest of the contact after its first entry into the face.
+        startsOut = out(u);
+        previous  = u;
+      }
+    }
+  }
+}
+
+void Blend::crossingOverSeam(int k, double u0, double u1, Crossing& c)
+{
+  const Piece& piece     = pieces[k];
+  int&         side      = c.side;
+  double&      at        = c.at;
+  double&      overAt    = c.overAt;
+  bool&        entering  = c.entering;
+  TopoDS_Edge& over      = c.over;
+  bool&        overSeam  = c.overSeam;
+  gp_Vec2d&    seamShift = c.seamShift;
+  for (int s2 = 0; s2 < 2 && side < 0; ++s2)
+  {
+    const TopoDS_Face&          face    = piece.rail.s[s2].face;
+    const Handle(Geom_Surface)& surface = piece.rail.s[s2].surface;
+    // Only a face on a closed surface has a seam.
+    if (!surface->IsUClosed() && !surface->IsVClosed())
+      continue;
+    const auto pointAt = [&](double u) {
+      const gp_Pnt2d uv = piece.fitted.contact[s2]->Value(u);
+      return surface->Value(uv.X(), uv.Y());
+    };
+    for (TopExp_Explorer e(face, TopAbs_EDGE); e.More() && side < 0; e.Next())
+    {
+      const TopoDS_Edge seam = TopoDS::Edge(e.Current());
+      if (!BRep_Tool::IsClosed(seam, face)
+          || !acrossSeam(piece.fitted.contact[s2], seam, face, surface)
+          || poleInStrip(piece, s2, seam))
+        continue;
+      const auto found = crossing(piece.fitted.contact[s2], u0, u1, (u0 + u1) / 2, seam, face);
+      if (!found)
+        continue;
+      const gp_Pnt there = pointAt(found->first);
+      const double near  = piece.rail.resolved(limit::together);
+      if (there.Distance(pointAt(u0)) <= near || there.Distance(pointAt(u1)) <= near)
+        continue;
+      // The part that lies off the face's own parameters, before the crossing or
+      // after it, is the one carried a period over onto them.
+      double ua, ub, va, vb;
+      BRepTools::UVBounds(face, ua, ub, va, vb);
+      // Each parameter's slack a share of its own range: an angle's and a length's
+      // ranges differ by the face's size.
+      const double su = 1e-9 * (ub - ua), sv = 1e-9 * (vb - va);
+      const auto   within = [&](const gp_Pnt2d& p) {
+        return p.X() >= ua - su && p.X() <= ub + su && p.Y() >= va - sv && p.Y() <= vb + sv;
+      };
+      const gp_Pnt2d ahead =
+        piece.fitted.contact[s2]->Value(found->first + (u1 - found->first) * 1e-3);
+      const gp_Pnt2d behind =
+        piece.fitted.contact[s2]->Value(found->first - (found->first - u0) * 1e-3);
+      if (within(ahead) == within(behind))
+        continue;
+      const gp_Pnt2d off      = within(ahead) ? behind : ahead;
+      const double   tu       = surface->IsUPeriodic() ? surface->UPeriod() : 0,
+                     tv       = surface->IsVPeriodic() ? surface->VPeriod() : 0;
+      const gp_Vec2d shifts[] = {{tu, 0}, {-tu, 0}, {0, tv}, {0, -tv}};
+      for (const auto& shift : shifts)
+        if (shift.SquareMagnitude() > 0 && within(off.Translated(shift)))
+        {
+          seamShift = shift;
+          side      = s2;
+          at        = found->first;
+          overAt    = found->second;
+          over      = seam;
+          overSeam  = true;
+          entering  = within(ahead);
+          break;
+        }
+      if (side < 0)
+        fail(op,
+             unsupported_geometry,
+             "a blend's contact crosses its face's seam where the blend does not find the "
+             "face's period beyond",
+             {piece.rail.edge});
+    }
+  }
+}
+
+void Blend::splitAt(int k, Stations& stations, const Crossing& c)
+{
+  Piece&             piece     = pieces[k];
+  const int          side      = c.side;
+  const double       at        = c.at;
+  const double       overAt    = c.overAt;
+  const bool         entering  = c.entering;
+  const bool         notched   = c.notched;
+  const TopoDS_Edge& over      = c.over;
+  const bool         overSeam  = c.overSeam;
+  const gp_Vec2d&    seamShift = c.seamShift;
+  // The next face across that edge, smooth with this one there.
+  TopoDS_Face next = overSeam ? piece.rail.s[side].face : TopoDS_Face();
+  for (const auto& face : facesOfEdge.FindFromKey(over))
+    if (!face.IsSame(piece.rail.s[side].face))
+      next = TopoDS::Face(face);
+  const double t = piece.rail.t(at);
+  Station      station;
+  if (next.IsNull() || !stations.at(t, station))
+    fail(op, unsupported_geometry, "a blend's contact runs off its face", {piece.rail.edge});
+  station.t = t;
+  // The edge's part before the crossing and its part after; the one off the face the
+  // edge lies on rolls on the next face, from the station there moved onto it.
+  Piece first = piece, second = piece;
+  if (!first.rail.parameterSupports)
+    first.rail.parameterSupports = std::array<Side, 2>{piece.rail.s[0], piece.rail.s[1]};
+  second.rail.parameterSupports = first.rail.parameterSupports;
+  first.rail.last = first.rail.to = t;
+  second.rail.first = second.rail.from = t;
+  Piece&  moved                        = entering ? first : second;
+  Station onNext                       = station;
+  if (notched)
+  {
+    moved.rail.s[side].trim       = next;
+    moved.rail.s[side].trimEdge   = over;
+    moved.rail.s[side].cliffWhole = false;
+  }
+  else
+  {
+    moved.rail.s[side].face    = next;
+    moved.rail.s[side].surface = BRep_Tool::Surface(next);
+    moved.rail.s[side].outward = next.Orientation() == TopAbs_REVERSED ? -1 : 1;
+    GeomAPI_ProjectPointOnSurf onto(station.foot[side], moved.rail.s[side].surface);
+    if (onto.NbPoints() == 0 || onto.LowerDistance() > piece.rail.resolved(limit::together))
+      fail(op,
+           unsupported_geometry,
+           "a blend's contact runs off its face onto one it does not meet",
+           {piece.rail.edge});
+    onto.LowerDistanceParameters(onNext.uv[side][0], onNext.uv[side][1]);
+    // Across its own seam, a period over (seamShift).
+    if (overSeam)
+    {
+      onNext.uv[side][0] = station.uv[side][0] + seamShift.X();
+      onNext.uv[side][1] = station.uv[side][1] + seamShift.Y();
+    }
+    else
+    {
+      // In the period of the next face's own parameters where the contact crosses onto
+      // it: two faces on one periodic surface meet at the seam's place a period apart.
+      double     f, l;
+      const auto onOver = BRep_Tool::CurveOnSurface(over, next, f, l);
+      if (!onOver.IsNull())
+      {
+        const gp_Pnt2d near = nearPeriod(gp_Pnt2d(onNext.uv[side][0], onNext.uv[side][1]),
+                                         onOver->Value(overAt),
+                                         moved.rail.s[side].surface);
+        onNext.uv[side][0]  = near.X();
+        onNext.uv[side][1]  = near.Y();
+      }
+    }
+  }
+  Jet before, after;
+  if (!jetAt(piece.rail.s[side], station.uv[side][0], station.uv[side][1], before)
+      || !jetAt(moved.rail.s[side], onNext.uv[side][0], onNext.uv[side][1], after)
+      || !SectionPolicy::tangentFor(before.n.Angle(after.n), piece.rail.scale))
+    fail(op,
+         unsupported_geometry,
+         "a blend's contact runs over an edge where its faces are not tangent, which the blend "
+         "does not do yet",
+         {piece.rail.edge});
+  // `piece` refers into `pieces`, which must not grow past what it holds.
+  if (pieces.size() >= pieces.capacity())
+    fail(op,
+         unsupported_geometry,
+         "the blend crosses too many faces along one edge",
+         {piece.rail.edge});
+  const int  index = int(pieces.size());
+  const auto outer = piece.joint[1];
+  first.joint[1]   = {Meets::Split, index, 0, false, side, over};
+  second.joint[0]  = {Meets::Split, k, 1, false, side, over};
+  seeds[k]         = entering ? onNext : station;
+  seeds.push_back(entering ? station : onNext);
+  piece = first;
+  // What met the edge's far end meets the second part's: on a closed edge, the first
+  // part's own start.
+  if (outer.meets == Meets::Joint || outer.meets == Meets::Miter || outer.meets == Meets::Split)
+  {
+    pieces[outer.piece].joint[outer.end].piece = index;
+    pieces[outer.piece].joint[outer.end].end   = 1;
+  }
+  if (outer.meets == Meets::Corner)
+    for (auto& [p2, e2] : corners[outer.piece].ends)
+      if (p2 == k && e2 == 1)
+        p2 = index;
+  pieces.push_back(second);
+}
+
+bool Blend::sheetOf(int k, Folds& folds, Creases& creased)
+{
+  if (pieces.size() >= pieces.capacity())
+    fail(op,
+         unsupported_geometry,
+         "the blend crosses too many faces along one edge",
+         {pieces[k].rail.edge});
+  Piece& piece = pieces[k];
+  if (centred(piece.rail.edge))
+    piece.rail.byCentre = true;
+  // An open rail is walked along its spine only where its own stations fold there
+  // (stationsFold): elsewhere they are the same balls, by the edge's parameter.
+  if (request.intersectSpines && piece.rail.spine.IsNull() && intersectSpine(piece.rail)
+      && piece.rail.spineArc && stationsFold(piece.rail) != true)
+  {
+    piece.rail.spine.Nullify();
+    piece.rail.spineArc.reset();
+  }
+  else if (!request.intersectSpines && request.reads && piece.rail.spine.IsNull())
+    request.reads->spines.push_back([rail = piece.rail]() mutable {
+      return intersectSpine(rail) && !(rail.spineArc && stationsFold(rail) != true);
+    });
+  for (int attempt = 0; attempt < 2; ++attempt)
+  {
+    creased.resize(pieces.size());
+    creased[k].clear();
+    Stations stations(piece.rail);
+    // No ball's plane passes through the edge's points somewhere along it (past a bend
+    // tighter than the ball, where the contact on a cap folds): the balls are found through
+    // their centres instead (Rail::byCentre), the same balls.
+    try
+    {
+      stations.march(seeds[k]);
+    }
+    catch (const Failure&)
+    {
+      if (!stations.stalled() || !mayCentre(k))
+        throw;
+      centreChain(k);
+      return false;
+    }
+    prepareRail(piece, stations);
+    SheetFit fitting;
+    if (!fitSheet(k, attempt, stations, fitting, creased[k]))
+      return false;
+    const bool onCliff = piece.rail.s[0].cliffCurve || piece.rail.s[1].cliffCurve
+                         || !piece.rail.s[0].trim.IsNull() || !piece.rail.s[1].trim.IsNull();
+    if (attempt == 1 || onCliff)
+    {
+      if (!fitting.contacts && !settleFolds(k, folds, onCliff))
+        return false;
+      break;
+    }
+    // The first place where a contact changes between inside its face and outside, and the edge
+    // of that face it crosses there: leaving it, or entering it from the face it started on.
+    const double u0 = piece.uAt(0), u1 = piece.uAt(1);
+    const Next   off = offFace(k, stations, u0, u1);
+    if (off == Next::Retry)
+    {
+      --attempt;
+      continue;
+    }
+    if (off == Next::Stop)
+      return false;
+    Crossing crossed;
+    crossingOverEdge(k, u0, u1, crossed);
+    // Over a seam of its face the contact stays on the face, a period on, which the test
+    // above does not see. Where it crosses one between the piece's ends (a rim whose
+    // dihedral turns along it, so that its sections lean off the seam), the face's new
+    // boundary has its vertex there on the seam: the piece is split there as where it
+    // crosses onto the next face, the part after rolling on the same face a period over.
+    if (crossed.side < 0 && !fitting.contacts)
+      crossingOverSeam(k, u0, u1, crossed);
+    if (crossed.side < 0)
+    {
+      if (fitting.contactPilot)
+      {
+        piece.fitted = fit(piece.rail, stations);
+        piece.sheet  = fitting.exact ? *fitting.exact : Sheet{piece.fitted.blend};
+      }
+      // An exact sheet's contacts are lines or circles at constant speed: they cannot fold.
+      if (!fitting.contacts && !settleFolds(k, folds, false))
+        return false;
+      break;
+    }
+    splitAt(k, stations, crossed);
+    // The first part is looked at again, as the second will be: its other contact may cross
+    // an edge too (the other face's seam just before a joint at a cone's, an edge of the
+    // other support just after a joint of crossed extrusions).
+    attempt = -1;
+  }
+  return true;
+}
+
+void Blend::creaseFolds(Folds& folds, Creases& creased)
+{
   // Where a round crosses itself between its contacts, the edge's blend is cut where the sheets
   // before and after the fold meet (Attach::crossingFold): its parts end at the sections through
   // the crease's ends, the crease between them.
@@ -3541,9 +3661,8 @@ void Blend::sheets()
   {
     if (creased[k].empty())
       continue;
-    auto found = std::find_if(folds.begin(), folds.end(), [&](const auto& f) {
-      return f.first == k;
-    });
+    auto found =
+      std::find_if(folds.begin(), folds.end(), [&](const auto& f) { return f.first == k; });
     if (found == folds.end())
       found = folds.insert(folds.end(), {k, {}});
     for (const auto& crease : creased[k])
@@ -3558,7 +3677,10 @@ void Blend::sheets()
       if (found->second[i].from <= found->second[i - 1].to)
         refuseFold(k, "loops where a contact folds overlap");
   }
-  crossFolds(folds);
+}
+
+void Blend::cutAtFolds(const Folds& folds)
+{
   // Where a contact on a flat cap folds over itself, the edge's blend is cut at the two ends of
   // each loop, where the balls are one, and the loop is patched (Attach::fold): a piece on the
   // one sheet between each loop and the next.
@@ -3588,7 +3710,8 @@ void Blend::sheets()
       pieces[k]            = first;
       pieces.push_back(second);
       seeds.push_back(std::nullopt);
-      // What met the edge's far end meets the second part's (the first's start, on a closed edge).
+      // What met the edge's far end meets the second part's (the first's start, on a closed
+      // edge).
       if (outer.meets == Meets::Joint || outer.meets == Meets::Miter || outer.meets == Meets::Split
           || outer.meets == Meets::Fold)
       {
@@ -3620,6 +3743,27 @@ void Blend::sheets()
       }
     }
   }
+}
+
+void Blend::sheets()
+{
+  // Sections in two spans along a whole chain, or along none of it: its sections share their
+  // form at its joints.
+  shareHalves();
+  // Each piece's blend, exact where every piece of its chain can be; a chain's sections then
+  // share one parameter at each joint.
+  // Where a contact leaves its face across a smooth edge onto the next face, the piece is split
+  // there and its second part rolls on that face (the support sequence).
+  seeds.assign(pieces.size(), std::nullopt);
+  Folds folds;
+  // Each piece's creases where its round crosses itself between its contacts, from its last fit.
+  Creases creased;
+  for (size_t k = 0; k < pieces.size(); ++k)
+    if (!sheetOf(int(k), folds, creased))
+      return;
+  creaseFolds(folds, creased);
+  crossFolds(folds);
+  cutAtFolds(folds);
 }
 
 void Blend::crossFolds(const std::vector<std::pair<int, std::vector<Fold>>>& folds)
