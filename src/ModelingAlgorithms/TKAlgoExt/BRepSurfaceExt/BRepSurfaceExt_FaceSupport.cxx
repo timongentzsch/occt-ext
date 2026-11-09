@@ -246,53 +246,158 @@ struct Edge
   double                  first = 0, last = 0;
 };
 
-} // namespace
-
-EvolutionData replaceFaceSupport(OcctKernel&                k,
-                                 uint32_t                   bodyId,
-                                 uint32_t                   faceId,
-                                 const std::vector<double>& spline,
-                                 double                     tolerance,
-                                 const std::vector<int>&    hashes,
-                                 int                        bound)
+//! Where a curve passes `point`: its parameter, and the distance it passes at.
+double parameterOn(const occ::handle<Geom_Curve>& curve, const gp_Pnt& point, double& parameter)
 {
-  const char* op = "replaceFaceSupport";
-  if (!std::isfinite(tolerance) || tolerance <= 0)
-    fail(op, invalid_input, "positive tolerance required");
-  const auto& input = get(k, bodyId);
-  ShapeSet    members;
-  TopExp::MapShapes(input, TopAbs_FACE, members);
-  const auto& picked = get(k, faceId);
-  if (picked.ShapeType() != TopAbs_FACE || !members.Contains(picked))
-    fail(op, invalid_input, "select a face of the body");
-  const auto wanted = splineFromData(op, spline);
-  if (wanted->IsUPeriodic() || wanted->IsVPeriodic())
-    fail(op, unsupported_geometry, "periodic nets are unsupported");
-  FaceHistory history(op, hashes, bound);
+  GeomAPI_ProjectPointOnCurve projection(point, curve);
+  if (projection.NbPoints() == 0)
+    return std::numeric_limits<double>::infinity();
+  parameter = projection.LowerDistanceParameter();
+  return projection.LowerDistance();
+}
 
-  // Everything below works on a copy: tolerances are raised in place.
-  BRepBuilderAPI_Copy copy(input, true, false);
-  const auto          body = copy.Shape();
-  const auto face = TopoDS::Face(copy.ModifiedShape(members.FindKey(members.FindIndex(picked))));
-  // Failures name the input's own sub-shapes, which core knows.
+//! A face of a body put on a new spline support: its corners kept or slid along the edges that
+//! leave it, its edges where the new support meets the faces across them, the edges that leave
+//! it run to the moved corners, and the support grown as far as the new boundary needs. Works
+//! on a copy of the body: tolerances are raised in place.
+class SupportReplacement
+{
+public:
+  SupportReplacement(const char*                             op,
+                     const TopoDS_Shape&                     input,
+                     const TopoDS_Shape&                     picked,
+                     const ShapeSet&                         members,
+                     const occ::handle<Geom_BSplineSurface>& wanted,
+                     double                                  tolerance)
+      : op(op),
+        tolerance(tolerance),
+        wanted(wanted),
+        copy(input, true, false),
+        body(copy.Shape()),
+        face(TopoDS::Face(copy.ModifiedShape(members.FindKey(members.FindIndex(picked)))))
+  {
+    // Failures name the input's own sub-shapes, which core knows.
+    for (const auto type : {TopAbs_EDGE, TopAbs_VERTEX, TopAbs_FACE})
+      for (TopExp_Explorer it(input, type); it.More(); it.Next())
+        if (!origin.IsBound(copy.ModifiedShape(it.Current())))
+          origin.Bind(copy.ModifiedShape(it.Current()), it.Current());
+    TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+    TopExp::MapShapesAndAncestors(body, TopAbs_VERTEX, TopAbs_EDGE, vertexEdges);
+    TopExp::MapShapes(face, TopAbs_EDGE, faceEdges);
+    TopExp::MapShapes(face, TopAbs_VERTEX, faceVertices);
+  }
+
+  //! The body with the face on its new support, valid, or a failure.
+  TopoDS_Shape run();
+
+  //! What a shape of the input became.
+  TopoDS_Shape successorOf(const TopoDS_Shape& shape) const;
+
+private:
+  //! Failures name the input's own sub-shapes, which core knows.
+  std::vector<TopoDS_Shape> at(const TopoDS_Shape& shape) const;
+
+  //! The one neighbour across each edge.
+  void neighbours();
+
+  //! As far as the new boundary can be from the old one: the face's own size.
+  void extend();
+
+  //! Corners: kept where they are on the new support, else slid along the edges that leave
+  //! the face there.
+  void slideCorners();
+
+  TopoDS_Vertex cornerOf(const TopoDS_Vertex& vertex) const;
+
+  //! A new edge on `curve` between two corners, as `original` ran. An edge that leaves the
+  //! face (`turnable` false) keeps its curve's direction: a corner that slid past its far end
+  //! would turn it round.
+  Edge edgeOn(const TopoDS_Edge&      original,
+              occ::handle<Geom_Curve> curve,
+              const TopoDS_Vertex&    start,
+              const TopoDS_Vertex&    end,
+              bool                    turnable);
+
+  //! The face's edges.
+  void faceEdgesOn();
+
+  //! The edges that leave the face at a moved corner run to it now.
+  void slideSides();
+
+  //! The support the face gets: the new net where it reaches the new boundary, else the net and
+  //! as much of its extension as the boundary needs, up to the boundary, so that a face the net
+  //! has shrunk inside is again a whole face of its support.
+  void supportFor();
+
+  //! An edge's p-curve on `surface`: its points projected, carried across the surface's period
+  //! so they run on without a jump, and interpolated at the edge's own parameters, so curve and
+  //! p-curve agree point for point. On a face that the edge's original lay on, it starts in
+  //! the same period as the original's p-curve did.
+  occ::handle<Geom2d_Curve> laid(const Edge&                      edge,
+                                 const occ::handle<Geom_Surface>& surface,
+                                 const gp_Pnt2d*                  was) const;
+
+  //! The p-curve of `edge` on the face `on` of `surface`, a pair of them on a seam.
+  void pcurve(Edge& edge, const TopoDS_Face& on, const occ::handle<Geom_Surface>& surface);
+
+  //! The new face, its edges' p-curves, and the neighbours' p-curves of every new edge.
+  void buildFace();
+
+  const char* const                                                        op;
+  const double                                                             tolerance;
+  const occ::handle<Geom_BSplineSurface>                                   wanted;
+  BRepBuilderAPI_Copy                                                      copy;
+  const TopoDS_Shape                                                       body;
+  const TopoDS_Face                                                        face;
   NCollection_DataMap<TopoDS_Shape, TopoDS_Shape, TopTools_ShapeMapHasher> origin;
-  for (const auto type : {TopAbs_EDGE, TopAbs_VERTEX, TopAbs_FACE})
-    for (TopExp_Explorer it(input, type); it.More(); it.Next())
-      if (!origin.IsBound(copy.ModifiedShape(it.Current())))
-        origin.Bind(copy.ModifiedShape(it.Current()), it.Current());
-  auto at = [&](const TopoDS_Shape& shape) {
-    return std::vector<TopoDS_Shape>{origin.IsBound(shape) ? origin.Find(shape) : shape};
-  };
+  Adjacency                                                                edgeFaces, vertexEdges;
+  ShapeSet                                                                 faceEdges, faceVertices;
+  NCollection_DataMap<TopoDS_Shape, TopoDS_Face, TopTools_ShapeMapHasher>  across;
+  occ::handle<Geom_BSplineSurface>                                         extended;
+  ShapeMap                                                                 corners;
+  BRep_Builder                                                             builder;
+  std::vector<Edge>                                                        edges, sides;
+  occ::handle<Geom_BSplineSurface>                                         support;
+  TopoDS_Face                                                              made;
+  BRepTools_ReShape                                                        reshape;
+};
 
-  Adjacency edgeFaces, vertexEdges;
-  TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
-  TopExp::MapShapesAndAncestors(body, TopAbs_VERTEX, TopAbs_EDGE, vertexEdges);
-  ShapeSet faceEdges, faceVertices;
-  TopExp::MapShapes(face, TopAbs_EDGE, faceEdges);
-  TopExp::MapShapes(face, TopAbs_VERTEX, faceVertices);
+TopoDS_Shape SupportReplacement::run()
+{
+  neighbours();
+  extend();
+  slideCorners();
+  faceEdgesOn();
+  slideSides();
+  supportFor();
+  buildFace();
+  reshape.Replace(face, made);
+  for (const auto& edge : edges)
+    reshape.Replace(edge.original, edge.made);
+  for (const auto& side : sides)
+    reshape.Replace(side.original, side.made);
+  const auto result = reshape.Apply(body);
+  BRepLib::UpdateTolerances(result, false);
+  if (!BRepCheck_Analyzer(result).IsValid())
+    fail(op,
+         no_solution,
+         "the faces beside it could not be grown or cut to the new surface",
+         at(face));
+  return result;
+}
 
-  // The one neighbour across each edge.
-  NCollection_DataMap<TopoDS_Shape, TopoDS_Face, TopTools_ShapeMapHasher> across;
+TopoDS_Shape SupportReplacement::successorOf(const TopoDS_Shape& shape) const
+{
+  return reshape.Value(copy.ModifiedShape(shape));
+}
+
+std::vector<TopoDS_Shape> SupportReplacement::at(const TopoDS_Shape& shape) const
+{
+  return std::vector<TopoDS_Shape>{origin.IsBound(shape) ? origin.Find(shape) : shape};
+}
+
+void SupportReplacement::neighbours()
+{
   for (const auto& shape : faceEdges)
   {
     const auto edge = TopoDS::Edge(shape);
@@ -313,8 +418,10 @@ EvolutionData replaceFaceSupport(OcctKernel&                k,
            at(edge));
     across.Bind(edge, others.front());
   }
+}
 
-  // As far as the new boundary can be from the old one: the face's own size.
+void SupportReplacement::extend()
+{
   Bnd_Box box;
   BRepBndLib::Add(face, box);
   const double                     reach = std::sqrt(box.SquareExtent());
@@ -326,14 +433,13 @@ EvolutionData replaceFaceSupport(OcctKernel&                k,
                                   std::min(wanted->UDegree(), wanted->VDegree()) >= 2 ? 2 : 1,
                                   alongU,
                                   after);
-  const auto extended = occ::down_cast<Geom_BSplineSurface>(grown);
+  extended = occ::down_cast<Geom_BSplineSurface>(grown);
   if (extended.IsNull())
     fail(op, no_solution, "could not extend the new support");
+}
 
-  // Corners: kept where they are on the new support, else slid along the edges that leave
-  // the face there.
-  ShapeMap     corners;
-  BRep_Builder builder;
+void SupportReplacement::slideCorners()
+{
   for (const auto& shape : faceVertices)
   {
     const auto vertex = TopoDS::Vertex(shape);
@@ -379,103 +485,91 @@ EvolutionData replaceFaceSupport(OcctKernel&                k,
     builder.MakeVertex(moved, found.front(), BRep_Tool::Tolerance(vertex));
     corners.Bind(vertex, moved);
   }
-  auto cornerOf = [&](const TopoDS_Vertex& vertex) { return TopoDS::Vertex(corners.Find(vertex)); };
+}
 
-  // Where a curve passes `point`: its parameter.
-  auto parameterOn =
-    [&](const occ::handle<Geom_Curve>& curve, const gp_Pnt& point, double& parameter) {
-      GeomAPI_ProjectPointOnCurve projection(point, curve);
-      if (projection.NbPoints() == 0)
-        return std::numeric_limits<double>::infinity();
-      parameter = projection.LowerDistanceParameter();
-      return projection.LowerDistance();
-    };
-  // A new edge on `curve` between two corners, as `original` ran. An edge that leaves the
-  // face (`turnable` false) keeps its curve's direction: a corner that slid past its far end
-  // would turn it round.
-  auto edgeOn = [&](const TopoDS_Edge&      original,
-                    occ::handle<Geom_Curve> curve,
-                    const TopoDS_Vertex&    start,
-                    const TopoDS_Vertex&    end,
-                    bool                    turnable) {
-    double a, b;
-    if (parameterOn(curve, BRep_Tool::Pnt(start), a) > 10 * tolerance
-        || parameterOn(curve, BRep_Tool::Pnt(end), b) > 10 * tolerance)
-      fail(op, no_solution, "the new edge does not pass through its corners", at(original));
-    const bool closed = start.IsSame(end);
-    if (closed)
+TopoDS_Vertex SupportReplacement::cornerOf(const TopoDS_Vertex& vertex) const
+{
+  return TopoDS::Vertex(corners.Find(vertex));
+}
+
+Edge SupportReplacement::edgeOn(const TopoDS_Edge&      original,
+                                occ::handle<Geom_Curve> curve,
+                                const TopoDS_Vertex&    start,
+                                const TopoDS_Vertex&    end,
+                                bool                    turnable)
+{
+  double a, b;
+  if (parameterOn(curve, BRep_Tool::Pnt(start), a) > 10 * tolerance
+      || parameterOn(curve, BRep_Tool::Pnt(end), b) > 10 * tolerance)
+    fail(op, no_solution, "the new edge does not pass through its corners", at(original));
+  const bool closed = start.IsSame(end);
+  if (closed)
+  {
+    // A closed intersection comes back as a spline that ends where it starts; as a
+    // periodic one its seam can be where the corner is.
+    if (auto spline = occ::down_cast<Geom_BSplineCurve>(curve);
+        !curve->IsPeriodic() && !spline.IsNull() && spline->IsClosed())
     {
-      // A closed intersection comes back as a spline that ends where it starts; as a
-      // periodic one its seam can be where the corner is.
-      if (auto spline = occ::down_cast<Geom_BSplineCurve>(curve);
-          !curve->IsPeriodic() && !spline.IsNull() && spline->IsClosed())
+      spline = occ::down_cast<Geom_BSplineCurve>(spline->Copy());
+      try
       {
-        spline = occ::down_cast<Geom_BSplineCurve>(spline->Copy());
-        try
-        {
-          spline->SetPeriodic();
-        }
-        catch (const Standard_Failure&)
-        {
-          fail(op,
-               unsupported_geometry,
-               "a closed edge on an open curve is unsupported",
-               at(original));
-        }
-        curve = spline;
-        parameterOn(curve, BRep_Tool::Pnt(start), a);
+        spline->SetPeriodic();
       }
-      if (!curve->IsPeriodic())
+      catch (const Standard_Failure&)
+      {
         fail(op,
              unsupported_geometry,
              "a closed edge on an open curve is unsupported",
              at(original));
-      b = a + curve->Period();
-    }
-    // The new edge runs the way the old one did, which the old midpoint tangent says.
-    double     first, last;
-    const auto old = carrier(original, first, last);
-    gp_Pnt     middle;
-    gp_Vec     was, now;
-    old->D1((first + last) / 2, middle, was);
-    double near;
-    parameterOn(curve, middle, near);
-    gp_Pnt on;
-    curve->D1(near, on, now);
-    if (!closed && b < a)
-    {
-      if (curve->IsPeriodic())
-        b += curve->Period() * std::ceil((a - b) / curve->Period());
-      else if (!turnable)
-        fail(op,
-             unsupported_geometry,
-             "a corner would slide past the end of its edge",
-             at(original));
-      else
-      {
-        curve = curve->Reversed();
-        a     = curve->ReversedParameter(a);
-        b     = curve->ReversedParameter(b);
       }
+      curve = spline;
+      parameterOn(curve, BRep_Tool::Pnt(start), a);
     }
-    if (closed && was.Dot(now) < 0)
+    if (!curve->IsPeriodic())
+      fail(op, unsupported_geometry, "a closed edge on an open curve is unsupported", at(original));
+    b = a + curve->Period();
+  }
+  // The new edge runs the way the old one did, which the old midpoint tangent says.
+  double     first, last;
+  const auto old = carrier(original, first, last);
+  gp_Pnt     middle;
+  gp_Vec     was, now;
+  old->D1((first + last) / 2, middle, was);
+  double near;
+  parameterOn(curve, middle, near);
+  gp_Pnt on;
+  curve->D1(near, on, now);
+  if (!closed && b < a)
+  {
+    if (curve->IsPeriodic())
+      b += curve->Period() * std::ceil((a - b) / curve->Period());
+    else if (!turnable)
+      fail(op, unsupported_geometry, "a corner would slide past the end of its edge", at(original));
+    else
     {
       curve = curve->Reversed();
       a     = curve->ReversedParameter(a);
-      b     = a + curve->Period();
+      b     = curve->ReversedParameter(b);
     }
-    if (b - a <= Precision::PConfusion())
-      fail(op, unsupported_geometry, "an edge would vanish", at(original));
-    TopoDS_Edge made;
-    builder.MakeEdge(made, curve, BRep_Tool::Tolerance(original));
-    builder.Add(made, start.Oriented(TopAbs_FORWARD));
-    builder.Add(made, end.Oriented(TopAbs_REVERSED));
-    builder.Range(made, a, b);
-    return Edge{original, made, curve, a, b};
-  };
+  }
+  if (closed && was.Dot(now) < 0)
+  {
+    curve = curve->Reversed();
+    a     = curve->ReversedParameter(a);
+    b     = a + curve->Period();
+  }
+  if (b - a <= Precision::PConfusion())
+    fail(op, unsupported_geometry, "an edge would vanish", at(original));
+  TopoDS_Edge newEdge;
+  builder.MakeEdge(newEdge, curve, BRep_Tool::Tolerance(original));
+  builder.Add(newEdge, start.Oriented(TopAbs_FORWARD));
+  builder.Add(newEdge, end.Oriented(TopAbs_REVERSED));
+  builder.Range(newEdge, a, b);
+  return Edge{original, newEdge, curve, a, b};
+}
 
-  // The face's edges.
-  std::vector<Edge> edges;
+void SupportReplacement::faceEdgesOn()
+{
   for (const auto& shape : faceEdges)
   {
     const auto    edge = TopoDS::Edge(shape.Oriented(TopAbs_FORWARD));
@@ -502,10 +596,11 @@ EvolutionData replaceFaceSupport(OcctKernel&                k,
                                      at(edge));
     edges.push_back(edgeOn(edge, curve2, start, end, true));
   }
+}
 
-  // The edges that leave the face at a moved corner run to it now.
-  std::vector<Edge> sides;
-  ShapeSet          touched;
+void SupportReplacement::slideSides()
+{
+  ShapeSet touched;
   for (const auto& shape : faceVertices)
   {
     const auto vertex = TopoDS::Vertex(shape);
@@ -525,10 +620,10 @@ EvolutionData replaceFaceSupport(OcctKernel&                k,
     double first, last;
     sides.push_back(edgeOn(side, carrier(side, first, last), start, end, false));
   }
+}
 
-  // The support the face gets: the new net where it reaches the new boundary, else the net and
-  // as much of its extension as the boundary needs, up to the boundary, so that a face the net
-  // has shrunk inside is again a whole face of its support.
+void SupportReplacement::supportFor()
+{
   double u0, u1, v0, v1;
   wanted->Bounds(u0, u1, v0, v1);
   double lowU = u0, highU = u1, lowV = v0, highV = v1;
@@ -549,7 +644,7 @@ EvolutionData replaceFaceSupport(OcctKernel&                k,
       lowU = std::min(lowU, u), highU = std::max(highU, u), lowV = std::min(lowV, v),
       highV = std::max(highV, v);
     }
-  occ::handle<Geom_BSplineSurface> support = wanted;
+  support = wanted;
   if (beyond)
   {
     support = occ::down_cast<Geom_BSplineSurface>(extended->Copy());
@@ -560,82 +655,83 @@ EvolutionData replaceFaceSupport(OcctKernel&                k,
                      std::max(f0, lowV),
                      std::min(f1, highV));
   }
+}
 
-  // The new face, its edges' p-curves, and the neighbours' p-curves of every new edge.
-  TopoDS_Face made;
-  builder.MakeFace(made, support, TopLoc_Location(), BRep_Tool::Tolerance(face));
-  // An edge's p-curve on `surface`: its points projected, carried across the surface's period
-  // so they run on without a jump, and interpolated at the edge's own parameters, so curve and
-  // p-curve agree point for point. On a face that the edge's original lay on, it starts in
-  // the same period as the original's p-curve did.
-  auto laid = [&](const Edge& edge, const occ::handle<Geom_Surface>& surface, const gp_Pnt2d* was) {
-    const double uPeriod = surface->IsUPeriodic() ? surface->UPeriod() : 0,
-                 vPeriod = surface->IsVPeriodic() ? surface->VPeriod() : 0;
-    auto wrap            = [](double value, double toward, double period) {
-      return period > 0 ? nearPeriod(value, toward, period) : value;
-    };
-    for (int count = 32;; count *= 2)
+occ::handle<Geom2d_Curve> SupportReplacement::laid(const Edge&                      edge,
+                                                   const occ::handle<Geom_Surface>& surface,
+                                                   const gp_Pnt2d*                  was) const
+{
+  const double uPeriod = surface->IsUPeriodic() ? surface->UPeriod() : 0,
+               vPeriod = surface->IsVPeriodic() ? surface->VPeriod() : 0;
+  auto wrap            = [](double value, double toward, double period) {
+    return period > 0 ? nearPeriod(value, toward, period) : value;
+  };
+  for (int count = 32;; count *= 2)
+  {
+    occ::handle<NCollection_HArray1<gp_Pnt2d>> points =
+      new NCollection_HArray1<gp_Pnt2d>(1, count + 1);
+    occ::handle<NCollection_HArray1<double>> parameters =
+      new NCollection_HArray1<double>(1, count + 1);
+    for (int i = 0; i <= count; ++i)
     {
-      occ::handle<NCollection_HArray1<gp_Pnt2d>> points =
-        new NCollection_HArray1<gp_Pnt2d>(1, count + 1);
-      occ::handle<NCollection_HArray1<double>> parameters =
-        new NCollection_HArray1<double>(1, count + 1);
-      for (int i = 0; i <= count; ++i)
-      {
-        const double               t = edge.first + (edge.last - edge.first) * i / count;
-        GeomAPI_ProjectPointOnSurf projection(edge.curve->Value(t), surface);
-        if (!projection.NbPoints())
-          fail(op, no_solution, "could not lay an edge on its face", at(edge.original));
-        double u, v;
-        projection.LowerDistanceParameters(u, v);
-        const gp_Pnt2d toward = i > 0 ? points->Value(i) : was ? *was : gp_Pnt2d(u, v);
-        points->SetValue(i + 1,
-                         gp_Pnt2d(wrap(u, toward.X(), uPeriod), wrap(v, toward.Y(), vPeriod)));
-        parameters->SetValue(i + 1, t);
-      }
-      Geom2dAPI_Interpolate interpolate(points, parameters, false, Precision::PConfusion());
-      interpolate.Perform();
-      if (!interpolate.IsDone())
+      const double               t = edge.first + (edge.last - edge.first) * i / count;
+      GeomAPI_ProjectPointOnSurf projection(edge.curve->Value(t), surface);
+      if (!projection.NbPoints())
         fail(op, no_solution, "could not lay an edge on its face", at(edge.original));
-      const occ::handle<Geom2d_Curve> curve2d(interpolate.Curve());
-      double                          worst = 0;
-      for (int i = 0; i < count; ++i)
-      {
-        const double t  = edge.first + (edge.last - edge.first) * (i + 0.5) / count;
-        const auto   uv = curve2d->Value(t);
-        worst = std::max(worst, surface->Value(uv.X(), uv.Y()).Distance(edge.curve->Value(t)));
-      }
-      if (worst <= tolerance / 2)
-        return curve2d;
-      if (count >= 4096)
-        fail(op,
-             no_solution,
-             "could not lay an edge on its face closely enough",
-             at(edge.original));
+      double u, v;
+      projection.LowerDistanceParameters(u, v);
+      const gp_Pnt2d toward = i > 0 ? points->Value(i) : was ? *was : gp_Pnt2d(u, v);
+      points->SetValue(i + 1, gp_Pnt2d(wrap(u, toward.X(), uPeriod), wrap(v, toward.Y(), vPeriod)));
+      parameters->SetValue(i + 1, t);
     }
-  };
-  auto pcurve = [&](Edge& edge, const TopoDS_Face& on, const occ::handle<Geom_Surface>& surface) {
-    const double within = std::max(BRep_Tool::Tolerance(edge.made), tolerance);
-    // Read as the face is stored: a reversed face would swap a seam's two p-curves.
-    const auto     stored = TopoDS::Face(on.Oriented(TopAbs_FORWARD));
-    double         f0, l0;
-    const auto     forward = on.IsSame(made) ? occ::handle<Geom2d_Curve>()
-                                             : BRep_Tool::CurveOnSurface(edge.original, stored, f0, l0);
-    const gp_Pnt2d start   = forward.IsNull() ? gp_Pnt2d() : forward->Value(f0);
-    const auto     curve2d = laid(edge, surface, forward.IsNull() ? nullptr : &start);
-    if (forward.IsNull() || !BRep_Tool::IsClosed(edge.original, on))
+    Geom2dAPI_Interpolate interpolate(points, parameters, false, Precision::PConfusion());
+    interpolate.Perform();
+    if (!interpolate.IsDone())
+      fail(op, no_solution, "could not lay an edge on its face", at(edge.original));
+    const occ::handle<Geom2d_Curve> curve2d(interpolate.Curve());
+    double                          worst = 0;
+    for (int i = 0; i < count; ++i)
     {
-      builder.UpdateEdge(edge.made, curve2d, on, within);
-      return;
+      const double t  = edge.first + (edge.last - edge.first) * (i + 0.5) / count;
+      const auto   uv = curve2d->Value(t);
+      worst = std::max(worst, surface->Value(uv.X(), uv.Y()).Distance(edge.curve->Value(t)));
     }
-    // A seam has a p-curve on each side of the face's period, as the old one had.
-    double     f1, l1;
-    const auto reversed =
-      BRep_Tool::CurveOnSurface(TopoDS::Edge(edge.original.Reversed()), stored, f1, l1);
-    const auto across =
-      occ::down_cast<Geom2d_Curve>(curve2d->Translated(gp_Vec2d(start, reversed->Value(f1))));
-    builder.UpdateEdge(edge.made, curve2d, across, on, within);
-  };
+    if (worst <= tolerance / 2)
+      return curve2d;
+    if (count >= 4096)
+      fail(op, no_solution, "could not lay an edge on its face closely enough", at(edge.original));
+  }
+}
+
+void SupportReplacement::pcurve(Edge&                            edge,
+                                const TopoDS_Face&               on,
+                                const occ::handle<Geom_Surface>& surface)
+{
+  const double within = std::max(BRep_Tool::Tolerance(edge.made), tolerance);
+  // Read as the face is stored: a reversed face would swap a seam's two p-curves.
+  const auto     stored = TopoDS::Face(on.Oriented(TopAbs_FORWARD));
+  double         f0, l0;
+  const auto     forward = on.IsSame(made) ? occ::handle<Geom2d_Curve>()
+                                           : BRep_Tool::CurveOnSurface(edge.original, stored, f0, l0);
+  const gp_Pnt2d start   = forward.IsNull() ? gp_Pnt2d() : forward->Value(f0);
+  const auto     curve2d = laid(edge, surface, forward.IsNull() ? nullptr : &start);
+  if (forward.IsNull() || !BRep_Tool::IsClosed(edge.original, on))
+  {
+    builder.UpdateEdge(edge.made, curve2d, on, within);
+    return;
+  }
+  // A seam has a p-curve on each side of the face's period, as the old one had.
+  double     f1, l1;
+  const auto reversed =
+    BRep_Tool::CurveOnSurface(TopoDS::Edge(edge.original.Reversed()), stored, f1, l1);
+  const auto opposite =
+    occ::down_cast<Geom2d_Curve>(curve2d->Translated(gp_Vec2d(start, reversed->Value(f1))));
+  builder.UpdateEdge(edge.made, curve2d, opposite, on, within);
+}
+
+void SupportReplacement::buildFace()
+{
+  builder.MakeFace(made, support, TopLoc_Location(), BRep_Tool::Tolerance(face));
   ShapeMap replaced;
   for (auto& edge : edges)
   {
@@ -667,25 +763,39 @@ EvolutionData replaceFaceSupport(OcctKernel&                k,
     BRepLib::SameParameter(edge.made, tolerance);
   for (auto& side : sides)
     BRepLib::SameParameter(side.made, tolerance);
+}
 
-  BRepTools_ReShape reshape;
-  reshape.Replace(face, made);
-  for (const auto& edge : edges)
-    reshape.Replace(edge.original, edge.made);
-  for (const auto& side : sides)
-    reshape.Replace(side.original, side.made);
-  const auto result = reshape.Apply(body);
-  BRepLib::UpdateTolerances(result, false);
-  if (!BRepCheck_Analyzer(result).IsValid())
-    fail(op,
-         no_solution,
-         "the faces beside it could not be grown or cut to the new surface",
-         at(face));
+} // namespace
+
+EvolutionData replaceFaceSupport(OcctKernel&                k,
+                                 uint32_t                   bodyId,
+                                 uint32_t                   faceId,
+                                 const std::vector<double>& spline,
+                                 double                     tolerance,
+                                 const std::vector<int>&    hashes,
+                                 int                        bound)
+{
+  const char* op = "replaceFaceSupport";
+  if (!std::isfinite(tolerance) || tolerance <= 0)
+    fail(op, invalid_input, "positive tolerance required");
+  const auto& input = get(k, bodyId);
+  ShapeSet    members;
+  TopExp::MapShapes(input, TopAbs_FACE, members);
+  const auto& picked = get(k, faceId);
+  if (picked.ShapeType() != TopAbs_FACE || !members.Contains(picked))
+    fail(op, invalid_input, "select a face of the body");
+  const auto wanted = splineFromData(op, spline);
+  if (wanted->IsUPeriodic() || wanted->IsVPeriodic())
+    fail(op, unsupported_geometry, "periodic nets are unsupported");
+  FaceHistory history(op, hashes, bound);
+
+  SupportReplacement replacement(op, input, picked, members, wanted, tolerance);
+  const TopoDS_Shape result = replacement.run();
   for (const auto& each : members)
     if (history.tracks(each))
     {
       NCollection_List<TopoDS_Shape> successor;
-      successor.Append(reshape.Value(copy.ModifiedShape(each)));
+      successor.Append(replacement.successorOf(each));
       history.modified(each, successor);
     }
   return history.finish(store(k, result));

@@ -264,62 +264,11 @@ occ::handle<Geom2d_BSplineCurve> pcurve(const Side& side)
   mults(1) = mults(2) = 2;
   return new Geom2d_BSplineCurve(poles, knots, mults, 1);
 }
-} // namespace
 
-DeformResult deformBody(OcctKernel&             kernel,
-                        uint32_t                bodyId,
-                        uint32_t                referenceId,
-                        uint32_t                targetId,
-                        Vec3                    scale,
-                        Vec3                    offset,
-                        bool                    swapUV,
-                        bool                    mirror,
-                        bool                    flipNormal,
-                        bool                    reblend,
-                        double                  tolerance,
-                        const std::vector<int>& hashes,
-                        int                     bound)
+//! The body's edges, each with its curve, its range and its vertices' indices; fails on what V1
+//! does not move.
+std::vector<Edge> movingEdges(const ShapeSet& edgeMap, const ShapeSet& vertexMap)
 {
-  if (reblend)
-    fail(op,
-         unsupported_geometry,
-         "Reblend unavailable: V1 cannot regenerate fillets or their radii");
-  if (!std::isfinite(tolerance) || tolerance < Precision::Confusion())
-    fail(op,
-         invalid_input,
-         "fit tolerance must be finite and at least the kernel precision (1e-7)");
-  auto input = get(kernel, bodyId);
-  if (input.ShapeType() != TopAbs_FACE && input.ShapeType() != TopAbs_SHELL
-      && input.ShapeType() != TopAbs_SOLID)
-    fail(op,
-         unsupported_geometry,
-         "select a whole rectangular sheet, sheet shell, or cuboid solid");
-  if (!BRepCheck_Analyzer(input).IsValid())
-    fail(op, invalid_input, "moving B-rep is invalid");
-  auto reference        = surfacing::faceOf(kernel, op, referenceId),
-       target           = surfacing::faceOf(kernel, op, targetId);
-  const auto targetType = BRepAdaptor_Surface(target).GetType();
-  if (targetType != GeomAbs_Plane && targetType != GeomAbs_Cylinder
-      && targetType != GeomAbs_BSplineSurface)
-    fail(op,
-         unsupported_geometry,
-         "V1 targets are planes, open cylinder charts or regular B-splines");
-  if (targetType == GeomAbs_BSplineSurface)
-  {
-    auto spline                   = occ::down_cast<Geom_BSplineSurface>(BRep_Tool::Surface(target));
-    const auto [uBudget, vBudget] = targetBudget(spline, tolerance);
-    if (spline->NbUPoles() > uBudget || spline->NbVPoles() > vBudget)
-      fail(op, unsupported_geometry, "target has more poles than its bends need at this tolerance");
-  }
-  DeformUVN map(op, reference, target, scale, offset, swapUV, mirror, flipNormal);
-  if (scale.z == 0)
-    fail(op, invalid_input, "Scale N must be nonzero; collapse is unsupported");
-  ShapeSet edgeMap, vertexMap, faceMap;
-  TopExp::MapShapes(input, TopAbs_FACE, faceMap);
-  TopExp::MapShapes(input, TopAbs_EDGE, edgeMap);
-  TopExp::MapShapes(input, TopAbs_VERTEX, vertexMap);
-  if (faceMap.Extent() > 16)
-    fail(op, unsupported_geometry, "V1 is limited to 16 rectangular sheet faces");
   std::vector<Edge> edges;
   for (const auto& shape : edgeMap)
   {
@@ -336,6 +285,16 @@ DeformResult deformBody(OcctKernel&             kernel,
       fail(op, unsupported_geometry, "closed edges require an explicit cut");
     edges.push_back({edge, curve, a, b, vertexMap.FindIndex(first), vertexMap.FindIndex(last)});
   }
+  return edges;
+}
+
+//! The body's faces, each a whole rectangle of a plane or a B-spline whose sides have affine
+//! parameter correspondence with their edges; fails on what V1 does not move.
+std::vector<Face> movingFaces(const ShapeSet&          faceMap,
+                              const ShapeSet&          edgeMap,
+                              const std::vector<Edge>& edges,
+                              double                   tolerance)
+{
   std::vector<Face> faces;
   for (const auto& shape : faceMap)
   {
@@ -404,117 +363,151 @@ DeformResult deformBody(OcctKernel&             kernel,
            {face});
     faces.push_back(f);
   }
-  gp_Pnt low, high;
-  dimensions(map, faces, low, high);
-  const bool solid = input.ShapeType() == TopAbs_SOLID;
-  if (solid)
+  return faces;
+}
+
+//! A whole solid is a six-face planar cuboid whose axes align with the reference plane's frame.
+void checkCuboid(const DeformUVN&         map,
+                 const std::vector<Face>& faces,
+                 const std::vector<Edge>& edges,
+                 const ShapeSet&          vertexMap,
+                 const gp_Pnt&            low,
+                 const gp_Pnt&            high,
+                 double                   tolerance)
+{
+  if (faces.size() != 6 || edges.size() != 12 || vertexMap.Extent() != 8)
+    fail(op, unsupported_geometry, "whole solids are restricted to six-face planar cuboids");
+  for (const auto& f : faces)
+    if (BRepAdaptor_Surface(f.shape).GetType() != GeomAbs_Plane)
+      fail(op,
+           unsupported_geometry,
+           "whole solids are restricted to planar cuboids; fillets are unsupported");
+  for (const auto& vertex : vertexMap)
   {
-    if (faces.size() != 6 || edges.size() != 12 || vertexMap.Extent() != 8)
-      fail(op, unsupported_geometry, "whole solids are restricted to six-face planar cuboids");
-    for (const auto& f : faces)
-      if (BRepAdaptor_Surface(f.shape).GetType() != GeomAbs_Plane)
-        fail(op,
-             unsupported_geometry,
-             "whole solids are restricted to planar cuboids; fillets are unsupported");
-    for (const auto& vertex : vertexMap)
-    {
-      auto p = map.local(BRep_Tool::Pnt(TopoDS::Vertex(vertex)));
-      for (int axis = 1; axis <= 3; ++axis)
-        if (std::min(std::abs(p.Coord(axis) - low.Coord(axis)),
-                     std::abs(p.Coord(axis) - high.Coord(axis)))
-            > tolerance)
-          fail(op, unsupported_geometry, "cuboid axes must align with the reference plane frame");
-    }
+    auto p = map.local(BRep_Tool::Pnt(TopoDS::Vertex(vertex)));
+    for (int axis = 1; axis <= 3; ++axis)
+      if (std::min(std::abs(p.Coord(axis) - low.Coord(axis)),
+                   std::abs(p.Coord(axis) - high.Coord(axis)))
+          > tolerance)
+        fail(op, unsupported_geometry, "cuboid axes must align with the reference plane frame");
   }
-  DeformResult result;
-  result.minJacobian = checkMap(map, low, high);
-  if (BRepAdaptor_Surface(target).GetType() == GeomAbs_Plane)
+}
+
+//! How far the affine result's faces, p-curves and edges are from the map of the input's.
+void affineResiduals(const BRepBuilderAPI_GTransform& maker,
+                     const DeformUVN&                 map,
+                     const std::vector<Face>&         faces,
+                     const std::vector<Edge>&         edges,
+                     DeformResult&                    result)
+{
+  for (const auto& face : faces)
   {
-    // Exact affine case. The standard modifier preserves the shared topology graph;
-    // no sampled approximation of surface control points is necessary here.
-    gp_GTrsf   transform;
-    const auto origin = map.point(gp_Pnt(0, 0, 0));
-    for (int column = 1; column <= 3; ++column)
-    {
-      gp_Pnt axis(0, 0, 0);
-      axis.SetCoord(column, 1);
-      auto delta = gp_Vec(origin, map.point(axis));
-      for (int row = 1; row <= 3; ++row)
-        transform.SetValue(row, column, delta.Coord(row));
-    }
-    for (int row = 1; row <= 3; ++row)
-      transform.SetValue(row, 4, origin.Coord(row));
-    BRepBuilderAPI_GTransform maker(input, transform, true);
-    if (!maker.IsDone() || !BRepCheck_Analyzer(maker.Shape(), true).IsValid())
-      fail(op, no_solution, "affine deformation produced an invalid B-rep");
-    auto output = maker.Shape();
-    if (solid)
-    {
-      auto body = TopoDS::Solid(output);
-      if (!BRepLib::OrientClosedSolid(body))
-        fail(op, no_solution, "affine solid orientation failed");
-      output = body;
-    }
-    BRepAlgoAPI_Check interference(output, false, true);
-    if (interference.HasErrors() || !interference.IsValid())
-      fail(op, no_solution, "affine deformation has self-interference");
-    for (const auto& face : faces)
-    {
-      const auto changed = TopoDS::Face(maker.ModifiedShape(face.shape));
-      auto       surface = BRep_Tool::Surface(changed);
-      double     a, b, c, d;
-      BRepTools::UVBounds(changed, a, b, c, d);
-      for (int i = 0; i <= 32; ++i)
-        for (int j = 0; j <= 32; ++j)
-        {
-          const double u = double(i) / 32, v = double(j) / 32;
-          result.faceResidual = std::max(
-            result.faceResidual,
-            map.point(face.point(u, v)).Distance(surface->Value(a + u * (b - a), c + v * (d - c))));
-        }
-      for (TopExp_Explorer it(changed, TopAbs_EDGE); it.More(); it.Next())
+    const auto changed = TopoDS::Face(maker.ModifiedShape(face.shape));
+    auto       surface = BRep_Tool::Surface(changed);
+    double     a, b, c, d;
+    BRepTools::UVBounds(changed, a, b, c, d);
+    for (int i = 0; i <= 32; ++i)
+      for (int j = 0; j <= 32; ++j)
       {
-        const auto edge = TopoDS::Edge(it.Current());
-        double     first, last, lo, hi;
-        auto       curve = BRep_Tool::Curve(edge, first, last);
-        auto       pc    = BRep_Tool::CurveOnSurface(edge, changed, lo, hi);
-        if (pc.IsNull() || curve.IsNull())
-          fail(op, no_solution, "affine result lost a boundary curve");
-        for (int i = 0; i <= 64; ++i)
-        {
-          const double t        = double(i) / 64;
-          auto         uv       = pc->Value(lo + t * (hi - lo));
-          result.pcurveResidual = std::max(
-            result.pcurveResidual,
-            curve->Value(first + t * (last - first)).Distance(surface->Value(uv.X(), uv.Y())));
-        }
+        const double u = double(i) / 32, v = double(j) / 32;
+        result.faceResidual = std::max(
+          result.faceResidual,
+          map.point(face.point(u, v)).Distance(surface->Value(a + u * (b - a), c + v * (d - c))));
       }
-    }
-    for (const auto& edge : edges)
+    for (TopExp_Explorer it(changed, TopAbs_EDGE); it.More(); it.Next())
     {
-      auto   changed = TopoDS::Edge(maker.ModifiedShape(edge.shape));
-      double a, b;
-      auto   curve = BRep_Tool::Curve(changed, a, b);
+      const auto edge = TopoDS::Edge(it.Current());
+      double     first, last, lo, hi;
+      auto       curve = BRep_Tool::Curve(edge, first, last);
+      auto       pc    = BRep_Tool::CurveOnSurface(edge, changed, lo, hi);
+      if (pc.IsNull() || curve.IsNull())
+        fail(op, no_solution, "affine result lost a boundary curve");
       for (int i = 0; i <= 64; ++i)
       {
-        const double t      = double(i) / 64;
-        result.edgeResidual = std::max(result.edgeResidual,
-                                       map.point(edge.source->Value(edge.a + t * (edge.b - edge.a)))
-                                         .Distance(curve->Value(a + t * (b - a))));
+        const double t        = double(i) / 64;
+        auto         uv       = pc->Value(lo + t * (hi - lo));
+        result.pcurveResidual = std::max(
+          result.pcurveResidual,
+          curve->Value(first + t * (last - first)).Distance(surface->Value(uv.X(), uv.Y())));
       }
     }
-    if (result.faceResidual > tolerance || result.edgeResidual > tolerance
-        || result.pcurveResidual > tolerance)
-      fail(op, no_solution, "affine numeric residual exceeds the document tolerance");
-    FaceHistory history(op, hashes, bound);
-    history.collect(maker, input);
-    result.evolution = history.finish(store(kernel, output));
-    // Zero spans identifies the exact affine construction in saved diagnostics.
-    return result;
   }
-  std::vector<occ::handle<Geom_BSplineCurve>>   curves;
-  std::vector<occ::handle<Geom_BSplineSurface>> surfaces;
-  bool                                          accepted = false;
+  for (const auto& edge : edges)
+  {
+    auto   changed = TopoDS::Edge(maker.ModifiedShape(edge.shape));
+    double a, b;
+    auto   curve = BRep_Tool::Curve(changed, a, b);
+    for (int i = 0; i <= 64; ++i)
+    {
+      const double t      = double(i) / 64;
+      result.edgeResidual = std::max(result.edgeResidual,
+                                     map.point(edge.source->Value(edge.a + t * (edge.b - edge.a)))
+                                       .Distance(curve->Value(a + t * (b - a))));
+    }
+  }
+}
+
+//! Exact affine case. The standard modifier preserves the shared topology graph;
+//! no sampled approximation of surface control points is necessary here.
+DeformResult affineDeform(OcctKernel&              kernel,
+                          const TopoDS_Shape&      input,
+                          const DeformUVN&         map,
+                          const std::vector<Face>& faces,
+                          const std::vector<Edge>& edges,
+                          bool                     solid,
+                          double                   tolerance,
+                          const std::vector<int>&  hashes,
+                          int                      bound,
+                          DeformResult             result)
+{
+  gp_GTrsf   transform;
+  const auto origin = map.point(gp_Pnt(0, 0, 0));
+  for (int column = 1; column <= 3; ++column)
+  {
+    gp_Pnt axis(0, 0, 0);
+    axis.SetCoord(column, 1);
+    auto delta = gp_Vec(origin, map.point(axis));
+    for (int row = 1; row <= 3; ++row)
+      transform.SetValue(row, column, delta.Coord(row));
+  }
+  for (int row = 1; row <= 3; ++row)
+    transform.SetValue(row, 4, origin.Coord(row));
+  BRepBuilderAPI_GTransform maker(input, transform, true);
+  if (!maker.IsDone() || !BRepCheck_Analyzer(maker.Shape(), true).IsValid())
+    fail(op, no_solution, "affine deformation produced an invalid B-rep");
+  auto output = maker.Shape();
+  if (solid)
+  {
+    auto body = TopoDS::Solid(output);
+    if (!BRepLib::OrientClosedSolid(body))
+      fail(op, no_solution, "affine solid orientation failed");
+    output = body;
+  }
+  BRepAlgoAPI_Check interference(output, false, true);
+  if (interference.HasErrors() || !interference.IsValid())
+    fail(op, no_solution, "affine deformation has self-interference");
+  affineResiduals(maker, map, faces, edges, result);
+  if (result.faceResidual > tolerance || result.edgeResidual > tolerance
+      || result.pcurveResidual > tolerance)
+    fail(op, no_solution, "affine numeric residual exceeds the document tolerance");
+  FaceHistory history(op, hashes, bound);
+  history.collect(maker, input);
+  result.evolution = history.finish(store(kernel, output));
+  // Zero spans identifies the exact affine construction in saved diagnostics.
+  return result;
+}
+
+//! Curves and surfaces fitted to the map of the edges and faces, on nets of twice the spans until
+//! they meet the tolerance and the tangent limit; fails when the spans allowed end first.
+void fitSplines(const DeformUVN&                               map,
+                const std::vector<Edge>&                       edges,
+                const std::vector<Face>&                       faces,
+                double                                         tolerance,
+                DeformResult&                                  result,
+                std::vector<occ::handle<Geom_BSplineCurve>>&   curves,
+                std::vector<occ::handle<Geom_BSplineSurface>>& surfaces)
+{
+  bool accepted = false;
   for (int spans = 1; spans <= maxSpans && !accepted; spans *= 2)
   {
     curves.clear();
@@ -590,8 +583,25 @@ DeformResult deformBody(OcctKernel&             kernel,
                   tolerance);
     fail(op, no_solution, detail);
   }
-  // The graph is reconstructed directly: each input edge and vertex has exactly one
-  // successor. No sewing, projection onto ambiguous branches, or tolerance inflation.
+}
+
+//! The graph is reconstructed directly: each input edge and vertex has exactly one
+//! successor. No sewing, projection onto ambiguous branches, or tolerance inflation.
+DeformResult rebuilt(OcctKernel&                                          kernel,
+                     const TopoDS_Shape&                                  input,
+                     const DeformUVN&                                     map,
+                     const ShapeSet&                                      edgeMap,
+                     const ShapeSet&                                      vertexMap,
+                     const std::vector<Edge>&                             edges,
+                     const std::vector<Face>&                             faces,
+                     const std::vector<occ::handle<Geom_BSplineCurve>>&   curves,
+                     const std::vector<occ::handle<Geom_BSplineSurface>>& surfaces,
+                     bool                                                 solid,
+                     double                                               tolerance,
+                     const std::vector<int>&                              hashes,
+                     int                                                  bound,
+                     DeformResult                                         result)
+{
   BRep_Builder               builder;
   std::vector<TopoDS_Vertex> vertices;
   for (const auto& vertex : vertexMap)
@@ -678,4 +688,91 @@ DeformResult deformBody(OcctKernel&             kernel,
   result.evolution = history.finish(store(kernel, output));
   return result;
 }
+
+} // namespace
+
+DeformResult deformBody(OcctKernel&             kernel,
+                        uint32_t                bodyId,
+                        uint32_t                referenceId,
+                        uint32_t                targetId,
+                        Vec3                    scale,
+                        Vec3                    offset,
+                        bool                    swapUV,
+                        bool                    mirror,
+                        bool                    flipNormal,
+                        bool                    reblend,
+                        double                  tolerance,
+                        const std::vector<int>& hashes,
+                        int                     bound)
+{
+  if (reblend)
+    fail(op,
+         unsupported_geometry,
+         "Reblend unavailable: V1 cannot regenerate fillets or their radii");
+  if (!std::isfinite(tolerance) || tolerance < Precision::Confusion())
+    fail(op,
+         invalid_input,
+         "fit tolerance must be finite and at least the kernel precision (1e-7)");
+  auto input = get(kernel, bodyId);
+  if (input.ShapeType() != TopAbs_FACE && input.ShapeType() != TopAbs_SHELL
+      && input.ShapeType() != TopAbs_SOLID)
+    fail(op,
+         unsupported_geometry,
+         "select a whole rectangular sheet, sheet shell, or cuboid solid");
+  if (!BRepCheck_Analyzer(input).IsValid())
+    fail(op, invalid_input, "moving B-rep is invalid");
+  auto reference        = surfacing::faceOf(kernel, op, referenceId),
+       target           = surfacing::faceOf(kernel, op, targetId);
+  const auto targetType = BRepAdaptor_Surface(target).GetType();
+  if (targetType != GeomAbs_Plane && targetType != GeomAbs_Cylinder
+      && targetType != GeomAbs_BSplineSurface)
+    fail(op,
+         unsupported_geometry,
+         "V1 targets are planes, open cylinder charts or regular B-splines");
+  if (targetType == GeomAbs_BSplineSurface)
+  {
+    auto spline                   = occ::down_cast<Geom_BSplineSurface>(BRep_Tool::Surface(target));
+    const auto [uBudget, vBudget] = targetBudget(spline, tolerance);
+    if (spline->NbUPoles() > uBudget || spline->NbVPoles() > vBudget)
+      fail(op, unsupported_geometry, "target has more poles than its bends need at this tolerance");
+  }
+  DeformUVN map(op, reference, target, scale, offset, swapUV, mirror, flipNormal);
+  if (scale.z == 0)
+    fail(op, invalid_input, "Scale N must be nonzero; collapse is unsupported");
+  ShapeSet edgeMap, vertexMap, faceMap;
+  TopExp::MapShapes(input, TopAbs_FACE, faceMap);
+  TopExp::MapShapes(input, TopAbs_EDGE, edgeMap);
+  TopExp::MapShapes(input, TopAbs_VERTEX, vertexMap);
+  if (faceMap.Extent() > 16)
+    fail(op, unsupported_geometry, "V1 is limited to 16 rectangular sheet faces");
+  const std::vector<Edge> edges = movingEdges(edgeMap, vertexMap);
+  const std::vector<Face> faces = movingFaces(faceMap, edgeMap, edges, tolerance);
+  gp_Pnt                  low, high;
+  dimensions(map, faces, low, high);
+  const bool solid = input.ShapeType() == TopAbs_SOLID;
+  if (solid)
+    checkCuboid(map, faces, edges, vertexMap, low, high, tolerance);
+  DeformResult result;
+  result.minJacobian = checkMap(map, low, high);
+  if (BRepAdaptor_Surface(target).GetType() == GeomAbs_Plane)
+    return affineDeform(kernel, input, map, faces, edges, solid, tolerance, hashes, bound, result);
+  std::vector<occ::handle<Geom_BSplineCurve>>   curves;
+  std::vector<occ::handle<Geom_BSplineSurface>> surfaces;
+  fitSplines(map, edges, faces, tolerance, result, curves, surfaces);
+  return rebuilt(kernel,
+                 input,
+                 map,
+                 edgeMap,
+                 vertexMap,
+                 edges,
+                 faces,
+                 curves,
+                 surfaces,
+                 solid,
+                 tolerance,
+                 hashes,
+                 bound,
+                 result);
+}
+
 } // namespace BRepExt

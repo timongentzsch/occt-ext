@@ -656,31 +656,11 @@ occ::handle<Geom_BSplineSurface> mergeGrid(const std::vector<SplineNet>& nets,
       fail(op, no_solution, "regular V patch merge failed");
   return s;
 }
-} // namespace
 
-PolySplineResult polySpline(OcctKernel&                kernel,
-                            const std::vector<double>& xyz,
-                            const std::vector<int>&    quads,
-                            double                     tolerance,
-                            int                        refinement,
-                            bool                       merge,
-                            bool                       rounded,
-                            bool                       boundaryExactly,
-                            bool                       requireG1,
-                            double                     angularTolerance)
+//! The cage of the vertices `xyz` and the faces `quads`; fails on coordinates out of bounds and
+//! quads naming an absent vertex.
+Mesh cageOf(const std::vector<double>& xyz, const std::vector<int>& quads)
 {
-  if (xyz.size() < 12 || xyz.size() % 3 || xyz.size() > 1024 * 3 || quads.empty()
-      || quads.size() % 4 || quads.size() > 256 * 4)
-    fail(op, invalid_input, "cages need XYZ vertices and quads, at most 1024 vertices / 256 faces");
-  if (!std::isfinite(tolerance) || tolerance < BRepExt::tolerance::length || tolerance > 1
-      || refinement < 0 || refinement > 3 || !std::isfinite(angularTolerance)
-      || angularTolerance < 0 || angularTolerance > 90)
-    fail(op, invalid_input, "invalid tolerance, angular tolerance or refinement budget");
-  if (rounded)
-    fail(op,
-         unsupported_geometry,
-         "Rounded Corners is not implemented; the V1 boundary keeps one-face "
-         "corners fixed");
   Mesh cage;
   for (size_t i = 0; i < xyz.size(); i += 3)
   {
@@ -700,10 +680,15 @@ PolySplineResult polySpline(OcctKernel&                kernel,
     }
     cage.q.push_back(q);
   }
-  Topology original(cage);
+  return cage;
+}
+
+//! The cage's corners marked, and its extraordinary vertices: isolated interior valences 3, 5
+//! and 6, none next to another or to the boundary.
+std::set<int> extraordinaryVertices(Mesh& cage, const Topology& original)
+{
   cage.corner.resize(cage.p.size(), false);
-  PolySplineResult report;
-  std::set<int>    extraordinary;
+  std::set<int> extraordinary;
   for (size_t v = 0; v < cage.p.size(); ++v)
   {
     if (!original.boundary[v].empty())
@@ -735,6 +720,12 @@ PolySplineResult polySpline(OcctKernel&                kernel,
              unsupported_geometry,
              "extraordinary vertices next to a boundary are not supported");
     }
+  return extraordinary;
+}
+
+//! The cage is one connected component.
+void checkConnected(const Mesh& cage, const Topology& original)
+{
   std::set<int>   visited;
   std::queue<int> todo;
   todo.push(0);
@@ -753,24 +744,18 @@ PolySplineResult polySpline(OcctKernel&                kernel,
          unsupported_geometry,
          "disconnected components must be imported as separate OBJ objects in "
          "V1");
-  validateCage(cage);
-  report.extraordinary = extraordinary.size();
-  auto grid            = regularGrid(cage, original);
-  report.regular       = grid.nu > 0;
-  if (merge && !report.regular)
-    fail(
-      op,
-      unsupported_geometry,
-      "Merge Patches is supported only for rectangular regular grids; disable it for this cage.");
-  if (boundaryExactly && !report.regular)
-    fail(op,
-         unsupported_geometry,
-         "Boundary Exactly is supported only for a regular rectangular grid in "
-         "V1");
-  Mesh                   work = cage;
+}
+
+//! The nets of the patches: exact on a regular grid, else fitted to the cage refined
+//! `refinement` times into `work`, within the 1024-patch budget.
+std::vector<SplineNet> patchNets(const Mesh& cage,
+                                 const Grid& grid,
+                                 bool        regular,
+                                 int&        refinement,
+                                 Mesh&       work)
+{
   std::vector<SplineNet> nets;
-  Grid                   workingGrid = grid;
-  if (report.regular)
+  if (regular)
   {
     nets       = exactGrid(cage, grid);
     refinement = 0;
@@ -788,12 +773,16 @@ PolySplineResult polySpline(OcctKernel&                kernel,
     Topology t(work);
     nets = fitted(work, t, lattices(work, 2));
   }
-  report.refinement = refinement;
-  Topology                                      topology(work);
-  auto                                          oracle = lattices(work, 3);
-  std::vector<occ::handle<Geom_BSplineSurface>> surfaces;
-  for (const auto& net : nets)
-    surfaces.push_back(surfaceOf(net));
+  return nets;
+}
+
+//! The patches sampled against the subdivision limit `oracle`: the deviation, and that no patch
+//! folds or reverses inside.
+void sampleLimit(const std::vector<occ::handle<Geom_BSplineSurface>>& surfaces,
+                 const std::vector<std::vector<gp_XYZ>>&              oracle,
+                 double                                               tolerance,
+                 PolySplineResult&                                    report)
+{
   report.minJacobian = std::numeric_limits<double>::infinity();
   for (size_t f = 0; f < surfaces.size(); ++f)
   {
@@ -830,6 +819,16 @@ PolySplineResult polySpline(OcctKernel&                kernel,
         << " mm; increase bounded refinement";
     fail(op, no_solution, msg.str());
   }
+}
+
+//! The gaps and normal angles across the seams between patches.
+void measureSeams(const Topology&                                      topology,
+                  const std::vector<occ::handle<Geom_BSplineSurface>>& surfaces,
+                  double                                               tolerance,
+                  bool                                                 requireG1,
+                  double                                               angularTolerance,
+                  PolySplineResult&                                    report)
+{
   for (size_t e = 0; e < topology.e.size(); ++e)
   {
     const auto& edge = topology.e[e];
@@ -865,48 +864,68 @@ PolySplineResult polySpline(OcctKernel&                kernel,
         << angularTolerance << " degrees; G1 was refused";
     fail(op, no_solution, msg.str());
   }
-  BRepBuilderAPI_Sewing    sew(BRepExt::tolerance::length);
+}
+
+//! The regular grid's patches merged into one multispan face, checked against them.
+TopoDS_Face mergedFace(const std::vector<SplineNet>&                        nets,
+                       const Mesh&                                          cage,
+                       const Grid&                                          grid,
+                       const std::vector<occ::handle<Geom_BSplineSurface>>& surfaces)
+{
+  auto s = mergeGrid(nets, cage, grid);
+  for (int u = 0; u < grid.nu; ++u)
+    for (int v = 0; v < grid.nv; ++v)
+      for (int i = 0; i <= 8; ++i)
+        for (int j = 0; j <= 8; ++j)
+        {
+          auto p = s->Value((u + i / 8.) / grid.nu, (v + j / 8.) / grid.nv);
+          // Compare the merged representation against the exact pre-merge
+          // patches.
+          int f = grid.face[u * grid.nv + v];
+          int r = 0;
+          while (cage.q[f][r] != grid.vertex[u * (grid.nv + 1) + v])
+            ++r;
+          double x = i / 8., y = j / 8.;
+          if (r == 1)
+          {
+            double old = x;
+            x          = 1 - y;
+            y          = old;
+          }
+          if (r == 2)
+          {
+            x = 1 - x;
+            y = 1 - y;
+          }
+          if (r == 3)
+          {
+            double old = x;
+            x          = y;
+            y          = 1 - old;
+          }
+          if (p.Distance(surfaces[f]->Value(x, y)) > 1e-8)
+            fail(op, no_solution, "merged patch representation changed the limit surface");
+        }
+  BRepBuilderAPI_MakeFace make(s, BRepExt::tolerance::length);
+  if (!make.IsDone())
+    fail(op, no_solution, "merged face construction failed");
+  return make.Face();
+}
+
+//! The faces of the result: one merged face, or a face per patch, with the cage face each
+//! comes from.
+std::vector<TopoDS_Face> patchFaces(const std::vector<SplineNet>&                        nets,
+                                    const Mesh&                                          cage,
+                                    const Grid&                                          grid,
+                                    const std::vector<occ::handle<Geom_BSplineSurface>>& surfaces,
+                                    bool                                                 merge,
+                                    int                                                  refinement,
+                                    PolySplineResult&                                    report)
+{
   std::vector<TopoDS_Face> faces;
   if (merge && report.regular)
   {
-    auto s = mergeGrid(nets, cage, grid);
-    for (int u = 0; u < grid.nu; ++u)
-      for (int v = 0; v < grid.nv; ++v)
-        for (int i = 0; i <= 8; ++i)
-          for (int j = 0; j <= 8; ++j)
-          {
-            auto p = s->Value((u + i / 8.) / grid.nu, (v + j / 8.) / grid.nv);
-            // Compare the merged representation against the exact pre-merge
-            // patches.
-            int f = grid.face[u * grid.nv + v];
-            int r = 0;
-            while (cage.q[f][r] != grid.vertex[u * (grid.nv + 1) + v])
-              ++r;
-            double x = i / 8., y = j / 8.;
-            if (r == 1)
-            {
-              double old = x;
-              x          = 1 - y;
-              y          = old;
-            }
-            if (r == 2)
-            {
-              x = 1 - x;
-              y = 1 - y;
-            }
-            if (r == 3)
-            {
-              double old = x;
-              x          = y;
-              y          = 1 - old;
-            }
-            if (p.Distance(surfaces[f]->Value(x, y)) > 1e-8)
-              fail(op, no_solution, "merged patch representation changed the limit surface");
-          }
-    BRepBuilderAPI_MakeFace make(s, BRepExt::tolerance::length);
-    if (!make.IsDone())
-      fail(op, no_solution, "merged face construction failed");
-    faces.push_back(make.Face());
+    faces.push_back(mergedFace(nets, cage, grid, surfaces));
     report.provenance.push_back(-1);
     // A merged multispan face has no B-rep joins. The pre-merge regular
     // joins were checked above; do not report them as output seams.
@@ -925,6 +944,15 @@ PolySplineResult polySpline(OcctKernel&                kernel,
       report.provenance.push_back(static_cast<int>(f) / (1 << (2 * refinement)));
     }
   }
+  return faces;
+}
+
+//! The faces sewn, and a closed cage's shell made a solid of positive volume; checked valid.
+TopoDS_Shape sewnBody(BRepBuilderAPI_Sewing&          sew,
+                      const std::vector<TopoDS_Face>& faces,
+                      const Topology&                 original,
+                      PolySplineResult&               report)
+{
   for (const auto& f : faces)
     sew.Add(f);
   sew.Perform();
@@ -957,6 +985,15 @@ PolySplineResult polySpline(OcctKernel&                kernel,
   analyzer.SetExactMethod(true);
   if (!analyzer.IsValid())
     fail(op, no_solution, "generated B-rep is invalid (including edge/pcurve agreement)");
+  return result;
+}
+
+//! The cage face of every face of the result, through the sewing.
+void traceProvenance(const TopoDS_Shape&             result,
+                     const BRepBuilderAPI_Sewing&    sew,
+                     const std::vector<TopoDS_Face>& faces,
+                     PolySplineResult&               report)
+{
   const auto sources = report.provenance;
   report.provenance.clear();
   for (TopExp_Explorer it(result, TopAbs_FACE); it.More(); it.Next())
@@ -975,6 +1012,68 @@ PolySplineResult polySpline(OcctKernel&                kernel,
     if (!found)
       fail(op, no_solution, "sewing lost patch-to-cage provenance");
   }
+}
+
+} // namespace
+
+PolySplineResult polySpline(OcctKernel&                kernel,
+                            const std::vector<double>& xyz,
+                            const std::vector<int>&    quads,
+                            double                     tolerance,
+                            int                        refinement,
+                            bool                       merge,
+                            bool                       rounded,
+                            bool                       boundaryExactly,
+                            bool                       requireG1,
+                            double                     angularTolerance)
+{
+  if (xyz.size() < 12 || xyz.size() % 3 || xyz.size() > 1024 * 3 || quads.empty()
+      || quads.size() % 4 || quads.size() > 256 * 4)
+    fail(op, invalid_input, "cages need XYZ vertices and quads, at most 1024 vertices / 256 faces");
+  if (!std::isfinite(tolerance) || tolerance < BRepExt::tolerance::length || tolerance > 1
+      || refinement < 0 || refinement > 3 || !std::isfinite(angularTolerance)
+      || angularTolerance < 0 || angularTolerance > 90)
+    fail(op, invalid_input, "invalid tolerance, angular tolerance or refinement budget");
+  if (rounded)
+    fail(op,
+         unsupported_geometry,
+         "Rounded Corners is not implemented; the V1 boundary keeps one-face "
+         "corners fixed");
+  Mesh             cage = cageOf(xyz, quads);
+  Topology         original(cage);
+  PolySplineResult report;
+  std::set<int>    extraordinary = extraordinaryVertices(cage, original);
+  checkConnected(cage, original);
+  validateCage(cage);
+  report.extraordinary = extraordinary.size();
+  auto grid            = regularGrid(cage, original);
+  report.regular       = grid.nu > 0;
+  if (merge && !report.regular)
+    fail(
+      op,
+      unsupported_geometry,
+      "Merge Patches is supported only for rectangular regular grids; disable it for this cage.");
+  if (boundaryExactly && !report.regular)
+    fail(op,
+         unsupported_geometry,
+         "Boundary Exactly is supported only for a regular rectangular grid in "
+         "V1");
+  Mesh                   work = cage;
+  std::vector<SplineNet> nets = patchNets(cage, grid, report.regular, refinement, work);
+  report.refinement           = refinement;
+  Topology                                      topology(work);
+  auto                                          oracle = lattices(work, 3);
+  std::vector<occ::handle<Geom_BSplineSurface>> surfaces;
+  for (const auto& net : nets)
+    surfaces.push_back(surfaceOf(net));
+  report.minJacobian = std::numeric_limits<double>::infinity();
+  sampleLimit(surfaces, oracle, tolerance, report);
+  measureSeams(topology, surfaces, tolerance, requireG1, angularTolerance, report);
+  BRepBuilderAPI_Sewing          sew(BRepExt::tolerance::length);
+  const std::vector<TopoDS_Face> faces =
+    patchFaces(nets, cage, grid, surfaces, merge, refinement, report);
+  const TopoDS_Shape result = sewnBody(sew, faces, original, report);
+  traceProvenance(result, sew, faces, report);
   BRepAlgoAPI_Check check(result, false, true);
   if (!check.IsValid())
     fail(op, no_solution, "generated B-rep has self-interference or invalid geometry");
@@ -982,4 +1081,5 @@ PolySplineResult polySpline(OcctKernel&                kernel,
   report.resultId = store(kernel, result);
   return report;
 }
+
 } // namespace BRepExt
