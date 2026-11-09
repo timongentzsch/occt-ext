@@ -8,308 +8,356 @@
 namespace BRepExt::blending::detail
 {
 
+void Attach::pinchCorner(const Corner& at)
+{
+  const Piece& first = pieces[at.ends[0].first];
+  // Every blend closes to the vertex: its end there is that point, a degenerate edge
+  // across its sheet, and the corner has no patch.
+  const TopoDS_Vertex point = footAt(BRep_Tool::Pnt(at.vertex), first.rail.scale);
+  for (const auto& [k, end] : at.ends)
+  {
+    const Sheet& sheet = pieces[k].sheet;
+    const double along = pieces[k].uAt(end);
+    if (sheet.contact(0)->Value(sheet.rail(along)).Distance(BRep_Tool::Pnt(point))
+          > pieces[k].rail.resolved(limit::together)
+        || sheet.contact(1)->Value(sheet.rail(along)).Distance(BRep_Tool::Pnt(point))
+             > pieces[k].rail.resolved(limit::together))
+      fail(op,
+           no_solution,
+           "a blend between faces tangent at its end does not close to the vertex",
+           {pieces[k].rail.edge});
+    corner[k][0][end] = corner[k][1][end] = point;
+    u[k][0][end] = u[k][1][end] = along;
+    section[k][end]             = degenerateEdge(sheet.sectionUV(sheet.rail(along)),
+                                                 sheet.surface,
+                                                 TopLoc_Location(),
+                                                 point,
+                                                 std::min(sheet.across[0], sheet.across[1]),
+                                                 std::max(sheet.across[0], sheet.across[1]),
+                                                 tolerance);
+  }
+}
+
+void Attach::ballSections(const Corner&                     at,
+                          const std::vector<TopoDS_Face>&   faces,
+                          const std::vector<TopoDS_Vertex>& foot)
+{
+  // Each blend ends at the section through the ball's centre, from foot to foot.
+  for (const auto& [k, end] : at.ends)
+  {
+    const Piece& piece = pieces[k];
+    double       ends[2];
+    for (int side = 0; side < 2; ++side)
+    {
+      int i = 0;
+      while (!faces[i].IsSame(piece.rail.s[side].face))
+        ++i;
+      corner[k][side][end] = foot[i];
+      GeomAPI_ProjectPointOnCurve along(BRep_Tool::Pnt(foot[i]), piece.sheet.contact(side));
+      if (along.NbPoints() == 0 || along.LowerDistance() > piece.rail.resolved(limit::together))
+        fail(op, no_solution, "a blend's contact misses the corner's ball", {piece.rail.edge});
+      ends[side] = (along.LowerDistanceParameter() - piece.sheet.alpha) / piece.sheet.beta;
+    }
+    if (railStationSeparation(piece.rail, ends[0], ends[1]) > piece.rail.resolved(limit::together))
+      fail(op,
+           no_solution,
+           "a blend's contacts reach the corner's ball at different places",
+           {piece.rail.edge});
+    u[k][0][end] = ends[0];
+    u[k][1][end] = ends[1];
+    // Where the corner at the blend's other end has the same ball, the blend has no length:
+    // the corners share its section.
+    if (const int other = 1 - end; pieces[k].joint[other].meets == Meets::Corner
+                                   && !section[k][other].IsNull()
+                                   && corner[k][0][other].IsSame(corner[k][0][end])
+                                   && corner[k][1][other].IsSame(corner[k][1][end]))
+    {
+      section[k][end] = section[k][other];
+      continue;
+    }
+    const double along = (ends[0] + ends[1]) / 2;
+    section[k][end] =
+      isoSection(piece.sheet, piece.sheet.rail(along), corner[k][0][end], corner[k][1][end]);
+    builder.UpdateEdge(section[k][end],
+                       piece.sheet.sectionUV(piece.sheet.rail(along)),
+                       piece.sheet.surface,
+                       TopLoc_Location(),
+                       tolerance);
+  }
+}
+
+gp_Ax3 Attach::ballFrame(const Corner&                   at,
+                         const std::vector<TopoDS_Face>& faces,
+                         const gp_Pnt&                   ball,
+                         const std::vector<gp_Vec>&      normal,
+                         double                          sigma,
+                         bool&                           square,
+                         int&                            poleFoot)
+{
+  const size_t count = faces.size();
+  // The sphere's frame. Where the edges are square to each other, as OpenCascade's own corners
+  // are made, its pole is the ball's foot on the face across from the first edge and its x
+  // axis an end of that edge's section: that section is its equator and the other two are
+  // meridians, every side an isoline. Elsewhere the poles and seam are kept away from the patch.
+  gp_Vec e[3];
+  square = count == 3;
+  for (int i = 0; i < 3 && square; ++i)
+    square &= leaving(pieces[at.ends[i].first].rail.edge, at.vertex, e[i], at.ends[i].second);
+  square = square && std::abs(e[0].Dot(e[1])) < tol::fineAngle
+           && std::abs(e[0].Dot(e[2])) < tol::fineAngle
+           && std::abs(e[1].Dot(e[2])) < tol::fineAngle;
+  gp_Ax3 frame;
+  poleFoot = -1;
+  if (square)
+  {
+    const Piece& p0         = pieces[at.ends[0].first];
+    int          equator[2] = {-1, -1};
+    for (int i = 0; i < 3; ++i)
+    {
+      if (faces[i].IsSame(p0.rail.s[0].face))
+        equator[0] = i;
+      else if (faces[i].IsSame(p0.rail.s[1].face))
+        equator[1] = i;
+      else
+        poleFoot = i;
+    }
+    // From the centre to each foot is the face's normal, exactly: against it at a convex
+    // corner, along it at a concave one.
+    const gp_Dir up(normal[poleFoot] * -sigma);
+    // x towards the equator foot from which the other is a quarter turn ahead.
+    gp_Dir x(normal[equator[0]] * -sigma);
+    if (gp_Vec(up).Crossed(gp_Vec(x)).Dot(normal[equator[1]] * -sigma) < 0)
+      x = gp_Dir(normal[equator[1]] * -sigma);
+    frame = fixedFrame(gp_Ax3(ball, up, x));
+  }
+  else
+  {
+    gp_Vec sum;
+    for (const auto& n : normal)
+      sum += n;
+    const gp_Vec middle = sum.Normalized() * -sigma;
+    gp_Vec       pole   = middle.Crossed(normal[0]);
+    if (pole.Magnitude() < tol::coarseAngle)
+      pole = middle.Crossed(normal[1]);
+    frame = fixedFrame(gp_Ax3(ball, gp_Dir(pole), gp_Dir(middle.Reversed())));
+  }
+  return frame;
+}
+
+void Attach::ballPatchFace(const Corner&                     at,
+                           size_t                            c,
+                           const std::vector<TopoDS_Vertex>& foot,
+                           const gp_Ax3&                     frame,
+                           bool                              square,
+                           int                               poleFoot)
+{
+  const Piece&                        first = pieces[at.ends[0].first];
+  const double                        d = first.rail.s[0].distance, sigma = first.rail.sigma;
+  const size_t                        count  = foot.size();
+  const Handle(Geom_SphericalSurface) sphere = new Geom_SphericalSurface(frame, d);
+  TopoDS_Face&                        patch  = patches[c];
+  builder.MakeFace(patch, sphere, tolerance);
+  // Its boundary: the blends' sections, from foot to foot, each laid on the sphere and moved
+  // by whole turns to where its middle is.
+  const auto uvOf = [&](const gp_Pnt& point) {
+    double su, sv;
+    ElSLib::Parameters(gp_Sphere(frame, d), point, su, sv);
+    if (square && su > 1.5 * M_PI)
+      su -= 2 * M_PI;
+    return gp_Pnt2d(su, sv);
+  };
+  std::vector<TopoDS_Edge> loop;
+  TopoDS_Vertex            at0 = foot[0];
+  std::vector<bool>        used(count, false);
+  for (size_t step = 0; step < count; ++step)
+    for (size_t i = 0; i < count; ++i)
+    {
+      if (used[i])
+        continue;
+      const TopoDS_Edge& edge = section[at.ends[i].first][at.ends[i].second];
+      TopoDS_Vertex      a, z;
+      TopExp::Vertices(edge, a, z);
+      if (!a.IsSame(at0) && !z.IsSame(at0))
+        continue;
+      double f, l;
+      BRep_Tool::Range(edge, f, l);
+      const auto curve = BRep_Tool::Curve(edge, f, l);
+      const auto uv    = laidOn(curve, f, l, sphere);
+      if (uv.IsNull())
+        fail(op,
+             no_solution,
+             "a blend's end cannot be laid on the corner's ball",
+             {first.rail.edge});
+      builder.UpdateEdge(edge,
+                         aligned(uv, (f + l) / 2, uvOf(curve->Value((f + l) / 2)), sphere),
+                         sphere,
+                         TopLoc_Location(),
+                         tolerance);
+      builder.Range(edge, f, l);
+      loop.push_back(a.IsSame(at0) ? edge : TopoDS::Edge(edge.Reversed()));
+      at0     = a.IsSame(at0) ? z : a;
+      used[i] = true;
+      break;
+    }
+  if (loop.size() != count)
+    fail(op,
+         no_solution,
+         "the ends of the blends do not close around their corner",
+         {first.rail.edge});
+  // Where two meridians meet at the pole, the side between them in the parameters is the
+  // pole itself: a degenerate edge. Elsewhere two sections end at one foot, their curves on
+  // the sphere within that place's tolerance of each other (a fitted sheet's section lies
+  // on the ball to its fit).
+  const auto endOf = [&](const TopoDS_Edge& edge, bool last) {
+    double     f, l;
+    const auto uv       = BRep_Tool::CurveOnSurface(edge, patch, f, l);
+    const bool reversed = edge.Orientation() == TopAbs_REVERSED;
+    return uv->Value(last != reversed ? l : f);
+  };
+  std::vector<TopoDS_Edge> closed;
+  for (size_t i = 0; i < loop.size(); ++i)
+  {
+    closed.push_back(loop[i]);
+    const gp_Pnt2d from = endOf(loop[i], true), to = endOf(loop[(i + 1) % loop.size()], false);
+    if (from.Distance(to) < tol::uv)
+      continue;
+    const bool atPole =
+      square && poleFoot >= 0 && TopExp::LastVertex(loop[i], true).IsSame(foot[poleFoot]);
+    if (!atPole)
+    {
+      const double gap =
+        d * std::hypot((to.X() - from.X()) * std::cos(from.Y()), to.Y() - from.Y());
+      if (gap > first.rail.resolved(limit::together))
+        fail(op,
+             no_solution,
+             "the ends of the blends do not close around their corner's ball",
+             {first.rail.edge});
+      continue;
+    }
+    closed.push_back(degenerateEdge(new Geom2d_Line(from, gp_Dir2d(gp_Vec2d(from, to))),
+                                    sphere,
+                                    TopLoc_Location(),
+                                    foot[poleFoot],
+                                    0,
+                                    from.Distance(to),
+                                    tolerance));
+  }
+  // Counter-clockwise in the sphere's parameters: the area the loop's parameter curves enclose.
+  double area = 0;
+  for (const auto& edge : closed)
+  {
+    double     f, l;
+    const auto uv       = BRep_Tool::CurveOnSurface(edge, patch, f, l);
+    gp_Pnt2d   previous = uv->Value(edge.Orientation() == TopAbs_REVERSED ? l : f);
+    for (int i = 1; i <= 16; ++i)
+    {
+      const double t =
+        edge.Orientation() == TopAbs_REVERSED ? l - (l - f) * i / 16 : f + (l - f) * i / 16;
+      const gp_Pnt2d next = uv->Value(t);
+      area += previous.X() * next.Y() - next.X() * previous.Y();
+      previous = next;
+    }
+  }
+  TopoDS_Wire wire;
+  builder.MakeWire(wire);
+  for (const auto& edge : closed)
+    builder.Add(wire, area > 0 ? edge : TopoDS::Edge(edge.Reversed()));
+  wire.Closed(true);
+  builder.Add(patch, wire);
+  // Facing out of the body: away from the centre at a convex corner, towards it at a concave.
+  if (sigma > 0)
+    patch.Reverse();
+}
+
+void Attach::cornerPatch(size_t c)
+{
+  const auto&  at    = cornersAt[c];
+  const Piece& first = pieces[at.ends[0].first];
+  if (at.pinch)
+  {
+    pinchCorner(at);
+    return;
+  }
+  std::vector<TopoDS_Face> faces;
+  for (const auto& [k, end] : at.ends)
+    for (const auto& side : pieces[k].rail.s)
+      if (std::none_of(faces.begin(), faces.end(), [&](const TopoDS_Face& f) {
+            return f.IsSame(side.face);
+          }))
+        faces.push_back(side.face);
+  // One law and one side throughout, each face between two of the blends.
+  bool alike = faces.size() == at.ends.size(), even = true;
+  for (const auto& [k, end] : at.ends)
+  {
+    const Rail& r = pieces[k].rail;
+    alike &= r.law == first.rail.law && std::abs(r.rho - first.rail.rho) < limit::equal
+             && r.sigma == first.rail.sigma;
+    even &= std::abs(r.s[0].distance - first.rail.s[0].distance) < limit::equal * r.scale
+            && std::abs(r.s[1].distance - first.rail.s[0].distance) < limit::equal * r.scale;
+  }
+  if (!alike)
+    fail(op,
+         unsupported_geometry,
+         "where three blended edges meet, the blend makes the corner of one law so far",
+         {first.rail.edge});
+  const bool round =
+    even && first.rail.law == Law::Conic && std::abs(first.rail.rho - 0.5) < limit::equal;
+  if (!round)
+  {
+    if (at.ends.size() > 3 && first.rail.law == Law::Conic)
+    {
+      splitCorner(at, c);
+      return;
+    }
+    if (at.ends.size() != 3)
+      fail(op,
+           unsupported_geometry,
+           "where more than three G2, conic or chamfer blends meet, the corner is blended with "
+           "them, which the blend does not do yet",
+           {first.rail.edge});
+    patches[c] = lawCorner(at, c);
+    return;
+  }
+  // The ball resting on all the faces, from the corner's vertex.
+  const double      d = first.rail.s[0].distance, sigma = first.rail.sigma;
+  const size_t      count = faces.size();
+  std::vector<Side> sides(count);
+  for (size_t i = 0; i < count; ++i)
+  {
+    sides[i].face    = faces[i];
+    sides[i].surface = BRep_Tool::Surface(faces[i]);
+    sides[i].outward = faces[i].Orientation() == TopAbs_REVERSED ? -1 : 1;
+  }
+  const auto rests = restingBall(sides, BRep_Tool::Pnt(at.vertex), d, sigma, first.rail.scale);
+  if (!rests)
+    fail(op,
+         no_solution,
+         "no ball of this size rests on the faces at the corner",
+         {first.rail.edge});
+  const gp_Pnt               ball   = rests->centre;
+  const std::vector<gp_Vec>& normal = rests->normals;
+  std::vector<TopoDS_Vertex> foot(count);
+  for (size_t i = 0; i < count; ++i)
+    foot[i] = footAt(rests->feet[i], first.rail.scale);
+  // Each blend ends at the section through the ball's centre, from foot to foot.
+  ballSections(at, faces, foot);
+  // The sphere's frame. Where the edges are square to each other, as OpenCascade's own corners
+  // are made, its pole is the ball's foot on the face across from the first edge and its x
+  // axis an end of that edge's section: that section is its equator and the other two are
+  // meridians, every side an isoline. Elsewhere the poles and seam are kept away from the patch.
+  bool         square   = false;
+  int          poleFoot = -1;
+  const gp_Ax3 frame    = ballFrame(at, faces, ball, normal, sigma, square, poleFoot);
+  ballPatchFace(at, c, foot, frame, square, poleFoot);
+}
+
 void Attach::cornerPatches()
 {
   // Three or more edges that meet: the rolling ball's corner. At equal distances the round's
   // corner is the ball itself where one rests on all the faces (three always have one; more need
   // not).
   for (size_t c = 0; c < cornersAt.size(); ++c)
-  {
-    const auto&  at    = cornersAt[c];
-    const Piece& first = pieces[at.ends[0].first];
-    if (at.pinch)
-    {
-      // Every blend closes to the vertex: its end there is that point, a degenerate edge
-      // across its sheet, and the corner has no patch.
-      const TopoDS_Vertex point = footAt(BRep_Tool::Pnt(at.vertex), first.rail.scale);
-      for (const auto& [k, end] : at.ends)
-      {
-        const Sheet& sheet = pieces[k].sheet;
-        const double along = pieces[k].uAt(end);
-        if (sheet.contact(0)->Value(sheet.rail(along)).Distance(BRep_Tool::Pnt(point))
-              > pieces[k].rail.resolved(limit::together)
-            || sheet.contact(1)->Value(sheet.rail(along)).Distance(BRep_Tool::Pnt(point))
-                 > pieces[k].rail.resolved(limit::together))
-          fail(op,
-               no_solution,
-               "a blend between faces tangent at its end does not close to the vertex",
-               {pieces[k].rail.edge});
-        corner[k][0][end] = corner[k][1][end] = point;
-        u[k][0][end] = u[k][1][end] = along;
-        section[k][end]             = degenerateEdge(sheet.sectionUV(sheet.rail(along)),
-                                         sheet.surface,
-                                         TopLoc_Location(),
-                                         point,
-                                         std::min(sheet.across[0], sheet.across[1]),
-                                         std::max(sheet.across[0], sheet.across[1]),
-                                         tolerance);
-      }
-      continue;
-    }
-    std::vector<TopoDS_Face> faces;
-    for (const auto& [k, end] : at.ends)
-      for (const auto& side : pieces[k].rail.s)
-        if (std::none_of(faces.begin(), faces.end(), [&](const TopoDS_Face& f) {
-              return f.IsSame(side.face);
-            }))
-          faces.push_back(side.face);
-    // One law and one side throughout, each face between two of the blends.
-    bool alike = faces.size() == at.ends.size(), even = true;
-    for (const auto& [k, end] : at.ends)
-    {
-      const Rail& r = pieces[k].rail;
-      alike &= r.law == first.rail.law && std::abs(r.rho - first.rail.rho) < limit::equal
-               && r.sigma == first.rail.sigma;
-      even &= std::abs(r.s[0].distance - first.rail.s[0].distance) < limit::equal * r.scale
-              && std::abs(r.s[1].distance - first.rail.s[0].distance) < limit::equal * r.scale;
-    }
-    if (!alike)
-      fail(op,
-           unsupported_geometry,
-           "where three blended edges meet, the blend makes the corner of one law so far",
-           {first.rail.edge});
-    const bool round =
-      even && first.rail.law == Law::Conic && std::abs(first.rail.rho - 0.5) < limit::equal;
-    if (!round)
-    {
-      if (at.ends.size() > 3 && first.rail.law == Law::Conic)
-      {
-        splitCorner(at, c);
-        continue;
-      }
-      if (at.ends.size() != 3)
-        fail(op,
-             unsupported_geometry,
-             "where more than three G2, conic or chamfer blends meet, the corner is blended with "
-             "them, which the blend does not do yet",
-             {first.rail.edge});
-      patches[c] = lawCorner(at, c);
-      continue;
-    }
-    // The ball resting on all the faces, from the corner's vertex.
-    const double      d = first.rail.s[0].distance, sigma = first.rail.sigma;
-    const size_t      count = faces.size();
-    std::vector<Side> sides(count);
-    for (size_t i = 0; i < count; ++i)
-    {
-      sides[i].face    = faces[i];
-      sides[i].surface = BRep_Tool::Surface(faces[i]);
-      sides[i].outward = faces[i].Orientation() == TopAbs_REVERSED ? -1 : 1;
-    }
-    const auto rests = restingBall(sides, BRep_Tool::Pnt(at.vertex), d, sigma, first.rail.scale);
-    if (!rests)
-      fail(op,
-           no_solution,
-           "no ball of this size rests on the faces at the corner",
-           {first.rail.edge});
-    const gp_Pnt               ball   = rests->centre;
-    const std::vector<gp_Vec>& normal = rests->normals;
-    std::vector<TopoDS_Vertex> foot(count);
-    for (size_t i = 0; i < count; ++i)
-      foot[i] = footAt(rests->feet[i], first.rail.scale);
-    // Each blend ends at the section through the ball's centre, from foot to foot.
-    for (const auto& [k, end] : at.ends)
-    {
-      const Piece& piece = pieces[k];
-      double       ends[2];
-      for (int side = 0; side < 2; ++side)
-      {
-        int i = 0;
-        while (!faces[i].IsSame(piece.rail.s[side].face))
-          ++i;
-        corner[k][side][end] = foot[i];
-        GeomAPI_ProjectPointOnCurve along(BRep_Tool::Pnt(foot[i]), piece.sheet.contact(side));
-        if (along.NbPoints() == 0 || along.LowerDistance() > piece.rail.resolved(limit::together))
-          fail(op, no_solution, "a blend's contact misses the corner's ball", {piece.rail.edge});
-        ends[side] = (along.LowerDistanceParameter() - piece.sheet.alpha) / piece.sheet.beta;
-      }
-      if (railStationSeparation(piece.rail, ends[0], ends[1])
-          > piece.rail.resolved(limit::together))
-        fail(op,
-             no_solution,
-             "a blend's contacts reach the corner's ball at different places",
-             {piece.rail.edge});
-      u[k][0][end] = ends[0];
-      u[k][1][end] = ends[1];
-      // Where the corner at the blend's other end has the same ball, the blend has no length:
-      // the corners share its section.
-      if (const int other = 1 - end; pieces[k].joint[other].meets == Meets::Corner
-                                     && !section[k][other].IsNull()
-                                     && corner[k][0][other].IsSame(corner[k][0][end])
-                                     && corner[k][1][other].IsSame(corner[k][1][end]))
-      {
-        section[k][end] = section[k][other];
-        continue;
-      }
-      const double along = (ends[0] + ends[1]) / 2;
-      section[k][end] =
-        isoSection(piece.sheet, piece.sheet.rail(along), corner[k][0][end], corner[k][1][end]);
-      builder.UpdateEdge(section[k][end],
-                         piece.sheet.sectionUV(piece.sheet.rail(along)),
-                         piece.sheet.surface,
-                         TopLoc_Location(),
-                         tolerance);
-    }
-    // The sphere's frame. Where the edges are square to each other, as OpenCascade's own corners
-    // are made, its pole is the ball's foot on the face across from the first edge and its x
-    // axis an end of that edge's section: that section is its equator and the other two are
-    // meridians, every side an isoline. Elsewhere the poles and seam are kept away from the patch.
-    gp_Vec e[3];
-    bool   square = count == 3;
-    for (int i = 0; i < 3 && square; ++i)
-      square &= leaving(pieces[at.ends[i].first].rail.edge, at.vertex, e[i], at.ends[i].second);
-    square = square && std::abs(e[0].Dot(e[1])) < tol::fineAngle
-             && std::abs(e[0].Dot(e[2])) < tol::fineAngle
-             && std::abs(e[1].Dot(e[2])) < tol::fineAngle;
-    gp_Ax3 frame;
-    int    poleFoot = -1;
-    if (square)
-    {
-      const Piece& p0         = pieces[at.ends[0].first];
-      int          equator[2] = {-1, -1};
-      for (int i = 0; i < 3; ++i)
-      {
-        if (faces[i].IsSame(p0.rail.s[0].face))
-          equator[0] = i;
-        else if (faces[i].IsSame(p0.rail.s[1].face))
-          equator[1] = i;
-        else
-          poleFoot = i;
-      }
-      // From the centre to each foot is the face's normal, exactly: against it at a convex
-      // corner, along it at a concave one.
-      const gp_Dir up(normal[poleFoot] * -sigma);
-      // x towards the equator foot from which the other is a quarter turn ahead.
-      gp_Dir x(normal[equator[0]] * -sigma);
-      if (gp_Vec(up).Crossed(gp_Vec(x)).Dot(normal[equator[1]] * -sigma) < 0)
-        x = gp_Dir(normal[equator[1]] * -sigma);
-      frame = fixedFrame(gp_Ax3(ball, up, x));
-    }
-    else
-    {
-      gp_Vec sum;
-      for (const auto& n : normal)
-        sum += n;
-      const gp_Vec middle = sum.Normalized() * -sigma;
-      gp_Vec       pole   = middle.Crossed(normal[0]);
-      if (pole.Magnitude() < tol::coarseAngle)
-        pole = middle.Crossed(normal[1]);
-      frame = fixedFrame(gp_Ax3(ball, gp_Dir(pole), gp_Dir(middle.Reversed())));
-    }
-    const Handle(Geom_SphericalSurface) sphere = new Geom_SphericalSurface(frame, d);
-    TopoDS_Face&                        patch  = patches[c];
-    builder.MakeFace(patch, sphere, tolerance);
-    // Its boundary: the blends' sections, from foot to foot, each laid on the sphere and moved
-    // by whole turns to where its middle is.
-    const auto uvOf = [&](const gp_Pnt& point) {
-      double su, sv;
-      ElSLib::Parameters(gp_Sphere(frame, d), point, su, sv);
-      if (square && su > 1.5 * M_PI)
-        su -= 2 * M_PI;
-      return gp_Pnt2d(su, sv);
-    };
-    std::vector<TopoDS_Edge> loop;
-    TopoDS_Vertex            at0 = foot[0];
-    std::vector<bool>        used(count, false);
-    for (size_t step = 0; step < count; ++step)
-      for (size_t i = 0; i < count; ++i)
-      {
-        if (used[i])
-          continue;
-        const TopoDS_Edge& edge = section[at.ends[i].first][at.ends[i].second];
-        TopoDS_Vertex      a, z;
-        TopExp::Vertices(edge, a, z);
-        if (!a.IsSame(at0) && !z.IsSame(at0))
-          continue;
-        double f, l;
-        BRep_Tool::Range(edge, f, l);
-        const auto curve = BRep_Tool::Curve(edge, f, l);
-        const auto uv    = laidOn(curve, f, l, sphere);
-        if (uv.IsNull())
-          fail(op,
-               no_solution,
-               "a blend's end cannot be laid on the corner's ball",
-               {first.rail.edge});
-        builder.UpdateEdge(edge,
-                           aligned(uv, (f + l) / 2, uvOf(curve->Value((f + l) / 2)), sphere),
-                           sphere,
-                           TopLoc_Location(),
-                           tolerance);
-        builder.Range(edge, f, l);
-        loop.push_back(a.IsSame(at0) ? edge : TopoDS::Edge(edge.Reversed()));
-        at0     = a.IsSame(at0) ? z : a;
-        used[i] = true;
-        break;
-      }
-    if (loop.size() != count)
-      fail(op,
-           no_solution,
-           "the ends of the blends do not close around their corner",
-           {first.rail.edge});
-    // Where two meridians meet at the pole, the side between them in the parameters is the
-    // pole itself: a degenerate edge. Elsewhere two sections end at one foot, their curves on
-    // the sphere within that place's tolerance of each other (a fitted sheet's section lies
-    // on the ball to its fit).
-    const auto endOf = [&](const TopoDS_Edge& edge, bool last) {
-      double     f, l;
-      const auto uv       = BRep_Tool::CurveOnSurface(edge, patch, f, l);
-      const bool reversed = edge.Orientation() == TopAbs_REVERSED;
-      return uv->Value(last != reversed ? l : f);
-    };
-    std::vector<TopoDS_Edge> closed;
-    for (size_t i = 0; i < loop.size(); ++i)
-    {
-      closed.push_back(loop[i]);
-      const gp_Pnt2d from = endOf(loop[i], true), to = endOf(loop[(i + 1) % loop.size()], false);
-      if (from.Distance(to) < tol::uv)
-        continue;
-      const bool atPole =
-        square && poleFoot >= 0 && TopExp::LastVertex(loop[i], true).IsSame(foot[poleFoot]);
-      if (!atPole)
-      {
-        const double gap =
-          d * std::hypot((to.X() - from.X()) * std::cos(from.Y()), to.Y() - from.Y());
-        if (gap > first.rail.resolved(limit::together))
-          fail(op,
-               no_solution,
-               "the ends of the blends do not close around their corner's ball",
-               {first.rail.edge});
-        continue;
-      }
-      closed.push_back(degenerateEdge(new Geom2d_Line(from, gp_Dir2d(gp_Vec2d(from, to))),
-                                      sphere,
-                                      TopLoc_Location(),
-                                      foot[poleFoot],
-                                      0,
-                                      from.Distance(to),
-                                      tolerance));
-    }
-    // Counter-clockwise in the sphere's parameters: the area the loop's parameter curves enclose.
-    double area = 0;
-    for (const auto& edge : closed)
-    {
-      double     f, l;
-      const auto uv       = BRep_Tool::CurveOnSurface(edge, patch, f, l);
-      gp_Pnt2d   previous = uv->Value(edge.Orientation() == TopAbs_REVERSED ? l : f);
-      for (int i = 1; i <= 16; ++i)
-      {
-        const double t =
-          edge.Orientation() == TopAbs_REVERSED ? l - (l - f) * i / 16 : f + (l - f) * i / 16;
-        const gp_Pnt2d next = uv->Value(t);
-        area += previous.X() * next.Y() - next.X() * previous.Y();
-        previous = next;
-      }
-    }
-    TopoDS_Wire wire;
-    builder.MakeWire(wire);
-    for (const auto& edge : closed)
-      builder.Add(wire, area > 0 ? edge : TopoDS::Edge(edge.Reversed()));
-    wire.Closed(true);
-    builder.Add(patch, wire);
-    // Facing out of the body: away from the centre at a convex corner, towards it at a concave.
-    if (sigma > 0)
-      patch.Reverse();
-  }
+    cornerPatch(c);
 }
 
 // The corner of three blends of one law between three planes at any angles: the vertex

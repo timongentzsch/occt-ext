@@ -73,10 +73,33 @@ struct Attach
   void              jointSection(int k, int end);
   void              miters();
   void              cornerPatches();
-  void         ridges();
-  void         contacts();
-  void         blendFaces();
-  void         continuity();
+  //! The steps of cornerPatches: one corner, by kind.
+  void cornerPatch(size_t c);
+  //! Every blend closes to the vertex: a degenerate end each, and no patch.
+  void pinchCorner(const Corner& at);
+  //! Each blend's end at the section through the corner ball's centre, from foot to foot.
+  void ballSections(const Corner&                     at,
+                    const std::vector<TopoDS_Face>&   faces,
+                    const std::vector<TopoDS_Vertex>& foot);
+  //! The corner ball's frame: its pole at a foot where the edges are square, else off the patch.
+  gp_Ax3 ballFrame(const Corner&                   at,
+                   const std::vector<TopoDS_Face>& faces,
+                   const gp_Pnt&                   ball,
+                   const std::vector<gp_Vec>&      normal,
+                   double                          sigma,
+                   bool&                           square,
+                   int&                            poleFoot);
+  //! The ball's face, bounded by the blends' sections laid on it.
+  void              ballPatchFace(const Corner&                     at,
+                                  size_t                            c,
+                                  const std::vector<TopoDS_Vertex>& foot,
+                                  const gp_Ax3&                     frame,
+                                  bool                              square,
+                                  int                               poleFoot);
+  void              ridges();
+  void              contacts();
+  void              blendFaces();
+  void              continuity();
   std::vector<Join> joins;
   void         tolerances();
   void         collisions();
