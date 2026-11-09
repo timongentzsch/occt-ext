@@ -40,353 +40,385 @@ Attach::Attach(TopoDS_Shape                     body_,
         crossed.Add(joint.crossed);
 }
 
-void Attach::chainEnds()
+void Attach::splitNotchCut(int k, int end)
 {
-  for (int k = 0; k < n; ++k)
-    for (int end = 0; end < 2; ++end)
-    {
-      const Piece&  piece = pieces[k];
-      const Rail&   rail  = piece.rail;
-      const Sheet&  sheet = piece.sheet;
-      TopoDS_Vertex ends[2];
-      TopExp::Vertices(TopoDS::Edge(rail.edge.Oriented(TopAbs_FORWARD)), ends[0], ends[1]);
-      if (!piece.stopVertex[end].IsNull())
-        ends[end] = piece.stopVertex[end];
-      const auto& joint = piece.joint[end];
-      if (joint.meets == Meets::Miter || joint.meets == Meets::Corner)
-        continue; // below
-      if (joint.meets == Meets::Fold)
-      {
-        if (joint.piece > k || (joint.piece == k && joint.end > end))
-          fold(k, end, joint.piece, joint.end);
-        continue;
-      }
-      if (joint.meets == Meets::Joint || joint.meets == Meets::Split)
-      {
-        if (joint.piece < k || (joint.piece == k && joint.end < end))
-          continue; // made from its other side
-        const Piece& other = pieces[joint.piece];
-        const double here = piece.uAt(end), there = other.uAt(joint.end);
-        // One corner on each side, where both pieces' contacts end.
-        for (int side = 0; side < 2; ++side)
-        {
-          const int to = side ^ int(joint.swapped);
-          // Round a closed edge whose narrow face the blend uses up (a notch), the corner is on
-          // the blend's edge on the face beyond.
-          const bool   notched = joint.piece == k && !rail.s[side].trim.IsNull();
-          const gp_Pnt point   = notched ? trimOf(k, side).curve->Value(sheet.rail(here))
-                                         : sheet.contact(side)->Value(sheet.rail(here));
-          const double gap =
-            point.Distance(notched ? trimOf(k, side).curve->Value(sheet.rail(there))
-                                   : other.sheet.contact(to)->Value(other.sheet.rail(there)));
-          if (gap > rail.resolved(limit::together))
-            fail(op,
-                 unsupported_geometry,
-                 "the blends of tangent edges do not meet in one section there, which the blend "
-                 "does not do yet",
-                 {rail.edge});
-          TopoDS_Vertex vertex;
-          builder.MakeVertex(vertex, point, std::max(tolerance, gap));
-          corner[k][side][end] = corner[joint.piece][to][joint.end] = vertex;
-          u[k][side][end]                                           = here;
-          u[joint.piece][to][joint.end]                             = there;
-        }
-        if (joint.meets == Meets::Split
-            && (splitNotch(k, joint.side)
-                || splitNotch(joint.piece, joint.side ^ int(joint.swapped))))
-        {
-          // A far edge the contact runs off over partway: its part along the face that stays
-          // keeps the face's end there; the rest is inside the blend.
-          const TopoDS_Edge& edge  = joint.crossed;
-          const Piece&       plain = splitNotch(k, joint.side) ? other : piece;
-          const int          away  = splitNotch(k, joint.side) ? 1 - joint.end : 1 - end;
-          gp_Pnt             start;
-          plain.rail.curve.D0(away == 0 ? plain.rail.first : plain.rail.last, start);
-          TopoDS_Vertex a, z;
-          TopExp::Vertices(edge, a, z);
-          const TopoDS_Vertex keep =
-            BRep_Tool::Pnt(a).Distance(start) < BRep_Tool::Pnt(z).Distance(start) ? a : z;
-          double                      f, l;
-          const auto                  curve = BRep_Tool::Curve(edge, f, l);
-          GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][joint.side][end]), curve, f, l);
-          if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
-            fail(op, no_solution, "a contact misses the far edge it runs off over", {rail.edge});
-          // A bounded notch can remove an interior interval, leaving two edge components.
-          // Sequential cuts from the same original endpoint cannot represent that set.
-          const bool hereNotched = splitNotch(k, joint.side);
-          const int notchIndex = hereNotched ? k : joint.piece;
-          const int notchSide = hereNotched ? joint.side : joint.side ^ int(joint.swapped);
-          const auto& notchPiece = pieces[notchIndex];
-          const auto& beginJoint = notchPiece.joint[0];
-          const auto& finish = notchPiece.joint[1];
-          int crossings = 0;
-          for (const auto& p : pieces)
-            crossings += p.joint[1].meets == Meets::Split && p.joint[1].crossed.IsSame(edge);
-          const bool paired = refines(crossings == 2
-            && beginJoint.meets == Meets::Split && finish.meets == Meets::Split
+  const Piece& piece = pieces[k];
+  const Rail&  rail  = piece.rail;
+  const auto&  joint = piece.joint[end];
+  const Piece& other = pieces[joint.piece];
+  // A far edge the contact runs off over partway: its part along the face that stays
+  // keeps the face's end there; the rest is inside the blend.
+  const TopoDS_Edge& edge  = joint.crossed;
+  const Piece&       plain = splitNotch(k, joint.side) ? other : piece;
+  const int          away  = splitNotch(k, joint.side) ? 1 - joint.end : 1 - end;
+  gp_Pnt             start;
+  plain.rail.curve.D0(away == 0 ? plain.rail.first : plain.rail.last, start);
+  TopoDS_Vertex a, z;
+  TopExp::Vertices(edge, a, z);
+  const TopoDS_Vertex keep =
+    BRep_Tool::Pnt(a).Distance(start) < BRep_Tool::Pnt(z).Distance(start) ? a : z;
+  double                      f, l;
+  const auto                  curve = BRep_Tool::Curve(edge, f, l);
+  GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][joint.side][end]), curve, f, l);
+  if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
+    fail(op, no_solution, "a contact misses the far edge it runs off over", {rail.edge});
+  // A bounded notch can remove an interior interval, leaving two edge components.
+  // Sequential cuts from the same original endpoint cannot represent that set.
+  const bool  hereNotched = splitNotch(k, joint.side);
+  const int   notchIndex  = hereNotched ? k : joint.piece;
+  const int   notchSide   = hereNotched ? joint.side : joint.side ^ int(joint.swapped);
+  const auto& notchPiece  = pieces[notchIndex];
+  const auto& beginJoint  = notchPiece.joint[0];
+  const auto& finish      = notchPiece.joint[1];
+  int         crossings   = 0;
+  for (const auto& p : pieces)
+    crossings += p.joint[1].meets == Meets::Split && p.joint[1].crossed.IsSame(edge);
+  const bool paired =
+    refines(crossings == 2 && beginJoint.meets == Meets::Split && finish.meets == Meets::Split
             && beginJoint.side == notchSide && finish.side == notchSide
             && beginJoint.crossed.IsSame(edge) && finish.crossed.IsSame(edge)
             && pieces[beginJoint.piece].rail.s[notchSide ^ int(beginJoint.swapped)].trim.IsNull()
             && pieces[finish.piece].rail.s[notchSide ^ int(finish.swapped)].trim.IsNull()
             && !cuts.Contains(edge));
-          if (!paired)
-            cut(edge, keep.IsSame(a) ? z : a, corner[k][joint.side][end], on.LowerDistanceParameter());
-          else
-          {
-            const double crossing = on.LowerDistanceParameter();
-            if (const auto found = seamCrossed.find(edge.TShape().get()); found == seamCrossed.end())
-              seamCrossed[edge.TShape().get()] = {corner[k][joint.side][end], crossing};
-            else
-            {
-              const auto& [other, there] = found->second;
-              const double low = std::min(crossing, there), high = std::max(crossing, there);
-              if (!(low > f + tol::parameter && high < l - tol::parameter
-                    && high - low > tol::parameter))
-                fail(op, unsupported_geometry, "a contact interval does not lie inside its crossed edge", {edge});
-              const bool lower = crossing < there;
-              TopoDS_Vertex e0, e1;
-              TopExp::Vertices(TopoDS::Edge(edge.Oriented(TopAbs_FORWARD)), e0, e1);
-              TopoDS_Compound parts;
-              builder.MakeCompound(parts);
-              builder.Add(parts, trimmed(edge, e1, lower ? corner[k][joint.side][end] : other, low));
-              builder.Add(parts, trimmed(edge, e0, lower ? other : corner[k][joint.side][end], high));
-              for (const auto& face : facesOfEdge.FindFromKey(edge))
-                editOf(edits, face).replace.Bind(edge, parts);
-            }
-          }
-        }
-        else if (joint.meets == Meets::Split)
-        {
-          // The edge the contact crosses onto the next face is cut back to it, from its
-          // end at the blended edges.
-          const TopoDS_Edge& edge = joint.crossed;
-          TopoDS_Vertex      a, z;
-          TopExp::Vertices(edge, a, z);
-          const auto atRail = [&](const TopoDS_Vertex& v) {
-            return std::any_of(pieces.begin(), pieces.end(), [&](const Piece& p) {
-              for (TopExp_Explorer x(p.rail.edge, TopAbs_VERTEX); x.More(); x.Next())
-                if (x.Current().IsSame(v))
-                  return true;
-              return false;
-            });
-          };
-          // Where both its ends are at blended edges (a hole's seam whose two rims are both
-          // rounded), from the one at this edge.
-          const auto atOwn = [&](const TopoDS_Vertex& v) {
-            for (TopExp_Explorer x(rail.edge, TopAbs_VERTEX); x.More(); x.Next())
-              if (x.Current().IsSame(v))
-                return true;
-            return false;
-          };
-          double                      f, l;
-          const auto                  curve = BRep_Tool::Curve(edge, f, l);
-          GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][joint.side][end]), curve, f, l);
-          if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
-            fail(op,
-                 no_solution,
-                 "a contact misses the edge it crosses onto the next face",
-                 {rail.edge});
-          const double crossing = on.LowerDistanceParameter();
-          // A sphere's seam the contact crosses twice (across the cap, from rim to rim) keeps
-          // its part between: each crossing cuts it from the end it is nearer.
-          int crossings = 0;
-          for (const auto& p : pieces)
-            crossings += p.joint[1].meets == Meets::Split && p.joint[1].crossed.IsSame(edge);
-          // Two crossings retain the interval between them when the edge reaches
-          // the blended chain. Its two ends need not both belong to that chain.
-          double otherCrossing = crossing;
-          if (refines(crossings == 2 && (atRail(a) || atRail(z))))
-            for (int m = 0; m < n; ++m)
-            {
-              const auto& joint = pieces[m].joint[1];
-              if (joint.meets != Meets::Split || !joint.crossed.IsSame(edge)
-                  || (m == k && end == 1) || (joint.piece == k && joint.end == end))
-                continue;
-              const auto& q = pieces[m];
-              const gp_Pnt point = q.sheet.contact(joint.side)->Value(q.sheet.rail(q.uAt(1)));
-              GeomAPI_ProjectPointOnCurve other(point, curve, f, l);
-              if (other.NbPoints() && other.LowerDistance() <= rail.resolved(limit::together)
-                  && std::abs(other.LowerDistanceParameter() - crossing) > tol::parameter)
-                otherCrossing = other.LowerDistanceParameter();
-            }
-          const TopoDS_Vertex from = otherCrossing != crossing
-                                       ? (crossing < otherCrossing ? a : z)
-                                     : atRail(a) && atRail(z)
-                                       ? (crossings > 1 ? (crossing - f < l - crossing ? a : z)
-                                          : atOwn(z) && !atOwn(a) ? z : a)
-                                     : atRail(a) ? a
-                                     : atRail(z) ? z
-                                                 : TopoDS_Vertex();
-          if (from.IsNull() && crossings == 2)
-          {
-            // An edge (or a seam) the contact crosses and comes back over, in the strip the
-            // blend replaces between the crossings and on the faces past them: it is left in two.
-            if (const auto found = seamCrossed.find(edge.TShape().get());
-                found == seamCrossed.end())
-              seamCrossed[edge.TShape().get()] = {corner[k][joint.side][end], crossing};
-            else
-            {
-              const auto& [other, there] = found->second;
-              const bool      lower      = crossing < there;
-              TopoDS_Compound parts;
-              builder.MakeCompound(parts);
-              builder.Add(parts,
-                          trimmed(edge,
-                                  z,
-                                  lower ? corner[k][joint.side][end] : other,
-                                  std::min(crossing, there)));
-              builder.Add(parts,
-                          trimmed(edge,
-                                  a,
-                                  lower ? other : corner[k][joint.side][end],
-                                  std::max(crossing, there)));
-              for (const auto& face : facesOfEdge.FindFromKey(edge))
-                editOf(edits, face).replace.Bind(edge, parts);
-            }
-            continue;
-          }
-          if (from.IsNull())
-            fail(op,
-                 unsupported_geometry,
-                 "a contact crosses onto the next face over an edge that does not reach the "
-                 "blended edges, which the blend does not do yet",
-                 {rail.edge});
-          cut(edge, from, corner[k][joint.side][end], crossing);
-        }
-        else
-        {
-          // The other edges at the vertex lie between faces of the supports and end there:
-          // each is cut back to the corner on its side.
-          for (const auto& shape : edgesOfVertex.FindFromKey(ends[end]))
-          {
-            if (railEdge(shape) || crossed.Contains(shape))
-              continue;
-            const auto consumed = [&](const Rail& r) {
-              return std::any_of(r.consumedSupports.begin(),
-                                 r.consumedSupports.end(),
-                                 [&](const TopoDS_Face& face) { return onFace(shape, face); });
-            };
-            if (consumed(rail) || consumed(other.rail))
-            {
-              swept.push_back(shape);
-              continue;
-            }
-            // A narrow face a cliff or a notch replaces whole takes its edges with it.
-            if (std::any_of(std::begin(rail.s), std::end(rail.s), [&](const Side& s) {
-                  return (s.cliffCurve || !s.trim.IsNull()) && s.cliffWhole
-                         && onFace(shape, s.face);
-                }))
-            {
-              swept.push_back(shape);
-              continue;
-            }
-            int side = -1;
-            for (int s = 0; s < 2; ++s)
-              if (onFace(shape, rail.s[s].face)
-                  || onFace(shape, other.rail.s[s ^ int(joint.swapped)].face))
-                side = s;
-            if (side < 0)
-              fail(op,
-                   unsupported_geometry,
-                   "where a chain of blended edges meets another face, the corner is blended too, "
-                   "which the blend does not do yet",
-                   {rail.edge});
-            if (poleInStrip(piece, side, TopoDS::Edge(shape))
-                && sweepToPole(TopoDS::Edge(shape), ends[end]))
-              continue;
-            double                      f, l;
-            const auto                  curve = BRep_Tool::Curve(TopoDS::Edge(shape), f, l);
-            GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][side][end]), curve, f, l);
-            if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
-            {
-              if (sweepToPole(TopoDS::Edge(shape), ends[end]))
-                continue;
-              // A body pinched at the joint (a hole tangent to a support there, which meets it in
-              // a line of four faces): no blend passes it.
-              for (const auto& near : edgesOfVertex.FindFromKey(ends[end]))
-                if (facesOfEdge.Contains(near) && facesOfEdge.FindFromKey(near).Extent() > 2)
-                  fail(op,
-                       invalid_input,
-                       "the body is pinched where the edge's blend would pass: more than two faces "
-                       "meet along an edge at its vertex (a hole tangent to a face beside it)",
-                       {rail.edge, near});
-              fail(op,
-                   unsupported_geometry,
-                   "the contact of a chain's blend leaves the edge between its faces there, which "
-                   "the blend does not do yet",
-                   {rail.edge});
-            }
-            cut(shape, ends[end], corner[k][side][end], on.LowerDistanceParameter());
-          }
-        }
-        // The section between them: the sheet's own there, laid on the other sheet too,
-        // or on its own sheet's other end where the piece closes on itself.
-        // A split's parts are one face: no section between them.
-        if (joint.meets == Meets::Split)
-          continue;
-        // Where a closed blend's side is a notch, its section ends on the face beyond.
-        double reach[2] = {sheet.across[0], sheet.across[1]};
-        if (joint.piece == k)
-          for (int side = 0; side < 2; ++side)
-            if (!rail.s[side].trim.IsNull())
-            {
-              const gp_Pnt2d at = trimOf(k, side).onSheet->Value(sheet.rail(here));
-              reach[side]       = sheet.swapped ? at.X() : at.Y();
-            }
-        const TopoDS_Edge x = edgeBetween(sheet.section(sheet.rail(here)),
-                                          corner[k][0][end],
-                                          reach[0],
-                                          corner[k][1][end],
-                                          reach[1],
-                                          {},
-                                          tol::length);
-        double            lo, hi;
-        BRep_Tool::Range(x, lo, hi);
-        if (joint.piece == k || other.sheet.surface == sheet.surface)
-        {
-          // The seam, of a closed edge's sheet or of the one sheet a closed chain of split
-          // parts is joined into: the forward use is where the face's boundary runs from
-          // the first contact to the second, at the end of the rail when counter-clockwise.
-          const bool ccw =
-            sheet.swapped ? sheet.across[1] < sheet.across[0] : sheet.across[1] > sheet.across[0];
-          const bool   forwardAtEnd = (sheet.across[0] < sheet.across[1]) == ccw;
-          const double atHere = sheet.rail(here), atThere = other.sheet.rail(there);
-          builder.UpdateEdge(x,
-                             sheet.sectionUV(forwardAtEnd ? atThere : atHere),
-                             sheet.sectionUV(forwardAtEnd ? atHere : atThere),
-                             sheet.surface,
-                             TopLoc_Location(),
-                             tolerance);
-        }
-        else
-        {
-          builder.UpdateEdge(x,
-                             sheet.sectionUV(sheet.rail(here)),
-                             sheet.surface,
-                             TopLoc_Location(),
-                             tolerance);
-          // On the other sheet the section runs between the same corners at the same
-          // rate: the sections of a chain share their law and their parameter.
-          const int atLo = sheet.across[0] < sheet.across[1] ? 0 : 1;
-          builder.UpdateEdge(
-            x,
-            segment2d(other.sheet.uv(other.sheet.rail(there),
-                                     other.sheet.across[atLo ^ int(joint.swapped)]),
-                      other.sheet.uv(other.sheet.rail(there),
-                                     other.sheet.across[(1 - atLo) ^ int(joint.swapped)]),
-                      lo,
-                      hi),
-            other.sheet.surface,
-            TopLoc_Location(),
-            tolerance);
-        }
-        builder.Range(x, lo, hi);
-        section[k][end] = section[joint.piece][joint.end] = x;
-        continue;
-      }
-      // A face stops the edge here.
-      stop(k, end, ends[end]);
+  if (!paired)
+    cut(edge, keep.IsSame(a) ? z : a, corner[k][joint.side][end], on.LowerDistanceParameter());
+  else
+  {
+    const double crossing = on.LowerDistanceParameter();
+    if (const auto found = seamCrossed.find(edge.TShape().get()); found == seamCrossed.end())
+      seamCrossed[edge.TShape().get()] = {corner[k][joint.side][end], crossing};
+    else
+    {
+      const auto& [other, there] = found->second;
+      const double low = std::min(crossing, there), high = std::max(crossing, there);
+      if (!(low > f + tol::parameter && high < l - tol::parameter && high - low > tol::parameter))
+        fail(op,
+             unsupported_geometry,
+             "a contact interval does not lie inside its crossed edge",
+             {edge});
+      const bool    lower = crossing < there;
+      TopoDS_Vertex e0, e1;
+      TopExp::Vertices(TopoDS::Edge(edge.Oriented(TopAbs_FORWARD)), e0, e1);
+      TopoDS_Compound parts;
+      builder.MakeCompound(parts);
+      builder.Add(parts, trimmed(edge, e1, lower ? corner[k][joint.side][end] : other, low));
+      builder.Add(parts, trimmed(edge, e0, lower ? other : corner[k][joint.side][end], high));
+      for (const auto& face : facesOfEdge.FindFromKey(edge))
+        editOf(edits, face).replace.Bind(edge, parts);
     }
+  }
+}
+
+void Attach::splitCrossingCut(int k, int end)
+{
+  const Piece& piece = pieces[k];
+  const Rail&  rail  = piece.rail;
+  const auto&  joint = piece.joint[end];
+  // The edge the contact crosses onto the next face is cut back to it, from its
+  // end at the blended edges.
+  const TopoDS_Edge& edge = joint.crossed;
+  TopoDS_Vertex      a, z;
+  TopExp::Vertices(edge, a, z);
+  const auto atRail = [&](const TopoDS_Vertex& v) {
+    return std::any_of(pieces.begin(), pieces.end(), [&](const Piece& p) {
+      for (TopExp_Explorer x(p.rail.edge, TopAbs_VERTEX); x.More(); x.Next())
+        if (x.Current().IsSame(v))
+          return true;
+      return false;
+    });
+  };
+  // Where both its ends are at blended edges (a hole's seam whose two rims are both
+  // rounded), from the one at this edge.
+  const auto atOwn = [&](const TopoDS_Vertex& v) {
+    for (TopExp_Explorer x(rail.edge, TopAbs_VERTEX); x.More(); x.Next())
+      if (x.Current().IsSame(v))
+        return true;
+    return false;
+  };
+  double                      f, l;
+  const auto                  curve = BRep_Tool::Curve(edge, f, l);
+  GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][joint.side][end]), curve, f, l);
+  if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
+    fail(op, no_solution, "a contact misses the edge it crosses onto the next face", {rail.edge});
+  const double crossing = on.LowerDistanceParameter();
+  // A sphere's seam the contact crosses twice (across the cap, from rim to rim) keeps
+  // its part between: each crossing cuts it from the end it is nearer.
+  int crossings = 0;
+  for (const auto& p : pieces)
+    crossings += p.joint[1].meets == Meets::Split && p.joint[1].crossed.IsSame(edge);
+  // Two crossings retain the interval between them when the edge reaches
+  // the blended chain. Its two ends need not both belong to that chain.
+  double otherCrossing = crossing;
+  if (refines(crossings == 2 && (atRail(a) || atRail(z))))
+    for (int m = 0; m < n; ++m)
+    {
+      const auto& joint = pieces[m].joint[1];
+      if (joint.meets != Meets::Split || !joint.crossed.IsSame(edge) || (m == k && end == 1)
+          || (joint.piece == k && joint.end == end))
+        continue;
+      const auto&  q     = pieces[m];
+      const gp_Pnt point = q.sheet.contact(joint.side)->Value(q.sheet.rail(q.uAt(1)));
+      GeomAPI_ProjectPointOnCurve other(point, curve, f, l);
+      if (other.NbPoints() && other.LowerDistance() <= rail.resolved(limit::together)
+          && std::abs(other.LowerDistanceParameter() - crossing) > tol::parameter)
+        otherCrossing = other.LowerDistanceParameter();
+    }
+  const TopoDS_Vertex from = otherCrossing != crossing ? (crossing < otherCrossing ? a : z)
+                             : atRail(a) && atRail(z)
+                               ? (crossings > 1           ? (crossing - f < l - crossing ? a : z)
+                                  : atOwn(z) && !atOwn(a) ? z
+                                                          : a)
+                             : atRail(a) ? a
+                             : atRail(z) ? z
+                                         : TopoDS_Vertex();
+  if (from.IsNull() && crossings == 2)
+  {
+    // An edge (or a seam) the contact crosses and comes back over, in the strip the
+    // blend replaces between the crossings and on the faces past them: it is left in two.
+    if (const auto found = seamCrossed.find(edge.TShape().get()); found == seamCrossed.end())
+      seamCrossed[edge.TShape().get()] = {corner[k][joint.side][end], crossing};
+    else
+    {
+      const auto& [other, there] = found->second;
+      const bool      lower      = crossing < there;
+      TopoDS_Compound parts;
+      builder.MakeCompound(parts);
+      builder.Add(
+        parts,
+        trimmed(edge, z, lower ? corner[k][joint.side][end] : other, std::min(crossing, there)));
+      builder.Add(
+        parts,
+        trimmed(edge, a, lower ? other : corner[k][joint.side][end], std::max(crossing, there)));
+      for (const auto& face : facesOfEdge.FindFromKey(edge))
+        editOf(edits, face).replace.Bind(edge, parts);
+    }
+    return;
+  }
+  if (from.IsNull())
+    fail(op,
+         unsupported_geometry,
+         "a contact crosses onto the next face over an edge that does not reach the "
+         "blended edges, which the blend does not do yet",
+         {rail.edge});
+  cut(edge, from, corner[k][joint.side][end], crossing);
+}
+
+void Attach::jointEdgeCuts(int k, int end, const TopoDS_Vertex& vertex)
+{
+  const Piece& piece = pieces[k];
+  const Rail&  rail  = piece.rail;
+  const auto&  joint = piece.joint[end];
+  const Piece& other = pieces[joint.piece];
+  // The other edges at the vertex lie between faces of the supports and end there:
+  // each is cut back to the corner on its side.
+  for (const auto& shape : edgesOfVertex.FindFromKey(vertex))
+  {
+    if (railEdge(shape) || crossed.Contains(shape))
+      continue;
+    const auto consumed = [&](const Rail& r) {
+      return std::any_of(r.consumedSupports.begin(),
+                         r.consumedSupports.end(),
+                         [&](const TopoDS_Face& face) { return onFace(shape, face); });
+    };
+    if (consumed(rail) || consumed(other.rail))
+    {
+      swept.push_back(shape);
+      continue;
+    }
+    // A narrow face a cliff or a notch replaces whole takes its edges with it.
+    if (std::any_of(std::begin(rail.s), std::end(rail.s), [&](const Side& s) {
+          return (s.cliffCurve || !s.trim.IsNull()) && s.cliffWhole && onFace(shape, s.face);
+        }))
+    {
+      swept.push_back(shape);
+      continue;
+    }
+    int side = -1;
+    for (int s = 0; s < 2; ++s)
+      if (onFace(shape, rail.s[s].face) || onFace(shape, other.rail.s[s ^ int(joint.swapped)].face))
+        side = s;
+    if (side < 0)
+      fail(op,
+           unsupported_geometry,
+           "where a chain of blended edges meets another face, the corner is blended too, "
+           "which the blend does not do yet",
+           {rail.edge});
+    if (poleInStrip(piece, side, TopoDS::Edge(shape)) && sweepToPole(TopoDS::Edge(shape), vertex))
+      continue;
+    double                      f, l;
+    const auto                  curve = BRep_Tool::Curve(TopoDS::Edge(shape), f, l);
+    GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][side][end]), curve, f, l);
+    if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
+    {
+      if (sweepToPole(TopoDS::Edge(shape), vertex))
+        continue;
+      // A body pinched at the joint (a hole tangent to a support there, which meets it in
+      // a line of four faces): no blend passes it.
+      for (const auto& near : edgesOfVertex.FindFromKey(vertex))
+        if (facesOfEdge.Contains(near) && facesOfEdge.FindFromKey(near).Extent() > 2)
+          fail(op,
+               invalid_input,
+               "the body is pinched where the edge's blend would pass: more than two faces "
+               "meet along an edge at its vertex (a hole tangent to a face beside it)",
+               {rail.edge, near});
+      fail(op,
+           unsupported_geometry,
+           "the contact of a chain's blend leaves the edge between its faces there, which "
+           "the blend does not do yet",
+           {rail.edge});
+    }
+    cut(shape, vertex, corner[k][side][end], on.LowerDistanceParameter());
+  }
+}
+
+void Attach::jointSection(int k, int end)
+{
+  const Piece& piece = pieces[k];
+  const Rail&  rail  = piece.rail;
+  const auto&  joint = piece.joint[end];
+  const Piece& other = pieces[joint.piece];
+  const Sheet& sheet = piece.sheet;
+  const double here = piece.uAt(end), there = other.uAt(joint.end);
+  // Where a closed blend's side is a notch, its section ends on the face beyond.
+  double reach[2] = {sheet.across[0], sheet.across[1]};
+  if (joint.piece == k)
+    for (int side = 0; side < 2; ++side)
+      if (!rail.s[side].trim.IsNull())
+      {
+        const gp_Pnt2d at = trimOf(k, side).onSheet->Value(sheet.rail(here));
+        reach[side]       = sheet.swapped ? at.X() : at.Y();
+      }
+  const TopoDS_Edge x = edgeBetween(sheet.section(sheet.rail(here)),
+                                    corner[k][0][end],
+                                    reach[0],
+                                    corner[k][1][end],
+                                    reach[1],
+                                    {},
+                                    tol::length);
+  double            lo, hi;
+  BRep_Tool::Range(x, lo, hi);
+  if (joint.piece == k || other.sheet.surface == sheet.surface)
+  {
+    // The seam, of a closed edge's sheet or of the one sheet a closed chain of split
+    // parts is joined into: the forward use is where the face's boundary runs from
+    // the first contact to the second, at the end of the rail when counter-clockwise.
+    const bool ccw =
+      sheet.swapped ? sheet.across[1] < sheet.across[0] : sheet.across[1] > sheet.across[0];
+    const bool   forwardAtEnd = (sheet.across[0] < sheet.across[1]) == ccw;
+    const double atHere = sheet.rail(here), atThere = other.sheet.rail(there);
+    builder.UpdateEdge(x,
+                       sheet.sectionUV(forwardAtEnd ? atThere : atHere),
+                       sheet.sectionUV(forwardAtEnd ? atHere : atThere),
+                       sheet.surface,
+                       TopLoc_Location(),
+                       tolerance);
+  }
+  else
+  {
+    builder.UpdateEdge(x,
+                       sheet.sectionUV(sheet.rail(here)),
+                       sheet.surface,
+                       TopLoc_Location(),
+                       tolerance);
+    // On the other sheet the section runs between the same corners at the same
+    // rate: the sections of a chain share their law and their parameter.
+    const int atLo = sheet.across[0] < sheet.across[1] ? 0 : 1;
+    builder.UpdateEdge(
+      x,
+      segment2d(
+        other.sheet.uv(other.sheet.rail(there), other.sheet.across[atLo ^ int(joint.swapped)]),
+        other.sheet.uv(other.sheet.rail(there),
+                       other.sheet.across[(1 - atLo) ^ int(joint.swapped)]),
+        lo,
+        hi),
+      other.sheet.surface,
+      TopLoc_Location(),
+      tolerance);
+  }
+  builder.Range(x, lo, hi);
+  section[k][end] = section[joint.piece][joint.end] = x;
+}
+
+void Attach::jointEnd(int k, int end, const TopoDS_Vertex& endVertex)
+{
+  const Piece& piece = pieces[k];
+  const Rail&  rail  = piece.rail;
+  const auto&  joint = piece.joint[end];
+  const Piece& other = pieces[joint.piece];
+  const Sheet& sheet = piece.sheet;
+  const double here = piece.uAt(end), there = other.uAt(joint.end);
+  // One corner on each side, where both pieces' contacts end.
+  for (int side = 0; side < 2; ++side)
+  {
+    const int to = side ^ int(joint.swapped);
+    // Round a closed edge whose narrow face the blend uses up (a notch), the corner is on
+    // the blend's edge on the face beyond.
+    const bool   notched = joint.piece == k && !rail.s[side].trim.IsNull();
+    const gp_Pnt point   = notched ? trimOf(k, side).curve->Value(sheet.rail(here))
+                                   : sheet.contact(side)->Value(sheet.rail(here));
+    const double gap =
+      point.Distance(notched ? trimOf(k, side).curve->Value(sheet.rail(there))
+                             : other.sheet.contact(to)->Value(other.sheet.rail(there)));
+    if (gap > rail.resolved(limit::together))
+      fail(op,
+           unsupported_geometry,
+           "the blends of tangent edges do not meet in one section there, which the blend "
+           "does not do yet",
+           {rail.edge});
+    TopoDS_Vertex vertex;
+    builder.MakeVertex(vertex, point, std::max(tolerance, gap));
+    corner[k][side][end] = corner[joint.piece][to][joint.end] = vertex;
+    u[k][side][end]                                           = here;
+    u[joint.piece][to][joint.end]                             = there;
+  }
+  if (joint.meets == Meets::Split
+      && (splitNotch(k, joint.side) || splitNotch(joint.piece, joint.side ^ int(joint.swapped))))
+    splitNotchCut(k, end);
+  else if (joint.meets == Meets::Split)
+    splitCrossingCut(k, end);
+  else
+    jointEdgeCuts(k, end, endVertex);
+  // The section between them: the sheet's own there, laid on the other sheet too,
+  // or on its own sheet's other end where the piece closes on itself.
+  // A split's parts are one face: no section between them.
+  if (joint.meets == Meets::Split)
+    return;
+  jointSection(k, end);
+}
+
+void Attach::chainEnd(int k, int end)
+{
+  const Piece&  piece = pieces[k];
+  const Rail&   rail  = piece.rail;
+  TopoDS_Vertex ends[2];
+  TopExp::Vertices(TopoDS::Edge(rail.edge.Oriented(TopAbs_FORWARD)), ends[0], ends[1]);
+  if (!piece.stopVertex[end].IsNull())
+    ends[end] = piece.stopVertex[end];
+  const auto& joint = piece.joint[end];
+  if (joint.meets == Meets::Miter || joint.meets == Meets::Corner)
+    return; // below
+  if (joint.meets == Meets::Fold)
+  {
+    if (joint.piece > k || (joint.piece == k && joint.end > end))
+      fold(k, end, joint.piece, joint.end);
+    return;
+  }
+  if (joint.meets == Meets::Joint || joint.meets == Meets::Split)
+  {
+    if (joint.piece < k || (joint.piece == k && joint.end < end))
+      return; // made from its other side
+    jointEnd(k, end, ends[end]);
+    return;
+  }
+  // A face stops the edge here.
+  stop(k, end, ends[end]);
+}
+
+void Attach::chainEnds()
+{
+  for (int k = 0; k < n; ++k)
+    for (int end = 0; end < 2; ++end)
+      chainEnd(k, end);
 }
 
 TopoDS_Shape Attach::assemble()

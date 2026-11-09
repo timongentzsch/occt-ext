@@ -59,8 +59,20 @@ struct Attach
   //! Each end of each piece: a stop face cut back to the blend's end section, a joint or a
   //! split shared with the next piece.
   void         chainEnds();
-  void         miters();
-  void         cornerPatches();
+  //! The steps of chainEnds: one end of one piece, by how it meets.
+  void chainEnd(int k, int end);
+  //! A joint or a split shared with the next piece: the corners, the cuts and the section.
+  void jointEnd(int k, int end, const TopoDS_Vertex& endVertex);
+  //! A far edge a split's contact runs off over partway: cut back to the crossing.
+  void splitNotchCut(int k, int end);
+  //! The edge a split's contact crosses onto the next face: cut back to it.
+  void splitCrossingCut(int k, int end);
+  //! The other edges at a joint's vertex: each cut back to the corner on its side.
+  void jointEdgeCuts(int k, int end, const TopoDS_Vertex& vertex);
+  //! The section between the two pieces at a joint.
+  void              jointSection(int k, int end);
+  void              miters();
+  void              cornerPatches();
   void         ridges();
   void         contacts();
   void         blendFaces();
