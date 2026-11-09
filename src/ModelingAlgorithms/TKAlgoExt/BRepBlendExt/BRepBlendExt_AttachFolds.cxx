@@ -784,7 +784,7 @@ std::optional<TopoDS_Face> Attach::ballFace(Folded&                            f
       interpolate.Perform();
       if (!interpolate.IsDone())
         return {};
-      laid.push_back({f.run[i].edge, interpolate.Curve()});
+      laid.emplace_back(f.run[i].edge, interpolate.Curve());
     }
     catch (const Standard_Failure&)
     {
