@@ -116,6 +116,97 @@ struct Attach
        rolled; // [piece][end] -> the stop face a notch's blend uses up there (consumed)
   void stops(int k, int end, const TopoDS_Vertex& vertex);
 
+  //! A face of a support's own surface a contact crosses onto before the faces that stop it:
+  //! the edge it crosses, that edge's end the blend replaces, where it crosses, the face.
+  struct StopPassage
+  {
+    TopoDS_Edge   edge;
+    TopoDS_Vertex from;
+    Meeting       at;
+    TopoDS_Face   face;
+  }; //! The walk out from a stop's vertex along one support to the faces that stop its contact.
+
+  struct StopWalk
+  {
+    std::vector<TopoDS_Face>   faces;   // out from the vertex
+    std::vector<TopoDS_Edge>   between; // between consecutive faces
+    std::vector<TopoDS_Vertex> from;    // each one's end that the blend replaces
+    std::vector<TopoDS_Edge>   swept;
+    std::vector<TopoDS_Vertex> sweptAt;
+    TopoDS_Edge                crossed;
+    TopoDS_Vertex              crossedFrom;
+    Meeting                    at;
+    // Where the support goes on past the vertex: the edge at the vertex between the face it
+    // goes on into and the stop face, and where the contact meets the stop face's surface.
+    TopoDS_Edge                 up;
+    std::optional<Continuation> continued;
+    // Where the crossed edge's face across goes on from the support: that face.
+    TopoDS_Face level;
+    // Faces of the support's own surface the contact crosses onto before it reaches the faces
+    // that stop it, in the order it crosses them, each with the edge it crosses onto it, that
+    // edge's end the blend replaces and where it crosses.
+    std::vector<StopPassage> passed;
+    // Where the contact ends on its support (or a face of its surface) without crossing an edge
+    // of it: that face, and the edge across which the face before it lies, from its end the
+    // blend replaces.
+    TopoDS_Face   open;
+    TopoDS_Edge   openEdge;
+    TopoDS_Vertex openFrom;
+  };
+
+  //! A stop at several faces (stops): the piece and its end, the walks along both supports, the
+  //! stop faces in order from side 0's crossing to side 1's with the edges between them and the
+  //! ends of those the blend replaces, the places on them and the edges the end runs along.
+  struct StopEnd
+  {
+    int                        k, end;
+    TopoDS_Vertex              vertex;
+    double                     middle     = 0;
+    double                     carried[2] = {0, 0};
+    StopWalk                   walk[2];
+    std::vector<TopoDS_Face>   faces;
+    std::vector<TopoDS_Edge>   between;
+    std::vector<TopoDS_Vertex> from;
+    std::vector<TopoDS_Vertex> at;
+    std::vector<double>        param;
+    std::vector<bool>          touched;
+    std::vector<TopoDS_Edge>   made;
+  };
+
+  //! The face across `edge` from `face`, else null.
+  TopoDS_Face faceAcross(const TopoDS_Shape& edge, const TopoDS_Shape& face) const;
+  //! The faces around `at` from `first`, the face beyond `firstEdge`, to the face beyond
+  //! `lastEdge`, and the edges between them.
+  void facesAround(const Rail&               rail,
+                   const TopoDS_Vertex&      at,
+                   const TopoDS_Face&        first,
+                   const TopoDS_Edge&        firstEdge,
+                   const TopoDS_Edge&        lastEdge,
+                   std::vector<TopoDS_Face>& faces,
+                   std::vector<TopoDS_Edge>& edges);
+  //! The steps of stops: out along one support from the vertex to the faces that stop its contact.
+  void walkSupport(StopEnd& st, int side);
+  //! Whether a contact ends on `own` where it is carried: it crosses none of its edges (but the
+  //! rail's and the one it came onto the face over) and the ball rolls on over no other piece.
+  bool endsOnFace(const Piece&       piece,
+                  int                side,
+                  int                end,
+                  double             middle,
+                  const StopWalk&    w,
+                  const TopoDS_Face& own) const;
+  //! All the stop faces in order from side 0's crossing to side 1's.
+  void stopFaces(StopEnd& st);
+  //! One contact ends on its face: the face the other crosses onto stops the blend and grows.
+  //! Where the open contact o meets the stop face's surface, in its own face's parameters.
+  void openCorner(StopEnd& st, int o, const Handle(Geom_Surface)& stopSurface);
+  void openStop(StopEnd& st);
+  //! The two corners, and where the sheet crosses each edge between stop faces.
+  void stopPlaces(StopEnd& st);
+  //! The end along the sheet on each stop face, from one place to the next.
+  void stopEdges(StopEnd& st);
+  //! The cuts, what the contacts swept over, and the faces' new edges.
+  void stopCuts(StopEnd& st);
+
   bool railEdge(const TopoDS_Shape& edge) const
   {
     return std::any_of(pieces.begin(), pieces.end(), [&](const Piece& p) {
