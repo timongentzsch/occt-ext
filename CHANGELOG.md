@@ -7,8 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-09
+
 ### Added
 
+- `BRepBlendExt`: a round whose centre path bends tighter than its radius is trimmed where it crosses itself
+  between its contacts.
 - A GitHub Actions workflow that builds the extension toolkits and runs their tests on Linux and macOS
   (`.github/workflows/extensions.yml`), with a status badge.
 - A Quick start in the README, a changelog, `dox/extensions/limits.md` for the open work, and a README for
@@ -30,9 +34,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `Rung` is `BooleanAttempt` (`BooleanResult::attempts`), and `BooleanRequest::journal` is `subShapeHistory`.
 - `BRepBlendExt`: the attachment is split into one source file per stage with a shared header, the solver into
   its entry and its stages, and its longest functions into named steps. No behaviour change.
+- `BRepPatchExt`, `BRepSkinExt`, `BRepSurfaceExt`, `GeomAlgoExt`: the Patch fill is split into one source file per
+  stage, no function is longer than 150 lines, and the fill's inline tolerances are named constants. No behaviour
+  change.
 
 ### Fixed
 
+- `BRepOffsetExt`: a kept offset's edge tolerance is the largest measured distance between the edge's curves where
+  that stays within 1e-6, so valid offsets are no longer rejected as invalid shapes.
 - The package README of `TKAlgoExt` no longer lists the removed bridge curves and corner rounding.
 
 ## [0.1.0] - 2026-11-09
