@@ -80,7 +80,7 @@ EvolutionData bridgeSurface(OcctKernel& k,
                             double      tensionA,
                             double      tensionB,
                             double      tolerance,
-                            int         shape)
+                            BridgeShape shape)
 {
   const char* op = "bridgeSurface";
   if (orderA < 0 || orderA > 2 || orderB < 0 || orderB > 2 || !std::isfinite(tensionA)
@@ -89,9 +89,9 @@ EvolutionData bridgeSurface(OcctKernel& k,
     fail(op,
          invalid_input,
          "G0/G1/G2, positive tensions up to ten and a positive finite tolerance are required");
-  if (shape < 0 || shape > 1)
+  if (shape < BridgeShape::Smooth || shape > BridgeShape::Chamfer)
     fail(op, invalid_input, "shape must be smooth or chamfer");
-  if (shape == 1)
+  if (shape == BridgeShape::Chamfer)
   {
     orderA = 0;
     orderB = 0;

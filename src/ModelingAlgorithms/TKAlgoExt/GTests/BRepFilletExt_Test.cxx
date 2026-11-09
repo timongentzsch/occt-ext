@@ -64,11 +64,24 @@ TEST(BRepFilletExt, LimitedBlendCarriesContactsAndSharpStops)
       const auto source = BRepExt::store(session(), body);
       const auto picked = BRepExt::store(session(), candidates.front());
       std::vector<BRepExt::blending::Join> joins;
-      const auto output = BRepExt::blendRange(session(), source, picked, 1, 0, 0, .5, 0, 0,
-        .2, .7, {}, BRepExt::failureHashBound,
-        variable ? (circular ? std::vector<double>{0, 1, .5, 2, 1, 1}
-                             : std::vector<double>{0, 1, 1, 2})
-                 : std::vector<double>{}, &joins);
+      const auto                           output =
+        BRepExt::blendRange(session(),
+                            source,
+                            picked,
+                            1,
+                            0,
+                            BRepExt::blending::Law::Conic,
+                            .5,
+                            0,
+                            0,
+                            .2,
+                            .7,
+                            {},
+                            BRepExt::failureHashBound,
+                            variable ? (circular ? std::vector<double>{0, 1, .5, 2, 1, 1}
+                                                 : std::vector<double>{0, 1, 1, 2})
+                                     : std::vector<double>{},
+                            &joins);
       const auto& made = BRepExt::get(session(), output.resultId);
       EXPECT_TRUE(BRepExt::invalidity(made).empty());
       NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> adjacent;
@@ -244,7 +257,7 @@ TEST(BRepFilletExt, ChamferInARangeRemovesThePrismThereOnly)
                           picked,
                           d0,
                           0,
-                          2,
+                          BRepExt::blending::Law::Chamfer,
                           0.5,
                           0,
                           0,
@@ -276,11 +289,11 @@ TEST(BRepFilletExt, LimitedBlendTakesTheRangeShareOfTheChange)
   };
   for (bool rim : {false, true})
     for (bool cavity : {false, true})
-      for (int law : {0, 2})
+      for (const auto law : {BRepExt::blending::Law::Conic, BRepExt::blending::Law::Chamfer})
         for (double scale : {1., 100.})
         {
-          SCOPED_TRACE(testing::Message() << "rim " << rim << " cavity " << cavity << " law " << law
-                                          << " scale " << scale);
+          SCOPED_TRACE(testing::Message() << "rim " << rim << " cavity " << cavity << " law "
+                                          << static_cast<int>(law) << " scale " << scale);
           TopoDS_Shape body = rim ? BRepPrimAPI_MakeCylinder(10, 20).Shape()
                                   : BRepPrimAPI_MakeBox(20, 20, 20).Shape();
           const auto onEdge = [&](const double* b) {
@@ -340,7 +353,7 @@ TEST(BRepFilletExt, AngleChamferWhoseSetbackGrowsRemovesItsSections)
                                             picked,
                                             d0,
                                             0,
-                                            2,
+                                            BRepExt::blending::Law::Chamfer,
                                             0.5,
                                             reference,
                                             angle,

@@ -24,7 +24,7 @@ struct NativePolicy
     return std::sin(wedge / 2) * rho / (1 - rho);
   }
 
-  static std::array<std::pair<double, double>, 8> g2Poles(double)
+  static std::array<std::pair<double, double>, 8> g2Poles(double /*rho*/)
   {
     fail("blend", unsupported_geometry, "supply a curvature-continuous section policy");
   }
@@ -33,13 +33,13 @@ struct NativePolicy
   inline static constexpr std::array<int, 3>    g2Multiplicities = {};
 
   template <class Station, class Point, class Vector>
-  static bool curvedG2(double,
-                       const Station&,
-                       const Point&,
-                       const Vector*,
-                       const double*,
-                       std::vector<Point>&,
-                       int&)
+  static bool curvedG2(double /*rho*/,
+                       const Station& /*station*/,
+                       const Point& /*apex*/,
+                       const Vector* /*tangents*/,
+                       const double* /*bends*/,
+                       std::vector<Point>& /*poles*/,
+                       int& /*regime*/)
   {
     return false;
   }

@@ -94,7 +94,7 @@
 //     where the rim turns fast, and may change its bend across lines through the corners where
 //     the faces along the rim do; each edge of the face lies on the surface where the surface is
 //     nearest to it, parameter by parameter.
-// The last two are fitted by patch_fit. `method` 2 is OpenCascade's plate instead, kept to
+// The last two are fitted by patch_fit. `method` Plate is OpenCascade's plate instead, kept to
 // measure against.
 //
 // Whatever was built is measured again from outside, at the places Measure Continuity reads and
@@ -2687,7 +2687,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
   int order = 0;
   for (const Side& side : asked.sides)
     order = std::max(order, side.order);
-  const bool fitting = order > 0 || asked.flatness >= 0 || asked.controls.flow > 0
+  const bool fitting = order > 0 || asked.flatness >= 0 || asked.controls.flow > PatchFlow::Natural
                        || !asked.guides.empty() || !asked.points.empty();
   const double lu = (runs[0].length + runs[2].length) / 2,
                lv = (runs[1].length + runs[3].length) / 2;
@@ -2750,7 +2750,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
     // same share of the tolerance and over the same parameters.
     const int least = !fitting ? 1 : order < 2 ? 3 : 5;
     for (auto* curve : {&a, &b})
-      if (asked.controls.quad == 1
+      if (asked.controls.quad == PatchQuad::On
           && ((*curve)->Degree() > 5
               || (fitting
                   && (*curve)->NbPoles()
@@ -2779,7 +2779,9 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
       return {};
   }
   // Quality budgets are minimum span counts.
-  const int minimum = asked.controls.quality == 2 ? 16 : asked.controls.quality == 1 ? 10 : 1;
+  const int minimum = asked.controls.quality == PatchQuality::Max    ? 16
+                      : asked.controls.quality == PatchQuality::High ? 10
+                                                                     : 1;
   for (int i = 0; i < 2; ++i)
     for (int k = 1; k < minimum; ++k)
       for (int c : {i, i + 2})
@@ -2809,7 +2811,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
   // turned at the corners into those same sides. Square to the side on a rectangle, both.
   const auto axis = [&](size_t s, double f) -> gp_Vec {
     const auto [part, g] = runs[s].at(f);
-    if (asked.controls.flow == 1)
+    if (asked.controls.flow == PatchFlow::Normal)
       return part->tangent(g);
     const gp_Vec tangent = part->tangent(g).Normalized();
     gp_Vec       before  = -runs[(s + 3) % 4].tangent(1).Normalized(),
@@ -2820,18 +2822,18 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
     // A gap is no side to turn to: next to one the isocurves leave as for Normal, square to
     // the side, for Adjacent, and along the chord for Next.
     const bool fromGap = gap[(s + 3) % 4], toGap = gap[(s + 1) % 4];
-    if (asked.controls.flow == 3 && fromGap && toGap)
+    if (asked.controls.flow == PatchFlow::Adjacent && fromGap && toGap)
       return part->tangent(g);
     const auto square = [&](const gp_Vec& way, double t) {
       const gp_Vec along = runs[s].tangent(t).Normalized(), out = way - along * way.Dot(along);
       return out.Magnitude() > 1e-12 ? out.Normalized() : out;
     };
     if (fromGap)
-      before = asked.controls.flow == 2 ? chord(0) : square(after, 0);
+      before = asked.controls.flow == PatchFlow::Next ? chord(0) : square(after, 0);
     if (toGap)
-      after = asked.controls.flow == 2 ? chord(1) : square(before, 1);
+      after = asked.controls.flow == PatchFlow::Next ? chord(1) : square(before, 1);
     gp_Vec way = before * (1 - f) + after * f;
-    if (asked.controls.flow == 2)
+    if (asked.controls.flow == PatchFlow::Next)
       way = chord(f) + (before - chord(0)) * (1 - f) + (after - chord(1)) * f;
     if (part->order > 0)
     {
@@ -2872,7 +2874,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
         {
           const double f       = (k + 0.5) / count;
           const auto [part, g] = runs[s].at(f);
-          if (part->free || (part->order < 1 && !asked.controls.flow))
+          if (part->free || (part->order < 1 && asked.controls.flow == PatchFlow::Natural))
             continue;
           Target target{part->at(g),
                         along(s, f),
@@ -2880,7 +2882,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
                         part->order ? std::optional<SurfaceJet>(part->jet(g)) : std::nullopt,
                         s % 2 ? gp_XY(1, 0) : gp_XY(0, 1),
                         runs[s].length / count / asked.size};
-          if (asked.controls.flow)
+          if (asked.controls.flow != PatchFlow::Natural)
             target.perpendicular = axis(s, f);
           if (part->order)
             target.easing = part->easing(g);
@@ -3101,7 +3103,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
                                       ? std::optional<Place>(Place{place(side, f), false})
                                       : std::nullopt;
                            })};
-    for (size_t side = 0; asked.controls.flow && side < 4; ++side)
+    for (size_t side = 0; asked.controls.flow != PatchFlow::Natural && side < 4; ++side)
       for (int k = 0; k < places && !gap[side]; ++k)
       {
         const double     f      = (k + .5) / places;
@@ -3604,8 +3606,8 @@ std::optional<Built> continued(const occ::handle<Geom_BSplineSurface>&    surfac
 std::optional<Built> chainedQuad(const Asked& asked, const Frame& frame)
 {
   if (asked.sides.size() <= 4 || !asked.guides.empty() || !asked.points.empty()
-      || asked.flatness >= 0 || asked.controls.flow || asked.controls.quad >= 0
-      || asked.controls.quality
+      || asked.flatness >= 0 || asked.controls.flow != PatchFlow::Natural
+      || asked.controls.quad >= PatchQuad::Off || asked.controls.quality != PatchQuality::Auto
       || std::any_of(asked.sides.begin(), asked.sides.end(), [](const Side& side) {
            return side.order != 0;
          }))
@@ -5185,9 +5187,9 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction = 0)
     for (int rung : ladder)
     {
       const int spans = std::max(rung,
-                                 asked.controls.quality == 2   ? 16
-                                     : asked.controls.quality == 1 ? 10
-                                                                   : 0);
+                                 asked.controls.quality == PatchQuality::Max    ? 16
+                                 : asked.controls.quality == PatchQuality::High ? 10
+                                                                                : 0);
       if (spans == previousSpans)
         continue;
       previousSpans = spans;
@@ -6527,13 +6529,14 @@ Built plate(const Asked& asked)
 
 //! The face of the loop `asked` holds once its sides are in turn, held to every check Patch
 //! makes; fails with what it misses otherwise.
-Built fillFace(Asked asked, int method, double flatness, const PatchControls& controls)
+Built fillFace(Asked asked, PatchMethod method, double flatness, const PatchControls& controls)
 {
   const bool gapped      = hasGaps(asked);
   asked.controls         = controls;
   Asked   input          = asked;
   bool    copyBudgetMiss = false;
-  auto    placement      = method != 2 ? localSplineRim(asked, &copyBudgetMiss) : std::nullopt;
+  auto    placement =
+    method != PatchMethod::Plate ? localSplineRim(asked, &copyBudgetMiss) : std::nullopt;
   gp_Trsf anchor;
   bool    anchored = false;
   if (!placement && copyBudgetMiss)
@@ -6600,12 +6603,15 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
 
   // A plane in the mean-plane coordinates has orthogonal UV everywhere, so all
   // nonquad flow choices described as Normal can be satisfied exactly there.
-  const auto plane = method == 0 && controls.quad != 1 ? planar(asked, frame) : std::nullopt;
+  const auto plane = method == PatchMethod::Auto && controls.quad != PatchQuad::On
+                       ? planar(asked, frame)
+                       : std::nullopt;
   // With Quad sided off, Next and Adjacent both ask for Normal flow: the Natural
   // fill, then the same over its conformal chart (see adjacent). With it on, they are
   // directions across the quad's sides (see foursided).
-  const bool conformal = controls.flow >= (gapped ? 1 : 2) && controls.quad == 0 && !plane;
-  if (controls.flow >= 2 && controls.quad != 1 && !plane && !conformal)
+  const bool conformal = controls.flow >= (gapped ? PatchFlow::Normal : PatchFlow::Next)
+                         && controls.quad == PatchQuad::Off && !plane;
+  if (controls.flow >= PatchFlow::Next && controls.quad != PatchQuad::On && !plane && !conformal)
     fail(op,
          unsupported_geometry,
          "Next and Adjacent UV flow are not implemented for this boundary; use Natural flow");
@@ -6614,11 +6620,11 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
   {
     built = Built{0, *plane, measureAll(BRep_Tool::Surface(*plane), asked)};
   }
-  else if (method == 2)
+  else if (method == PatchMethod::Plate)
   {
     built = plate(asked);
   }
-  else if (controls.quad == 1)
+  else if (controls.quad == PatchQuad::On)
   {
     if (!quadRuns(asked.sides, asked.limits.g1))
       fail(op,
@@ -6631,17 +6637,18 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
            no_solution,
            built ? built->measured.worst : "the four sides cannot form an untrimmed quad");
   }
-  else if (controls.flow > 0 && !conformal)
+  else if (controls.flow > PatchFlow::Natural && !conformal)
   {
     fail(op,
          unsupported_geometry,
          "UV flow controls currently require four regular sides and Quad sided");
   }
-  else if (flatness >= 0 || controls.quad == 0 || controls.quality > 0)
+  else if (flatness >= 0 || controls.quad == PatchQuad::Off
+           || controls.quality > PatchQuality::Auto)
   {
     built = overPlane(asked, frame);
   }
-  else if (const auto face = method == 0 ? planar(asked, frame) : std::nullopt)
+  else if (const auto face = method == PatchMethod::Auto ? planar(asked, frame) : std::nullopt)
   {
     built = Built{0, *face, measureAll(BRep_Tool::Surface(*face), asked)};
   }
@@ -6685,7 +6692,7 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
         built = rotatingQuad;
     }
   }
-  if (!built->measured.within && method != 2 && !gapped)
+  if (!built->measured.within && method != PatchMethod::Plate && !gapped)
     if (const auto quad = chainedQuad(asked, frame))
       built = quad;
   if (conformal && built->measured.within && !built->measured.unkept)
@@ -6772,7 +6779,7 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
     fail(op, no_solution, "the surface that meets the edges is not one to keep: " + *fault);
   }
 
-  if (method != 2)
+  if (method != PatchMethod::Plate)
     verifySewn(*built, asked);
   if (!controls.trim)
   {
@@ -6793,9 +6800,9 @@ Built fillFace(Asked asked, int method, double flatness, const PatchControls& co
 
 //! The face of the loop `asked` holds, held to every check Patch makes; fails with what it
 //! misses otherwise.
-Built patchFace(Asked asked, int method, double flatness, PatchControls controls)
+Built patchFace(Asked asked, PatchMethod method, double flatness, PatchControls controls)
 {
-  if (!arrange(asked.sides, asked.limits.g0, controls.open && method != 2))
+  if (!arrange(asked.sides, asked.limits.g0, controls.open && method != PatchMethod::Plate))
     chain(asked.sides, asked.limits.g0);
   const bool gapped = hasGaps(asked);
   // What `open` changes is for a boundary that does not close. One that does is the fill it
@@ -6805,7 +6812,7 @@ Built patchFace(Asked asked, int method, double flatness, PatchControls controls
   // untrimmed quad with the gaps' poles free (see foursided). Where that is not a face to keep,
   // it is filled as any open boundary is: every flow but Natural is then the refit over the
   // conformal chart.
-  if (gapped && controls.quad == 1 && quadRuns(asked.sides, asked.limits.g1))
+  if (gapped && controls.quad == PatchQuad::On && quadRuns(asked.sides, asked.limits.g1))
     try
     {
       return fillFace(asked, method, flatness, controls);
@@ -6816,7 +6823,7 @@ Built patchFace(Asked asked, int method, double flatness, PatchControls controls
         throw;
     }
   if (gapped)
-    controls.quad = 0;
+    controls.quad = PatchQuad::Off;
   return fillFace(asked, method, flatness, controls);
 }
 
@@ -6829,13 +6836,14 @@ PatchResult patchAsAsked(OcctKernel&                  kernel,
                          double                       tolerance,
                          double                       g1Degrees,
                          double                       g2Share,
-                         int                          method,
+                         PatchMethod                  method,
                          double                       flatness,
                          const PatchControls&         controls)
 {
   PatchPhase phase("total");
   if (edges.empty() || edges.size() > 64 || supports.size() != edges.size()
-      || orders.size() != edges.size() || points.size() % 3 != 0 || method < 0 || method > 2)
+      || orders.size() != edges.size() || points.size() % 3 != 0 || method < PatchMethod::Auto
+      || method > PatchMethod::Plate)
     fail(op,
          invalid_input,
          "one to 64 boundary edges, each with a support (or 0) and an order, are required");
@@ -6843,12 +6851,15 @@ PatchResult patchAsAsked(OcctKernel&                  kernel,
       || !std::isfinite(tolerance + g1Degrees + g2Share))
     fail(op, invalid_input, "the tolerances must be positive and finite");
   if (!std::isfinite(flatness) || (flatness != -1 && (flatness < 0 || flatness > 1))
-      || (flatness >= 0 && method == 2))
+      || (flatness >= 0 && method == PatchMethod::Plate))
     fail(op, invalid_input, "Flatness must be in 0..1 and uses the variational solver");
-  if (controls.quad < -1 || controls.quad > 1 || controls.flow < 0 || controls.flow > 3
-      || controls.quality < 0 || controls.quality > 2)
+  if (controls.quad < PatchQuad::Auto || controls.quad > PatchQuad::On
+      || controls.flow < PatchFlow::Natural || controls.flow > PatchFlow::Adjacent
+      || controls.quality < PatchQuality::Auto || controls.quality > PatchQuality::Max)
     fail(op, invalid_input, "invalid parameterization, flow or quality control");
-  if (method == 2 && (controls.quad != -1 || controls.flow || controls.quality || !controls.trim))
+  if (method == PatchMethod::Plate
+      && (controls.quad != PatchQuad::Auto || controls.flow != PatchFlow::Natural
+          || controls.quality != PatchQuality::Auto || !controls.trim))
     fail(op, invalid_input, "parameterization, flow, quality and untrim controls use this solver");
   Asked asked{{}, {}, {}, {tolerance, g1Degrees, g2Share}, 0, flatness, controls};
   for (size_t i = 0; i < edges.size(); ++i)
@@ -6902,7 +6913,7 @@ PatchResult patch(OcctKernel&                  kernel,
                   double                       tolerance,
                   double                       g1Degrees,
                   double                       g2Share,
-                  int                          method,
+                  PatchMethod                  method,
                   double                       flatness,
                   const PatchControls&         controls)
 {
@@ -6965,7 +6976,7 @@ TopoDS_Face patchLoop(const std::vector<PatchSide>& sides, double tolerance, dou
   for (size_t i = 0; i < sides.size(); ++i)
     asked.sides.push_back(
       sideOf(sides[i].edge, sides[i].support, sides[i].order, static_cast<int>(i)));
-  return patchFace(asked, 0, -1, PatchControls{}).face;
+  return patchFace(asked, PatchMethod::Auto, -1, PatchControls{}).face;
 }
 
 } // namespace BRepExt

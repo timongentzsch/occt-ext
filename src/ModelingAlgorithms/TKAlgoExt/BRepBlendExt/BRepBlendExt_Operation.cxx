@@ -50,7 +50,7 @@ Blended blendStored(const OcctKernel&            kernel,
                     const std::vector<uint32_t>& edges,
                     double                       first,
                     double                       second,
-                    int                          law,
+                    Law                          law,
                     double                       rho,
                     uint32_t                     reference,
                     const std::vector<int>&      counts,
@@ -58,7 +58,7 @@ Blended blendStored(const OcctKernel&            kernel,
                     double                       angle,
                     bool                         deferredFit)
 {
-  if (law < 0 || law > 4)
+  if (law < Law::Conic || law > Law::Full)
     fail(op, invalid_input, "unknown section law");
   if (!counts.empty() && counts.size() != edges.size())
     fail(op, invalid_input, "one count of size places for each edge");
@@ -70,7 +70,7 @@ Blended blendStored(const OcctKernel&            kernel,
     request.edges.push_back(edge);
   request.first  = first;
   request.second = second;
-  request.law    = static_cast<Law>(law);
+  request.law    = law;
   request.rho    = rho;
   request.angle  = angle;
   if (reference)

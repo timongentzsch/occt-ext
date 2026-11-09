@@ -154,7 +154,7 @@ TEST(BRepSurfaceExt, G1BridgeBetweenFloorAndWallHasTheNormalsOfBothAtTheirEdges)
                                              1.0,
                                              1.0,
                                              1e-7,
-                                             0);
+                                             BRepExt::BridgeShape::Smooth);
   const TopoDS_Shape& made   = BRepExt::get(session(), result.resultId);
   TopExp_Explorer     it(made, TopAbs_FACE);
   ASSERT_TRUE(it.More());
@@ -219,7 +219,7 @@ TEST(BRepSurfaceExt, ChamferBridgeIsTheRuledStripBetweenTheEdges)
                                              1.0,
                                              1.0,
                                              1e-7,
-                                             1);
+                                             BRepExt::BridgeShape::Chamfer);
   const TopoDS_Shape& made   = BRepExt::get(session(), result.resultId);
   EXPECT_NEAR(area(made), 6 * std::sqrt(45.0), 1e-6 * 6 * std::sqrt(45.0));
 }
@@ -755,7 +755,7 @@ TEST(BRepSurfaceExt, ExtendSheetDoesNotDiscardSmallNotchesOnLargeFaces)
     const auto id = BRepExt::store(session(), face);
     try
     {
-      BRepExt::extendSheet(session(), id, 1, 1, 1, 1e-6);
+      BRepExt::extendSheet(session(), id, BRepExt::SheetBoundary::ULast, 1, 1, 1e-6);
       FAIL() << "nonrectangular trim accepted at size " << size;
     }
     catch (const BRepExt::Failure& failure)
@@ -770,7 +770,10 @@ TEST(BRepSurfaceExt, ExtensionStoresOnlyTheReturnedShape)
   const auto face = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
                                             0, 10, 0, 10).Face();
   const auto id = BRepExt::store(session(), face);
-  for (int side = 0; side < 4; ++side)
+  for (const auto side : {BRepExt::SheetBoundary::UFirst,
+                          BRepExt::SheetBoundary::ULast,
+                          BRepExt::SheetBoundary::VFirst,
+                          BRepExt::SheetBoundary::VLast})
   {
     const auto before = storedShapeCount();
     const auto result = BRepExt::extendSheet(session(), id, side, 1, 1, 1e-6);

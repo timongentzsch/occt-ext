@@ -44,6 +44,14 @@ enum class Select
                     // share a face, else nothing: the choice Extrude makes from the clash
 };
 
+//! How a Boolean glues coincident operands; the values are BOPAlgo_GlueEnum's.
+enum class BooleanGlue
+{
+  Off   = 0,
+  Shift = 1,
+  Full  = 2
+};
+
 //! What one attempt of the ladder (plain, then fuzzy) did; these make up its timing table.
 struct BooleanAttempt
 {
@@ -107,10 +115,10 @@ struct BooleanRequest
   const char*               operation = "boolean"; // the name failures carry
   Select                    select    = Select::Union;
   std::vector<TopoDS_Shape> sources, tools;
-  bool   cancellable = false;
-  bool   subShapeHistory = false; // also the history of edges and vertices, not only faces
-  int    glue        = 0; // BOPAlgo_GlueEnum
-  double fuzzy       = 0; // the caller's own fuzzy value for the first rung; 0 for none
+  bool                      cancellable = false;
+  bool        subShapeHistory = false; // also the history of edges and vertices, not only faces
+  BooleanGlue glue            = BooleanGlue::Off;
+  double      fuzzy           = 0; // the caller's own fuzzy value for the first rung; 0 for none
 };
 
 //! Run the ladder: plain, then at a fuzzy value; the first rung whose partition is verified

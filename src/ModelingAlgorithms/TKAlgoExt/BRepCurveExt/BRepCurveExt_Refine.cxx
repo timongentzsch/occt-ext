@@ -21,18 +21,19 @@
 namespace BRepExt
 {
 
-EvolutionData refineCurve(OcctKernel& kernel,
-                          uint32_t    wireId,
-                          int         mode,
-                          int         amount,
-                          double      tolerance)
+EvolutionData refineCurve(OcctKernel&     kernel,
+                          uint32_t        wireId,
+                          CurveRefinement mode,
+                          int             amount,
+                          double          tolerance)
 {
   const char* const op    = "refineCurve";
   TopoDS_Shape      shape = get(kernel, wireId);
-  if (shape.ShapeType() != TopAbs_WIRE || mode < 0 || mode > 2 || amount < 1 || amount > 24
-      || !std::isfinite(tolerance) || tolerance <= 0)
+  if (shape.ShapeType() != TopAbs_WIRE || mode < CurveRefinement::RaiseDegree
+      || mode > CurveRefinement::Simplify || amount < 1 || amount > 24 || !std::isfinite(tolerance)
+      || tolerance <= 0)
     fail(op, invalid_input, "a wire, refinement mode, positive amount and tolerance are required");
-  if (mode == 2)
+  if (mode == CurveRefinement::Simplify)
   {
     ShapeUpgrade_UnifySameDomain unify(shape, true, false, false);
     unify.SetLinearTolerance(tolerance);
@@ -47,7 +48,7 @@ EvolutionData refineCurve(OcctKernel& kernel,
     const auto        curve = BRep_Tool::Curve(edge, first, last);
     if (curve.IsNull())
       fail(op, unsupported_geometry, "an edge has no 3D curve");
-    if (mode == 2 && Handle(Geom_BSplineCurve)::DownCast(curve).IsNull())
+    if (mode == CurveRefinement::Simplify && Handle(Geom_BSplineCurve)::DownCast(curve).IsNull())
     {
       wire.Add(edge);
       continue;
@@ -55,13 +56,13 @@ EvolutionData refineCurve(OcctKernel& kernel,
     // Convert just the trimmed, located geometry. Upstream elevation exposes the whole
     // underlying spline, which lengthens split edges and loses their reversed orientation.
     auto spline = GeomConvert::CurveToBSplineCurve(new Geom_TrimmedCurve(curve, first, last));
-    if (mode == 0)
+    if (mode == CurveRefinement::RaiseDegree)
     {
       if (spline->Degree() + amount > Geom_BSplineCurve::MaxDegree())
         fail(op, invalid_input, "the resulting degree exceeds OCCT's maximum (25)");
       spline->IncreaseDegree(spline->Degree() + amount);
     }
-    else if (mode == 1)
+    else if (mode == CurveRefinement::Subdivide)
     {
       const int target = 2 * spline->NbPoles();
       if (target > 16384)

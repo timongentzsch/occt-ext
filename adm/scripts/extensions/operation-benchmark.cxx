@@ -519,7 +519,7 @@ void patch(double a)
                                        1e-6,
                                        1,
                                        0.1,
-                                       0);
+                                       BRepExt::PatchMethod::Auto);
     extResult         = BRepExt::get(session(), result.evolution.resultId);
     return !extResult.IsNull();
   });
@@ -613,7 +613,7 @@ void offset(double d)
   });
   const uint32_t id    = BRepExt::store(session(), wire);
   const Stats    ext   = measure([&] {
-    const auto result = BRepExt::offsetCurve(session(), id, d, 0);
+    const auto result = BRepExt::offsetCurve(session(), id, d, BRepExt::OffsetGap::Round);
     errorExt          = std::abs(length(BRepExt::get(session(), result.resultId)) - expected);
     return true;
   });

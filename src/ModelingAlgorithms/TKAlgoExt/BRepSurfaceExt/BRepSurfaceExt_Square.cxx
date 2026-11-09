@@ -151,7 +151,7 @@ EvolutionData squareSurface(OcctKernel&                  k,
                           tolerance,
                           0.1,
                           0.05,
-                          1);
+                          PatchMethod::Fitted);
   const auto seedFace = surfacing::faceOf(k, op, seed.evolution.resultId);
   BRepExt::release(k, seed.evolution.resultId);
   if (seed.values[0] != 1)

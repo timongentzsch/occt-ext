@@ -1216,9 +1216,16 @@ TEST(BRepBlendExt, LocalFitRefinementOfATorusAndASplineSkin)
     turn.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, .3, 0)), angleRadius.first);
     move.SetTranslation(gp_Vec(6, 3, 2));
     const auto support = BRepBuilderAPI_Transform(skin, move * turn, true).Shape();
-    const auto united = BRepExt::booleanChecked(session(), 0,
-      {BRepExt::store(session(), BRepPrimAPI_MakeTorus(9, 4).Shape())},
-      {BRepExt::store(session(), support)}, 0, 0, 0, {}, BRepExt::failureHashBound);
+    const auto united =
+      BRepExt::booleanChecked(session(),
+                              BRepExt::Select::Union,
+                              {BRepExt::store(session(), BRepPrimAPI_MakeTorus(9, 4).Shape())},
+                              {BRepExt::store(session(), support)},
+                              BRepExt::BooleanGlue::Off,
+                              0,
+                              0,
+                              {},
+                              BRepExt::failureHashBound);
     const auto whole = BRepExt::get(session(), united.resultId);
     TopExp_Explorer solids(whole, TopAbs_SOLID);
     ASSERT_TRUE(solids.More());

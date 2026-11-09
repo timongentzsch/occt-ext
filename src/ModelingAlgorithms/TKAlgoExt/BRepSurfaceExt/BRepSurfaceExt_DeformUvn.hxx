@@ -23,18 +23,32 @@ class DeformUVN
                             out = 0;
 
 public:
-  DeformUVN(const char*, const TopoDS_Face&, const TopoDS_Face&, Vec3, Vec3, bool, bool, bool);
-  gp_Pnt local(const gp_Pnt&) const;
-  gp_Pnt point(const gp_Pnt&) const;
-  gp_Pnt world(const gp_Pnt&) const;
-  gp_XY  uv(const gp_Pnt&) const;
+  //! The map from the planar `reference` face to `target`. Fails naming `operation` on a
+  //! reference that is not planar or a zero scale in u or v.
+  DeformUVN(const char*        operation,
+            const TopoDS_Face& reference,
+            const TopoDS_Face& target,
+            Vec3               scale,
+            Vec3               offset,
+            bool               swapUV,
+            bool               mirror,
+            bool               flipNormal);
+  //! `point` in the reference plane's frame: x, y and height along its oriented normal.
+  gp_Pnt local(const gp_Pnt& point) const;
+  //! `point` carried onto the target and its normal. Fails where the normal is singular.
+  gp_Pnt point(const gp_Pnt& point) const;
+  //! The inverse of `local`.
+  gp_Pnt world(const gp_Pnt& point) const;
+  //! The target parameters `point` maps to: swapped, mirrored, then scaled and offset.
+  gp_XY uv(const gp_Pnt& point) const;
 
   double orientation() const
   {
     return out * scale.x * scale.y * scale.z * (swap ? -1 : 1) * (mirror ? -1 : 1);
   }
 
-  void checkChart(double, double, double, double) const;
+  //! Fails where the parameter range crosses the seam of a periodic target.
+  void checkChart(double uMin, double uMax, double vMin, double vMax) const;
 };
 
 struct DeformResult
@@ -45,17 +59,19 @@ struct DeformResult
   int spans          = 0;
 };
 
-Standard_EXPORT DeformResult deformBody(OcctKernel&,
-                                        uint32_t,
-                                        uint32_t,
-                                        uint32_t,
-                                        Vec3,
-                                        Vec3,
-                                        bool,
-                                        bool,
-                                        bool,
-                                        bool,
-                                        double,
-                                        const std::vector<int>&,
-                                        int);
+//! `body` carried from the planar `reference` face onto `target` by the UVN map (DeformUVN),
+//! with its residuals. Fails with `reblend`, above 16 faces or for a zero scale along the normal.
+Standard_EXPORT DeformResult deformBody(OcctKernel&             kernel,
+                                        uint32_t                body,
+                                        uint32_t                reference,
+                                        uint32_t                target,
+                                        Vec3                    scale,
+                                        Vec3                    offset,
+                                        bool                    swapUV,
+                                        bool                    mirror,
+                                        bool                    flipNormal,
+                                        bool                    reblend,
+                                        double                  tolerance,
+                                        const std::vector<int>& hashes,
+                                        int                     bound);
 } // namespace BRepExt

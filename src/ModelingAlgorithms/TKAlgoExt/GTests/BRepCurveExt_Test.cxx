@@ -107,7 +107,8 @@ TEST(BRepCurveExt, DegreeElevationKeepsTheCurve)
   const TopoDS_Wire wire =
     BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(new Geom_BezierCurve(poles)).Edge()).Wire();
   const uint32_t              id     = BRepExt::store(session(), wire);
-  const auto                  result = BRepExt::refineCurve(session(), id, 0, 2, 1e-9);
+  const auto                  result =
+    BRepExt::refineCurve(session(), id, BRepExt::CurveRefinement::RaiseDegree, 2, 1e-9);
   const TopoDS_Shape&         raised = BRepExt::get(session(), result.resultId);
   const BRepAdaptor_CompCurve before(wire), after(TopoDS::Wire(raised));
   for (int k = 0; k <= 40; ++k)

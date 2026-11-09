@@ -132,17 +132,17 @@ EvolutionData isoparam(OcctKernel&                kernel,
   return checked(kernel, op, result);
 }
 
-EvolutionData extendSheet(OcctKernel& kernel,
-                          uint32_t    faceId,
-                          int         side,
-                          double      distance,
-                          int         continuity,
-                          double      tolerance)
+EvolutionData extendSheet(OcctKernel&   kernel,
+                          uint32_t      faceId,
+                          SheetBoundary side,
+                          double        distance,
+                          int           continuity,
+                          double        tolerance)
 {
   const char* op   = "extendSheet";
   const auto  face = faceInput(kernel, op, faceId, tolerance);
-  if (side < 0 || side > 3 || !std::isfinite(distance) || distance <= tolerance || continuity < 1
-      || continuity > 2)
+  if (side < SheetBoundary::UFirst || side > SheetBoundary::VLast || !std::isfinite(distance)
+      || distance <= tolerance || continuity < 1 || continuity > 2)
     fail(op, invalid_input, "a UV boundary, positive distance and continuity 1 or 2 are required");
   int wires = 0;
   for (TopExp_Explorer it(face, TopAbs_WIRE); it.More(); it.Next())
@@ -157,7 +157,11 @@ EvolutionData extendSheet(OcctKernel& kernel,
     fail(op, unsupported_geometry, "extend requires an untrimmed rectangular sheet");
   Handle(Geom_BoundedSurface) bounded = GeomConvert::SurfaceToBSplineSurface(
     new Geom_RectangularTrimmedSurface(surface, u0, u1, v0, v1));
-  GeomLib::ExtendSurfByLength(bounded, distance, continuity, side < 2, side % 2 == 1);
+  GeomLib::ExtendSurfByLength(bounded,
+                              distance,
+                              continuity,
+                              side == SheetBoundary::UFirst || side == SheetBoundary::ULast,
+                              side == SheetBoundary::ULast || side == SheetBoundary::VLast);
   auto result = BRepBuilderAPI_MakeFace(bounded, tolerance).Face();
   result.Orientation(face.Orientation());
   return checked(kernel, op, result);

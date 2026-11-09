@@ -154,7 +154,7 @@ TopoDS_Shape withoutVanishing(const char*         op,
 TopoDS_Shape offsetBody(const TopoDS_Shape&              work,
                         double                           distance,
                         double                           tolerance,
-                        int                              join,
+                        OffsetJoin                       join,
                         const std::vector<TopoDS_Shape>& pushed,
                         double                           pushedBy,
                         Lineage&                         faces)
@@ -223,14 +223,14 @@ EvolutionData offsetSolid(OcctKernel&             kernel,
                           uint32_t                shapeId,
                           double                  distance,
                           double                  tolerance,
-                          int                     join,
+                          OffsetJoin              join,
                           const std::vector<int>& hashes,
                           int                     bound)
 {
   const char* const  op    = "offsetSolid";
   const TopoDS_Shape solid = singleSolid(get(kernel, shapeId));
   if (solid.IsNull() || !std::isfinite(distance) || distance == 0.0 || !std::isfinite(tolerance)
-      || tolerance <= 0.0 || join < 0 || join > 2)
+      || tolerance <= 0.0 || join < OffsetJoin::Arc || join > OffsetJoin::Intersection)
     fail(op,
          invalid_input,
          "one solid, a distance that is not zero, a positive tolerance and a supported join are "

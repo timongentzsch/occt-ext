@@ -85,7 +85,7 @@ BooleanRequest requestOf(OcctKernel&                  k,
                          Select                       select,
                          const std::vector<uint32_t>& sources,
                          const std::vector<uint32_t>& tools,
-                         int                          glue,
+                         BooleanGlue                  glue,
                          double                       fuzzy)
 {
   BooleanRequest request;
@@ -199,19 +199,18 @@ EvolutionData finish(OcctKernel&             k,
 } // namespace
 
 EvolutionData booleanChecked(OcctKernel&                  k,
-                             int                          operation,
+                             Select                       operation,
                              const std::vector<uint32_t>& sources,
                              const std::vector<uint32_t>& tools,
-                             int                          glue,
+                             BooleanGlue                  glue,
                              double                       fuzzy,
                              double                       angle,
                              const std::vector<int>&      hashes,
                              int                          bound)
 {
-  if (operation < 0 || operation > 2)
+  if (operation < Select::Union || operation > Select::Intersection)
     fail("boolean", invalid_input, "unknown operation");
-  auto request =
-    requestOf(k, "booleanChecked", static_cast<Select>(operation), sources, tools, glue, fuzzy);
+  auto request = requestOf(k, "booleanChecked", operation, sources, tools, glue, fuzzy);
   auto result = booleanCells(request);
   if (angle > 0)
     simplifyBooleanResult(result, request, angle);
@@ -219,30 +218,29 @@ EvolutionData booleanChecked(OcctKernel&                  k,
 }
 
 EvolutionData booleanCells(OcctKernel&                  k,
-                           int                          select,
+                           Select                       select,
                            const std::vector<uint32_t>& sources,
                            const std::vector<uint32_t>& tools,
                            double                       fuzzy,
                            const std::vector<int>&      hashes,
                            int                          bound)
 {
-  if (select < 0 || select > 6)
+  if (select < Select::Union || select > Select::Region)
     fail("boolean", invalid_input, "unknown selection of cells");
-  auto request =
-    requestOf(k, "booleanCells", static_cast<Select>(select), sources, tools, 0, fuzzy);
+  auto request = requestOf(k, "booleanCells", select, sources, tools, BooleanGlue::Off, fuzzy);
   auto result = booleanCells(request);
   return finish(k, result, request, hashes, bound);
 }
 
 std::vector<BooleanAttempt> booleanReport(OcctKernel&                  k,
-                                          int                          select,
+                                          Select                       select,
                                           const std::vector<uint32_t>& sources,
                                           const std::vector<uint32_t>& tools,
                                           double                       fuzzy)
 {
-  if (select < 0 || select > 6)
+  if (select < Select::Union || select > Select::Region)
     fail("boolean", invalid_input, "unknown selection of cells");
-  auto request = requestOf(k, "boolean", static_cast<Select>(select), sources, tools, 0, fuzzy);
+  auto request = requestOf(k, "boolean", select, sources, tools, BooleanGlue::Off, fuzzy);
   std::vector<BooleanAttempt> rungs;
   try
   {

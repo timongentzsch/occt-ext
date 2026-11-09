@@ -27,7 +27,7 @@ EvolutionData sweepSection(OcctKernel& kernel,
                            uint32_t    profileId,
                            uint32_t    pathId,
                            double      scale,
-                           int         corner,
+                           SweepCorner corner,
                            bool        parallel,
                            bool        solid,
                            double      tolerance)
@@ -36,7 +36,7 @@ EvolutionData sweepSection(OcctKernel& kernel,
   const auto& profile = get(kernel, profileId);
   const auto& path    = get(kernel, pathId);
   if (profile.ShapeType() != TopAbs_WIRE || path.ShapeType() != TopAbs_WIRE || !std::isfinite(scale)
-      || scale <= 0 || corner < 0 || corner > 2)
+      || scale <= 0 || corner < SweepCorner::Transformed || corner > SweepCorner::Round)
     fail(op,
          invalid_input,
          "planar profile and path wires, positive scale and valid corner mode "
@@ -102,14 +102,14 @@ EvolutionData sweepSection(OcctKernel& kernel,
   maker.SetTransitionMode(static_cast<BRepBuilderAPI_TransitionMode>(corner));
   maker.SetTolerance(tolerance, tolerance, BRepExt::tolerance::coarseAngle);
   if (scale == 1)
-    maker.Add(profile, false, !parallel && corner != 1);
+    maker.Add(profile, false, !parallel && corner != SweepCorner::Right);
   else
   {
     BRepAdaptor_CompCurve curve(TopoDS::Wire(path), true);
     const double          length = GCPnts_AbscissaPoint::Length(curve);
     Handle(Law_Linear)    law    = new Law_Linear();
     law->Set(0, 1, length, scale);
-    maker.SetLaw(profile, law, false, !parallel && corner != 1);
+    maker.SetLaw(profile, law, false, !parallel && corner != SweepCorner::Right);
   }
   maker.Build();
   if (!maker.IsDone() || (solid && !maker.MakeSolid())

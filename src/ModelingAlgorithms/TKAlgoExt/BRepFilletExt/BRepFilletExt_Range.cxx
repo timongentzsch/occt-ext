@@ -1186,20 +1186,20 @@ EvolutionData filletRange(OcctKernel&                kernel,
   return withinRange(kernel, op, shape, maker.Shape(), edge, start, end, others, history);
 }
 
-EvolutionData blendRange(OcctKernel&                kernel,
-                         uint32_t                   shapeId,
-                         uint32_t                   edgeId,
-                         double                     first,
-                         double                     second,
-                         int                        law,
-                         double                     rho,
-                         uint32_t                   reference,
-                         double                     angle,
-                         double                     start,
-                         double                     end,
-                         const std::vector<int>&    hashes,
-                         int                        bound,
-                         const std::vector<double>& sizes,
+EvolutionData blendRange(OcctKernel&                  kernel,
+                         uint32_t                     shapeId,
+                         uint32_t                     edgeId,
+                         double                       first,
+                         double                       second,
+                         blending::Law                law,
+                         double                       rho,
+                         uint32_t                     reference,
+                         double                       angle,
+                         double                       start,
+                         double                       end,
+                         const std::vector<int>&      hashes,
+                         int                          bound,
+                         const std::vector<double>&   sizes,
                          std::vector<blending::Join>* joins)
 {
   const char* op    = "filletRange";
@@ -1207,7 +1207,7 @@ EvolutionData blendRange(OcctKernel&                kernel,
   const auto  edge  = TopoDS::Edge(subShapes(kernel, op, shape, {edgeId}, TopAbs_EDGE)[0]);
   if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end > 1 || start >= end)
     fail(op, invalid_input, "an ordered range within [0,1] required");
-  if (law < 0 || law > 2)
+  if (law < blending::Law::Conic || law > blending::Law::Chamfer)
     fail(op, invalid_input, "a range takes a conic, G2 or chamfer section");
   if (sizes.size() % 2)
     fail(op, invalid_input, "size places come in (place, size) pairs");
@@ -1219,7 +1219,7 @@ EvolutionData blendRange(OcctKernel&                kernel,
   request.mayAdd    = {edge};
   request.first     = first;
   request.second    = second;
-  request.law       = static_cast<blending::Law>(law);
+  request.law       = law;
   request.rho       = rho;
   request.angle     = angle;
   if (reference)

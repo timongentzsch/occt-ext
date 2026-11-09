@@ -59,9 +59,9 @@ namespace BRepExt
 {
 namespace
 {
-// How the gap at a corner of an offset is closed: 0 by an arc about the corner (Round), 1 by
-// the chord of that arc (Linear), 2 by carrying the two neighbours on to where they cross
-// (Natural). OpenCascade has arcs for every curve and crossings for lines and circles only, so
+// How the gap at a corner of an offset is closed (OffsetGap): Round by an arc about the corner,
+// Linear by the chord of that arc, Natural by carrying the two neighbours on to where they
+// cross. OpenCascade has arcs for every curve and crossings for lines and circles only, so
 // Linear, and Natural beside any other curve, are made from the arcs.
 //
 // Everything here works on a copy of the curve moved to the origin and scaled to this size, and
@@ -417,7 +417,7 @@ std::vector<Run> filled(const char*              op,
                         std::vector<Poly>&       added,
                         const Measure&           measure,
                         double                   distance,
-                        int                      gap)
+                        OffsetGap                gap)
 {
   const size_t                  n     = runs.size();
   const gp_Pln&                 plane = measure.plane;
@@ -428,7 +428,7 @@ std::vector<Run> filled(const char*              op,
   {
     if (!runs[j].join)
       continue;
-    if (gap == 1)
+    if (gap == OffsetGap::Linear)
     {
       // The chord of half a circle or more would pass through the corner or behind it:
       // there the arc stays.
@@ -638,11 +638,12 @@ std::vector<TopoDS_Wire> offsetWiresAt(const char*         op,
                                        const gp_Pln&       plane,
                                        bool                open,
                                        double              distance,
-                                       int                 gap,
+                                       OffsetGap           gap,
                                        double              enlarged)
 {
-  const bool own  = gap == 1 || (gap == 2 && !linesAndCircles(source));
-  const auto join = gap == 2 && !own ? GeomAbs_Intersection : GeomAbs_Arc;
+  const bool own =
+    gap == OffsetGap::Linear || (gap == OffsetGap::Natural && !linesAndCircles(source));
+  const auto join = gap == OffsetGap::Natural && !own ? GeomAbs_Intersection : GeomAbs_Arc;
   gp_Trsf    enlarge;
   enlarge.SetScale(gp_Pnt(0, 0, 0), enlarged);
   const TopoDS_Shape given =
@@ -759,7 +760,7 @@ std::vector<TopoDS_Wire> offsetWires(const char*         op,
                                      const gp_Pln&       plane,
                                      bool                open,
                                      double              distance,
-                                     int                 gap)
+                                     OffsetGap           gap)
 {
   std::optional<Failure> refused;
   for (const double enlarged : {1.0, 3.0, 1 / 3.0})
@@ -889,12 +890,12 @@ static EvolutionData offsetCurveSeen(const char* op,
                                      OcctKernel& kernel,
                                      uint32_t    wireId,
                                      double      distance,
-                                     int         gap,
+                                     OffsetGap   gap,
                                      Vec3        up)
 {
   const auto& shape = get(kernel, wireId);
-  if (shape.ShapeType() != TopAbs_WIRE || !std::isfinite(distance) || distance == 0 || gap < 0
-      || gap > 2 || !finite(up))
+  if (shape.ShapeType() != TopAbs_WIRE || !std::isfinite(distance) || distance == 0
+      || gap < OffsetGap::Round || gap > OffsetGap::Natural || !finite(up))
     fail(op, invalid_input, "a planar curve and a nonzero distance are required");
   double  factor;
   gp_Trsf back;
@@ -943,12 +944,16 @@ static EvolutionData offsetCurveSeen(const char* op,
   return stored(kernel, BRepBuilderAPI_Transform(all, back, true).Shape());
 }
 
-EvolutionData offsetCurveOn(OcctKernel& kernel, uint32_t wireId, double distance, int gap, Vec3 up)
+EvolutionData offsetCurveOn(OcctKernel& kernel,
+                            uint32_t    wireId,
+                            double      distance,
+                            OffsetGap   gap,
+                            Vec3        up)
 {
   return offsetCurveSeen("offsetCurveOn", kernel, wireId, distance, gap, up);
 }
 
-EvolutionData offsetCurve(OcctKernel& kernel, uint32_t wireId, double distance, int gap)
+EvolutionData offsetCurve(OcctKernel& kernel, uint32_t wireId, double distance, OffsetGap gap)
 {
   return offsetCurveSeen("offsetCurve", kernel, wireId, distance, gap, Vec3{0, 0, 0});
 }
@@ -963,13 +968,13 @@ EvolutionData offsetCurve(OcctKernel& kernel, uint32_t wireId, double distance, 
 EvolutionData offsetRegion(OcctKernel& kernel,
                            uint32_t    faceId,
                            double      distance,
-                           int         gap,
+                           OffsetGap   gap,
                            double      tolerance)
 {
   const char* op    = "offsetRegion";
   const auto& shape = get(kernel, faceId);
   if (shape.ShapeType() != TopAbs_FACE || !std::isfinite(distance)
-      || std::abs(distance) <= tolerance || gap < 0 || gap > 2)
+      || std::abs(distance) <= tolerance || gap < OffsetGap::Round || gap > OffsetGap::Natural)
     fail(op, invalid_input, "a planar region and nonzero distance are required");
   if (BRepAdaptor_Surface(TopoDS::Face(shape)).GetType() != GeomAbs_Plane)
     fail(op, invalid_input, "region must be planar");

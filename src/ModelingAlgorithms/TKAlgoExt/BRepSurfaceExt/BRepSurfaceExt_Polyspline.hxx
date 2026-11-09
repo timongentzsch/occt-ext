@@ -20,14 +20,16 @@ struct PolySplineResult
   std::vector<int> provenance;
 };
 
-Standard_EXPORT PolySplineResult polySpline(OcctKernel&,
-                                            const std::vector<double>&,
-                                            const std::vector<int>&,
-                                            double tolerance,
-                                            int    refinement,
-                                            bool   merge,
-                                            bool   rounded,
-                                            bool   boundaryExactly,
-                                            bool   requireG1,
-                                            double angularTolerance);
+//! A spline surface over a quad cage of points `xyz` (x, y, z in turn) and `quads` (four point
+//! indices each), refined `refinement` times (0 to 3). Fails on a cage too large or irregular.
+Standard_EXPORT PolySplineResult polySpline(OcctKernel&                kernel,
+                                            const std::vector<double>& xyz,
+                                            const std::vector<int>&    quads,
+                                            double                     tolerance,
+                                            int                        refinement,
+                                            bool                       merge,
+                                            bool                       rounded,
+                                            bool                       boundaryExactly,
+                                            bool                       requireG1,
+                                            double                     angularTolerance);
 } // namespace BRepExt

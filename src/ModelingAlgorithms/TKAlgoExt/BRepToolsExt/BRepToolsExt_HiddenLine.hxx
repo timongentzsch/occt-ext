@@ -15,9 +15,11 @@ struct DrawingCurve
   std::vector<double> points;
 };
 
-Standard_EXPORT std::vector<DrawingCurve> hiddenLine(OcctKernel&,
-                                                     const std::vector<uint32_t>&,
-                                                     Vec3                       normal,
-                                                     Vec3                       x,
-                                                     const std::vector<double>& options);
+//! The drawing of `bodies` seen along `normal` with `x` across the view: each curve's body,
+//! kind and points in the view's plane. Fails without positive chord and angle tolerances.
+Standard_EXPORT std::vector<DrawingCurve> hiddenLine(OcctKernel&                  kernel,
+                                                     const std::vector<uint32_t>& bodies,
+                                                     Vec3                         normal,
+                                                     Vec3                         x,
+                                                     const std::vector<double>&   options);
 } // namespace BRepExt

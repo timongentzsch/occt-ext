@@ -10,7 +10,6 @@
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepCheck_Analyzer.hxx>
-#include <GeomAbs_JoinType.hxx>
 
 #include <cmath>
 
@@ -35,7 +34,7 @@ EvolutionData hollow(OcctKernel&             kernel,
   Lineage            walls(shape);
   const TopoDS_Shape work = withoutVanishing(op, shape, -thickness, walls);
   const TopoDS_Shape inset =
-    offsetBody(work, -thickness, tolerance, GeomAbs_Intersection, {}, 0.0, walls);
+    offsetBody(work, -thickness, tolerance, OffsetJoin::Intersection, {}, 0.0, walls);
   if (inset.IsNull())
     fail(op,
          no_solution,

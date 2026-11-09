@@ -124,24 +124,25 @@ Handle(Geom_BSplineCurve) fixedFit(const Handle(Adaptor3d_Curve)& source, int co
 }
 } // namespace
 
-EvolutionData rebuildCurve(OcctKernel& kernel,
-                           uint32_t    wireId,
-                           int         mode,
-                           double      tolerance,
-                           bool        keepCorners,
-                           int         degree,
-                           int         count)
+EvolutionData rebuildCurve(OcctKernel&  kernel,
+                           uint32_t     wireId,
+                           CurveRebuild mode,
+                           double       tolerance,
+                           bool         keepCorners,
+                           int          degree,
+                           int          count)
 {
   const char* op    = "rebuildCurve";
   const auto& shape = get(kernel, wireId);
-  if (shape.ShapeType() != TopAbs_WIRE || mode < 0 || mode > 1 || !std::isfinite(tolerance)
-      || tolerance <= 0 || degree < 1 || degree > 9 || count <= degree || count > 256)
+  if (shape.ShapeType() != TopAbs_WIRE || mode < CurveRebuild::Tolerance
+      || mode > CurveRebuild::Count || !std::isfinite(tolerance) || tolerance <= 0 || degree < 1
+      || degree > 9 || count <= degree || count > 256)
     fail(op,
          invalid_input,
          "rebuild requires a wire, positive tolerance, degree 1-9 and degree+1 "
          "to 256 points");
   std::vector<TopoDS_Wire> pieces;
-  if (mode == 0 && keepCorners)
+  if (mode == CurveRebuild::Tolerance && keepCorners)
     for (BRepTools_WireExplorer it(TopoDS::Wire(shape)); it.More(); it.Next())
       pieces.push_back(BRepBuilderAPI_MakeWire(it.Current()).Wire());
   else
@@ -151,7 +152,7 @@ EvolutionData rebuildCurve(OcctKernel& kernel,
   {
     Handle(Adaptor3d_Curve)   curve = new BRepAdaptor_CompCurve(wire, true);
     Handle(Geom_BSplineCurve) spline;
-    if (mode == 0)
+    if (mode == CurveRebuild::Tolerance)
     {
       Approx_Curve3d fit(curve, tolerance, GeomAbs_C1, 256, degree);
       if (!fit.IsDone() || fit.MaxError() > tolerance)

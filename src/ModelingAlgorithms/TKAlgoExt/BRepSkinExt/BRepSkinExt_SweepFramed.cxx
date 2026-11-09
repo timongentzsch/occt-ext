@@ -359,7 +359,7 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
                           double                       twist,
                           double                       scale,
                           const std::vector<uint32_t>& guideIds,
-                          int                          guideMethod,
+                          GuideMethod                  guideMethod,
                           double                       tolerance,
                           bool                         solid)
 {
@@ -372,7 +372,7 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
     fail(op, invalid_input, "the twist must be within four turns");
   if (!std::isfinite(scale) || scale <= 0)
     fail(op, invalid_input, "the scale must be positive");
-  if (guideMethod < 0 || guideMethod > 2)
+  if (guideMethod < GuideMethod::Point || guideMethod > GuideMethod::Curve)
     fail(op, invalid_input, "the guide method is point (0), chord (1), or curve (2)");
   for (const uint32_t id : guideIds)
     if (get(kernel, id).ShapeType() != TopAbs_WIRE)
@@ -384,7 +384,7 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
          invalid_input,
          "the guides set the profile's place, turn and size: no twist or scale with them");
   // Three guides set every point of the plane: the method is for two.
-  const int         method    = guideIds.size() == 2 ? guideMethod : 0;
+  const GuideMethod method    = guideIds.size() == 2 ? guideMethod : GuideMethod::Point;
   const TopoDS_Wire spineWire = TopoDS::Wire(path), profileWire = TopoDS::Wire(profile);
   if (BRep_Tool::IsClosed(spineWire))
     fail(op, unsupported_geometry, "a closed path is not swept with frames of our own");
@@ -588,7 +588,7 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
       if (guides.size() == 3
           && std::abs(det) <= tolerance * std::max(spanA.Modulus(), spanB.Modulus()))
         fail(op, invalid_input, "the three guides cross the profile's plane in a line");
-      if (method == 2)
+      if (method == GuideMethod::Curve)
         for (const auto& c : curves)
           for (const gp_XYZ& x : c.local)
             if (std::abs(x.Z()) > tolerance)
@@ -670,7 +670,7 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
                "the profile does not reach the second guide: Curve turns it but keeps its size");
         return best;
       };
-      if (method == 2
+      if (method == GuideMethod::Curve
           && std::abs(curveTurn(contacts[1] - pin, 0)) * (contacts[1] - pin).Modulus() > tolerance)
         fail(op, invalid_input, "for Curve the second guide has to touch the profile");
       auto mapFor = [&](const std::vector<gp_XY>& to, double& turn) {
@@ -678,12 +678,13 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
         if (guides.size() == 2)
         {
           const gp_XY from = contacts[1] - pin, toward = to[1] - to[0];
-          turn                = method == 2
-                                  ? curveTurn(toward, turn)
-                                  : nearPeriod(std::atan2(toward.Y(), toward.X()) - std::atan2(from.Y(), from.X()),
+          turn = method == GuideMethod::Curve
+                   ? curveTurn(toward, turn)
+                   : nearPeriod(std::atan2(toward.Y(), toward.X()) - std::atan2(from.Y(), from.X()),
                                 turn,
                                 2 * M_PI);
-          const double factor = method == 0 ? toward.Modulus() / from.Modulus() : 1;
+          const double factor =
+            method == GuideMethod::Point ? toward.Modulus() / from.Modulus() : 1;
           m.a = m.e = factor * std::cos(turn);
           m.c       = factor * std::sin(turn);
           m.b       = -m.c;

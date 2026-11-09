@@ -158,14 +158,29 @@ TEST(BRepSkinExt, DiscSweptAlongAnArcFollowsPappus)
   const double   base = M_PI * r * r * rho * theta;
   for (const double twist : {0.0, 0.7})
   {
-    const auto result =
-      BRepExt::sweepFramed(session(), profile, along, twist, 1, {}, 0, 1e-6, true);
+    const auto          result = BRepExt::sweepFramed(session(),
+                                             profile,
+                                             along,
+                                             twist,
+                                             1,
+                                                      {},
+                                             BRepExt::GuideMethod::Point,
+                                             1e-6,
+                                             true);
     const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
     EXPECT_TRUE(BRepExt::invalidity(made).empty());
     EXPECT_NEAR(volume(made), base, 1e-5 * base) << "twist " << twist;
   }
   const double s      = 1.5;
-  const auto   scaled = BRepExt::sweepFramed(session(), profile, along, 0, s, {}, 0, 1e-6, true);
+  const auto   scaled = BRepExt::sweepFramed(session(),
+                                           profile,
+                                           along,
+                                           0,
+                                           s,
+                                             {},
+                                           BRepExt::GuideMethod::Point,
+                                           1e-6,
+                                           true);
   EXPECT_NEAR(volume(BRepExt::get(session(), scaled.resultId)),
               base * (1 + s + s * s) / 3,
               1e-4 * base);

@@ -341,7 +341,7 @@ EvolutionData offsetFaces(OcctKernel&                  kernel,
                           double                       tolerance,
                           const std::vector<int>&      inputFaceHashes,
                           int                          hashUpperBound,
-                          int                          grow)
+                          FaceGrow                     grow)
 {
   TopoDS_Shape body = get(kernel, solidId);
   if (body.ShapeType() == TopAbs_COMPOUND && !singleSolid(body).IsNull())
@@ -353,7 +353,7 @@ EvolutionData offsetFaces(OcctKernel&                  kernel,
     fail(op, invalid_input, "the distance is zero");
   if (!std::isfinite(tolerance) || tolerance <= 0.0)
     fail(op, invalid_input, "the tolerance must be positive");
-  if (grow < 0 || grow > 2)
+  if (grow < FaceGrow::None || grow > FaceGrow::Moving)
     fail(op, invalid_input, "grow is 0 (none), 1 (fixed) or 2 (moving)");
 
   FaceHistory               history(op, inputFaceHashes, hashUpperBound);
@@ -442,8 +442,8 @@ EvolutionData offsetFaces(OcctKernel&                  kernel,
   std::optional<Moved> done;
   gp_Pnt               origin;
   gp_Dir               normal;
-  if (grow != 0 && distance > 0 && moved.size() == 1 && body.ShapeType() == TopAbs_SOLID
-      && outwardPlaneOf(moved[0], origin, normal))
+  if (grow != FaceGrow::None && distance > 0 && moved.size() == 1
+      && body.ShapeType() == TopAbs_SOLID && outwardPlaneOf(moved[0], origin, normal))
   {
     // The walls that face the same way, ahead of the face and within its reach, nearest first.
     std::vector<std::pair<double, TopoDS_Shape>> walls;
@@ -478,7 +478,7 @@ EvolutionData offsetFaces(OcctKernel&                  kernel,
       const bool  one    = !face.empty() && !beside.empty() && face[0].IsSame(beside[0]);
       if (!one && !touching(face, beside))
         continue;
-      if (grow == 2 && distance - ahead > tolerance)
+      if (grow == FaceGrow::Moving && distance - ahead > tolerance)
       {
         std::vector<TopoDS_Shape> both = face;
         if (!one)

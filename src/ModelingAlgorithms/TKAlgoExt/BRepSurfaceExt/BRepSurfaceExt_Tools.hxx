@@ -39,99 +39,143 @@ struct Constraint
   double skewAt(double f) const { return skewStart * (1 - f) - skewEnd * f; }
 };
 
-Standard_EXPORT TopoDS_Face faceOf(OcctKernel&, const char*, uint32_t);
-Standard_EXPORT Boundary    boundaryOf(OcctKernel&, const char*, uint32_t edge, uint32_t face);
-Standard_EXPORT occ::handle<Geom_BSplineSurface> editable(const char*,
-                                                          const TopoDS_Face&,
-                                                          bool fitting = true);
-Standard_EXPORT SplineNet                        netOf(const occ::handle<Geom_BSplineSurface>&);
-Standard_EXPORT gp_XY boundaryUV(const char*, const TopoDS_Face&, const TopoDS_Edge&, bool end);
-Standard_EXPORT int   boundarySide(const char*, const TopoDS_Face&, const TopoDS_Edge&);
-Standard_EXPORT Constraint
-  constraint(const char*, const TopoDS_Face&, const TopoDS_Edge&, Boundary, int);
+//! The face behind `face`. Fails naming `op` where it is not a face.
+Standard_EXPORT TopoDS_Face faceOf(OcctKernel& kernel, const char* op, uint32_t face);
+//! `edge` of `face` with its curve and range. Fails where the edge is not on the face.
+Standard_EXPORT Boundary boundaryOf(OcctKernel& kernel,
+                                    const char* op,
+                                    uint32_t    edge,
+                                    uint32_t    face);
+//! A copy of the surface of an untrimmed rectangular, non-periodic B-spline face; with `fitting`,
+//! one that is not rational and of degree 5 at most. Fails naming `op` otherwise.
+Standard_EXPORT occ::handle<Geom_BSplineSurface> editable(const char*        op,
+                                                          const TopoDS_Face& face,
+                                                          bool               fitting = true);
+//! The degrees, knot sequences and poles of `surface`, U-major.
+Standard_EXPORT SplineNet netOf(const occ::handle<Geom_BSplineSurface>& surface);
+//! The parameters of the start, or with `end` the end, of `edge` on `face`.
+Standard_EXPORT gp_XY boundaryUV(const char*        op,
+                                 const TopoDS_Face& face,
+                                 const TopoDS_Edge& edge,
+                                 bool               end);
+//! The side of the parameter rectangle that `edge` lies on whole: 0 u-min, 1 u-max, 2 v-min,
+//! 3 v-max. Fails naming `op` otherwise.
+Standard_EXPORT int boundarySide(const char* op, const TopoDS_Face& face, const TopoDS_Edge& edge);
+//! The fit target that makes `edge` of `face` meet `reference` to `order` 0, 1 or 2 (G0 to G2).
+Standard_EXPORT Constraint constraint(const char*        op,
+                                      const TopoDS_Face& face,
+                                      const TopoDS_Edge& edge,
+                                      Boundary           reference,
+                                      int                order);
 
-Standard_EXPORT std::vector<FitCondition> conditions(const char*,
-                                                     const std::vector<Constraint>&,
-                                                     const occ::handle<Geom_BSplineSurface>&,
-                                                     double tolerance,
-                                                     bool   normalFlow = false);
-Standard_EXPORT TopoDS_Face               makeFace(const char*,
-                                                   const occ::handle<Geom_BSplineSurface>&,
-                                                   double             tolerance,
-                                                   TopAbs_Orientation orientation = TopAbs_FORWARD,
-                                                   bool               useTopologyTolerance = false);
-Standard_EXPORT void                      measure(const char*,
-                                                  const TopoDS_Face&,
-                                                  const std::vector<Constraint>&,
-                                                  double tolerance,
-                                                  bool   normalFlow = false);
+//! The fit conditions (positions, normals, curvatures, skew) sampled along each constraint.
+Standard_EXPORT std::vector<FitCondition> conditions(
+  const char*                             op,
+  const std::vector<Constraint>&          constraints,
+  const occ::handle<Geom_BSplineSurface>& surface,
+  double                                  tolerance,
+  bool                                    normalFlow = false);
+//! A valid face on `surface`. Fails naming `op` where it is not valid.
+Standard_EXPORT TopoDS_Face makeFace(const char*                             op,
+                                     const occ::handle<Geom_BSplineSurface>& surface,
+                                     double                                  tolerance,
+                                     TopAbs_Orientation orientation          = TopAbs_FORWARD,
+                                     bool               useTopologyTolerance = false);
+//! Check a fitted face against its constraints. Fails naming the gap, angle or curvature missed.
+Standard_EXPORT void measure(const char*                    op,
+                             const TopoDS_Face&             face,
+                             const std::vector<Constraint>& constraints,
+                             double                         tolerance,
+                             bool                           normalFlow = false);
 } // namespace surfacing
 
-Standard_EXPORT EvolutionData alignCollinear(OcctKernel&,
-                                             uint32_t,
-                                             uint32_t,
-                                             uint32_t,
-                                             uint32_t,
-                                             bool,
-                                             bool,
-                                             double,
-                                             double,
-                                             double,
-                                             double,
-                                             double);
-Standard_EXPORT EvolutionData alignSurface(OcctKernel&,
-                                           uint32_t,
-                                           uint32_t,
-                                           uint32_t,
-                                           uint32_t,
-                                           int,
-                                           double,
-                                           int    = 0,
-                                           int    = 0,
-                                           int    = 0,
-                                           int    = 0,
-                                           int    = 0,
-                                           bool   = false,
-                                           double = 0,
-                                           double = 1,
-                                           bool   = false,
-                                           double = 0,
-                                           double = 0,
-                                           double = 0);
-Standard_EXPORT EvolutionData bridgeSurface(OcctKernel&,
-                                            uint32_t,
-                                            uint32_t,
-                                            uint32_t,
-                                            uint32_t,
-                                            int,
-                                            int,
-                                            double,
-                                            double,
-                                            double,
-                                            int = 0);
-Standard_EXPORT EvolutionData squareSurface(OcctKernel&,
-                                            const std::vector<uint32_t>&,
-                                            const std::vector<uint32_t>&,
-                                            const std::vector<int>&,
-                                            int,
-                                            int,
-                                            int,
-                                            int,
-                                            double,
-                                            double = -1,
-                                            bool   = false);
-Standard_EXPORT std::vector<double> surfacePoles(OcctKernel&, uint32_t);
-Standard_EXPORT EvolutionData       moveSurfacePoles(OcctKernel&,
-                                                     uint32_t,
-                                                     const std::vector<int>&,
-                                                     const std::vector<double>&,
-                                                     const std::vector<uint32_t>&,
-                                                     const std::vector<uint32_t>&,
-                                                     const std::vector<uint32_t>&,
-                                                     const std::vector<int>&,
-                                                     double);
-Standard_EXPORT EvolutionData       raiseSurfaceDegree(OcctKernel&, uint32_t, int, int, double);
+//! The shape of a bridge between two boundary edges.
+enum class BridgeShape
+{
+  Smooth  = 0, //!< to the orders asked at each edge
+  Chamfer = 1  //!< G0 at both edges
+};
+
+//! The row of poles next to `edge` of `face` put in line with the hull of `reference` on
+//! `support`; with `symmetric`, both faces change. Skews in radians. Fails where the rows fold.
+Standard_EXPORT EvolutionData alignCollinear(OcctKernel& kernel,
+                                             uint32_t    face,
+                                             uint32_t    edge,
+                                             uint32_t    reference,
+                                             uint32_t    support,
+                                             bool        symmetric,
+                                             bool        matchRatio,
+                                             double      partialStart,
+                                             double      partialEnd,
+                                             double      skewStart,
+                                             double      skewEnd,
+                                             double      tolerance);
+//! `edge` of a spline `face` made to meet `reference` on `support` to `order` 0 to 2 (G0 to G2),
+//! raising degrees (to 5) and spans (to 9) exactly. Skews in radians. Fails where either would
+//! fall.
+Standard_EXPORT EvolutionData alignSurface(OcctKernel& kernel,
+                                           uint32_t    face,
+                                           uint32_t    edge,
+                                           uint32_t    reference,
+                                           uint32_t    support,
+                                           int         order,
+                                           double      tolerance,
+                                           int         extraRows           = 0,
+                                           int         uDegree             = 0,
+                                           int         vDegree             = 0,
+                                           int         uSpans              = 0,
+                                           int         vSpans              = 0,
+                                           bool        normalFlow          = false,
+                                           double      partialStart        = 0,
+                                           double      partialEnd          = 1,
+                                           bool        skewed              = false,
+                                           double      skewStart           = 0,
+                                           double      skewEnd             = 0,
+                                           double      inputShapeInfluence = 0);
+//! A face bridging two boundary edges, to the orders 0 to 2 at each with tensions in (0, 10].
+//! Fails where the edges are one.
+Standard_EXPORT EvolutionData bridgeSurface(OcctKernel& kernel,
+                                            uint32_t    firstEdge,
+                                            uint32_t    firstFace,
+                                            uint32_t    secondEdge,
+                                            uint32_t    secondFace,
+                                            int         orderA,
+                                            int         orderB,
+                                            double      tensionA,
+                                            double      tensionB,
+                                            double      tolerance,
+                                            BridgeShape shape = BridgeShape::Smooth);
+//! A four-sided spline face from two to four boundary `edges`, the missing sides made, each
+//! smooth to its support to its order 0 to 2. Fails where they form no quad.
+Standard_EXPORT EvolutionData squareSurface(OcctKernel&                  kernel,
+                                            const std::vector<uint32_t>& edges,
+                                            const std::vector<uint32_t>& supports,
+                                            const std::vector<int>&      orders,
+                                            int                          uDegree,
+                                            int                          vDegree,
+                                            int                          uSpans,
+                                            int                          vSpans,
+                                            double                       tolerance,
+                                            double                       flatness   = -1,
+                                            bool                         normalFlow = false);
+//! The pole counts in u and v, each pole as x, y, z, weight (U-major), then the unit normal at
+//! each pole's Greville point. Fails on a face that is not a B-spline.
+Standard_EXPORT std::vector<double> surfacePoles(OcctKernel& kernel, uint32_t face);
+//! The poles at the (u, v) `indices` from 0 moved by `offsets` (x, y, z each), the joins to up to
+//! four neighbours kept to their `orders`. Fails above 400 poles.
+Standard_EXPORT EvolutionData moveSurfacePoles(OcctKernel&                  kernel,
+                                               uint32_t                     face,
+                                               const std::vector<int>&      indices,
+                                               const std::vector<double>&   offsets,
+                                               const std::vector<uint32_t>& edges,
+                                               const std::vector<uint32_t>& references,
+                                               const std::vector<uint32_t>& supports,
+                                               const std::vector<int>&      orders,
+                                               double                       tolerance);
+//! A B-spline face with its degrees raised by `deltaU` and `deltaV`. Fails past degree 25.
+Standard_EXPORT EvolutionData
+  raiseSurfaceDegree(OcctKernel& kernel, uint32_t face, int deltaU, int deltaV, double tolerance);
 //! The B-spline that `faceSpline` data describes; fails naming `op` on malformed data.
-Standard_EXPORT occ::handle<Geom_BSplineSurface> splineFromData(const char* op,
-                                                                const std::vector<double>&);
+Standard_EXPORT occ::handle<Geom_BSplineSurface> splineFromData(const char*                op,
+                                                                const std::vector<double>& data);
 } // namespace BRepExt

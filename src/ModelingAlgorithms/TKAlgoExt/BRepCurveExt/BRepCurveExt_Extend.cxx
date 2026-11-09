@@ -58,19 +58,20 @@ double length(const Handle(Geom_Curve)& curve, double a, double b, double tolera
 
 // One extension by a distance; with `reach` a shape that cannot be that long is as long as it
 // can be.
-EvolutionData extendBy(OcctKernel& kernel,
-                       uint32_t    wireId,
-                       bool        atStart,
-                       int         mode,
-                       double      distance,
-                       uint32_t    targetId,
-                       double      tolerance,
-                       bool        reach)
+EvolutionData extendBy(OcctKernel&    kernel,
+                       uint32_t       wireId,
+                       bool           atStart,
+                       CurveExtension mode,
+                       double         distance,
+                       uint32_t       targetId,
+                       double         tolerance,
+                       bool           reach)
 {
   const char* const op    = "extendCurve";
   const auto&       shape = get(kernel, wireId);
-  if (shape.ShapeType() != TopAbs_WIRE || mode < 0 || mode > 4 || !std::isfinite(distance)
-      || distance <= tolerance || !std::isfinite(tolerance) || tolerance <= 0)
+  if (shape.ShapeType() != TopAbs_WIRE || mode < CurveExtension::Natural
+      || mode > CurveExtension::Arc || !std::isfinite(distance) || distance <= tolerance
+      || !std::isfinite(tolerance) || tolerance <= 0)
     fail(op, invalid_input, "an open wire, positive distance and tolerance are required");
   std::vector<TopoDS_Edge> edges;
   for (BRepTools_WireExplorer it(TopoDS::Wire(shape)); it.More(); it.Next())
@@ -93,12 +94,14 @@ EvolutionData extendBy(OcctKernel& kernel,
   const gp_Vec       curvature = (d2 - tangent * d2.Dot(tangent)) / d1.SquareMagnitude();
   Handle(Geom_Curve) extension;
   double             first = 0, last = 1;
-  if (mode == 1 || ((mode == 2 || mode == 4) && curvature.Magnitude() < 1e-14))
+  if (mode == CurveExtension::Linear
+      || ((mode == CurveExtension::Soft || mode == CurveExtension::Arc)
+          && curvature.Magnitude() < 1e-14))
   {
     extension = new Geom_Line(p, gp_Dir(tangent));
     last      = distance;
   }
-  else if (mode == 4)
+  else if (mode == CurveExtension::Arc)
   {
     const double radius = 1 / curvature.Magnitude();
     // The circle of an arc's own curvature is the arc's circle: what the arc already
@@ -119,7 +122,7 @@ EvolutionData extendBy(OcctKernel& kernel,
                       radius);
     last = distance / radius;
   }
-  else if (mode == 3)
+  else if (mode == CurveExtension::Reflective)
   {
     const double available = length(source, source->FirstParameter(), end, tolerance);
     if (reach)
@@ -137,12 +140,14 @@ EvolutionData extendBy(OcctKernel& kernel,
     first     = reflected->FirstParameter();
     last      = reflected->LastParameter();
   }
-  else if (mode == 0 && source->BasisCurve()->IsKind(STANDARD_TYPE(Geom_Line)))
+  else if (mode == CurveExtension::Natural
+           && source->BasisCurve()->IsKind(STANDARD_TYPE(Geom_Line)))
   {
     extension = new Geom_Line(p, gp_Dir(tangent));
     last      = distance;
   }
-  else if (mode == 0 && source->BasisCurve()->IsKind(STANDARD_TYPE(Geom_Circle)))
+  else if (mode == CurveExtension::Natural
+           && source->BasisCurve()->IsKind(STANDARD_TYPE(Geom_Circle)))
   {
     auto circle = Handle(Geom_Circle)::DownCast(source->BasisCurve());
     if (reach)
@@ -157,7 +162,8 @@ EvolutionData extendBy(OcctKernel& kernel,
     first     = end;
     last      = end + distance / circle->Radius();
   }
-  else if (mode == 0 && GeomAdaptor_Curve(source->BasisCurve()).GetType() != GeomAbs_BSplineCurve
+  else if (mode == CurveExtension::Natural
+           && GeomAdaptor_Curve(source->BasisCurve()).GetType() != GeomAbs_BSplineCurve
            && GeomAdaptor_Curve(source->BasisCurve()).GetType() != GeomAbs_BezierCurve)
   {
     // Keep analytic conics analytic; a rational Bezier continuation has a
@@ -177,7 +183,7 @@ EvolutionData extendBy(OcctKernel& kernel,
   else
   {
     Handle(Geom_BezierCurve) terminal;
-    if (mode == 0)
+    if (mode == CurveExtension::Natural)
     {
       GeomConvert_BSplineCurveToBezierCurve arcs(GeomConvert::CurveToBSplineCurve(source));
       terminal = arcs.Arc(arcs.NbArcs());
@@ -186,7 +192,7 @@ EvolutionData extendBy(OcctKernel& kernel,
     // preserves G2 at the join and reduces curvature to zero at its far end.
     // Solve the actual arc length.
     auto candidate = [&](double extent) -> Handle(Geom_BezierCurve) {
-      if (mode == 0)
+      if (mode == CurveExtension::Natural)
       {
         auto copy = Handle(Geom_BezierCurve)::DownCast(terminal->Copy());
         copy->Segment(1, 1 + extent);
@@ -199,7 +205,7 @@ EvolutionData extendBy(OcctKernel& kernel,
       poles(4) = p.Translated(tangent * (3 * extent) + curvature * (3 * extent * extent));
       return new Geom_BezierCurve(poles);
     };
-    double lo = 0, hi = mode == 0 ? 1 : distance / 3;
+    double lo = 0, hi = mode == CurveExtension::Natural ? 1 : distance / 3;
     for (int i = 0; length(candidate(hi), 0, 1, tolerance / 10) < distance; ++i)
     {
       if (i == 40)
@@ -265,13 +271,13 @@ EvolutionData extendBy(OcctKernel& kernel,
 }
 } // namespace
 
-EvolutionData extendCurve(OcctKernel& kernel,
-                          uint32_t    wireId,
-                          bool        atStart,
-                          int         mode,
-                          double      distance,
-                          uint32_t    targetId,
-                          double      tolerance)
+EvolutionData extendCurve(OcctKernel&    kernel,
+                          uint32_t       wireId,
+                          bool           atStart,
+                          CurveExtension mode,
+                          double         distance,
+                          uint32_t       targetId,
+                          double         tolerance)
 {
   // Up to a target no distance need be given: the extension is tried at an eighth of the
   // curve's own size and doubled until it meets the target, up to twice the size of curve

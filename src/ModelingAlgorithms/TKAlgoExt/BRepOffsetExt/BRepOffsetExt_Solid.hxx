@@ -9,6 +9,7 @@
 #include <Standard_Macro.hxx>
 #include <BRepBooleanExt_Accept.hxx>
 #include <BRepOffsetExt_Parts.hxx>
+#include <BRepToolsExt_Operations.hxx>
 
 namespace BRepExt
 {
@@ -27,7 +28,7 @@ Standard_EXPORT TopoDS_Shape withoutVanishing(const char*         op,
 Standard_EXPORT TopoDS_Shape offsetBody(const TopoDS_Shape&              work,
                                         double                           distance,
                                         double                           tolerance,
-                                        int                              join,
+                                        OffsetJoin                       join,
                                         const std::vector<TopoDS_Shape>& pushed,
                                         double                           pushedBy,
                                         Lineage&                         faces);

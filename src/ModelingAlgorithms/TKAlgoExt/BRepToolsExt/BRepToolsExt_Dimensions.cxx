@@ -31,7 +31,7 @@ namespace
 {
 struct Primitive
 {
-  int    kind = 0;
+  PrimitiveKind kind = PrimitiveKind::None;
   gp_Pnt origin;
   gp_Dir x{1, 0, 0}, y{0, 1, 0}, z{0, 0, 1};
   double a = 0, b = 0, c = 0;
@@ -62,7 +62,7 @@ Primitive recognize(const TopoDS_Shape& shape, double tolerance)
       const double r      = sphere.Radius();
       if (matches(4 * M_PI * r * r * r / 3))
       {
-        p.kind   = 3;
+        p.kind   = PrimitiveKind::Sphere;
         p.origin = sphere.Location();
         p.a      = 2 * r;
         return p;
@@ -101,7 +101,7 @@ Primitive recognize(const TopoDS_Shape& shape, double tolerance)
         std::swap(a, b);
       if (matches(M_PI * cylinder.Radius() * cylinder.Radius() * (b - a)))
       {
-        p.kind   = 2;
+        p.kind   = PrimitiveKind::Cylinder;
         p.origin = axis.Location().Translated(gp_Vec(dir) * a);
         p.z      = dir;
         p.x      = cylinder.XAxis().Direction();
@@ -166,7 +166,7 @@ Primitive recognize(const TopoDS_Shape& shape, double tolerance)
     }
   if (!matches((hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2])))
     return p;
-  p.kind = 1;
+  p.kind = PrimitiveKind::Box;
   p.origin =
     anchor.Translated(gp_Vec(axes[0]) * lo[0] + gp_Vec(axes[1]) * lo[1] + gp_Vec(axes[2]) * lo[2]);
   p.x = axes[0];
@@ -211,9 +211,9 @@ std::vector<double> primitiveDimensions(OcctKernel& kernel, uint32_t shape, doub
             0};
   }
   const auto p = recognize(input, tolerance);
-  if (p.kind == 0)
+  if (p.kind == PrimitiveKind::None)
     return {};
-  return {double(p.kind),
+  return {double(static_cast<int>(p.kind)),
           p.origin.X(),
           p.origin.Y(),
           p.origin.Z(),
@@ -233,7 +233,7 @@ std::vector<double> primitiveDimensions(OcctKernel& kernel, uint32_t shape, doub
 
 EvolutionData setPrimitiveDimensions(OcctKernel&             kernel,
                                      uint32_t                shape,
-                                     int                     kind,
+                                     PrimitiveKind           kind,
                                      double                  a,
                                      double                  b,
                                      double                  c,
@@ -242,22 +242,22 @@ EvolutionData setPrimitiveDimensions(OcctKernel&             kernel,
                                      int                     bound)
 {
   const auto p = recognize(get(kernel, shape), tolerance);
-  if (p.kind != kind || kind < 1 || kind > 3)
+  if (p.kind != kind || kind < PrimitiveKind::Box || kind > PrimitiveKind::Sphere)
     fail("setPrimitiveDimensions",
          invalid_input,
          "body is not the requested unmodified primitive geometry");
   if (!std::isfinite(a) || a <= tolerance || !std::isfinite(b) || !std::isfinite(c)
-      || (kind == 1 && (b <= tolerance || c <= tolerance)))
+      || (kind == PrimitiveKind::Box && (b <= tolerance || c <= tolerance)))
     fail("setPrimitiveDimensions", invalid_input, "dimensions must be positive");
   TopoDS_Shape result;
   gp_Ax2       axes(p.origin, p.z, p.x);
-  if (kind == 1)
+  if (kind == PrimitiveKind::Box)
     result = BRepPrimAPI_MakeBox(axes, a, b, c).Shape();
-  else if (kind == 2)
+  else if (kind == PrimitiveKind::Cylinder)
     result = BRepPrimAPI_MakeCylinder(axes, a / 2, p.b).Shape();
   else
     result = BRepPrimAPI_MakeSphere(p.origin, a / 2).Shape();
-  if (kind == 1)
+  if (kind == PrimitiveKind::Box)
   {
     // A rectangular box has exactly one face for each outward axis direction.
     // Map those supports explicitly; keep analytic planes for subsequent edits.

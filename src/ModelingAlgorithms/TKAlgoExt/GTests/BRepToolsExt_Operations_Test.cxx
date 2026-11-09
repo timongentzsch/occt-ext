@@ -89,7 +89,7 @@ TEST(BRepToolsExtOperations, RoundOffsetOfRectangleAddsOneTurnOfArc)
   const uint32_t wire = BRepExt::store(session(), maker.Wire());
   for (const double d : {2.0, 10.0})
   {
-    const auto result = BRepExt::offsetCurve(session(), wire, d, 0);
+    const auto result = BRepExt::offsetCurve(session(), wire, d, BRepExt::OffsetGap::Round);
     EXPECT_NEAR(length(BRepExt::get(session(), result.resultId)),
                 2 * (a + b) + 2 * M_PI * d,
                 1e-6 * (a + b));
@@ -154,7 +154,7 @@ TEST(BRepToolsExtOperations, PatchOfFourCubicSidesContainsItsSides)
                                      1e-6,
                                      1,
                                      0.1,
-                                     0);
+                                     BRepExt::PatchMethod::Auto);
   TopoDS_Face face;
   for (TopExp_Explorer it(BRepExt::get(session(), result.evolution.resultId), TopAbs_FACE);
        it.More();

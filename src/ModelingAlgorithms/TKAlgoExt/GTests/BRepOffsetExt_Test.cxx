@@ -194,7 +194,7 @@ TEST(BRepOffsetExt, OffsetOfABoxIsSteinersParallelBodyOrTheGrownBox)
 {
   const TopoDS_Shape box    = BRepPrimAPI_MakeBox(a, b, c).Shape();
   const double       d      = 4;
-  const auto         offset = [&](double distance, int join) {
+  const auto         offset = [&](double distance, BRepExt::OffsetJoin join) {
     const auto result = BRepExt::offsetSolid(session(),
                                              keep(box),
                                              distance,
@@ -204,7 +204,9 @@ TEST(BRepOffsetExt, OffsetOfABoxIsSteinersParallelBodyOrTheGrownBox)
                                              BRepExt::failureHashBound);
     return BRepExt::get(session(), result.resultId);
   };
-  const TopoDS_Shape rounded = offset(d, 0), sharp = offset(d, 2), inward = offset(-d, 2);
+  const TopoDS_Shape rounded = offset(d, BRepExt::OffsetJoin::Arc),
+                     sharp   = offset(d, BRepExt::OffsetJoin::Intersection),
+                     inward  = offset(-d, BRepExt::OffsetJoin::Intersection);
   EXPECT_TRUE(BRepExt::invalidity(rounded).empty());
   EXPECT_TRUE(BRepExt::invalidity(sharp).empty());
   EXPECT_TRUE(BRepExt::invalidity(inward).empty());
@@ -611,7 +613,7 @@ TEST(BRepOffsetExt, RingParallelBodyClosesItsHoleWithoutKeepingTheCrossingSheet)
                                                  keep(source),
                                                  d,
                                                  1e-7 * scale,
-                                                 0,
+                                                 BRepExt::OffsetJoin::Arc,
                                                          {},
                                                  BRepExt::failureHashBound);
         const TopoDS_Shape made   = BRepExt::get(session(), result.resultId);
@@ -782,8 +784,13 @@ TEST(BRepOffsetExt, ExactSphereKeepsEveryPositiveRadiusBeforeItsFocalDistance)
     const auto fate = BRepExt::classifyForOffset(sphere, -radius * (1 - 5e-5));
     EXPECT_TRUE(fate.vanish.empty());
     EXPECT_TRUE(fate.partial.empty());
-    const auto made=BRepExt::offsetSolid(session(),keep(sphere),-radius*(1-5e-5),
-                                         1e-6,2,{},BRepExt::failureHashBound);
+    const auto made  = BRepExt::offsetSolid(session(),
+                                           keep(sphere),
+                                           -radius * (1 - 5e-5),
+                                           1e-6,
+                                           BRepExt::OffsetJoin::Intersection,
+                                            {},
+                                           BRepExt::failureHashBound);
     const auto result=BRepExt::get(session(),made.resultId);
     EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
     const double expectedRadius=radius*5e-5;
@@ -950,14 +957,14 @@ TEST(BRepOffsetExt, PocketedBodyOpeningClearance)
           if (!f.Current().IsSame(opened))
             builder.Add(skin, f.Current());
         const auto made   = BRepExt::shell(session(),
-                                           keep(input),
+                                         keep(input),
                                            {keep(opened)},
-                                           wall * scale,
-                                           1e-6 * scale,
-                                           2,
-                                           hashes,
-                                           BRepExt::failureHashBound,
-                                           false);
+                                         wall * scale,
+                                         1e-6 * scale,
+                                         BRepExt::OffsetJoin::Intersection,
+                                         hashes,
+                                         BRepExt::failureHashBound,
+                                         false);
         const auto result = BRepExt::get(session(), made.resultId);
         EXPECT_TRUE(BRepCheck_Analyzer(result).IsValid());
         EXPECT_LT(volume(result), 0.45 * volume(input));

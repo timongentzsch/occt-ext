@@ -70,12 +70,13 @@ TEST(BRepPatchExt, FillOfACircleHasTheAreaOfTheDisc)
   const TopoDS_Edge circle =
     BRepBuilderAPI_MakeEdge(new Geom_Circle(gp_Ax2(gp_Pnt(3, -2, 5), gp_Dir(0, 0, 1)), r)).Edge();
   const uint32_t edge = BRepExt::store(session(), circle);
-  for (const int method : {0, 1})
+  for (const auto method : {BRepExt::PatchMethod::Auto, BRepExt::PatchMethod::Fitted})
   {
     const auto result = BRepExt::patch(session(), {edge}, {0}, {0}, {}, {}, 1e-6, 1, 0.1, method);
     const TopoDS_Face face = onlyFace(BRepExt::get(session(), result.evolution.resultId));
-    ASSERT_FALSE(face.IsNull()) << "method " << method;
-    EXPECT_NEAR(area(face), M_PI * r * r, 1e-4 * M_PI * r * r) << "method " << method;
+    ASSERT_FALSE(face.IsNull()) << "method " << static_cast<int>(method);
+    EXPECT_NEAR(area(face), M_PI * r * r, 1e-4 * M_PI * r * r)
+      << "method " << static_cast<int>(method);
   }
 }
 
@@ -108,7 +109,7 @@ TEST(BRepPatchExt, FillOfACapHoleIsTangentToTheSphere)
                                      1e-4,
                                      g1Degrees,
                                      0.1,
-                                     0);
+                                     BRepExt::PatchMethod::Auto);
   const TopoDS_Face fill   = onlyFace(BRepExt::get(session(), result.evolution.resultId));
   ASSERT_FALSE(fill.IsNull());
   const Handle(Geom_Surface) sphereSurface = BRep_Tool::Surface(support),
@@ -173,7 +174,7 @@ TEST(BRepPatchExt, OpenBoundaryOfThreeArcsIsClosedByTheChordOfTheGap)
                                      1e-6,
                                      1,
                                      0.1,
-                                     0,
+                                     BRepExt::PatchMethod::Auto,
                                      -1,
                                      controls);
   const TopoDS_Face face   = onlyFace(BRepExt::get(session(), result.evolution.resultId));
@@ -228,7 +229,16 @@ TEST(BRepPatchExt, G1FillBetweenPlatesThatDisagreeAtACornerIsRefused)
   dish(edges, supports, normals);
   try
   {
-    BRepExt::patch(session(), edges, supports, std::vector<int>(6, 1), {}, {}, 1e-4, 1.0, 0.1, 0);
+    BRepExt::patch(session(),
+                   edges,
+                   supports,
+                   std::vector<int>(6, 1),
+                   {},
+                   {},
+                   1e-4,
+                   1.0,
+                   0.1,
+                   BRepExt::PatchMethod::Auto);
     FAIL() << "a G1 fill was returned";
   }
   catch (const BRepExt::Failure& failure)
@@ -246,8 +256,16 @@ TEST(BRepPatchExt, G0FillOfASixSidedLoopHoldsEveryVertexAndTheSymmetry)
   std::vector<uint32_t> edges, supports;
   std::vector<gp_Dir>   normals;
   dish(edges, supports, normals);
-  const auto result =
-    BRepExt::patch(session(), edges, supports, std::vector<int>(6, 0), {}, {}, 1e-4, 1.0, 0.1, 0);
+  const auto        result = BRepExt::patch(session(),
+                                     edges,
+                                     supports,
+                                     std::vector<int>(6, 0),
+                                            {},
+                                            {},
+                                     1e-4,
+                                     1.0,
+                                     0.1,
+                                     BRepExt::PatchMethod::Auto);
   const TopoDS_Face fill = onlyFace(BRepExt::get(session(), result.evolution.resultId));
   ASSERT_FALSE(fill.IsNull());
   const Handle(Geom_Surface) surface = BRep_Tool::Surface(fill);
@@ -299,7 +317,7 @@ TEST(BRepPatchExt, SixArcRimOnASphereIsFilledTangentToItThroughEveryArc)
                                      1e-4,
                                      g1Degrees,
                                      0.1,
-                                     0);
+                                     BRepExt::PatchMethod::Auto);
   const TopoDS_Face fill   = onlyFace(BRepExt::get(session(), result.evolution.resultId));
   ASSERT_FALSE(fill.IsNull());
   const Handle(Geom_Surface) sphereSurface = BRep_Tool::Surface(support),
@@ -380,14 +398,24 @@ struct Elbow
     }
   }
 
-  TopoDS_Face fill(int flow) const
+  TopoDS_Face fill(BRepExt::PatchFlow flow) const
   {
     BRepExt::PatchControls controls;
-    controls.quad = 1;
+    controls.quad     = BRepExt::PatchQuad::On;
     controls.flow = flow;
     controls.open = true;
-    const auto result =
-      BRepExt::patch(session(), edges, supports, {2, 2}, {}, {}, 1e-3, 0.1, 0.05, 0, -1, controls);
+    const auto result = BRepExt::patch(session(),
+                                       edges,
+                                       supports,
+                                       {2, 2},
+                                       {},
+                                       {},
+                                       1e-3,
+                                       0.1,
+                                       0.05,
+                                       BRepExt::PatchMethod::Auto,
+                                       -1,
+                                       controls);
     return onlyFace(BRepExt::get(session(), result.evolution.resultId));
   }
 };
@@ -423,7 +451,7 @@ std::pair<double, double> bends(const Handle(Geom_Surface)& surface,
 TEST(BRepPatchExt, OpenElbowBetweenATubeAndAPlateIsFilledG2AcrossItsGaps)
 {
   for (const bool sheet : {false, true})
-    for (const int flow : {0, 3})
+    for (const auto flow : {BRepExt::PatchFlow::Natural, BRepExt::PatchFlow::Adjacent})
     {
       const Elbow elbow(sheet);
       ASSERT_EQ(elbow.edges.size(), 2u);
@@ -445,11 +473,11 @@ TEST(BRepPatchExt, OpenElbowBetweenATubeAndAPlateIsFilledG2AcrossItsGaps)
           gp_Dir       own    = normal;
           const auto   mine   = bends(surface, p, own);
           const double tilt   = std::acos(std::min(1.0, own.Dot(normal))) * 180 / M_PI;
-          EXPECT_LE(tilt, 0.1) << "flow " << flow << " at " << k;
+          EXPECT_LE(tilt, 0.1) << "flow " << static_cast<int>(flow) << " at " << k;
           EXPECT_LE(std::abs(mine.first - theirs.first), 0.05 * scale)
-            << "flow " << flow << " " << k;
+            << "flow " << static_cast<int>(flow) << " " << k;
           EXPECT_LE(std::abs(mine.second - theirs.second), 0.05 * scale)
-            << "flow " << flow << " " << k;
+            << "flow " << static_cast<int>(flow) << " " << k;
         }
       }
       double u0, u1, v0, v1, skew = 0;
@@ -462,7 +490,7 @@ TEST(BRepPatchExt, OpenElbowBetweenATubeAndAPlateIsFilledG2AcrossItsGaps)
             skew,
             GeomAPI_ProjectPointOnSurf(gp_Pnt(-p.X(), p.Y(), p.Z()), surface).LowerDistance());
         }
-      EXPECT_LE(skew, 0.2) << "flow " << flow << " sheet " << sheet;
+      EXPECT_LE(skew, 0.2) << "flow " << static_cast<int>(flow) << " sheet " << sheet;
     }
 }
 
@@ -475,7 +503,7 @@ TEST(BRepPatchExt, OpenElbowBetweenATubeAndAPlateIsFilledG2AcrossItsGaps)
 TEST(BRepPatchExt, InsideCheckKeepsTheElbowAcrossItsCrossingAndRefusesARippledOne)
 {
   const Elbow                       elbow;
-  const TopoDS_Face                 fill = elbow.fill(0);
+  const TopoDS_Face                 fill = elbow.fill(BRepExt::PatchFlow::Natural);
   const Handle(Geom_BSplineSurface) surface =
     Handle(Geom_BSplineSurface)::DownCast(BRep_Tool::Surface(fill));
   ASSERT_FALSE(surface.IsNull());
@@ -572,7 +600,7 @@ struct Rounds
                           1e-3,
                           0.1,
                           0.05,
-                          0);
+                          BRepExt::PatchMethod::Auto);
   }
 
   //! Along every edge, 33 places: the fill passes through it within `tolerance` and keeps its
@@ -857,7 +885,16 @@ TEST(BRepPatchExt, ThreeRoundsAtAMillionthAreRefusedWithTheCornerWhereTheyBendDi
   ASSERT_EQ(edges.size(), 3u);
   try
   {
-    BRepExt::patch(session(), edges, supports, {2, 2, 2}, {}, {}, 1e-6, 0.1, 0.05, 0);
+    BRepExt::patch(session(),
+                   edges,
+                   supports,
+                   {2, 2, 2},
+                   {},
+                   {},
+                   1e-6,
+                   0.1,
+                   0.05,
+                   BRepExt::PatchMethod::Auto);
     FAIL() << "a G2 fill was returned";
   }
   catch (const BRepExt::Failure& failure)
@@ -893,14 +930,14 @@ TEST(BRepPatchExt, ALoopTheSameAfterAThirdOfATurnIsLaidOutAlikeAtAnySize)
       placed.push_back(BRepExt::store(session(), moved.ModifiedShape(BRepExt::get(session(), id))));
     const auto made = BRepExt::patch(session(),
                                      placed,
-                                          {0, 0, 0},
-                                          {0, 0, 0},
-                                          {},
-                                          {},
+                                     {0, 0, 0},
+                                     {0, 0, 0},
+                                     {},
+                                     {},
                                      tolerance * scale,
                                      0.1,
                                      0.05,
-                                     0);
+                                     BRepExt::PatchMethod::Auto);
     return onlyFace(BRepExt::get(session(), made.evolution.resultId));
   };
   const auto way = [](const TopoDS_Face& face) {
@@ -1022,7 +1059,7 @@ TEST(BRepPatchExt, HeldOutStripsOnDomesAndSaddlesAreEasedAtAnyScaleAndPose)
                                           1e-3 * scale,
                                           0.1,
                                           0.05,
-                                          0);
+                                          BRepExt::PatchMethod::Auto);
         const TopoDS_Face fill  = onlyFace(BRepExt::get(session(), built.evolution.resultId));
         ASSERT_FALSE(fill.IsNull());
         loop.expectMet(fill, 1e-3 * scale);
@@ -1046,7 +1083,16 @@ TEST(BRepPatchExt, HeldOutStripsOnDomesAndSaddlesAreEasedAtAnyScaleAndPose)
   }
   try
   {
-    BRepExt::patch(session(), edges, supports, {2, 2, 2}, {}, {}, 1e-3, 0.1, 0.05, 0);
+    BRepExt::patch(session(),
+                   edges,
+                   supports,
+                   {2, 2, 2},
+                   {},
+                   {},
+                   1e-3,
+                   0.1,
+                   0.05,
+                   BRepExt::PatchMethod::Auto);
     FAIL() << "the flat strips were filled";
   }
   catch (const BRepExt::Failure& failure)
@@ -1066,7 +1112,7 @@ struct Asking
   std::vector<uint32_t>  edges, supports;
   std::vector<int>       orders;
   double                 tolerance, g1Degrees, g2Share;
-  int                    method   = 0;
+  BRepExt::PatchMethod   method   = BRepExt::PatchMethod::Auto;
   BRepExt::PatchControls controls = {};
 };
 
@@ -1169,7 +1215,7 @@ TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
   const uint32_t    circle = BRepExt::store(
     session(),
     BRepBuilderAPI_MakeEdge(new Geom_Circle(gp_Ax2(gp_Pnt(3, -2, 5), gp_Dir(0, 0, 1)), 12)).Edge());
-  for (const int method : {0, 1})
+  for (const auto method : {BRepExt::PatchMethod::Auto, BRepExt::PatchMethod::Fitted})
     cases.push_back({"circle", {{circle}, {0}, {0}, 1e-6, 1, 0.1, method}});
   {
     const double       R = 10, latitude = 40 * M_PI / 180;
@@ -1211,7 +1257,7 @@ TEST(BRepPatchExt, FillsAreMadeTheSameAtAThousandthAndAThousandTimesTheirSize)
   {
     const Elbow elbow;
     Asking      bend{elbow.edges, elbow.supports, {2, 2}, 1e-3, 0.1, 0.05};
-    bend.controls.quad = 1;
+    bend.controls.quad = BRepExt::PatchQuad::On;
     bend.controls.open = true;
     cases.push_back({"elbow", bend});
   }
@@ -1260,8 +1306,8 @@ Asking coneRim(double tilt)
              1e-4,
              0.1,
              0.05,
-             1};
-  out.controls.quad = 0;
+             BRepExt::PatchMethod::Fitted};
+  out.controls.quad = BRepExt::PatchQuad::Off;
   return out;
 }
 
@@ -1465,7 +1511,7 @@ std::vector<double> readFill(const Master& master, const gp_Trsf& pose)
                                    1e-3 * pose.ScaleFactor(),
                                    0.1,
                                    0.05,
-                                   0,
+                                   BRepExt::PatchMethod::Auto,
                                    -1,
                                    controls);
   const TopoDS_Face   fill = onlyFace(BRepExt::get(session(), made.evolution.resultId));
@@ -1743,7 +1789,16 @@ TEST(BRepPatchExt, PlanarFillsDoNotHaveAnAspectRatioLimit)
     for (const gp_Pnt& p : {gp_Pnt(0,0,0),gp_Pnt(length,0,0),gp_Pnt(length,width,0),gp_Pnt(0,width,0)})wire.Add(p);
     wire.Close();std::vector<uint32_t> edges;
     for(TopExp_Explorer it(wire.Wire(),TopAbs_EDGE);it.More();it.Next())edges.push_back(BRepExt::store(session(),it.Current()));
-    const auto made=BRepExt::patch(session(),edges,{0,0,0,0},{0,0,0,0},{},{},1e-6,.1,.05,0);
+    const auto made = BRepExt::patch(session(),
+                                     edges,
+                                     {0, 0, 0, 0},
+                                     {0, 0, 0, 0},
+                                     {},
+                                     {},
+                                     1e-6,
+                                     .1,
+                                     .05,
+                                     BRepExt::PatchMethod::Auto);
     EXPECT_NEAR(area(BRepExt::get(session(),made.evolution.resultId)),length*width,1e-8*length*width);
   }
 }
@@ -1757,7 +1812,16 @@ TEST(BRepPatchExt, PositionalGuideToleranceDoesNotRequireExactEndpointTangency)
     {edges.push_back(BRepExt::store(session(),it.Current()));supports.push_back(BRepExt::store(session(),support));}
     const auto guide=BRepBuilderAPI_MakeEdge(gp_Pnt(0,50,0),gp_Pnt(.01,50,height)).Edge();
     const uint32_t id=BRepExt::store(session(),guide);
-    const auto made=BRepExt::patch(session(),edges,supports,{1,1,1,1},{id},{},.001,.1,.05,0);
+    const auto     made = BRepExt::patch(session(),
+                                     edges,
+                                     supports,
+                                         {1, 1, 1, 1},
+                                         {id},
+                                         {},
+                                     .001,
+                                     .1,
+                                     .05,
+                                     BRepExt::PatchMethod::Auto);
     EXPECT_NEAR(area(BRepExt::get(session(),made.evolution.resultId)),10000.,1e-8);
   }
 }
@@ -1787,7 +1851,16 @@ TEST(BRepPatchExt, InteriorRequestsAreMeasuredAgainstTheDeliveredTrim)
     {
       try
       {
-        BRepExt::patch(session(),edges,{0,0,0,0},{0,0,0,0},curve?std::vector<uint32_t>{guide}:std::vector<uint32_t>{},curve?std::vector<double>{}:std::vector<double>{p.X(),p.Y(),p.Z()},.001,.1,.05,0);
+        BRepExt::patch(session(),
+                       edges,
+                       {0, 0, 0, 0},
+                       {0, 0, 0, 0},
+                       curve ? std::vector<uint32_t>{guide} : std::vector<uint32_t>{},
+                       curve ? std::vector<double>{} : std::vector<double>{p.X(), p.Y(), p.Z()},
+                       .001,
+                       .1,
+                       .05,
+                       BRepExt::PatchMethod::Auto);
         FAIL() << "an exterior constraint was accepted " << outside << " guide " << curve;
       }
       catch(const BRepExt::Failure& f){EXPECT_EQ(f.reason,BRepExt::no_solution);}
@@ -1827,8 +1900,16 @@ TEST(BRepPatchExt, QuadraticGuideRemainsOwnedUpToACircularRim)
     poles(1)=gp_Pnt(-radius,0,0); poles(2)=gp_Pnt(0,0,4*scale); poles(3)=gp_Pnt(radius,0,0);
     Handle(Geom_Curve) curve = new Geom_BezierCurve(poles);
     const auto guide = BRepBuilderAPI_MakeEdge(curve).Edge();
-    const auto made = BRepExt::patch(session(),{BRepExt::store(session(),edge)},{0},{0},
-      {BRepExt::store(session(),guide)},{},1e-6*scale,.1,.05,0);
+    const auto         made  = BRepExt::patch(session(),
+                                              {BRepExt::store(session(), edge)},
+                                              {0},
+                                              {0},
+                                              {BRepExt::store(session(), guide)},
+                                              {},
+                                     1e-6 * scale,
+                                     .1,
+                                     .05,
+                                     BRepExt::PatchMethod::Auto);
     const auto face = onlyFace(BRepExt::get(session(),made.evolution.resultId));
     for (double t : {1e-7,1e-6,.1,.5,.9,1-1e-6,1-1e-7})
       EXPECT_LE(GeomAPI_ProjectPointOnSurf(curve->Value(t),BRep_Tool::Surface(face)).LowerDistance(),1e-6*scale);

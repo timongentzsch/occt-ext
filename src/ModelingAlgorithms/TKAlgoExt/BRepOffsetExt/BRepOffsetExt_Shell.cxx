@@ -58,7 +58,7 @@ std::optional<EvolutionData> quickShell(OcctKernel&                      kernel,
                                         const std::vector<TopoDS_Shape>& removed,
                                         double                           thickness,
                                         double                           tolerance,
-                                        int                              join,
+                                        OffsetJoin                       join,
                                         const Lineage&                   divided,
                                         FaceHistory&                     history)
 {
@@ -153,14 +153,14 @@ EvolutionData shell(OcctKernel&                  kernel,
                     const std::vector<uint32_t>& ids,
                     double                       thickness,
                     double                       tolerance,
-                    int                          join,
+                    OffsetJoin                   join,
                     const std::vector<int>&      hashes,
                     int                          bound,
                     bool                         local)
 {
   const TopoDS_Shape given = singleSolid(get(kernel, id));
   if (given.IsNull() || !std::isfinite(thickness) || thickness == 0 || !std::isfinite(tolerance)
-      || tolerance <= 0 || join < 0 || join > 2)
+      || tolerance <= 0 || join < OffsetJoin::Arc || join > OffsetJoin::Intersection)
     fail(op,
          invalid_input,
          "one solid, a thickness that is not zero, a positive tolerance and a supported join are "

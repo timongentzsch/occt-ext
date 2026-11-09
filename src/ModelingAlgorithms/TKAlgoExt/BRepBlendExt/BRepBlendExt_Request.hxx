@@ -120,9 +120,6 @@ struct Blended
 
 Standard_EXPORT Blended blend(const Request& request);
 
-//! The kernel's stored body `shape` blended at its `edges` and checked valid: what the blend's
-//! two entry points, with a journal session and without, share. `law` is a Law's value and
-//! `reference` 0 for none.
 //! A result the blend may return for this input: valid, closed where the input was, and every edge
 //! that claims it curvature continuous to within limit::seamBend of a blend of `size`. Refused by
 //! name otherwise.

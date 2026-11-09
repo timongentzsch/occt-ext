@@ -23,18 +23,20 @@ using namespace BRepExtTest;
 namespace
 {
 
-enum Operation
-{
-  Union        = 0,
-  Difference   = 1,
-  Intersection = 2
-};
-
-TopoDS_Shape combine(Operation operation, const TopoDS_Shape& source, const TopoDS_Shape& tool)
+TopoDS_Shape combine(BRepExt::Select     operation,
+                     const TopoDS_Shape& source,
+                     const TopoDS_Shape& tool)
 {
   const uint32_t a = BRepExt::store(session(), source), b = BRepExt::store(session(), tool);
-  const auto     result =
-    BRepExt::booleanChecked(session(), operation, {a}, {b}, 0, 0, 0, {}, BRepExt::failureHashBound);
+  const auto     result = BRepExt::booleanChecked(session(),
+                                              operation,
+                                                  {a},
+                                                  {b},
+                                              BRepExt::BooleanGlue::Off,
+                                              0,
+                                              0,
+                                                  {},
+                                              BRepExt::failureHashBound);
   return BRepExt::get(session(), result.resultId);
 }
 
@@ -50,7 +52,7 @@ TEST(BRepBooleanExt, IntersectionOfCrossedCylindersIsTheSteinmetzSolid)
     BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -length / 2), gp_Dir(0, 0, 1)), r, length).Shape();
   const TopoDS_Shape across =
     BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(-length / 2, 0, 0), gp_Dir(1, 0, 0)), r, length).Shape();
-  const TopoDS_Shape made = combine(Intersection, along, across);
+  const TopoDS_Shape made = combine(BRepExt::Select::Intersection, along, across);
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
   EXPECT_NEAR(volume(made), 16 * r * r * r / 3, 1e-6 * r * r * r);
 }
@@ -64,7 +66,7 @@ TEST(BRepBooleanExt, UnionOfCrossedCylindersFollowsInclusionExclusion)
     BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -length / 2), gp_Dir(0, 0, 1)), r, length).Shape();
   const TopoDS_Shape across =
     BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(-length / 2, 0, 0), gp_Dir(1, 0, 0)), r, length).Shape();
-  const TopoDS_Shape made = combine(Union, along, across);
+  const TopoDS_Shape made = combine(BRepExt::Select::Union, along, across);
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
   EXPECT_NEAR(volume(made), 2 * M_PI * r * r * length - 16 * r * r * r / 3, 1e-6 * r * r * length);
 }
@@ -77,7 +79,7 @@ TEST(BRepBooleanExt, DifferenceOfABoxAndAThroughCylinderRemovesTheBore)
   const TopoDS_Shape box = BRepPrimAPI_MakeBox(a, b, c).Shape();
   const TopoDS_Shape bore =
     BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(a / 2, b / 2, -5), gp_Dir(0, 0, 1)), r, c + 10).Shape();
-  const TopoDS_Shape made = combine(Difference, box, bore);
+  const TopoDS_Shape made = combine(BRepExt::Select::Difference, box, bore);
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
   EXPECT_NEAR(volume(made), a * b * c - M_PI * r * r * c, 1e-9 * a * b * c);
 }
@@ -88,7 +90,7 @@ TEST(BRepBooleanExt, UnionOfOverlappingBoxesRemovesTheOverlapOnce)
 {
   const TopoDS_Shape first  = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 10, 10, 10).Shape();
   const TopoDS_Shape second = BRepPrimAPI_MakeBox(gp_Pnt(6, 4, 2), 10, 10, 10).Shape();
-  const TopoDS_Shape made   = combine(Union, first, second);
+  const TopoDS_Shape made   = combine(BRepExt::Select::Union, first, second);
   EXPECT_TRUE(BRepExt::invalidity(made).empty());
   EXPECT_NEAR(volume(made), 2000 - 4 * 6 * 8, 1e-9 * 2000);
 }
@@ -109,11 +111,11 @@ TEST(BRepBooleanExt, ImprintOfACircleSplitsTheFaceIntoDiscAndRing)
   const auto          result = BRepExt::imprintCurves(session(),
                                              BRepExt::store(session(), box),
                                                       {BRepExt::store(session(), circle)},
-                                             0,
+                                             BRepExt::ImprintMethod::Direction,
                                                       {0, 0, -1},
                                              false,
                                              false,
-                                             0,
+                                             BRepExt::ImprintCompletion::None,
                                                       {},
                                              BRepExt::failureHashBound);
   const TopoDS_Shape& made   = BRepExt::get(session(), result.resultId);

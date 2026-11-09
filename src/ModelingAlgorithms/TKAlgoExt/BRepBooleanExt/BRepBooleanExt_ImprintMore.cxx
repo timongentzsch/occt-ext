@@ -298,31 +298,34 @@ EvolutionData isoparamEdges(OcctKernel&                kernel,
   return splitBy(op, kernel, shape, tools, hashes, bound);
 }
 
-// Imprint: `method` 0 projects each curve along `direction` (`both`: and against it), 1 along
-// the normals of the faces (onto the nearest of the body). `hideOccluded` keeps of a
-// projection along a direction only what has nothing of the body between it and the curve.
-// `completion` 0 leaves the projected edges as they are; 1 carries each loose end on, straight
-// in the parameters of the face it lies on, until it leaves that face (it stretches projected
-// edges until they contact other edges). A third completion, to the boundary, is not built.
+// Imprint: `method` Direction projects each curve along `direction` (`both`: and against it),
+// Normal along the normals of the faces (onto the nearest of the body). `hideOccluded` keeps of
+// a projection along a direction only what has nothing of the body between it and the curve.
+// `completion` None leaves the projected edges as they are; Extend carries each loose end on,
+// straight in the parameters of the face it lies on, until it leaves that face (it stretches
+// projected edges until they contact other edges). A third completion, to the boundary, is not
+// built.
 EvolutionData imprintCurves(OcctKernel&                  kernel,
                             uint32_t                     shapeId,
                             const std::vector<uint32_t>& curveIds,
-                            int                          method,
+                            ImprintMethod                method,
                             Vec3                         direction,
                             bool                         both,
                             bool                         hideOccluded,
-                            int                          completion,
+                            ImprintCompletion            completion,
                             const std::vector<int>&      hashes,
                             int                          bound)
 {
   const char* op    = "imprintCurves";
   const auto& shape = get(kernel, shapeId);
-  if (method < 0 || method > 1 || completion < 0 || completion > 1 || curveIds.empty())
+  if (method < ImprintMethod::Direction || method > ImprintMethod::Normal
+      || completion < ImprintCompletion::None || completion > ImprintCompletion::Extend
+      || curveIds.empty())
     fail(op, invalid_input, "curves, a method and a completion are required");
   std::vector<TopoDS_Edge> projected;
   for (const auto id : curveIds)
   {
-    if (method == 1)
+    if (method == ImprintMethod::Normal)
     {
       // Onto the nearest of the body: what lies further from the curve than the curve ever
       // is from the body (at 32 places to each edge, and a hundredth more) is left out, so
@@ -367,7 +370,7 @@ EvolutionData imprintCurves(OcctKernel&                  kernel,
   NCollection_List<TopoDS_Shape> tools;
   for (const auto& edge : projected)
     tools.Append(edge);
-  if (completion == 1)
+  if (completion == ImprintCompletion::Extend)
   {
     // The ends of the projected edges, and how many edges each is an end of. Two ends are
     // one where they are no further apart than the tolerances their edges were made with.
@@ -476,7 +479,7 @@ EvolutionData imprintCurves(OcctKernel&                  kernel,
         // not, and a wrong edge is not drawn. The direction of an approximated
         // projected edge is known to about a ten-thousandth, so that much of the
         // carried length is allowed.
-        if (method == 0)
+        if (method == ImprintMethod::Direction)
         {
           const gp_Vec across = end.leaving.Crossed(gp_Vec(direction.x, direction.y, direction.z));
           double       off = 0, length = 0;
