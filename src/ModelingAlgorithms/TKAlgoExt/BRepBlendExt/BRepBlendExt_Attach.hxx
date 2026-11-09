@@ -81,9 +81,20 @@ struct Attach
                                        int                                nv);
   TopoDS_Face                 lawCorner(const Corner& at, size_t c);
   std::pair<TopoDS_Vertex, double> contactsCross(const Corner& at, int i, int j);
-  void                        splitCorner(const Corner& at, size_t c);
-  TopoDS_Face                 tracedCorner(const Corner& at, size_t c,
-                                         const TopoDS_Vertex (&Q)[3][3], double crossingGap);
+  void                             splitCorner(const Corner& at, size_t c);
+  //! The central split's construction (defined beside splitCorner).
+  struct CentralSplit;
+  //! Each blend's end at the corner as a homogeneous cubic on its sheet, from crossing to crossing.
+  void splitCornerEnds(const Corner& at, CentralSplit& cs);
+  //! The split's patches, the ends' halves and the inner curves, all on shared edges.
+  void                        splitCornerFaces(const Corner&       at,
+                                               size_t              c,
+                                               const CentralSplit& cs,
+                                               const gp_XYZ&       centrePoint);
+  TopoDS_Face                 tracedCorner(const Corner& at,
+                                           size_t        c,
+                                           const TopoDS_Vertex (&Q)[3][3],
+                                           double crossingGap);
   bool                        notch(int a, int ea, int b, int eb);
   void                        rollRound(int                  k,
                                         int                  ea,

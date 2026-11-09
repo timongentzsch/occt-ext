@@ -719,38 +719,55 @@ TopoDS_Face Attach::tracedCorner(const Corner& at, size_t c,
 //   by the rules above (with the offsets next to M_i set so) and is solved for at the others
 //   together with the poles that remain, kept fair: the least thin-plate energy of the nets. Its
 //   last coefficient makes the curves' tangents at C an affine image of the regular n-gon's.
-void Attach::splitCorner(const Corner& at, size_t c)
+//! The central split's construction (Attach::splitCorner) in the corner's frame at V: each blend's
+//! end as a homogeneous cubic on its sheet, split at M_i into two halves of degree 6; the patches'
+//! poles, fixed or solved for under the G1 conditions across the inner curves; the centre where
+//! the corner bends least.
+struct Attach::CentralSplit
 {
   using Homogeneous = std::array<double, 6>; // w (x - V), w s, w r, w: on the corner and a sheet
-  constexpr int degree = 6;
-  const Piece&  first  = pieces[at.ends[0].first];
-  const int     count  = int(at.ends.size());
-  const double  scale  = first.rail.scale;
-  const gp_XYZ  V      = BRep_Tool::Pnt(at.vertex).XYZ();
-  const char*   notYet = "where more than three conic blends meet, the blend makes the corner "
-                         "only between planes so far";
-  std::vector<TopoDS_Vertex> X(count); // X[i]: where the contacts of blends i and i + 1 cross
-  for (int i = 0; i < count; ++i)
-    X[i] = contactsCross(at, i, (i + 1) % count).first;
-  std::vector<gp_Vec>                    d(count);
-  std::vector<Handle(Geom_BSplineCurve)> profile(count);
-  for (int i = 0; i < count; ++i)
+  static constexpr int degree = 6;
+
+  //! A pole: one of the unknowns, else fixed at `at`.
+  struct Ref
   {
-    const Piece& piece = pieces[at.ends[i].first];
-    const auto   extrusion =
-      Handle(Geom_SurfaceOfLinearExtrusion)::DownCast(piece.sheet.surface);
-    if (!extrusion.IsNull())
-      profile[i] = Handle(Geom_BSplineCurve)::DownCast(extrusion->BasisCurve());
-    if (!piece.sheet.swapped || profile[i].IsNull() || profile[i]->Degree() != 2
-        || profile[i]->NbPoles() != 3)
-      fail(op, unsupported_geometry, notYet, {piece.rail.edge});
-    d[i] = gp_Vec(extrusion->Direction());
-  }
-  const auto point = [&](const Homogeneous& h) {
-    return gp_XYZ(h[0], h[1], h[2]) / h[5];
+    int    var = -1;
+    gp_XYZ at;
   };
-  // de Casteljau's split of a homogeneous Bezier curve at t.
-  const auto split = [](std::vector<Homogeneous> b, double t) {
+
+  //! A term of a fairness stencil or of a condition across an inner curve.
+  struct Term
+  {
+    double coefficient;
+    Ref    ref;
+  };
+
+  const char*                            op     = nullptr;
+  const char*                            notYet = nullptr;
+  int                                    count  = 0;
+  double                                 scale  = 0;
+  gp_XYZ                                 V;
+  std::vector<TopoDS_Edge>               edges; // the blends', in turn round it
+  std::vector<TopoDS_Vertex>             X;     // X[i]: where blends i and i + 1 cross
+  std::vector<gp_Vec>                    d;
+  std::vector<Handle(Geom_BSplineCurve)> profile;
+  std::vector<std::vector<Homogeneous>>  cubics;
+  std::vector<gp_Vec> outwardAt; // out of the face blends i and i + 1 share, at X[i]
+  //! Each blend's end: half[i][0] from X[i - 1] to M_i, half[i][1] from X[i] to M_i.
+  std::vector<std::array<std::vector<Homogeneous>, 2>> half;
+  double                                               beta = 0;
+  std::vector<double>                                  legRow, legCol, ell;
+  int                                                  curveBase = 0, centre = 0, unknowns = 0;
+  std::vector<std::vector<Term>>                       stencils, rows;
+  std::vector<math_Vector>                             solution;
+
+  static gp_XYZ point(const Homogeneous& h) { return gp_XYZ(h[0], h[1], h[2]) / h[5]; }
+
+  //! de Casteljau's split of a homogeneous Bezier curve at t.
+  static std::pair<std::vector<Homogeneous>, std::vector<Homogeneous>> split(
+    std::vector<Homogeneous> b,
+    double                   t)
+  {
     std::vector<Homogeneous> left, right(b.size());
     for (size_t level = 0; level < b.size(); ++level)
     {
@@ -761,11 +778,13 @@ void Attach::splitCorner(const Corner& at, size_t c)
           b[m][x] = (1 - t) * b[m][x] + t * b[m + 1][x];
     }
     return std::make_pair(left, right);
-  };
-  // A cubic half in the form of weights 1, 1, ..., 1, 1: its weights' Moebius standard form, then
-  // the cubic factor (1, 2 - w1, 2 - w2, 1) of numerator and denominator. Empty where a weight is
-  // not positive.
-  const auto sextic = [&](std::vector<Homogeneous> b) -> std::optional<std::vector<Homogeneous>> {
+  }
+
+  //! A cubic half in the form of weights 1, 1, ..., 1, 1: its weights' Moebius standard form, then
+  //! the cubic factor (1, 2 - w1, 2 - w2, 1) of numerator and denominator. Empty where a weight is
+  //! not positive.
+  static std::optional<std::vector<Homogeneous>> sextic(std::vector<Homogeneous> b)
+  {
     if (!(b[0][5] > 0 && b[3][5] > 0))
       return {};
     const double ratio = std::cbrt(b[0][5] / b[3][5]);
@@ -776,9 +795,9 @@ void Attach::splitCorner(const Corner& at, size_t c)
         x *= f;
       f *= ratio;
     }
-    const double             g[4]    = {1, 2 - b[1][5], 2 - b[2][5], 1};
-    constexpr double         c3[4]   = {1, 3, 3, 1};
-    constexpr double         c6[7]   = {1, 6, 15, 20, 15, 6, 1};
+    const double             g[4]  = {1, 2 - b[1][5], 2 - b[2][5], 1};
+    constexpr double         c3[4] = {1, 3, 3, 1};
+    constexpr double         c6[7] = {1, 6, 15, 20, 15, 6, 1};
     std::vector<Homogeneous> product(degree + 1, Homogeneous{});
     for (int i = 0; i < 4; ++i)
       for (int j = 0; j < 4; ++j)
@@ -788,89 +807,12 @@ void Attach::splitCorner(const Corner& at, size_t c)
       if (!(pole[5] > 0))
         return {};
     return product;
-  };
-  // Each blend's end: half[i][0] from X[i - 1] to M_i, half[i][1] from X[i] to M_i.
-  std::vector<std::array<std::vector<Homogeneous>, 2>> half(count);
-  std::vector<std::vector<Homogeneous>>                 cubics(count);
-  std::vector<gp_Vec> outwardAt(count); // out of the face blends i and i + 1 share, at X[i]
-  for (int i = 0; i < count; ++i)
-  {
-    const auto& [k, end] = at.ends[i];
-    const Piece& piece   = pieces[k];
-    const int    prev = (i + count - 1) % count, next = (i + 1) % count;
-    const int    a    = corner[k][0][end].IsSame(X[prev]) ? 0 : 1;
-    if (!corner[k][a][end].IsSame(X[prev]) || !corner[k][1 - a][end].IsSame(X[i]))
-      fail(op,
-           no_solution,
-           "the contacts of the blends at a corner do not cross in turn round it",
-           {piece.rail.edge});
-    {
-      const gp_Pnt2d foot = piece.fitted.contact[1 - a]->Value(u[k][1 - a][end]);
-      Jet            j;
-      if (!jetAt(piece.rail.s[1 - a], foot.X(), foot.Y(), j))
-        fail(op, unsupported_geometry, notYet, {piece.rail.edge});
-      outwardAt[i] = j.n;
-    }
-    const gp_Pnt2d from = piece.sheet.uv(piece.sheet.rail(u[k][a][end]), piece.sheet.across[a]);
-    const gp_Pnt2d to =
-      piece.sheet.uv(piece.sheet.rail(u[k][1 - a][end]), piece.sheet.across[1 - a]);
-    const auto&  conic    = profile[i];
-    const bool   reversed = std::abs(from.X() - conic->LastParameter())
-                          < std::abs(from.X() - conic->FirstParameter());
-    gp_XYZ       p[3];
-    double       w[3];
-    for (int m = 0; m < 3; ++m)
-    {
-      p[m] = conic->Pole(reversed ? 3 - m : m + 1).XYZ() - V;
-      w[m] = conic->Weight(reversed ? 3 - m : m + 1);
-    }
-    // The section's slopes at its ends; the rail's slopes there that turn them along the
-    // neighbours' edges.
-    const gp_Vec start(gp_Vec(p[1] - p[0]) * (2 * w[1] / w[0]));
-    const gp_Vec stop(gp_Vec(p[2] - p[1]) * (2 * w[1] / w[2]));
-    const auto   slope = [&](const gp_Vec& c, const gp_Vec& along) {
-      const gp_Vec normal = d[i].Crossed(along);
-      const double rho    = -c.Crossed(along).Dot(normal) / normal.SquareMagnitude();
-      const gp_Vec turned = c + d[i] * rho;
-      if (turned.Crossed(along).Magnitude() > tol::fineAngle * turned.Magnitude())
-        fail(op, unsupported_geometry, notYet, {piece.rail.edge});
-      return rho;
-    };
-    const double rhoA = slope(start, d[prev]), rhoB = slope(stop, d[next]);
-    const double R0 = from.Y() * w[0], R3 = to.Y() * w[2];
-    const double R[4] = {R0,
-                         R0 + (rhoA * w[0] + from.Y() * 2 * (w[1] - w[0])) / 3,
-                         R3 - (rhoB * w[2] + to.Y() * 2 * (w[2] - w[1])) / 3,
-                         R3};
-    const double s0 = from.X(), s1 = to.X();
-    const gp_XYZ hp[4] = {p[0] * w[0],
-                          (p[0] * w[0] + p[1] * (2 * w[1])) / 3,
-                          (p[1] * (2 * w[1]) + p[2] * w[2]) / 3,
-                          p[2] * w[2]};
-    const double hw[4] = {w[0], (w[0] + 2 * w[1]) / 3, (2 * w[1] + w[2]) / 3, w[2]};
-    const double hs[4] = {s0 * w[0],
-                          (2 * s0 * w[1] + s1 * w[0]) / 3,
-                          (s0 * w[2] + 2 * s1 * w[1]) / 3,
-                          s1 * w[2]};
-    std::vector<Homogeneous> cubic(4);
-    for (int m = 0; m < 4; ++m)
-    {
-      const gp_XYZ x = hp[m] + d[i].XYZ() * R[m];
-      cubic[m]       = {x.X(), x.Y(), x.Z(), hs[m], R[m], hw[m]};
-    }
-    // Its ends at the crossings' vertices, which both sheets meet to within their gap.
-    for (const auto& [m, vertex] : {std::make_pair(0, X[prev]), std::make_pair(3, X[i])})
-    {
-      const gp_XYZ x = (BRep_Tool::Pnt(vertex).XYZ() - V) * cubic[m][5];
-      cubic[m][0]    = x.X();
-      cubic[m][1]    = x.Y();
-      cubic[m][2]    = x.Z();
-    }
-    cubics[i] = cubic;
   }
-  // Blend i's end split where its halves' speeds at M_i agree: the first's grows from nothing as
-  // the split moves along, the second's shrinks to nothing.
-  const auto splitEnd = [&](int i) {
+
+  //! Blend i's end split where its halves' speeds at M_i agree: the first's grows from nothing as
+  //! the split moves along, the second's shrinks to nothing.
+  void splitEnd(int i)
+  {
     const auto halves = [&](double t) {
       const auto [left, right] = split(cubics[i], t);
       return std::make_pair(sextic(left), sextic(right));
@@ -882,7 +824,7 @@ void Attach::splitCorner(const Corner& at, size_t c)
       return (point((*left)[degree]) - point((*left)[degree - 1])).Modulus()
              - (point((*right)[1]) - point((*right)[0])).Modulus();
     };
-    const TopoDS_Edge& edge = pieces[at.ends[i].first].rail.edge;
+    const TopoDS_Edge& edge = edges[i];
     const char*        why  = "the end of a blend at a corner cannot be split evenly";
     double             lo = 0.02, hi = 0.98;
     const auto         low = excess(lo), high = excess(hi);
@@ -899,63 +841,65 @@ void Attach::splitCorner(const Corner& at, size_t c)
     const auto [left, right] = halves((lo + hi) / 2);
     half[i][0]               = *left;
     half[i][1]               = std::vector<Homogeneous>(right->rbegin(), right->rend());
-  };
-  const auto splitPoint = [&](int i) { return point(half[i][0][degree]); };
-  for (int i = 0; i < count; ++i)
-    splitEnd(i);
-  // The offsets across each half end, along its blend's edge: l0 at the crossing (the other
-  // end's first leg), l_i at M_i, and l_i (1 - cos(2 pi / n) / 6) next to M_i, where the
-  // condition across the inner curve then holds at its second coefficient; between, from one to
-  // the other in even steps. l_i is a sixth of the chord from M_i to the splits' mean: the speed
-  // of the inner curve's first leg that of a straight curve to the centre's likely place.
-  const double        beta = 2 * std::cos(2 * M_PI / count);
-  std::vector<double> legRow(count), legCol(count), ell(count);
-  for (int i = 0; i < count; ++i)
-  {
-    const int    next = (i + 1) % count;
-    const gp_Vec alongRow(point(half[i][1][1]) - point(half[i][1][0]));
-    const gp_Vec alongCol(point(half[next][0][1]) - point(half[next][0][0]));
-    legRow[i] = alongRow.Dot(d[next]);
-    legCol[i] = alongCol.Dot(d[i]);
-    if (alongRow.Crossed(d[next]).Magnitude() > tol::fineAngle * alongRow.Magnitude()
-        || alongCol.Crossed(d[i]).Magnitude() > tol::fineAngle * alongCol.Magnitude())
-      fail(op, unsupported_geometry, notYet, {first.rail.edge});
   }
-  gp_XYZ centred;
-  for (int i = 0; i < count; ++i)
-    centred += splitPoint(i) / count;
-  for (int i = 0; i < count; ++i)
+
+  gp_XYZ splitPoint(int i) const { return point(half[i][0][degree]); }
+
+  //! The offsets across each half end, along its blend's edge: l0 at the crossing (the other
+  //! end's first leg), l_i at M_i, and l_i (1 - cos(2 pi / n) / 6) next to M_i, where the
+  //! condition across the inner curve then holds at its second coefficient; between, from one to
+  //! the other in even steps. l_i is a sixth of the chord from M_i to the splits' mean: the speed
+  //! of the inner curve's first leg that of a straight curve to the centre's likely place.
+  void legs()
   {
-    // Both patches beside blend i's end lie on one side of it: towards the corner.
-    if (!(legRow[(i + count - 1) % count] * legCol[i] > 0))
-      fail(op,
-           no_solution,
-           "the ends of the blends at a corner turn away from it",
-           {pieces[at.ends[i].first].rail.edge});
-    ell[i] = (legCol[i] > 0 ? 1 : -1) * (centred - splitPoint(i)).Modulus() / degree;
+    beta = 2 * std::cos(2 * M_PI / count);
+    legRow.resize(count);
+    legCol.resize(count);
+    ell.resize(count);
+    for (int i = 0; i < count; ++i)
+    {
+      const int    next = (i + 1) % count;
+      const gp_Vec alongRow(point(half[i][1][1]) - point(half[i][1][0]));
+      const gp_Vec alongCol(point(half[next][0][1]) - point(half[next][0][0]));
+      legRow[i] = alongRow.Dot(d[next]);
+      legCol[i] = alongCol.Dot(d[i]);
+      if (alongRow.Crossed(d[next]).Magnitude() > tol::fineAngle * alongRow.Magnitude()
+          || alongCol.Crossed(d[i]).Magnitude() > tol::fineAngle * alongCol.Magnitude())
+        fail(op, unsupported_geometry, notYet, {edges[0]});
+    }
+    gp_XYZ centred;
+    for (int i = 0; i < count; ++i)
+      centred += splitPoint(i) / count;
+    for (int i = 0; i < count; ++i)
+    {
+      // Both patches beside blend i's end lie on one side of it: towards the corner.
+      if (!(legRow[(i + count - 1) % count] * legCol[i] > 0))
+        fail(op, no_solution, "the ends of the blends at a corner turn away from it", {edges[i]});
+      ell[i] = (legCol[i] > 0 ? 1 : -1) * (centred - splitPoint(i)).Modulus() / degree;
+    }
   }
-  const auto offset = [&](double l0, double l, int j) {
+
+  double offset(double l0, double l, int j) const
+  {
     const double inner = l * (1 - beta / (2 * degree));
-    return j <= 1             ? l0
-           : j == degree      ? l
-           : j == degree - 1  ? inner
-                              : l0 + (inner - l0) * (j - 1) / 4;
-  };
-  // Patch q at X[q]: u along blend q + 1's end to M_{q+1} (its side v = 0), v along blend q's to
-  // M_q (u = 0); the inner curve q + 1 is its side u = 1, curve q its side v = 1. A pole is fixed
-  // or one of the unknowns: per patch its 16 inner ones, per curve 4, and the centre.
-  struct Ref
+    return j <= 1            ? l0
+           : j == degree     ? l
+           : j == degree - 1 ? inner
+                             : l0 + (inner - l0) * (j - 1) / 4;
+  }
+
+  //! Patch q at X[q]: u along blend q + 1's end to M_{q+1} (its side v = 0), v along blend q's to
+  //! M_q (u = 0); the inner curve q + 1 is its side u = 1, curve q its side v = 1. A pole is fixed
+  //! or one of the unknowns: per patch its 16 inner ones, per curve 4, and the centre.
+  Ref onCurve(int i, int t) const
   {
-    int    var = -1;
-    gp_XYZ at;
-  };
-  const int  curveBase = 16 * count, centre = 20 * count, unknowns = 20 * count + 1;
-  const auto onCurve   = [&](int i, int t) -> Ref {
     if (t <= 1)
       return {-1, splitPoint(i) + d[i].XYZ() * (t * ell[i])};
     return {t == degree ? centre : curveBase + 4 * i + t - 2, {}};
-  };
-  const auto pole = [&](int q, int j, int k) -> Ref {
+  }
+
+  Ref pole(int q, int j, int k) const
+  {
     const int next = (q + 1) % count;
     if (k == degree)
       return onCurve(q, j);
@@ -972,127 +916,157 @@ void Attach::splitCorner(const Corner& at, size_t c)
     if (j == 1)
       return {-1, point(B[k]) + d[q].XYZ() * offset(legCol[q], ell[q], k)};
     return {16 * q + 4 * (j - 2) + k - 2, {}};
-  };
-  const auto weight = [&](int q, int j, int k) {
+  }
+
+  double weight(int q, int j, int k) const
+  {
     if (k <= 1 && j < degree)
       return half[(q + 1) % count][0][j][5];
     if (j <= 1 && k < degree)
       return half[q][1][k][5];
     return 1.0;
-  };
-  // The fairness, the thin-plate energy of the nets: their second differences along u and v and
-  // their twists. The conditions across the inner curves, coefficient by coefficient.
-  struct Term
-  {
-    double coefficient;
-    Ref    ref;
-  };
-  std::vector<std::vector<Term>> stencils;
-  for (int q = 0; q < count; ++q)
-    for (int j = 0; j <= degree; ++j)
-      for (int k = 0; k <= degree; ++k)
-      {
-        if (j > 0 && j < degree)
-          stencils.push_back({{1, pole(q, j - 1, k)}, {-2, pole(q, j, k)}, {1, pole(q, j + 1, k)}});
-        if (k > 0 && k < degree)
-          stencils.push_back({{1, pole(q, j, k - 1)}, {-2, pole(q, j, k)}, {1, pole(q, j, k + 1)}});
-        if (j < degree && k < degree)
-          stencils.push_back({{M_SQRT2, pole(q, j + 1, k + 1)},
-                              {-M_SQRT2, pole(q, j + 1, k)},
-                              {-M_SQRT2, pole(q, j, k + 1)},
-                              {M_SQRT2, pole(q, j, k)}});
-      }
-  std::vector<std::vector<Term>> rows;
-  for (int i = 0; i < count; ++i)
-  {
-    const int a = (i + count - 1) % count, b = i;
-    for (int t = 0; t <= degree; ++t)
-      rows.push_back({{2 * degree - beta * t, onCurve(i, t)},
-                      {beta * t, t > 0 ? onCurve(i, t - 1) : Ref{}},
-                      {-double(degree), pole(a, degree - 1, t)},
-                      {-double(degree), pole(b, t, degree - 1)}});
   }
-  // One system for the three coordinates, [H A'; A 0] [x; y] = [-g; b], with one more row that
-  // holds the centre at a point c; its constraints are dependent (the centre's take two of them),
-  // so it is solved by singular values. Its solution is x0 + g c, g the same for every coordinate.
-  std::vector<std::vector<Term>> conditions;
-  std::copy_if(rows.begin(), rows.end(), std::back_inserter(conditions), [](const auto& row) {
-    return std::any_of(row.begin(), row.end(), [](const Term& term) { return term.ref.var >= 0; });
-  });
-  const int                size = unknowns + int(conditions.size()) + 1;
-  math_Matrix              K(1, size, 1, size, 0.0);
-  std::vector<math_Vector> rhs(4, math_Vector(1, size, 0.0));
-  const auto               fixedPart = [&](int row, double c, const gp_XYZ& at) {
-    for (int x = 0; x < 3; ++x)
-      rhs[x](row) -= c * at.Coord(x + 1);
-  };
-  for (const auto& stencil : stencils)
-    for (const auto& p : stencil)
-      if (p.ref.var >= 0)
-        for (const auto& q : stencil)
-          if (q.ref.var >= 0)
-            K(p.ref.var + 1, q.ref.var + 1) += p.coefficient * q.coefficient;
-          else
-            fixedPart(p.ref.var + 1, p.coefficient * q.coefficient, q.ref.at);
-  for (size_t r = 0; r < conditions.size(); ++r)
+
+  //! The fairness, the thin-plate energy of the nets: their second differences along u and v and
+  //! their twists. The conditions across the inner curves, coefficient by coefficient.
+  void equations()
   {
-    const int row = unknowns + int(r) + 1;
-    for (const auto& term : conditions[r])
-      if (term.ref.var >= 0)
-      {
-        K(row, term.ref.var + 1) += term.coefficient;
-        K(term.ref.var + 1, row) += term.coefficient;
-      }
-      else
-        fixedPart(row, term.coefficient, term.ref.at);
+    curveBase = 16 * count;
+    centre    = 20 * count;
+    unknowns  = 20 * count + 1;
+    for (int q = 0; q < count; ++q)
+      for (int j = 0; j <= degree; ++j)
+        for (int k = 0; k <= degree; ++k)
+        {
+          if (j > 0 && j < degree)
+            stencils.push_back(
+              {{1, pole(q, j - 1, k)}, {-2, pole(q, j, k)}, {1, pole(q, j + 1, k)}});
+          if (k > 0 && k < degree)
+            stencils.push_back(
+              {{1, pole(q, j, k - 1)}, {-2, pole(q, j, k)}, {1, pole(q, j, k + 1)}});
+          if (j < degree && k < degree)
+            stencils.push_back({{M_SQRT2, pole(q, j + 1, k + 1)},
+                                {-M_SQRT2, pole(q, j + 1, k)},
+                                {-M_SQRT2, pole(q, j, k + 1)},
+                                {M_SQRT2, pole(q, j, k)}});
+        }
+    for (int i = 0; i < count; ++i)
+    {
+      const int a = (i + count - 1) % count, b = i;
+      for (int t = 0; t <= degree; ++t)
+        rows.push_back({{2 * degree - beta * t, onCurve(i, t)},
+                        {beta * t, t > 0 ? onCurve(i, t - 1) : Ref{}},
+                        {-double(degree), pole(a, degree - 1, t)},
+                        {-double(degree), pole(b, t, degree - 1)}});
+    }
   }
-  K(size, centre + 1) = K(centre + 1, size) = 1;
-  rhs[3](size)                         = 1;
-  math_SVD                 svd(K);
-  std::vector<math_Vector> solution(4, math_Vector(1, size));
-  for (int x = 0; x < 4; ++x)
-    svd.Solve(rhs[x], solution[x], 1e-12);
-  const math_Vector& g        = solution[3];
-  const auto         valueFor = [&](const Ref& ref, const gp_XYZ& c) {
+
+  //! The unknowns as an affine function of the centre c, and the centre where the nets' energy is
+  //! least.
+  gp_XYZ solve()
+  {
+    // One system for the three coordinates, [H A'; A 0] [x; y] = [-g; b], with one more row that
+    // holds the centre at a point c; its constraints are dependent (the centre's take two of them),
+    // so it is solved by singular values. Its solution is x0 + g c, g the same for every
+    // coordinate.
+    std::vector<std::vector<Term>> conditions;
+    std::copy_if(rows.begin(), rows.end(), std::back_inserter(conditions), [](const auto& row) {
+      return std::any_of(row.begin(), row.end(), [](const Term& term) {
+        return term.ref.var >= 0;
+      });
+    });
+    const int                size = unknowns + int(conditions.size()) + 1;
+    math_Matrix              K(1, size, 1, size, 0.0);
+    std::vector<math_Vector> rhs(4, math_Vector(1, size, 0.0));
+    const auto               fixedPart = [&](int row, double c, const gp_XYZ& at) {
+      for (int x = 0; x < 3; ++x)
+        rhs[x](row) -= c * at.Coord(x + 1);
+    };
+    for (const auto& stencil : stencils)
+      for (const auto& p : stencil)
+        if (p.ref.var >= 0)
+          for (const auto& q : stencil)
+            if (q.ref.var >= 0)
+              K(p.ref.var + 1, q.ref.var + 1) += p.coefficient * q.coefficient;
+            else
+              fixedPart(p.ref.var + 1, p.coefficient * q.coefficient, q.ref.at);
+    for (size_t r = 0; r < conditions.size(); ++r)
+    {
+      const int row = unknowns + int(r) + 1;
+      for (const auto& term : conditions[r])
+        if (term.ref.var >= 0)
+        {
+          K(row, term.ref.var + 1) += term.coefficient;
+          K(term.ref.var + 1, row) += term.coefficient;
+        }
+        else
+          fixedPart(row, term.coefficient, term.ref.at);
+    }
+    K(size, centre + 1) = K(centre + 1, size) = 1;
+    rhs[3](size)                              = 1;
+    math_SVD svd(K);
+    solution.assign(4, math_Vector(1, size));
+    for (int x = 0; x < 4; ++x)
+      svd.Solve(rhs[x], solution[x], 1e-12);
+    const math_Vector& g = solution[3];
+    // Where the thin-plate energy of the nets is least: x' H x - 2 x' r is least along x0 + g c.
+    gp_XYZ fair;
+    {
+      double gHg = 0;
+      gp_XYZ gR;
+      for (int a = 1; a <= unknowns; ++a)
+      {
+        double Hg = 0;
+        gp_XYZ Hx;
+        for (int b = 1; b <= unknowns; ++b)
+        {
+          Hg += K(a, b) * g(b);
+          Hx += gp_XYZ(solution[0](b), solution[1](b), solution[2](b)) * K(a, b);
+        }
+        gHg += g(a) * Hg;
+        gR += (gp_XYZ(rhs[0](a), rhs[1](a), rhs[2](a)) - Hx) * g(a);
+      }
+      fair = gR / gHg;
+    }
+    return fair;
+  }
+
+  gp_XYZ valueFor(const Ref& ref, const gp_XYZ& c) const
+  {
+    const math_Vector& g = solution[3];
     if (ref.var < 0)
       return ref.at;
     const int x = ref.var + 1;
     return gp_XYZ(solution[0](x), solution[1](x), solution[2](x)) + c * g(x);
-  };
-  // Where the thin-plate energy of the nets is least: x' H x - 2 x' r is least along x0 + g c.
-  gp_XYZ fair;
-  {
-    double gHg = 0;
-    gp_XYZ gR;
-    for (int a = 1; a <= unknowns; ++a)
-    {
-      double Hg = 0;
-      gp_XYZ Hx;
-      for (int b = 1; b <= unknowns; ++b)
-      {
-        Hg += K(a, b) * g(b);
-        Hx += gp_XYZ(solution[0](b), solution[1](b), solution[2](b)) * K(a, b);
-      }
-      gHg += g(a) * Hg;
-      gR += (gp_XYZ(rhs[0](a), rhs[1](a), rhs[2](a)) - Hx) * g(a);
-    }
-    fair = gR / gHg;
   }
-  // The centre itself where the corner bends least: the least integral of k1^2 + k2^2 over the
-  // patches, the bending energy of the surface (not of its nets). The nets' energy is a stand-in
-  // for it only where the patches are parametrised evenly; uneven corners have patches of very
-  // different shapes, and it pulls the centre towards the long ones. Every other pole stays the
-  // nets' fairest for that centre. The energy is a sum of squares of the shape operator's entries
-  // in an orthonormal frame at Gauss points, minimised from the nets' fairest centre by
-  // Levenberg-Marquardt steps until no step lowers it.
-  const gp_XYZ centrePoint = [&] {
+
+  // Per point the homogeneous point and its derivatives (u, v, uu, uv, vv), split into the part
+  // that does not move with the centre and the factor that does, and the weight's; summed over
+  // u first, then v.
+  struct Node
+  {
+    gp_XYZ h[6];
+    double gamma[6], w[6], area;
+  };
+
+  struct Homogeneous5
+  {
+    gp_XYZ h;
+    double gamma = 0, w = 0;
+  };
+
+  //! The surface's points and derivatives at the Gauss points of every patch, as affine functions
+  //! of the centre.
+  std::vector<Node> gaussNodes() const
+  {
+    const math_Vector& g = solution[3];
     // A composite Gauss rule, 4 x 4 squares of 8 x 8 points per patch. The energy's integrand
     // varies sharply where a patch is narrow (one Gauss rule of 10 x 10 points misses it by a
     // quarter); on the uneven family the centre this rule finds lies within 0.7 % of the corner's
     // size of the one 8 x 8 squares of 6 x 6 points find (measured).
-    constexpr int cells = 4, nodes = 8, points = cells * nodes;
+    constexpr int                           cells = 4, nodes = 8, points = cells * nodes;
     const math_ComputeGaussPointsAndWeights gauss(nodes);
-    const math_Vector gx = gauss.Points(), gw = gauss.Weights();
+    const math_Vector                       gx = gauss.Points(), gw = gauss.Weights();
     // Bernstein values and derivatives at the points on [0, 1], and their weights.
     std::vector<std::array<std::array<double, degree + 1>, 3>> basis(points);
     std::vector<double>                                        share(points);
@@ -1116,19 +1090,7 @@ void Attach::splitCorner(const Corner& at, size_t c)
                          * (b(degree - 2, j - 2) - 2 * b(degree - 2, j - 1) + b(degree - 2, j));
       }
     }
-    // Per point the homogeneous point and its derivatives (u, v, uu, uv, vv), split into the part
-    // that does not move with the centre and the factor that does, and the weight's; summed over
-    // u first, then v.
-    struct Node
-    {
-      gp_XYZ h[6];
-      double gamma[6], w[6], area;
-    };
-    struct Homogeneous5
-    {
-      gp_XYZ h;
-      double gamma = 0, w = 0;
-    };
+
     std::vector<Node> at(size_t(count) * points * points);
     constexpr int     du[6] = {0, 1, 0, 2, 1, 0}, dv[6] = {0, 0, 1, 0, 1, 2};
     for (int q = 0; q < count; ++q)
@@ -1139,7 +1101,7 @@ void Attach::splitCorner(const Corner& at, size_t c)
         {
           const Ref    ref = pole(q, j, k);
           const double w   = weight(q, j, k);
-          net[j][k]        = {valueFor(ref, gp_XYZ()) * w, ref.var < 0 ? 0.0 : g(ref.var + 1) * w, w};
+          net[j][k] = {valueFor(ref, gp_XYZ()) * w, ref.var < 0 ? 0.0 : g(ref.var + 1) * w, w};
         }
       std::vector<std::array<std::array<Homogeneous5, degree + 1>, 3>> row(points);
       for (int a = 0; a < points; ++a)
@@ -1171,7 +1133,20 @@ void Attach::splitCorner(const Corner& at, size_t c)
           node.area = share[a] * share[b];
         }
     }
-    const auto residuals = [&](const gp_XYZ& c, std::vector<double>& r) {
+    return at;
+  }
+
+  // The centre itself where the corner bends least: the least integral of k1^2 + k2^2 over the
+  // patches, the bending energy of the surface (not of its nets). The nets' energy is a stand-in
+  // for it only where the patches are parametrised evenly; uneven corners have patches of very
+  // different shapes, and it pulls the centre towards the long ones. Every other pole stays the
+  // nets' fairest for that centre. The energy is a sum of squares of the shape operator's entries
+  // in an orthonormal frame at Gauss points, minimised from the nets' fairest centre by
+  // Levenberg-Marquardt steps until no step lowers it.
+  gp_XYZ centreOf(const gp_XYZ& fair) const
+  {
+    const std::vector<Node> at        = gaussNodes();
+    const auto              residuals = [&](const gp_XYZ& c, std::vector<double>& r) {
       r.resize(3 * at.size());
       for (size_t i = 0; i < at.size(); ++i)
       {
@@ -1210,8 +1185,8 @@ void Attach::splitCorner(const Corner& at, size_t c)
     // The gradient 2 J' r, J the residuals' Jacobian by differences.
     const double h        = 1e-7 * scale;
     const auto   gradient = [&](const gp_XYZ& c, const std::vector<double>& r, math_Matrix* JtJ) {
-      std::vector<double> plus;
-      math_Vector         grad(1, 3, 0.0);
+      std::vector<double>                plus;
+      math_Vector                        grad(1, 3, 0.0);
       std::vector<std::array<double, 3>> jac(r.size());
       for (int x = 0; x < 3; ++x)
       {
@@ -1266,9 +1241,9 @@ void Attach::splitCorner(const Corner& at, size_t c)
       const math_Vector next = gradient(c, r, nullptr);
       const math_Vector y    = next - grad;
       math_Vector       sv(1, 3);
-      sv(1) = move.X();
-      sv(2) = move.Y();
-      sv(3) = move.Z();
+      sv(1)           = move.X();
+      sv(2)           = move.Y();
+      sv(3)           = move.Z();
       const double sy = sv * y;
       if (sy > 0)
       {
@@ -1280,18 +1255,129 @@ void Attach::splitCorner(const Corner& at, size_t c)
       }
       grad = next;
     }
-  }();
-  const auto value = [&](const Ref& ref) { return valueFor(ref, centrePoint); };
-  // The conditions hold: the first two by construction, the others as solved.
-  const double exact = 1e-9 * scale;
-  for (const auto& row : rows)
-  {
-    gp_XYZ sum;
-    for (const auto& term : row)
-      sum += value(term.ref) * term.coefficient;
-    if (sum.Modulus() > exact)
-      fail(op, no_solution, "the corner's split does not join smoothly", {first.rail.edge});
   }
+
+  //! The conditions hold: the first two by construction, the others as solved.
+  void checkJoins(const gp_XYZ& centrePoint) const
+  {
+    const auto   value = [&](const Ref& ref) { return valueFor(ref, centrePoint); };
+    const double exact = 1e-9 * scale;
+    for (const auto& row : rows)
+    {
+      gp_XYZ sum;
+      for (const auto& term : row)
+        sum += value(term.ref) * term.coefficient;
+      if (sum.Modulus() > exact)
+        fail(op, no_solution, "the corner's split does not join smoothly", {edges[0]});
+    }
+  }
+};
+
+void Attach::splitCornerEnds(const Corner& at, CentralSplit& cs)
+{
+  using Homogeneous       = CentralSplit::Homogeneous;
+  const int     count     = cs.count;
+  const gp_XYZ& V         = cs.V;
+  const char*   notYet    = cs.notYet;
+  const auto&   X         = cs.X;
+  const auto&   d         = cs.d;
+  const auto&   profile   = cs.profile;
+  auto&         cubics    = cs.cubics;
+  auto&         outwardAt = cs.outwardAt;
+  for (int i = 0; i < count; ++i)
+  {
+    const auto& [k, end] = at.ends[i];
+    const Piece& piece   = pieces[k];
+    const int    prev = (i + count - 1) % count, next = (i + 1) % count;
+    const int    a = corner[k][0][end].IsSame(X[prev]) ? 0 : 1;
+    if (!corner[k][a][end].IsSame(X[prev]) || !corner[k][1 - a][end].IsSame(X[i]))
+      fail(op,
+           no_solution,
+           "the contacts of the blends at a corner do not cross in turn round it",
+           {piece.rail.edge});
+    {
+      const gp_Pnt2d foot = piece.fitted.contact[1 - a]->Value(u[k][1 - a][end]);
+      Jet            j;
+      if (!jetAt(piece.rail.s[1 - a], foot.X(), foot.Y(), j))
+        fail(op, unsupported_geometry, notYet, {piece.rail.edge});
+      outwardAt[i] = j.n;
+    }
+    const gp_Pnt2d from = piece.sheet.uv(piece.sheet.rail(u[k][a][end]), piece.sheet.across[a]);
+    const gp_Pnt2d to =
+      piece.sheet.uv(piece.sheet.rail(u[k][1 - a][end]), piece.sheet.across[1 - a]);
+    const auto& conic = profile[i];
+    const bool  reversed =
+      std::abs(from.X() - conic->LastParameter()) < std::abs(from.X() - conic->FirstParameter());
+    gp_XYZ p[3];
+    double w[3];
+    for (int m = 0; m < 3; ++m)
+    {
+      p[m] = conic->Pole(reversed ? 3 - m : m + 1).XYZ() - V;
+      w[m] = conic->Weight(reversed ? 3 - m : m + 1);
+    }
+    // The section's slopes at its ends; the rail's slopes there that turn them along the
+    // neighbours' edges.
+    const gp_Vec start(gp_Vec(p[1] - p[0]) * (2 * w[1] / w[0]));
+    const gp_Vec stop(gp_Vec(p[2] - p[1]) * (2 * w[1] / w[2]));
+    const auto   slope = [&](const gp_Vec& c, const gp_Vec& along) {
+      const gp_Vec normal = d[i].Crossed(along);
+      const double rho    = -c.Crossed(along).Dot(normal) / normal.SquareMagnitude();
+      const gp_Vec turned = c + d[i] * rho;
+      if (turned.Crossed(along).Magnitude() > tol::fineAngle * turned.Magnitude())
+        fail(op, unsupported_geometry, notYet, {piece.rail.edge});
+      return rho;
+    };
+    const double             rhoA = slope(start, d[prev]), rhoB = slope(stop, d[next]);
+    const double             R0 = from.Y() * w[0], R3 = to.Y() * w[2];
+    const double             R[4] = {R0,
+                                     R0 + (rhoA * w[0] + from.Y() * 2 * (w[1] - w[0])) / 3,
+                                     R3 - (rhoB * w[2] + to.Y() * 2 * (w[2] - w[1])) / 3,
+                                     R3};
+    const double             s0 = from.X(), s1 = to.X();
+    const gp_XYZ             hp[4] = {p[0] * w[0],
+                                      (p[0] * w[0] + p[1] * (2 * w[1])) / 3,
+                                      (p[1] * (2 * w[1]) + p[2] * w[2]) / 3,
+                                      p[2] * w[2]};
+    const double             hw[4] = {w[0], (w[0] + 2 * w[1]) / 3, (2 * w[1] + w[2]) / 3, w[2]};
+    const double             hs[4] = {s0 * w[0],
+                                      (2 * s0 * w[1] + s1 * w[0]) / 3,
+                                      (s0 * w[2] + 2 * s1 * w[1]) / 3,
+                                      s1 * w[2]};
+    std::vector<Homogeneous> cubic(4);
+    for (int m = 0; m < 4; ++m)
+    {
+      const gp_XYZ x = hp[m] + d[i].XYZ() * R[m];
+      cubic[m]       = {x.X(), x.Y(), x.Z(), hs[m], R[m], hw[m]};
+    }
+    // Its ends at the crossings' vertices, which both sheets meet to within their gap.
+    for (const auto& [m, vertex] : {std::make_pair(0, X[prev]), std::make_pair(3, X[i])})
+    {
+      const gp_XYZ x = (BRep_Tool::Pnt(vertex).XYZ() - V) * cubic[m][5];
+      cubic[m][0]    = x.X();
+      cubic[m][1]    = x.Y();
+      cubic[m][2]    = x.Z();
+    }
+    cubics[i] = cubic;
+  }
+}
+
+void Attach::splitCornerFaces(const Corner&       at,
+                              size_t              c,
+                              const CentralSplit& cs,
+                              const gp_XYZ&       centrePoint)
+{
+  constexpr int degree    = CentralSplit::degree;
+  const Piece&  first     = pieces[at.ends[0].first];
+  const int     count     = cs.count;
+  const gp_XYZ& V         = cs.V;
+  const auto&   X         = cs.X;
+  const auto&   half      = cs.half;
+  const auto&   outwardAt = cs.outwardAt;
+  const auto    point     = CentralSplit::point;
+  const auto    pole      = [&](int q, int j, int k) { return cs.pole(q, j, k); };
+  const auto    weight    = [&](int q, int j, int k) { return cs.weight(q, j, k); };
+  const auto    onCurve   = [&](int i, int t) { return cs.onCurve(i, t); };
+  const auto    value = [&](const CentralSplit::Ref& ref) { return cs.valueFor(ref, centrePoint); };
   // The patches, the ends' halves and the inner curves, all on shared edges.
   NCollection_Array1<double> knots(1, 2);
   NCollection_Array1<int>    mults(1, 2);
@@ -1327,8 +1413,8 @@ void Attach::splitCorner(const Corner& at, size_t c)
     builder.MakeVertex(M[i], gp_Pnt(point(half[i][0][degree]) + V), tolerance);
   TopoDS_Vertex C;
   builder.MakeVertex(C, gp_Pnt(value(onCurve(0, degree)) + V), tolerance);
-  std::vector<std::array<TopoDS_Edge, 2>> ends(count); // [blend][half]
-  std::vector<TopoDS_Edge>                inner(count);  // inner curve i, from M_i to C
+  std::vector<std::array<TopoDS_Edge, 2>> ends(count);  // [blend][half]
+  std::vector<TopoDS_Edge>                inner(count); // inner curve i, from M_i to C
   for (int i = 0; i < count; ++i)
   {
     const int    prev  = (i + count - 1) % count;
@@ -1351,17 +1437,17 @@ void Attach::splitCorner(const Corner& at, size_t c)
       // second.
       const Handle(Geom2d_Curve) onPatch =
         segment2d(gp_Pnt2d(0, 0), h == 0 ? gp_Pnt2d(1, 0) : gp_Pnt2d(0, 1));
-      ends[i][h] = edgeBetween(
-        curve3d(at3, w),
-        h == 0 ? X[prev] : X[i],
-        0,
-        M[i],
-        1,
-        {OnSurface{onPatch, Handle(Geom_Surface)(surface[h == 0 ? prev : i]), {}},
-         OnSurface{new Geom2d_BSplineCurve(uv, uvWeights, knots, mults, degree),
-                   sheet.surface,
-                   {}}},
-        tolerance);
+      ends[i][h] =
+        edgeBetween(curve3d(at3, w),
+                    h == 0 ? X[prev] : X[i],
+                    0,
+                    M[i],
+                    1,
+                    {OnSurface{onPatch, Handle(Geom_Surface)(surface[h == 0 ? prev : i]), {}},
+                     OnSurface{new Geom2d_BSplineCurve(uv, uvWeights, knots, mults, degree),
+                               sheet.surface,
+                               {}}},
+                    tolerance);
     }
     std::vector<gp_XYZ> at3(degree + 1);
     for (int t = 0; t <= degree; ++t)
@@ -1406,7 +1492,7 @@ void Attach::splitCorner(const Corner& at, size_t c)
   for (int i = 0; i < count; ++i)
   {
     const auto& [k, end] = at.ends[i];
-    const int prev       = (i + count - 1) % count;
+    const int  prev      = (i + count - 1) % count;
     const bool fromPrev  = corner[k][0][end].IsSame(X[prev]);
     chain[k][end]        = fromPrev ? std::vector<TopoDS_Edge>{ends[i][0], ends[i][1]}
                                     : std::vector<TopoDS_Edge>{ends[i][1], ends[i][0]};
@@ -1416,6 +1502,51 @@ void Attach::splitCorner(const Corner& at, size_t c)
     partInner.push_back({inner[i], faces[prev], faces[i]});
   }
   parts[c] = faces;
+}
+
+void Attach::splitCorner(const Corner& at, size_t c)
+{
+  const Piece& first = pieces[at.ends[0].first];
+  CentralSplit cs;
+  cs.op           = op;
+  cs.count        = int(at.ends.size());
+  cs.scale        = first.rail.scale;
+  cs.V            = BRep_Tool::Pnt(at.vertex).XYZ();
+  cs.notYet       = "where more than three conic blends meet, the blend makes the corner "
+                    "only between planes so far";
+  const int count = cs.count;
+  cs.X.resize(count);
+  for (int i = 0; i < count; ++i)
+    cs.X[i] = contactsCross(at, i, (i + 1) % count).first;
+  cs.d.resize(count);
+  cs.profile.resize(count);
+  for (int i = 0; i < count; ++i)
+  {
+    const Piece& piece     = pieces[at.ends[i].first];
+    const auto   extrusion = Handle(Geom_SurfaceOfLinearExtrusion)::DownCast(piece.sheet.surface);
+    if (!extrusion.IsNull())
+      cs.profile[i] = Handle(Geom_BSplineCurve)::DownCast(extrusion->BasisCurve());
+    if (!piece.sheet.swapped || cs.profile[i].IsNull() || cs.profile[i]->Degree() != 2
+        || cs.profile[i]->NbPoles() != 3)
+      fail(op, unsupported_geometry, cs.notYet, {piece.rail.edge});
+    cs.d[i] = gp_Vec(extrusion->Direction());
+  }
+  for (int i = 0; i < count; ++i)
+    cs.edges.push_back(pieces[at.ends[i].first].rail.edge);
+  cs.half.resize(count);
+  cs.cubics.resize(count);
+  cs.outwardAt.resize(count);
+  splitCornerEnds(at, cs);
+  for (int i = 0; i < count; ++i)
+    cs.splitEnd(i);
+  cs.legs();
+  cs.equations();
+  const gp_XYZ fair = cs.solve();
+  // The centre itself where the corner bends least (centreOf); every other pole stays the nets'
+  // fairest for that centre.
+  const gp_XYZ centrePoint = cs.centreOf(fair);
+  cs.checkJoins(centrePoint);
+  splitCornerFaces(at, c, cs, centrePoint);
 }
 
 } // namespace BRepExt::blending::detail
