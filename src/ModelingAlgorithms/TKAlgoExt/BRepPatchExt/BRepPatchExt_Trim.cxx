@@ -90,10 +90,13 @@ constexpr double edgeHeadroom = 1.1;
 
 } // namespace
 
-std::optional<gp_Trsf> localSplineRim(Asked& asked, bool* copyBudgetMiss)
+namespace
 {
-  if (copyBudgetMiss)
-    *copyBudgetMiss = false;
+
+//! Whether the loop is one a private spline rim is made for: sides only, each a curve of
+//! positive weights with no face, and a B-spline only on its own domain.
+bool splineRimAsked(const Asked& asked)
+{
   if (asked.sides.empty() || !asked.guides.empty() || !asked.points.empty()
       || std::any_of(asked.sides.begin(), asked.sides.end(), [](const Side& side) {
            const RimPoles poles(side.curve);
@@ -108,7 +111,13 @@ std::optional<gp_Trsf> localSplineRim(Asked& asked, bool* copyBudgetMiss)
                       || std::min(side.from, side.to) < side.curve->FirstParameter()
                       || std::max(side.from, side.to) > side.curve->LastParameter());
          }))
-    return std::nullopt;
+    return false;
+  return true;
+}
+
+//! Private copies of the sides' curves: a Bezier curve cut to its stretch and run its way.
+std::vector<Side> privateSides(const Asked& asked)
+{
   auto sides = asked.sides;
   for (Side& side : sides)
   {
@@ -130,28 +139,36 @@ std::optional<gp_Trsf> localSplineRim(Asked& asked, bool* copyBudgetMiss)
                                                std::min(side.from, side.to),
                                                std::max(side.from, side.to));
   }
+  return sides;
+}
+
+//! The sides in an order and a direction of their own: from the longest side, run away from
+//! the loop's centre at its ends; false where there is no unique such order. `perimeter` gets
+//! the length round the loop.
+bool intrinsicOrder(std::vector<Side>& sides, double& perimeter)
+{
   gp_XYZ centre(0, 0, 0);
-  double perimeter = 0;
-  size_t first     = 0;
+  perimeter    = 0;
+  size_t first = 0;
   for (size_t i = 0; i < sides.size(); ++i)
   {
     const Side& side = sides[i];
     if (!(side.length > 0) || !std::isfinite(side.length))
-      return std::nullopt;
+      return false;
     centre += side.at(.5).XYZ() * side.length;
     perimeter += side.length;
     if (side.length > sides[first].length * (1 + 1e-12))
       first = i;
   }
   if (!(perimeter > 0) || !std::isfinite(perimeter))
-    return std::nullopt;
+    return false;
   // A tied anchor has no unique intrinsic ordering; retain the original path.
   for (size_t i = 0; i < sides.size(); ++i)
     if (i != first && std::abs(sides[i].length - sides[first].length) <= 1e-12 * perimeter)
-      return std::nullopt;
+      return false;
   centre /= perimeter;
   if (!finite(centre))
-    return std::nullopt;
+    return false;
   const gp_Pnt middle(centre);
   const int    selected = sides[first].input;
   bool         reverse = false, directed = false;
@@ -167,7 +184,7 @@ std::optional<gp_Trsf> localSplineRim(Asked& asked, bool* copyBudgetMiss)
     }
   }
   if (!directed)
-    return std::nullopt;
+    return false;
   if (reverse)
   {
     std::reverse(sides.begin(), sides.end());
@@ -192,6 +209,21 @@ std::optional<gp_Trsf> localSplineRim(Asked& asked, bool* copyBudgetMiss)
     return side.input == selected;
   });
   std::rotate(sides.begin(), start, sides.end());
+  return true;
+}
+
+} // namespace
+
+std::optional<gp_Trsf> localSplineRim(Asked& asked, bool* copyBudgetMiss)
+{
+  if (copyBudgetMiss)
+    *copyBudgetMiss = false;
+  if (!splineRimAsked(asked))
+    return std::nullopt;
+  auto   sides     = privateSides(asked);
+  double perimeter = 0;
+  if (!intrinsicOrder(sides, perimeter))
+    return std::nullopt;
   const Frame frame = meanPlane(polygon(sides), perimeter);
   gp_Trsf     world;
   world.SetValues(frame.x.X(),
@@ -300,13 +332,16 @@ std::optional<gp_Trsf> rebasedSplineRim(Asked& asked, gp_Trsf& anchor)
   return placement;
 }
 
-Rim preimage(const occ::handle<Geom_BSplineSurface>&    surface,
-             const Side&                                side,
-             const Frame&                               frame,
-             double                                     tolerance,
-             double                                     size,
-             const std::function<gp_XY(const gp_Pnt&)>& layout,
-             const std::function<gp_XY(double)>&        parameterLayout)
+namespace
+{
+
+//! A curve of a side laid into the surface's parameters to begin with: a line, a Bezier curve or a
+//! B-spline its own poles laid into the plane (or `layout`), anything else a quintic near it.
+occ::handle<Geom2d_BSplineCurve> laidCurve(const Side&                                side,
+                                           const Frame&                               frame,
+                                           double                                     size,
+                                           const std::function<gp_XY(const gp_Pnt&)>& layout,
+                                           const std::function<gp_XY(double)>& parameterLayout)
 {
   const auto   project = [&](const gp_Pnt& p) { return layout ? layout(p) : frame.project(p); };
   const double first = std::min(side.from, side.to), last = std::max(side.from, side.to);
@@ -370,8 +405,16 @@ Rim preimage(const occ::handle<Geom_BSplineSurface>&    surface,
     }
     flat = new Geom2d_BSplineCurve(poles, distinct, times, degree);
   }
-  // A same-parameter support curve can be only C1 at its own knots. An everywhere-C4
-  // preimage cannot follow those small changes of parameter at an absolute tolerance.
+  return flat;
+}
+
+// A same-parameter support curve can be only C1 at its own knots. An everywhere-C4
+// preimage cannot follow those small changes of parameter at an absolute tolerance.
+void heldKnots(const occ::handle<Geom2d_BSplineCurve>& flat,
+               const Side&                             side,
+               double                                  first,
+               double                                  last)
+{
   occ::handle<Geom2d_Curve> onHeld = side.onHeld;
   while (const auto cut = occ::down_cast<Geom2d_TrimmedCurve>(onHeld))
     onHeld = cut->BasisCurve();
@@ -390,9 +433,128 @@ Rim preimage(const occ::handle<Geom_BSplineSurface>&    surface,
       flat->InsertKnots(knots, times, 1e-10 * std::max(1.0, last - first), false);
     }
   }
-  const auto off = [&](double t, const gp_Pnt2d& uv) {
+}
+
+//! The poles of `flat` moved so that it passes through `wanted` at `at`: by the banded system
+//! where that brings it nearer, else pole by pole, each by what its own place is off.
+void fitPlaces(const occ::handle<Geom2d_BSplineCurve>& flat,
+               const occ::handle<Geom_BSplineSurface>& surface,
+               const NCollection_Array1<double>&       sequence,
+               const std::vector<double>&              at,
+               const std::vector<gp_XY>&               wanted,
+               double                                  tolerance)
+{
+  const int          count = flat->NbPoles(), degree = flat->Degree();
+  std::vector<gp_XY> miss(count);
+  // The curve through those places, which are as many as it has poles and lie one under
+  // each: its poles solve a banded system. Where that has no solution (knots as often
+  // as the order, which no curve here has) each pole is moved by what its own place is
+  // off instead, over and over.
+  NCollection_Array1<gp_Pnt2d> through(1, count);
+  NCollection_Array1<double>   parameters(1, count);
+  NCollection_Array1<int>      contacts(1, count);
+  for (int i = 0; i < count; ++i)
+  {
+    through.SetValue(i + 1, gp_Pnt2d(wanted[i]));
+    parameters.SetValue(i + 1, at[i]);
+    contacts.SetValue(i + 1, 0);
+  }
+  // Not where the curve is at its places as it stands (over a net that is a height
+  // above the mean plane the side laid into that plane is there already), and not kept
+  // where the curve it gives is further from them than the one before.
+  const auto furthest = [&] {
+    double worst = 0;
+    for (int i = 0; i < count; ++i)
+      worst = std::max(worst,
+                       surface->Value(wanted[i].X(), wanted[i].Y())
+                         .Distance(surface->Value(flat->Value(at[i]).X(), flat->Value(at[i]).Y())));
+    return worst;
+  };
+  const double asGiven  = furthest();
+  int          unsolved = asGiven < preimageShare * tolerance / 10;
+  if (!unsolved)
+  {
+    const NCollection_Array1<gp_Pnt2d> given = flat->Poles();
+    BSplCLib::Interpolate(degree, sequence, parameters, contacts, through, unsolved);
+    for (int i = 0; !unsolved && i < count; ++i)
+      flat->SetPole(i + 1, through(i + 1));
+    if (!unsolved && furthest() > asGiven)
+    {
+      unsolved = 1;
+      for (int i = 0; i < count; ++i)
+        flat->SetPole(i + 1, given(i + 1));
+    }
+  }
+  for (int pass = 0; unsolved && pass < preimagePasses; ++pass)
+  {
+    double worst = 0;
+    for (int i = 0; i < count; ++i)
+    {
+      miss[i] = wanted[i] - flat->Value(at[i]).XY();
+      worst   = std::max(worst,
+                       surface->Value(wanted[i].X(), wanted[i].Y())
+                         .Distance(surface->Value(flat->Value(at[i]).X(), flat->Value(at[i]).Y())));
+    }
+    if (worst < preimageShare * tolerance / 10)
+      break;
+    for (int i = 0; i < count; ++i)
+      flat->SetPole(i + 1, gp_Pnt2d(flat->Pole(i + 1).XY() + miss[i]));
+  }
+}
+
+//! How far `flat` is from where it should be between its places, in space; `rim` gets the
+//! furthest the surface is there from the side, and `middles` the middle of every knot span.
+double readBeside(const occ::handle<Geom2d_BSplineCurve>& flat,
+                  const occ::handle<Geom_BSplineSurface>& surface,
+                  const Side&                             side,
+                  const NCollection_Array1<double>&       sequence,
+                  double                                  first,
+                  double                                  last,
+                  const std::function<gp_XY(double)>&     parameterLayout,
+                  Rim&                                    rim,
+                  std::vector<double>&                    middles)
+{
+  const int  degree = flat->Degree();
+  const auto off    = [&](double t, const gp_Pnt2d& uv) {
     return surface->Value(uv.X(), uv.Y()).Distance(side.curve->Value(t));
   };
+  double beside = 0;
+  rim.deviation = std::max(off(first, flat->Value(first)), off(last, flat->Value(last)));
+  for (int k = sequence.Lower() + degree; k < sequence.Upper() - degree; ++k)
+  {
+    const double from = sequence(k), to = sequence(k + 1);
+    if (to <= from)
+      continue;
+    middles.push_back((from + to) / 2);
+    for (int part = 1; part <= 31; ++part)
+    {
+      const double   t  = from + (to - from) * part / 32;
+      const gp_Pnt2d uv = flat->Value(t);
+      const gp_XY    best =
+        nearest(surface, parameterLayout ? parameterLayout(t) : uv.XY(), side.meetAt(t));
+      beside =
+        std::max(beside,
+                 surface->Value(uv.X(), uv.Y()).Distance(surface->Value(best.X(), best.Y())));
+      rim.deviation = std::max(rim.deviation, off(t, uv));
+    }
+  }
+  return beside;
+}
+
+} // namespace
+
+Rim preimage(const occ::handle<Geom_BSplineSurface>&    surface,
+             const Side&                                side,
+             const Frame&                               frame,
+             double                                     tolerance,
+             double                                     size,
+             const std::function<gp_XY(const gp_Pnt&)>& layout,
+             const std::function<gp_XY(double)>&        parameterLayout)
+{
+  const double first = std::min(side.from, side.to), last = std::max(side.from, side.to);
+  const occ::handle<Geom2d_BSplineCurve> flat =
+    laidCurve(side, frame, size, layout, parameterLayout);
+  heldKnots(flat, side, first, last);
   Rim    rim{flat, 0};
   double before = HUGE_VAL;
   for (;;)
@@ -401,7 +563,7 @@ Rim preimage(const occ::handle<Geom_BSplineSurface>&    surface,
     const NCollection_Array1<double> sequence = flat->KnotSequence();
     // Each pole's own place on the curve: the mean of its knots.
     std::vector<double> at(count);
-    std::vector<gp_XY>  wanted(count), miss(count);
+    std::vector<gp_XY>  wanted(count);
     for (int i = 0; i < count; ++i)
     {
       double sum = 0;
@@ -412,84 +574,10 @@ Rim preimage(const occ::handle<Geom_BSplineSurface>&    surface,
                           parameterLayout ? parameterLayout(at[i]) : flat->Value(at[i]).XY(),
                           side.meetAt(at[i]));
     }
-    // The curve through those places, which are as many as it has poles and lie one under
-    // each: its poles solve a banded system. Where that has no solution (knots as often
-    // as the order, which no curve here has) each pole is moved by what its own place is
-    // off instead, over and over.
-    NCollection_Array1<gp_Pnt2d> through(1, count);
-    NCollection_Array1<double>   parameters(1, count);
-    NCollection_Array1<int>      contacts(1, count);
-    for (int i = 0; i < count; ++i)
-    {
-      through.SetValue(i + 1, gp_Pnt2d(wanted[i]));
-      parameters.SetValue(i + 1, at[i]);
-      contacts.SetValue(i + 1, 0);
-    }
-    // Not where the curve is at its places as it stands (over a net that is a height
-    // above the mean plane the side laid into that plane is there already), and not kept
-    // where the curve it gives is further from them than the one before.
-    const auto furthest = [&] {
-      double worst = 0;
-      for (int i = 0; i < count; ++i)
-        worst =
-          std::max(worst,
-                   surface->Value(wanted[i].X(), wanted[i].Y())
-                     .Distance(surface->Value(flat->Value(at[i]).X(), flat->Value(at[i]).Y())));
-      return worst;
-    };
-    const double asGiven  = furthest();
-    int          unsolved = asGiven < preimageShare * tolerance / 10;
-    if (!unsolved)
-    {
-      const NCollection_Array1<gp_Pnt2d> given = flat->Poles();
-      BSplCLib::Interpolate(degree, sequence, parameters, contacts, through, unsolved);
-      for (int i = 0; !unsolved && i < count; ++i)
-        flat->SetPole(i + 1, through(i + 1));
-      if (!unsolved && furthest() > asGiven)
-      {
-        unsolved = 1;
-        for (int i = 0; i < count; ++i)
-          flat->SetPole(i + 1, given(i + 1));
-      }
-    }
-    for (int pass = 0; unsolved && pass < preimagePasses; ++pass)
-    {
-      double worst = 0;
-      for (int i = 0; i < count; ++i)
-      {
-        miss[i] = wanted[i] - flat->Value(at[i]).XY();
-        worst =
-          std::max(worst,
-                   surface->Value(wanted[i].X(), wanted[i].Y())
-                     .Distance(surface->Value(flat->Value(at[i]).X(), flat->Value(at[i]).Y())));
-      }
-      if (worst < preimageShare * tolerance / 10)
-        break;
-      for (int i = 0; i < count; ++i)
-        flat->SetPole(i + 1, gp_Pnt2d(flat->Pole(i + 1).XY() + miss[i]));
-    }
-    // Between those places: how far the curve is from where it should be, in space.
-    double beside = 0;
-    rim.deviation = std::max(off(first, flat->Value(first)), off(last, flat->Value(last)));
+    fitPlaces(flat, surface, sequence, at, wanted, tolerance);
     std::vector<double> middles;
-    for (int k = sequence.Lower() + degree; k < sequence.Upper() - degree; ++k)
-    {
-      const double from = sequence(k), to = sequence(k + 1);
-      if (to <= from)
-        continue;
-      middles.push_back((from + to) / 2);
-      for (int part = 1; part <= 31; ++part)
-      {
-        const double   t  = from + (to - from) * part / 32;
-        const gp_Pnt2d uv = flat->Value(t);
-        const gp_XY    best =
-          nearest(surface, parameterLayout ? parameterLayout(t) : uv.XY(), side.meetAt(t));
-        beside =
-          std::max(beside,
-                   surface->Value(uv.X(), uv.Y()).Distance(surface->Value(best.X(), best.Y())));
-        rim.deviation = std::max(rim.deviation, off(t, uv));
-      }
-    }
+    const double        beside =
+      readBeside(flat, surface, side, sequence, first, last, parameterLayout, rim, middles);
     // Twice the knots bring a curve that is being followed at all sixteen times nearer;
     // one that comes no nearer by half is not following (the surface has no one nearest
     // point there), and more knots would not make it.

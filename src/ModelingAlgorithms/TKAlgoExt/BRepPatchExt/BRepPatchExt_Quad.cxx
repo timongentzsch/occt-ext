@@ -282,33 +282,149 @@ bool apart(const TopoDS_Edge& a, const TopoDS_Edge& b, double gap)
   return true;
 }
 
-std::optional<Built> foursided(const Asked& asked, const Frame& frame)
+namespace
 {
-  PatchPhase phase("quad");
-  const auto found = quadRuns(asked.sides, asked.limits.g1);
-  if (!found)
-    return {};
-  std::vector<Run> runs = *found;
-  // A side made only of gaps of an open boundary: nothing is asked along it.
-  bool gap[4];
-  for (size_t s = 0; s < 4; ++s)
-    gap[s] = std::all_of(runs[s].parts.begin(), runs[s].parts.end(), [](const Side* part) {
-      return part->free;
-    });
-  for (int pair = 0; pair < 2; ++pair)
-    for (const Side* a : runs[pair].parts)
-      for (const Side* b : runs[pair + 2].parts)
-        if (!a->free && !b->free && !apart(a->edge, b->edge, asked.limits.g0)
-            && BRepExtrema_DistShapeShape(a->edge, b->edge).Value() <= asked.limits.g0)
-          fail(op, invalid_input, "the boundary crosses itself");
-  int order = 0;
-  for (const Side& side : asked.sides)
-    order = std::max(order, side.order);
-  const bool fitting = order > 0 || asked.flatness >= 0 || asked.controls.flow > PatchFlow::Natural
-                       || !asked.guides.empty() || !asked.points.empty();
-  const double lu = (runs[0].length + runs[2].length) / 2,
-               lv = (runs[1].length + runs[3].length) / 2;
+
+// A guide from side to side runs straight across the rectangle, through the place of
+// each guide it crosses: the nearest point of a surface that does not yet rise to it
+// would drag the parameters along with the rise. Others go by that nearest point.
+struct Across
+{
+  bool                                  laid = false;
+  std::vector<std::pair<double, gp_XY>> stops;
+};
+
+//! The place of a laid guide at `f`, along the straight pieces between its `stops`.
+gp_XY laidAt(std::vector<std::pair<double, gp_XY>> stops, double f)
+{
+  std::sort(stops.begin(), stops.end(), [](const auto& a, const auto& b) {
+    return a.first < b.first;
+  });
+  size_t i = 0;
+  while (i + 2 < stops.size() && f > stops[i + 1].first)
+    ++i;
+  const double t = (f - stops[i].first) / std::max(stops[i + 1].first - stops[i].first, 1e-12);
+  return gp_XY(stops[i].second + (stops[i + 1].second - stops[i].second) * t);
+}
+
+//! The even places along two guides at which where they come nearest is first looked for,
+//! before it is narrowed down. Chosen: about as many as an edge is measured at (`places`).
+constexpr int crossingPlaces = 129;
+
+//! Four sides: the runs of the loop as the four sides of an untrimmed surface, the Coons patch
+//! of their curves, its inner poles then moved to meet G1 and G2, net by finer net.
+class QuadFill
+{
+public:
+  QuadFill(const Asked& asked, const Frame& frame, std::vector<Run> found)
+      : asked(asked),
+        frame(frame),
+        runs(std::move(found))
+  {
+    // A side made only of gaps of an open boundary: nothing is asked along it.
+    for (size_t s = 0; s < 4; ++s)
+      gap[s] = std::all_of(runs[s].parts.begin(), runs[s].parts.end(), [](const Side* part) {
+        return part->free;
+      });
+    for (int pair = 0; pair < 2; ++pair)
+      for (const Side* a : runs[pair].parts)
+        for (const Side* b : runs[pair + 2].parts)
+          if (!a->free && !b->free && !apart(a->edge, b->edge, asked.limits.g0)
+              && BRepExtrema_DistShapeShape(a->edge, b->edge).Value() <= asked.limits.g0)
+            fail(op, invalid_input, "the boundary crosses itself");
+    for (const Side& side : asked.sides)
+      order = std::max(order, side.order);
+    fitting = order > 0 || asked.flatness >= 0 || asked.controls.flow > PatchFlow::Natural
+              || !asked.guides.empty() || !asked.points.empty();
+    lu = (runs[0].length + runs[2].length) / 2;
+    lv = (runs[1].length + runs[3].length) / 2;
+  }
+
+  //! The surface, or nothing where the sides cannot be its edges.
+  std::optional<Built> run();
+
+private:
+  //! Each run as one curve, round the loop; false where an edge cannot be made a plain curve.
+  bool joinSides();
+
+  //! Opposite curves brought to one degree and one set of knots; false where they cannot be.
+  bool matchSides();
+
+  //! A place of a side is on the surface's own edge, as far along it.
+  gp_XY along(size_t s, double f) const;
+
+  //! Where an edge is in its side, for a place of it to be found on the surface.
+  gp_XY place(const Side& side, double f) const;
+
+  //! The way the isocurves across a side are to leave it, as the one direction in the
+  //! tangent plane that the derivative across is to have nothing of: square to the side for
+  //! Normal. For Adjacent they turn from the side before to the side after, which are those
+  //! isocurves at the corners; for Next they head for the same share of the opposite side,
+  //! turned at the corners into those same sides. Square to the side on a rectangle, both.
+  gp_Vec axis(size_t s, double f) const;
+
+  //! The nets, from the Coons patch of the curves, each with twice the spans of the one before.
+  std::optional<Built> rounds();
+
+  //! The poles a fit keeps: those of the sides that are not gaps, and the corners.
+  std::vector<char> fixedPoles(const SplineNet& net, int nu, int nv) const;
+
+  //! What a fit is held to along the sides, `placesPerPole` places to a pole.
+  std::vector<Target> sideTargets(int nu, int nv) const;
+
+  //! What a fit is held to along the guides and at the points inside.
+  void interiorTargets(std::vector<Target>&                    targets,
+                       const SplineNet&                        net,
+                       const std::vector<char>&                fixed,
+                       const occ::handle<Geom_BSplineSurface>& surface,
+                       int                                     nu,
+                       int                                     nv) const;
+
+  //! Whether a place in the parameters is on the rectangle's edge, within the tolerance.
+  bool onSide(const gp_XY& uv) const;
+
+  //! The guides laid straight across the rectangle where they run from side to side.
+  std::vector<Across> layAcross(ShapeAnalysis_Surface& projection) const;
+
+  //! Two laid guides that cross pass through one place of the rectangle.
+  void crossLaid(std::vector<Across>& across) const;
+
+  //! A guide that ends on one so laid, at a side or at another such guide, is laid to there.
+  void layEnds(std::vector<Across>& across, ShapeAnalysis_Surface& projection) const;
+
+  //! The face of `surface`, measured along the sides and for the flow across them.
+  Built measured(const occ::handle<Geom_BSplineSurface>& surface) const;
+
+  //! Twice the spans for the next round.
+  void finer();
+
+  const Asked&                   asked;
+  const Frame&                   frame;
+  std::vector<Run>               runs;
+  bool                           gap[4];
+  int                            order   = 0;
+  bool                           fitting = false;
+  double                         lu = 0, lv = 0;
   occ::handle<Geom_BSplineCurve> curves[4];
+};
+
+std::optional<Built> QuadFill::run()
+{
+  if (!joinSides() || !matchSides())
+    return {};
+  // Quality budgets are minimum span counts.
+  const int minimum = asked.controls.quality == PatchQuality::Max    ? 16
+                      : asked.controls.quality == PatchQuality::High ? 10
+                                                                     : 1;
+  for (int i = 0; i < 2; ++i)
+    for (int k = 1; k < minimum; ++k)
+      for (int c : {i, i + 2})
+        curves[c]->InsertKnot((i ? lv : lu) * k / minimum);
+  return rounds();
+}
+
+bool QuadFill::joinSides()
+{
   for (int i = 0; i < 4; ++i)
   {
     // Round the loop the top and the left run backwards.
@@ -316,7 +432,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
     {
       curves[i] = plain(*runs[i].parts[0], i % 2 ? lv : lu, i >= 2, asked.limits.g0);
       if (curves[i].IsNull())
-        return {};
+        return false;
       continue;
     }
     // The edges joined end to end, each scaled to go on at the speed the one before ends
@@ -329,7 +445,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
     {
       const auto piece = plain(*part, part->length, false, asked.limits.g0);
       if (piece.IsNull())
-        return {};
+        return false;
       if (!joined)
       {
         joined.emplace(piece);
@@ -337,7 +453,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
       }
       junctions.push_back(joined->BSplineCurve()->LastParameter());
       if (!joined->Add(piece, asked.limits.g0, true, true))
-        return {};
+        return false;
     }
     curves[i]          = joined->BSplineCurve();
     const double first = curves[i]->FirstParameter(), span = curves[i]->LastParameter() - first;
@@ -359,6 +475,11 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
     BSplCLib::Reparametrize(0, i % 2 ? lv : lu, knots);
     curves[i]->SetKnots(knots);
   }
+  return true;
+}
+
+bool QuadFill::matchSides()
+{
   for (int i = 0; i < 2; ++i)
   {
     auto &a = curves[i], &b = curves[i + 2];
@@ -381,90 +502,86 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
                                       plainSegments,
                                       5);
         if (!lower.HasResult() || lower.MaxError() > asked.limits.g0 * plainShare)
-          return {};
+          return false;
         *curve = lower.Curve();
       }
     const int degree = std::max({a->Degree(), b->Degree(), least});
     if (degree > 5)
-      return {};
+      return false;
     a->IncreaseDegree(degree);
     b->IncreaseDegree(degree);
     const double same = BRepExt::tolerance::parameterMerge * (i ? lv : lu);
     a->InsertKnots(b->Knots(), b->Multiplicities(), same, false);
     b->InsertKnots(a->Knots(), a->Multiplicities(), same, false);
     if (a->NbPoles() != b->NbPoles())
-      return {};
+      return false;
   }
-  // Quality budgets are minimum span counts.
-  const int minimum = asked.controls.quality == PatchQuality::Max    ? 16
-                      : asked.controls.quality == PatchQuality::High ? 10
-                                                                     : 1;
-  for (int i = 0; i < 2; ++i)
-    for (int k = 1; k < minimum; ++k)
-      for (int c : {i, i + 2})
-        curves[c]->InsertKnot((i ? lv : lu) * k / minimum);
-  // A place of a side is on the surface's own edge, as far along it.
-  const auto along = [&](size_t s, double f) {
-    return s == 0   ? gp_XY(f * lu, 0)
-           : s == 1 ? gp_XY(lu, f * lv)
-           : s == 2 ? gp_XY((1 - f) * lu, lv)
-                    : gp_XY(0, (1 - f) * lv);
+  return true;
+}
+
+gp_XY QuadFill::along(size_t s, double f) const
+{
+  return s == 0   ? gp_XY(f * lu, 0)
+         : s == 1 ? gp_XY(lu, f * lv)
+         : s == 2 ? gp_XY((1 - f) * lu, lv)
+                  : gp_XY(0, (1 - f) * lv);
+}
+
+gp_XY QuadFill::place(const Side& side, double f) const
+{
+  for (size_t s = 0; s < 4; ++s)
+    for (size_t k = 0; k < runs[s].parts.size(); ++k)
+      if (runs[s].parts[k] == &side)
+      {
+        const double end = k + 1 < runs[s].parts.size() ? runs[s].starts[k + 1] : 1;
+        return along(s, runs[s].starts[k] + f * (end - runs[s].starts[k]));
+      }
+  return gp_XY();
+}
+
+gp_Vec QuadFill::axis(size_t s, double f) const
+{
+  const auto [part, g] = runs[s].at(f);
+  if (asked.controls.flow == PatchFlow::Normal)
+    return part->tangent(g);
+  const gp_Vec tangent = part->tangent(g).Normalized();
+  gp_Vec       before  = -runs[(s + 3) % 4].tangent(1).Normalized(),
+         after         = runs[(s + 1) % 4].tangent(0).Normalized();
+  const auto chord     = [&](double t) {
+    return gp_Vec(runs[s].point(t), runs[(s + 2) % 4].point(1 - t)).Normalized();
   };
-  // Where an edge is in its side, for a place of it to be found on the surface.
-  const auto place = [&](const Side& side, double f) {
-    for (size_t s = 0; s < 4; ++s)
-      for (size_t k = 0; k < runs[s].parts.size(); ++k)
-        if (runs[s].parts[k] == &side)
-        {
-          const double end = k + 1 < runs[s].parts.size() ? runs[s].starts[k + 1] : 1;
-          return along(s, runs[s].starts[k] + f * (end - runs[s].starts[k]));
-        }
-    return gp_XY();
+  // A gap is no side to turn to: next to one the isocurves leave as for Normal, square to
+  // the side, for Adjacent, and along the chord for Next.
+  const bool fromGap = gap[(s + 3) % 4], toGap = gap[(s + 1) % 4];
+  if (asked.controls.flow == PatchFlow::Adjacent && fromGap && toGap)
+    return part->tangent(g);
+  const auto square = [&](const gp_Vec& way, double t) {
+    const gp_Vec along = runs[s].tangent(t).Normalized(), out = way - along * way.Dot(along);
+    return out.Magnitude() > 1e-12 ? out.Normalized() : out;
   };
-  // The way the isocurves across a side are to leave it, as the one direction in the
-  // tangent plane that the derivative across is to have nothing of: square to the side for
-  // Normal. For Adjacent they turn from the side before to the side after, which are those
-  // isocurves at the corners; for Next they head for the same share of the opposite side,
-  // turned at the corners into those same sides. Square to the side on a rectangle, both.
-  const auto axis = [&](size_t s, double f) -> gp_Vec {
-    const auto [part, g] = runs[s].at(f);
-    if (asked.controls.flow == PatchFlow::Normal)
-      return part->tangent(g);
-    const gp_Vec tangent = part->tangent(g).Normalized();
-    gp_Vec       before  = -runs[(s + 3) % 4].tangent(1).Normalized(),
-           after         = runs[(s + 1) % 4].tangent(0).Normalized();
-    const auto chord     = [&](double t) {
-      return gp_Vec(runs[s].point(t), runs[(s + 2) % 4].point(1 - t)).Normalized();
-    };
-    // A gap is no side to turn to: next to one the isocurves leave as for Normal, square to
-    // the side, for Adjacent, and along the chord for Next.
-    const bool fromGap = gap[(s + 3) % 4], toGap = gap[(s + 1) % 4];
-    if (asked.controls.flow == PatchFlow::Adjacent && fromGap && toGap)
-      return part->tangent(g);
-    const auto square = [&](const gp_Vec& way, double t) {
-      const gp_Vec along = runs[s].tangent(t).Normalized(), out = way - along * way.Dot(along);
-      return out.Magnitude() > 1e-12 ? out.Normalized() : out;
-    };
-    if (fromGap)
-      before = asked.controls.flow == PatchFlow::Next ? chord(0) : square(after, 0);
-    if (toGap)
-      after = asked.controls.flow == PatchFlow::Next ? chord(1) : square(before, 1);
-    gp_Vec way = before * (1 - f) + after * f;
-    if (asked.controls.flow == PatchFlow::Next)
-      way = chord(f) + (before - chord(0)) * (1 - f) + (after - chord(1)) * f;
-    if (part->order > 0)
-    {
-      const gp_Vec n = part->jet(g).n;
-      way -= n * way.Dot(n);
-    }
-    if (way.Magnitude() <= BRepExt::tolerance::exactLength * asked.size
-        || std::abs(way.Normalized().Dot(tangent)) > sharpestCorner)
-      fail(op,
-           unsupported_geometry,
-           "the UV flow asked for runs along boundary edge " + std::to_string(part->input + 1));
-    way.Normalize();
-    return tangent - way * tangent.Dot(way);
-  };
+  if (fromGap)
+    before = asked.controls.flow == PatchFlow::Next ? chord(0) : square(after, 0);
+  if (toGap)
+    after = asked.controls.flow == PatchFlow::Next ? chord(1) : square(before, 1);
+  gp_Vec way = before * (1 - f) + after * f;
+  if (asked.controls.flow == PatchFlow::Next)
+    way = chord(f) + (before - chord(0)) * (1 - f) + (after - chord(1)) * f;
+  if (part->order > 0)
+  {
+    const gp_Vec n = part->jet(g).n;
+    way -= n * way.Dot(n);
+  }
+  if (way.Magnitude() <= BRepExt::tolerance::exactLength * asked.size
+      || std::abs(way.Normalized().Dot(tangent)) > sharpestCorner)
+    fail(op,
+         unsupported_geometry,
+         "the UV flow asked for runs along boundary edge " + std::to_string(part->input + 1));
+  way.Normalize();
+  return tangent - way * tangent.Dot(way);
+}
+
+std::optional<Built> QuadFill::rounds()
+{
   std::optional<Built> best;
   for (int round = 0; round < 5; ++round)
   {
@@ -477,222 +594,9 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
     if (fitting)
     {
       // The poles of a side that is a gap are free like the inner ones, but for the corners.
-      std::vector<char> fixed(net.poles.size(), 0);
-      for (int i = 0; i < nu; ++i)
-        for (int j = 0; j < nv; ++j)
-          fixed[static_cast<size_t>(i) * nv + j] =
-            ((i == 0 || i == nu - 1) && (j == 0 || j == nv - 1)) || (j == 0 && !gap[0])
-            || (i == nu - 1 && !gap[1]) || (j == nv - 1 && !gap[2]) || (i == 0 && !gap[3]);
-      std::vector<Target> targets;
-      for (size_t s = 0; s < 4; ++s)
-      {
-        const int count = placesPerPole * (s % 2 ? nv : nu);
-        for (int k = 0; k < count; ++k)
-        {
-          const double f       = (k + 0.5) / count;
-          const auto [part, g] = runs[s].at(f);
-          if (part->free || (part->order < 1 && asked.controls.flow == PatchFlow::Natural))
-            continue;
-          Target target{part->at(g),
-                        along(s, f),
-                        part->order,
-                        part->order ? std::optional<SurfaceJet>(part->jet(g)) : std::nullopt,
-                        s % 2 ? gp_XY(1, 0) : gp_XY(0, 1),
-                        runs[s].length / count / asked.size};
-          if (asked.controls.flow != PatchFlow::Natural)
-            target.perpendicular = axis(s, f);
-          if (part->order)
-            target.easing = part->easing(g);
-          targets.push_back(target);
-        }
-      }
-      ShapeAnalysis_Surface projection(surface);
-      const auto            guideTarget = [&](const gp_Pnt& point, double share) {
-        gp_XY uv = projection.ValueOfUV(point, BRepExt::tolerance::exactLength).XY();
-        // A guide that ends on a side comes out on it to within the tolerance, either way:
-        // the parameters here are lengths.
-        const double slack = asked.limits.g0;
-        if (uv.X() < -slack || uv.X() > lu + slack || uv.Y() < -slack || uv.Y() > lv + slack)
-          fail(op, invalid_input, "an interior constraint lies outside the quad");
-        uv.SetCoord(std::clamp(uv.X(), 0.0, lu), std::clamp(uv.Y(), 0.0, lv));
-        targets.push_back({point, uv, 0, {}, {}, share});
-      };
-
-      // A guide from side to side runs straight across the rectangle, through the place of
-      // each guide it crosses: the nearest point of a surface that does not yet rise to it
-      // would drag the parameters along with the rise. Others go by that nearest point.
-      struct Across
-      {
-        bool                                  laid = false;
-        std::vector<std::pair<double, gp_XY>> stops;
-      };
-
-      std::vector<Across> across(asked.guides.size());
-      const auto          onSide = [&](const gp_XY& uv) {
-        const double slack = asked.limits.g0;
-        return std::abs(uv.X()) <= slack || std::abs(uv.X() - lu) <= slack
-               || std::abs(uv.Y()) <= slack || std::abs(uv.Y() - lv) <= slack;
-      };
-      for (size_t g = 0; g < asked.guides.size(); ++g)
-      {
-        const gp_XY
-          a = projection.ValueOfUV(asked.guides[g].at(0), BRepExt::tolerance::exactLength).XY(),
-          b = projection.ValueOfUV(asked.guides[g].at(1), BRepExt::tolerance::exactLength).XY();
-        if (onSide(a) && onSide(b))
-          across[g] = {true, {{0.0, a}, {1.0, b}}};
-      }
-      constexpr int crossingPlaces = 129;
-      for (size_t g = 0; g < asked.guides.size(); ++g)
-        for (size_t h = g + 1; h < asked.guides.size(); ++h)
-        {
-          if (!across[g].laid || !across[h].laid)
-            continue;
-          double least = HUGE_VAL, fg = 0, fh = 0;
-          for (int i = 0; i <= crossingPlaces; ++i)
-            for (int j = 0; j <= crossingPlaces; ++j)
-            {
-              const double x = static_cast<double>(i) / crossingPlaces,
-                           y = static_cast<double>(j) / crossingPlaces;
-              if (const double d = asked.guides[g].at(x).SquareDistance(asked.guides[h].at(y));
-                  d < least)
-              {
-                least = d;
-                fg    = x;
-                fh    = y;
-              }
-            }
-          // Closer, each way round the nearest places, to well below the tolerance.
-          for (double step = 1.0 / crossingPlaces; step > 1e-12; step /= 8)
-          {
-            const double x0 = fg, y0 = fh;
-            for (int i = -8; i <= 8; ++i)
-              for (int j = -8; j <= 8; ++j)
-              {
-                const double x = std::clamp(x0 + i * step / 8, 0.0, 1.0),
-                             y = std::clamp(y0 + j * step / 8, 0.0, 1.0);
-                if (const double d = asked.guides[g].at(x).SquareDistance(asked.guides[h].at(y));
-                    d < least)
-                {
-                  least = d;
-                  fg    = x;
-                  fh    = y;
-                }
-              }
-          }
-          // Within the tolerance they cross there, and a conflict at that place is theirs.
-          if (std::sqrt(least) > asked.limits.g0)
-            continue;
-          const gp_XY a = across[g].stops[0].second, b = across[g].stops.back().second,
-                      c = across[h].stops[0].second, d = across[h].stops.back().second;
-          const double det = (b - a).Crossed(d - c);
-          if (std::abs(det)
-              <= BRepExt::tolerance::parameterMerge * (b - a).Modulus() * (d - c).Modulus())
-            continue;
-          const gp_XY cross = a + (b - a) * ((c - a).Crossed(d - c) / det);
-          across[g].stops.push_back({fg, cross});
-          across[h].stops.push_back({fh, cross});
-        }
-      const auto laidAt = [](std::vector<std::pair<double, gp_XY>> stops, double f) {
-        std::sort(stops.begin(), stops.end(), [](const auto& a, const auto& b) {
-          return a.first < b.first;
-        });
-        size_t i = 0;
-        while (i + 2 < stops.size() && f > stops[i + 1].first)
-          ++i;
-        const double t =
-          (f - stops[i].first) / std::max(stops[i + 1].first - stops[i].first, 1e-12);
-        return gp_XY(stops[i].second + (stops[i + 1].second - stops[i].second) * t);
-      };
-      // A guide that ends on one so laid, at a side or at another such guide, is laid to there.
-      const size_t laidFirst = asked.guides.size();
-      for (size_t g = 0; g < laidFirst; ++g)
-      {
-        if (across[g].laid)
-          continue;
-        const auto end = [&](double f) -> std::optional<gp_XY> {
-          const gp_Pnt at = asked.guides[g].at(f);
-          const gp_XY  uv = projection.ValueOfUV(at, BRepExt::tolerance::exactLength).XY();
-          if (onSide(uv))
-            return uv;
-          for (size_t h = 0; h < laidFirst; ++h)
-          {
-            if (h == g || !across[h].laid || across[h].stops.size() < 2)
-              continue;
-            double least = HUGE_VAL, foot = 0;
-            for (int i = 0; i <= crossingPlaces; ++i)
-            {
-              const double x = static_cast<double>(i) / crossingPlaces;
-              if (const double d = at.SquareDistance(asked.guides[h].at(x)); d < least)
-              {
-                least = d;
-                foot  = x;
-              }
-            }
-            for (double step = 1.0 / crossingPlaces; step > 1e-12; step /= 8)
-            {
-              const double x0 = foot;
-              for (int i = -8; i <= 8; ++i)
-              {
-                const double x = std::clamp(x0 + i * step / 8, 0.0, 1.0);
-                if (const double d = at.SquareDistance(asked.guides[h].at(x)); d < least)
-                {
-                  least = d;
-                  foot  = x;
-                }
-              }
-            }
-            if (std::sqrt(least) <= asked.limits.g0)
-              return laidAt(across[h].stops, foot);
-          }
-          return std::nullopt;
-        };
-        const auto a = end(0), b = end(1);
-        if (a && b)
-          across[g] = {true, {{0.0, *a}, {1.0, *b}}};
-      }
-      for (size_t g = 0; g < asked.guides.size(); ++g)
-      {
-        const Side& guide = asked.guides[g];
-        const int   count = std::max(129, placesPerPole * std::max(nu, nv));
-        for (int k = 0; k <= count; ++k)
-        {
-          const double f     = static_cast<double>(k) / count,
-                       share = guide.length / count / asked.size;
-          if (across[g].laid)
-            targets.push_back({guide.at(f), laidAt(across[g].stops, f), 0, {}, {}, share});
-          else
-            guideTarget(guide.at(f), share);
-        }
-      }
-      // A point goes where the surface that holds the laid guides passes nearest it, for the
-      // same reason: the rectangle's own surface does not rise to it.
-      const bool anyLaid =
-        std::any_of(across.begin(), across.end(), [](const Across& a) { return a.laid; });
-      if (anyLaid && !asked.points.empty())
-      {
-        SplineNet             first = net;
-        const auto            held  = fit(first,
-                              fixed,
-                              targets,
-                              asked.size,
-                              asked.limits,
-                              surface,
-                                          {},
-                              nullptr,
-                                          {},
-                              &frame,
-                              asked.flatness);
-        ShapeAnalysis_Surface nearestOn(held);
-        for (const gp_Pnt& point : asked.points)
-        {
-          const gp_XY uv = nearestOn.ValueOfUV(point, BRepExt::tolerance::exactLength).XY();
-          targets.push_back(
-            {point, gp_XY(std::clamp(uv.X(), 0.0, lu), std::clamp(uv.Y(), 0.0, lv)), 0, {}, {}, 1});
-        }
-      }
-      else
-        for (const gp_Pnt& point : asked.points)
-          guideTarget(point, 1);
+      const std::vector<char> fixed   = fixedPoles(net, nu, nv);
+      std::vector<Target>     targets = sideTargets(nu, nv);
+      interiorTargets(targets, net, fixed, surface, nu, nv);
       // As for supported trimmed fits, solve the coordinates near the loop's origin.
       // Subtracting the energy of large world-coordinate poles loses the small interior
       // correction, even when the fixed boundary still passes its continuity checks.
@@ -708,47 +612,7 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
                     &frame,
                     asked.flatness);
     }
-    Built built{fitting ? 2 : 1,
-                {},
-                measureAll(surface,
-                           asked,
-                           [&](const Side& side, double f, const gp_Pnt&) -> std::optional<Place> {
-                             return std::any_of(
-                                      asked.sides.begin(),
-                                      asked.sides.end(),
-                                      [&](const Side& boundary) { return &side == &boundary; })
-                                      ? std::optional<Place>(Place{place(side, f), false})
-                                      : std::nullopt;
-                           })};
-    for (size_t side = 0; asked.controls.flow != PatchFlow::Natural && side < 4; ++side)
-      for (int k = 0; k < places && !gap[side]; ++k)
-      {
-        const double     f      = (k + .5) / places;
-        const gp_XY      uv     = along(side, f);
-        const SurfaceJet jet    = surfaceJet(op, surface, uv.X(), uv.Y());
-        const gp_Vec     across = side % 2 ? jet.u : jet.v;
-        const double     angle =
-          std::asin(std::min(1.0, std::abs(across.Normalized().Dot(axis(side, f).Normalized()))))
-          * 180 / M_PI;
-        if (angle > asked.limits.g1)
-        {
-          built.measured.within = false;
-          built.measured.excess = std::max(built.measured.excess, angle / asked.limits.g1);
-          built.measured.worst  = "boundary UV flow is missed by " + number(angle) + " degrees";
-        }
-      }
-    built.face = BRepBuilderAPI_MakeFace(surface, Precision::Confusion()).Face();
-    // The orders a rim asks along all of it.
-    const auto least = [&](size_t s) {
-      int order = 2;
-      for (const Side* part : runs[s].parts)
-        order = std::min(order, part->order);
-      return order;
-    };
-    if (gap[1] && gap[3] && !gap[0] && !gap[2])
-      built.crossing = Crossing{true, least(0), least(2)};
-    else if (gap[0] && gap[2] && !gap[1] && !gap[3])
-      built.crossing = Crossing{false, least(3), least(1)};
+    Built        built  = measured(surface);
     const double before = best ? best->measured.excess : HUGE_VAL;
     if (built.measured.excess < before)
       best = built;
@@ -756,16 +620,310 @@ std::optional<Built> foursided(const Asked& asked, const Frame& frame)
     if (built.measured.within || !fitting || built.measured.excess > stillFalling * before)
       break;
     // Twice the spans for the next round.
-    for (int i = 0; i < 2; ++i)
-    {
-      const std::vector<double> knots = flatKnots(curves[i]);
-      for (size_t k = 0; k + 1 < knots.size(); ++k)
-        if (knots[k + 1] > knots[k])
-          for (int c : {i, i + 2})
-            curves[c]->InsertKnot((knots[k] + knots[k + 1]) / 2);
-    }
+    finer();
   }
   return best;
+}
+
+std::vector<char> QuadFill::fixedPoles(const SplineNet& net, int nu, int nv) const
+{
+  std::vector<char> fixed(net.poles.size(), 0);
+  for (int i = 0; i < nu; ++i)
+    for (int j = 0; j < nv; ++j)
+      fixed[static_cast<size_t>(i) * nv + j] = ((i == 0 || i == nu - 1) && (j == 0 || j == nv - 1))
+                                               || (j == 0 && !gap[0]) || (i == nu - 1 && !gap[1])
+                                               || (j == nv - 1 && !gap[2]) || (i == 0 && !gap[3]);
+  return fixed;
+}
+
+std::vector<Target> QuadFill::sideTargets(int nu, int nv) const
+{
+  std::vector<Target> targets;
+  for (size_t s = 0; s < 4; ++s)
+  {
+    const int count = placesPerPole * (s % 2 ? nv : nu);
+    for (int k = 0; k < count; ++k)
+    {
+      const double f       = (k + 0.5) / count;
+      const auto [part, g] = runs[s].at(f);
+      if (part->free || (part->order < 1 && asked.controls.flow == PatchFlow::Natural))
+        continue;
+      Target target{part->at(g),
+                    along(s, f),
+                    part->order,
+                    part->order ? std::optional<SurfaceJet>(part->jet(g)) : std::nullopt,
+                    s % 2 ? gp_XY(1, 0) : gp_XY(0, 1),
+                    runs[s].length / count / asked.size};
+      if (asked.controls.flow != PatchFlow::Natural)
+        target.perpendicular = axis(s, f);
+      if (part->order)
+        target.easing = part->easing(g);
+      targets.push_back(target);
+    }
+  }
+  return targets;
+}
+
+void QuadFill::interiorTargets(std::vector<Target>&                    targets,
+                               const SplineNet&                        net,
+                               const std::vector<char>&                fixed,
+                               const occ::handle<Geom_BSplineSurface>& surface,
+                               int                                     nu,
+                               int                                     nv) const
+{
+  ShapeAnalysis_Surface projection(surface);
+  const auto            guideTarget = [&](const gp_Pnt& point, double share) {
+    gp_XY uv = projection.ValueOfUV(point, BRepExt::tolerance::exactLength).XY();
+    // A guide that ends on a side comes out on it to within the tolerance, either way:
+    // the parameters here are lengths.
+    const double slack = asked.limits.g0;
+    if (uv.X() < -slack || uv.X() > lu + slack || uv.Y() < -slack || uv.Y() > lv + slack)
+      fail(op, invalid_input, "an interior constraint lies outside the quad");
+    uv.SetCoord(std::clamp(uv.X(), 0.0, lu), std::clamp(uv.Y(), 0.0, lv));
+    targets.push_back({point, uv, 0, {}, {}, share});
+  };
+  const std::vector<Across> across = layAcross(projection);
+  for (size_t g = 0; g < asked.guides.size(); ++g)
+  {
+    const Side& guide = asked.guides[g];
+    const int   count = std::max(129, placesPerPole * std::max(nu, nv));
+    for (int k = 0; k <= count; ++k)
+    {
+      const double f = static_cast<double>(k) / count, share = guide.length / count / asked.size;
+      if (across[g].laid)
+        targets.push_back({guide.at(f), laidAt(across[g].stops, f), 0, {}, {}, share});
+      else
+        guideTarget(guide.at(f), share);
+    }
+  }
+  // A point goes where the surface that holds the laid guides passes nearest it, for the
+  // same reason: the rectangle's own surface does not rise to it.
+  const bool anyLaid =
+    std::any_of(across.begin(), across.end(), [](const Across& a) { return a.laid; });
+  if (anyLaid && !asked.points.empty())
+  {
+    SplineNet             first = net;
+    const auto            held  = fit(first,
+                          fixed,
+                          targets,
+                          asked.size,
+                          asked.limits,
+                          surface,
+                                      {},
+                          nullptr,
+                                      {},
+                          &frame,
+                          asked.flatness);
+    ShapeAnalysis_Surface nearestOn(held);
+    for (const gp_Pnt& point : asked.points)
+    {
+      const gp_XY uv = nearestOn.ValueOfUV(point, BRepExt::tolerance::exactLength).XY();
+      targets.push_back(
+        {point, gp_XY(std::clamp(uv.X(), 0.0, lu), std::clamp(uv.Y(), 0.0, lv)), 0, {}, {}, 1});
+    }
+  }
+  else
+    for (const gp_Pnt& point : asked.points)
+      guideTarget(point, 1);
+}
+
+bool QuadFill::onSide(const gp_XY& uv) const
+{
+  const double slack = asked.limits.g0;
+  return std::abs(uv.X()) <= slack || std::abs(uv.X() - lu) <= slack || std::abs(uv.Y()) <= slack
+         || std::abs(uv.Y() - lv) <= slack;
+}
+
+std::vector<Across> QuadFill::layAcross(ShapeAnalysis_Surface& projection) const
+{
+  std::vector<Across> across(asked.guides.size());
+  for (size_t g = 0; g < asked.guides.size(); ++g)
+  {
+    const gp_XY a =
+                  projection.ValueOfUV(asked.guides[g].at(0), BRepExt::tolerance::exactLength).XY(),
+                b =
+                  projection.ValueOfUV(asked.guides[g].at(1), BRepExt::tolerance::exactLength).XY();
+    if (onSide(a) && onSide(b))
+      across[g] = {true, {{0.0, a}, {1.0, b}}};
+  }
+  crossLaid(across);
+  layEnds(across, projection);
+  return across;
+}
+
+void QuadFill::crossLaid(std::vector<Across>& across) const
+{
+  for (size_t g = 0; g < asked.guides.size(); ++g)
+    for (size_t h = g + 1; h < asked.guides.size(); ++h)
+    {
+      if (!across[g].laid || !across[h].laid)
+        continue;
+      double least = HUGE_VAL, fg = 0, fh = 0;
+      for (int i = 0; i <= crossingPlaces; ++i)
+        for (int j = 0; j <= crossingPlaces; ++j)
+        {
+          const double x = static_cast<double>(i) / crossingPlaces,
+                       y = static_cast<double>(j) / crossingPlaces;
+          if (const double d = asked.guides[g].at(x).SquareDistance(asked.guides[h].at(y));
+              d < least)
+          {
+            least = d;
+            fg    = x;
+            fh    = y;
+          }
+        }
+      // Closer, each way round the nearest places, to well below the tolerance.
+      for (double step = 1.0 / crossingPlaces; step > 1e-12; step /= 8)
+      {
+        const double x0 = fg, y0 = fh;
+        for (int i = -8; i <= 8; ++i)
+          for (int j = -8; j <= 8; ++j)
+          {
+            const double x = std::clamp(x0 + i * step / 8, 0.0, 1.0),
+                         y = std::clamp(y0 + j * step / 8, 0.0, 1.0);
+            if (const double d = asked.guides[g].at(x).SquareDistance(asked.guides[h].at(y));
+                d < least)
+            {
+              least = d;
+              fg    = x;
+              fh    = y;
+            }
+          }
+      }
+      // Within the tolerance they cross there, and a conflict at that place is theirs.
+      if (std::sqrt(least) > asked.limits.g0)
+        continue;
+      const gp_XY a = across[g].stops[0].second, b = across[g].stops.back().second,
+                  c = across[h].stops[0].second, d = across[h].stops.back().second;
+      const double det = (b - a).Crossed(d - c);
+      if (std::abs(det)
+          <= BRepExt::tolerance::parameterMerge * (b - a).Modulus() * (d - c).Modulus())
+        continue;
+      const gp_XY cross = a + (b - a) * ((c - a).Crossed(d - c) / det);
+      across[g].stops.push_back({fg, cross});
+      across[h].stops.push_back({fh, cross});
+    }
+}
+
+void QuadFill::layEnds(std::vector<Across>& across, ShapeAnalysis_Surface& projection) const
+{
+  const size_t laidFirst = asked.guides.size();
+  for (size_t g = 0; g < laidFirst; ++g)
+  {
+    if (across[g].laid)
+      continue;
+    const auto end = [&](double f) -> std::optional<gp_XY> {
+      const gp_Pnt at = asked.guides[g].at(f);
+      const gp_XY  uv = projection.ValueOfUV(at, BRepExt::tolerance::exactLength).XY();
+      if (onSide(uv))
+        return uv;
+      for (size_t h = 0; h < laidFirst; ++h)
+      {
+        if (h == g || !across[h].laid || across[h].stops.size() < 2)
+          continue;
+        double least = HUGE_VAL, foot = 0;
+        for (int i = 0; i <= crossingPlaces; ++i)
+        {
+          const double x = static_cast<double>(i) / crossingPlaces;
+          if (const double d = at.SquareDistance(asked.guides[h].at(x)); d < least)
+          {
+            least = d;
+            foot  = x;
+          }
+        }
+        for (double step = 1.0 / crossingPlaces; step > 1e-12; step /= 8)
+        {
+          const double x0 = foot;
+          for (int i = -8; i <= 8; ++i)
+          {
+            const double x = std::clamp(x0 + i * step / 8, 0.0, 1.0);
+            if (const double d = at.SquareDistance(asked.guides[h].at(x)); d < least)
+            {
+              least = d;
+              foot  = x;
+            }
+          }
+        }
+        if (std::sqrt(least) <= asked.limits.g0)
+          return laidAt(across[h].stops, foot);
+      }
+      return std::nullopt;
+    };
+    const auto a = end(0), b = end(1);
+    if (a && b)
+      across[g] = {true, {{0.0, *a}, {1.0, *b}}};
+  }
+}
+
+Built QuadFill::measured(const occ::handle<Geom_BSplineSurface>& surface) const
+{
+  Built built{fitting ? 2 : 1,
+              {},
+              measureAll(surface,
+                         asked,
+                         [&](const Side& side, double f, const gp_Pnt&) -> std::optional<Place> {
+                           return std::any_of(
+                                    asked.sides.begin(),
+                                    asked.sides.end(),
+                                    [&](const Side& boundary) { return &side == &boundary; })
+                                    ? std::optional<Place>(Place{place(side, f), false})
+                                    : std::nullopt;
+                         })};
+  for (size_t side = 0; asked.controls.flow != PatchFlow::Natural && side < 4; ++side)
+    for (int k = 0; k < places && !gap[side]; ++k)
+    {
+      const double     f      = (k + .5) / places;
+      const gp_XY      uv     = along(side, f);
+      const SurfaceJet jet    = surfaceJet(op, surface, uv.X(), uv.Y());
+      const gp_Vec     across = side % 2 ? jet.u : jet.v;
+      const double     angle =
+        std::asin(std::min(1.0, std::abs(across.Normalized().Dot(axis(side, f).Normalized()))))
+        * 180 / M_PI;
+      if (angle > asked.limits.g1)
+      {
+        built.measured.within = false;
+        built.measured.excess = std::max(built.measured.excess, angle / asked.limits.g1);
+        built.measured.worst  = "boundary UV flow is missed by " + number(angle) + " degrees";
+      }
+    }
+  built.face = BRepBuilderAPI_MakeFace(surface, Precision::Confusion()).Face();
+  // The orders a rim asks along all of it.
+  const auto least = [&](size_t s) {
+    int lowest = 2;
+    for (const Side* part : runs[s].parts)
+      lowest = std::min(lowest, part->order);
+    return lowest;
+  };
+  if (gap[1] && gap[3] && !gap[0] && !gap[2])
+    built.crossing = Crossing{true, least(0), least(2)};
+  else if (gap[0] && gap[2] && !gap[1] && !gap[3])
+    built.crossing = Crossing{false, least(3), least(1)};
+  return built;
+}
+
+void QuadFill::finer()
+{
+  for (int i = 0; i < 2; ++i)
+  {
+    const std::vector<double> knots = flatKnots(curves[i]);
+    for (size_t k = 0; k + 1 < knots.size(); ++k)
+      if (knots[k + 1] > knots[k])
+        for (int c : {i, i + 2})
+          curves[c]->InsertKnot((knots[k] + knots[k + 1]) / 2);
+  }
+}
+
+} // namespace
+
+std::optional<Built> foursided(const Asked& asked, const Frame& frame)
+{
+  PatchPhase phase("quad");
+  const auto found = quadRuns(asked.sides, asked.limits.g1);
+  if (!found)
+    return {};
+  std::vector<Run> runs = *found;
+  QuadFill         quad(asked, frame, std::move(runs));
+  return quad.run();
 }
 
 std::optional<Built> chainedQuad(const Asked& asked, const Frame& frame)

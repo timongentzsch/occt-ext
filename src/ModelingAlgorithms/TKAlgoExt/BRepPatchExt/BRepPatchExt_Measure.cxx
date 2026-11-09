@@ -551,89 +551,26 @@ void measureSpatialBoundary(Built& built, const Asked& input, bool originalDirec
   }
 }
 
-void measureTrimmedInterior(Built& built, const Asked& asked)
+namespace
 {
-  if (asked.points.empty() && asked.guides.empty())
-    return;
-  const auto                 interior    = trimmedInteriorCells(built.face);
-  const auto                 faceSurface = BRep_Tool::Surface(built.face);
-  ShapeAnalysis_Surface      projection(faceSurface);
-  std::optional<gp_Pnt2d>    previousUV;
-  BRepExtrema_DistShapeShape query;
-  query.LoadS2(built.face);
 
-  struct Witness
-  {
-    double distance;
-    gp_XY  uv;
-  };
-
-  std::map<std::array<double, 3>, Witness> witnesses;
-  const auto distance = [&](const gp_Pnt& point, gp_XY* uvOut = nullptr) {
-    checkCancelled(op);
-    const std::array<double, 3> key{point.X(), point.Y(), point.Z()};
-    if (!std::all_of(key.begin(), key.end(), [](double x) { return std::isfinite(x); }))
-      fail(op, no_solution, "an interior constraint has a nonfinite point");
-    if (const auto found = witnesses.find(key); found != witnesses.end())
-    {
-      if (uvOut)
-        *uvOut = found->second.uv;
-      return found->second.distance;
-    }
-    // A local projection that supplies an in-trim face witness is sufficient
-    // for an upper distance bound. Fall back to the global trimmed query whenever
-    // it cannot meet the request; it never supplies a negative feasibility verdict.
-    try
-    {
-      const auto local =
-        previousUV ? nearestWithin(faceSurface, previousUV->XY(), point) : std::nullopt;
-      const auto   uv = local ? gp_Pnt2d(*local) : projection.ValueOfUV(point, asked.limits.g0 / 8);
-      const double d  = point.Distance(faceSurface->Value(uv.X(), uv.Y()));
-      if (std::isfinite(d) && d <= asked.limits.g0 && interior(uv.X(), uv.X(), uv.Y(), uv.Y()))
-      {
-        previousUV = uv;
-        witnesses.emplace(key, Witness{d, uv.XY()});
-        if (uvOut)
-          *uvOut = uv.XY();
-        return d;
-      }
-    }
-    catch (const Standard_Failure&)
-    {
-    }
-    query.LoadS1(BRepBuilderAPI_MakeVertex(point).Vertex());
-    query.Perform();
-    if (!query.IsDone() || query.NbSolution() == 0 || !std::isfinite(query.Value()))
-      fail(op, no_solution, "an interior constraint has no resolved trimmed-face distance");
-    gp_XY uv(HUGE_VAL, HUGE_VAL);
-    if (query.SupportTypeShape2(1) == BRepExtrema_IsInFace)
-    {
-      double u, v;
-      query.ParOnFaceS2(1, u, v);
-      uv = gp_XY(u, v);
-    }
-    if (uvOut)
-      *uvOut = uv;
-    // Distance to the returned face point is an upper witness, not merely the
-    // optimizer's minimum-distance estimate. Reuse only exactly equal coordinates.
-    const double d = point.Distance(query.PointOnShape2(1));
-    witnesses.emplace(key, Witness{d, uv});
-    return d;
-  };
-  bool convexPlane = BRepAdaptor_Surface(built.face).GetType() == GeomAbs_Plane;
+//! Whether `face` is a plane bounded by one convex polygon of straight edges: a curve whose
+//! poles are all within the tolerance of such a face is then within it all along.
+bool convexPlanarFace(const TopoDS_Face& face)
+{
+  bool convexPlane = BRepAdaptor_Surface(face).GetType() == GeomAbs_Plane;
   int  wires       = 0;
-  for (TopExp_Explorer it(built.face, TopAbs_WIRE); it.More(); it.Next())
+  for (TopExp_Explorer it(face, TopAbs_WIRE); it.More(); it.Next())
     ++wires;
   convexPlane = convexPlane && wires == 1;
   std::vector<gp_XY> polygon;
-  for (BRepTools_WireExplorer it(BRepTools::OuterWire(built.face), built.face);
-       convexPlane && it.More();
+  for (BRepTools_WireExplorer it(BRepTools::OuterWire(face), face); convexPlane && it.More();
        it.Next())
   {
     BRepAdaptor_Curve edge(it.Current());
     convexPlane = edge.GetType() == GeomAbs_Line;
     double     a, b;
-    const auto pc = BRep_Tool::CurveOnSurface(it.Current(), built.face, a, b);
+    const auto pc = BRep_Tool::CurveOnSurface(it.Current(), face, a, b);
     if (pc.IsNull())
     {
       convexPlane = false;
@@ -652,191 +589,335 @@ void measureTrimmedInterior(Built& built, const Asked& asked)
     if (turn != 0)
       orientation = turn;
   }
-  convexPlane        = convexPlane && orientation != 0;
-  const auto carrier = occ::down_cast<Geom_BSplineSurface>(BRep_Tool::Surface(built.face));
+  convexPlane = convexPlane && orientation != 0;
+  return convexPlane;
+}
+
+//! The binomial coefficient n over k, as a double.
+double choose(int n, int k)
+{
+  double c = 1;
+  for (int i = 1; i <= k; ++i)
+    c *= double(n - i + 1) / i;
+  return c;
+}
+
+//! A guide as a B-spline over its own stretch, approximated where it is no polynomial curve;
+//! `approximation` gets the error of that.
+Handle(Geom_BSplineCurve) guideSpline(const Side& guide, const Asked& asked, double& approximation)
+{
+  const double first = std::min(guide.from, guide.to), last = std::max(guide.from, guide.to);
+  const Handle(Geom_Curve)  cut = new Geom_TrimmedCurve(guide.curve, first, last);
+  Handle(Geom_BSplineCurve) curve;
+  if (const auto type = GeomAdaptor_Curve(cut).GetType();
+      type == GeomAbs_OtherCurve || type == GeomAbs_OffsetCurve)
+  {
+    // Keep the approximation's reported error in the distance budget; unlike
+    // CurveToBSplineCurve's fixed offset allowance, this follows the request.
+    GeomConvert_ApproxCurve fit(cut, asked.limits.g0 / 8, GeomAbs_C1, 1000, 14);
+    if (!fit.IsDone() || !std::isfinite(fit.MaxError()))
+      fail(op, no_solution, "a guide has no resolved spline approximation for trim measurement");
+    curve         = fit.Curve();
+    approximation = fit.MaxError();
+  }
+  else
+    curve = GeomConvert::CurveToBSplineCurve(cut);
+  return curve;
+}
+
+//! Upper bounds on the distance of points and curves from a trimmed face: a point by a witness
+//! on the face, found locally from the last one or by the trimmed query; a curve by its poles
+//! where the face is a convex plane, by the polynomial cell it crosses, or split in halves.
+class TrimmedWitness
+{
+public:
+  TrimmedWitness(const TopoDS_Face& face, const Asked& asked)
+      : asked(asked),
+        interior(trimmedInteriorCells(face)),
+        faceSurface(BRep_Tool::Surface(face)),
+        projection(faceSurface),
+        convexPlane(convexPlanarFace(face)),
+        carrier(occ::down_cast<Geom_BSplineSurface>(BRep_Tool::Surface(face)))
+  {
+    query.LoadS2(face);
+    if (!carrier.IsNull() && !carrier->IsURational() && !carrier->IsVRational())
+    {
+      patches = std::make_unique<GeomConvert_BSplineSurfaceToBezierSurface>(carrier);
+      NCollection_Array1<double> u(1, patches->NbUPatches() + 1), v(1, patches->NbVPatches() + 1);
+      patches->UKnots(u);
+      patches->VKnots(v);
+      for (double x : u)
+        us.push_back(x);
+      for (double x : v)
+        vs.push_back(x);
+    }
+  }
+
+  //! The distance of `point` from the face, an upper bound with a witness on it; `uvOut` gets the
+  //! witness's parameters, or none where the trimmed query found it on no face's inside.
+  double distance(const gp_Pnt& point, gp_XY* uvOut = nullptr);
+
+  //! Whether `part` is shown within the tolerance of the face, `approximation` added to every
+  //! distance; `observed` gets the largest distance read.
+  bool covered(const Handle(Geom_BSplineCurve)& part, double approximation, double& observed);
+
+private:
+  //! Whether `part` is within `allowance` of the face by the polynomial cells its chord between
+  //! its ends' witnesses crosses.
+  bool pairedCover(const Handle(Geom_BSplineCurve)& part, double allowance);
+
+  //! Whether the piece of `part` from `first` to `last` is within `allowance` of the face's trace
+  //! along the chord from `a` to `b` in its parameters, which lies in one polynomial cell: by the
+  //! distance of their Bezier poles at one degree.
+  bool polynomialCover(const Handle(Geom_BSplineCurve)& part,
+                       const gp_XY&                     a,
+                       const gp_XY&                     b,
+                       double                           first,
+                       double                           last,
+                       double                           allowance) const;
+
+  struct Witness
+  {
+    double distance;
+    gp_XY  uv;
+  };
+
+  const Asked&                                               asked;
+  const std::function<bool(double, double, double, double)>  interior;
+  const occ::handle<Geom_Surface>                            faceSurface;
+  ShapeAnalysis_Surface                                      projection;
+  std::optional<gp_Pnt2d>                                    previousUV;
+  BRepExtrema_DistShapeShape                                 query;
+  std::map<std::array<double, 3>, Witness>                   witnesses;
+  const bool                                                 convexPlane;
+  const occ::handle<Geom_BSplineSurface>                     carrier;
   std::unique_ptr<GeomConvert_BSplineSurfaceToBezierSurface> patches;
   std::vector<double>                                        us, vs;
-  if (!carrier.IsNull() && !carrier->IsURational() && !carrier->IsVRational())
+};
+
+double TrimmedWitness::distance(const gp_Pnt& point, gp_XY* uvOut)
+{
+  checkCancelled(op);
+  const std::array<double, 3> key{point.X(), point.Y(), point.Z()};
+  if (!std::all_of(key.begin(), key.end(), [](double x) { return std::isfinite(x); }))
+    fail(op, no_solution, "an interior constraint has a nonfinite point");
+  if (const auto found = witnesses.find(key); found != witnesses.end())
   {
-    patches = std::make_unique<GeomConvert_BSplineSurfaceToBezierSurface>(carrier);
-    NCollection_Array1<double> u(1, patches->NbUPatches() + 1), v(1, patches->NbVPatches() + 1);
-    patches->UKnots(u);
-    patches->VKnots(v);
-    for (double x : u)
-      us.push_back(x);
-    for (double x : v)
-      vs.push_back(x);
+    if (uvOut)
+      *uvOut = found->second.uv;
+    return found->second.distance;
   }
-  const auto choose = [](int n, int k) {
-    double c = 1;
-    for (int i = 1; i <= k; ++i)
-      c *= double(n - i + 1) / i;
-    return c;
-  };
-  const auto pairedCover = [&](const Handle(Geom_BSplineCurve)& part, double allowance) {
-    if (carrier.IsNull() || carrier->IsURational() || carrier->IsVRational() || part->IsRational())
-      return false;
-    gp_XY a, b;
-    if (distance(part->StartPoint(), &a) > allowance || distance(part->EndPoint(), &b) > allowance
-        || !std::isfinite(a.X() + a.Y() + b.X() + b.Y()))
-      return false;
-    const double u0 = std::min(a.X(), b.X()), u1 = std::max(a.X(), b.X()),
-                 v0 = std::min(a.Y(), b.Y()), v1 = std::max(a.Y(), b.Y());
-    if (!interior(u0, u1, v0, v1))
-      return false;
-    try
+  // A local projection that supplies an in-trim face witness is sufficient
+  // for an upper distance bound. Fall back to the global trimmed query whenever
+  // it cannot meet the request; it never supplies a negative feasibility verdict.
+  try
+  {
+    const auto local =
+      previousUV ? nearestWithin(faceSurface, previousUV->XY(), point) : std::nullopt;
+    const auto   uv = local ? gp_Pnt2d(*local) : projection.ValueOfUV(point, asked.limits.g0 / 8);
+    const double d  = point.Distance(faceSurface->Value(uv.X(), uv.Y()));
+    if (std::isfinite(d) && d <= asked.limits.g0 && interior(uv.X(), uv.X(), uv.Y(), uv.Y()))
     {
-      // A chord can cross several polynomial cells. Partition its certificate
-      // at those crossings and the guide's own knots, instead of forcing the
-      // geometric subdivision to converge on each non-dyadic knot parameter.
-      const gp_XY         origin = a, direction = b - a;
-      const double        first = part->FirstParameter(), last = part->LastParameter();
-      std::vector<double> cuts{0., 1.};
-      for (int axis = 1; axis <= 2; ++axis)
-        if (direction.Coord(axis) != 0)
-          for (double knot : axis == 1 ? us : vs)
-          {
-            const double t = (knot - origin.Coord(axis)) / direction.Coord(axis);
-            if (t > 0 && t < 1)
-              cuts.push_back(t);
-          }
-      for (double knot : part->Knots())
+      previousUV = uv;
+      witnesses.emplace(key, Witness{d, uv.XY()});
+      if (uvOut)
+        *uvOut = uv.XY();
+      return d;
+    }
+  }
+  catch (const Standard_Failure&)
+  {
+  }
+  query.LoadS1(BRepBuilderAPI_MakeVertex(point).Vertex());
+  query.Perform();
+  if (!query.IsDone() || query.NbSolution() == 0 || !std::isfinite(query.Value()))
+    fail(op, no_solution, "an interior constraint has no resolved trimmed-face distance");
+  gp_XY uv(HUGE_VAL, HUGE_VAL);
+  if (query.SupportTypeShape2(1) == BRepExtrema_IsInFace)
+  {
+    double u, v;
+    query.ParOnFaceS2(1, u, v);
+    uv = gp_XY(u, v);
+  }
+  if (uvOut)
+    *uvOut = uv;
+  // Distance to the returned face point is an upper witness, not merely the
+  // optimizer's minimum-distance estimate. Reuse only exactly equal coordinates.
+  const double d = point.Distance(query.PointOnShape2(1));
+  witnesses.emplace(key, Witness{d, uv});
+  return d;
+}
+
+bool TrimmedWitness::covered(const Handle(Geom_BSplineCurve)& part,
+                             double                           approximation,
+                             double&                          observed)
+{
+  checkCancelled(op);
+  const double a = part->FirstParameter(), b = part->LastParameter(), m = a + (b - a) / 2;
+  const gp_Pnt point = part->Value(m);
+  const double miss  = distance(point) + approximation;
+  observed           = std::max(observed, miss);
+  if (miss > asked.limits.g0)
+    return false;
+  double radius      = 0;
+  bool   convexCover = convexPlane;
+  for (int i = 1; i <= part->NbPoles(); ++i)
+  {
+    if (!(part->Weight(i) > 0))
+      return false;
+    radius = std::max(radius, point.Distance(part->Pole(i)));
+    if (convexCover && distance(part->Pole(i)) + approximation > asked.limits.g0)
+      convexCover = false;
+  }
+  if (convexCover || miss + std::nextafter(radius, HUGE_VAL) <= asked.limits.g0
+      || pairedCover(part, asked.limits.g0 - approximation))
+    return true;
+  if (m == a || m == b)
+    return false;
+  auto left = occ::down_cast<Geom_BSplineCurve>(part->Copy());
+  left->Segment(a, m);
+  auto right = occ::down_cast<Geom_BSplineCurve>(part->Copy());
+  right->Segment(m, b);
+  return covered(left, approximation, observed) && covered(right, approximation, observed);
+}
+
+bool TrimmedWitness::pairedCover(const Handle(Geom_BSplineCurve)& part, double allowance)
+{
+  if (carrier.IsNull() || carrier->IsURational() || carrier->IsVRational() || part->IsRational())
+    return false;
+  gp_XY a, b;
+  if (distance(part->StartPoint(), &a) > allowance || distance(part->EndPoint(), &b) > allowance
+      || !std::isfinite(a.X() + a.Y() + b.X() + b.Y()))
+    return false;
+  const double u0 = std::min(a.X(), b.X()), u1 = std::max(a.X(), b.X()),
+               v0 = std::min(a.Y(), b.Y()), v1 = std::max(a.Y(), b.Y());
+  if (!interior(u0, u1, v0, v1))
+    return false;
+  try
+  {
+    // A chord can cross several polynomial cells. Partition its certificate
+    // at those crossings and the guide's own knots, instead of forcing the
+    // geometric subdivision to converge on each non-dyadic knot parameter.
+    const gp_XY         origin = a, direction = b - a;
+    const double        first = part->FirstParameter(), last = part->LastParameter();
+    std::vector<double> cuts{0., 1.};
+    for (int axis = 1; axis <= 2; ++axis)
+      if (direction.Coord(axis) != 0)
+        for (double knot : axis == 1 ? us : vs)
+        {
+          const double t = (knot - origin.Coord(axis)) / direction.Coord(axis);
+          if (t > 0 && t < 1)
+            cuts.push_back(t);
+        }
+    for (double knot : part->Knots())
+    {
+      const double t = (knot - first) / (last - first);
+      if (t > 0 && t < 1)
+        cuts.push_back(t);
+    }
+    std::sort(cuts.begin(), cuts.end());
+    cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
+    for (size_t i = 1; i < cuts.size(); ++i)
+      if (!polynomialCover(part,
+                           origin + direction * cuts[i - 1],
+                           origin + direction * cuts[i],
+                           first + (last - first) * cuts[i - 1],
+                           first + (last - first) * cuts[i],
+                           allowance))
+        return false;
+    return true;
+  }
+  catch (const Standard_Failure&)
+  {
+    return false;
+  }
+}
+
+bool TrimmedWitness::polynomialCover(const Handle(Geom_BSplineCurve)& part,
+                                     const gp_XY&                     a,
+                                     const gp_XY&                     b,
+                                     double                           first,
+                                     double                           last,
+                                     double                           allowance) const
+{
+  const double u0 = std::min(a.X(), b.X()), u1 = std::max(a.X(), b.X()),
+               v0 = std::min(a.Y(), b.Y()), v1 = std::max(a.Y(), b.Y());
+  Handle(Geom_BezierCurve) trace;
+  // Restrict to one polynomial cell before taking its diagonal. Degenerate
+  // UV rectangles are exact isoparametric curves instead.
+  if (u1 == u0 || v1 == v0)
+  {
+    auto         iso   = u1 == u0 ? carrier->UIso(u0) : carrier->VIso(v0);
+    const double first = u1 == u0 ? v0 : u0, last = u1 == u0 ? v1 : u1;
+    if (first == last)
+      return false;
+    GeomConvert_BSplineCurveToBezierCurve spans(
+      GeomConvert::CurveToBSplineCurve(new Geom_TrimmedCurve(iso, first, last)));
+    if (spans.NbArcs() != 1)
+      return false;
+    trace = spans.Arc(1);
+    if ((u1 == u0 ? a.Y() > b.Y() : a.X() > b.X()))
+      trace->Reverse();
+  }
+  else
+  {
+    const auto span = [](const std::vector<double>& k, double a, double b) {
+      const int i = std::clamp(int(std::upper_bound(k.begin(), k.end(), a) - k.begin()) - 1,
+                               0,
+                               int(k.size()) - 2);
+      return a >= k[i] && b <= k[i + 1] ? i : -1;
+    };
+    const int iu = span(us, u0, u1), iv = span(vs, v0, v1);
+    if (iu < 0 || iv < 0)
+      return false;
+    auto patch = occ::down_cast<Geom_BezierSurface>(patches->Patch(iu + 1, iv + 1)->Copy());
+    patch->Segment((u0 - us[iu]) / (us[iu + 1] - us[iu]),
+                   (u1 - us[iu]) / (us[iu + 1] - us[iu]),
+                   (v0 - vs[iv]) / (vs[iv + 1] - vs[iv]),
+                   (v1 - vs[iv]) / (vs[iv + 1] - vs[iv]));
+    const int                  p = patch->UDegree(), q = patch->VDegree(), degree = p + q;
+    NCollection_Array1<gp_Pnt> poles(1, degree + 1);
+    for (int k = 0; k <= degree; ++k)
+    {
+      gp_XYZ value(0, 0, 0);
+      for (int i = std::max(0, k - q); i <= std::min(p, k); ++i)
       {
-        const double t = (knot - first) / (last - first);
-        if (t > 0 && t < 1)
-          cuts.push_back(t);
+        const int j = k - i;
+        value +=
+          patch->Pole(a.X() > b.X() ? p - i + 1 : i + 1, a.Y() > b.Y() ? q - j + 1 : j + 1).XYZ()
+          * (choose(p, i) * choose(q, j) / choose(degree, k));
       }
-      std::sort(cuts.begin(), cuts.end());
-      cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
-      const auto polynomialCover = [&](const gp_XY& a, const gp_XY& b, double first, double last) {
-        const double u0 = std::min(a.X(), b.X()), u1 = std::max(a.X(), b.X()),
-                     v0 = std::min(a.Y(), b.Y()), v1 = std::max(a.Y(), b.Y());
-        Handle(Geom_BezierCurve) trace;
-        // Restrict to one polynomial cell before taking its diagonal. Degenerate
-        // UV rectangles are exact isoparametric curves instead.
-        if (u1 == u0 || v1 == v0)
-        {
-          auto         iso   = u1 == u0 ? carrier->UIso(u0) : carrier->VIso(v0);
-          const double first = u1 == u0 ? v0 : u0, last = u1 == u0 ? v1 : u1;
-          if (first == last)
-            return false;
-          GeomConvert_BSplineCurveToBezierCurve spans(
-            GeomConvert::CurveToBSplineCurve(new Geom_TrimmedCurve(iso, first, last)));
-          if (spans.NbArcs() != 1)
-            return false;
-          trace = spans.Arc(1);
-          if ((u1 == u0 ? a.Y() > b.Y() : a.X() > b.X()))
-            trace->Reverse();
-        }
-        else
-        {
-          const auto span = [](const std::vector<double>& k, double a, double b) {
-            const int i = std::clamp(int(std::upper_bound(k.begin(), k.end(), a) - k.begin()) - 1,
-                                     0,
-                                     int(k.size()) - 2);
-            return a >= k[i] && b <= k[i + 1] ? i : -1;
-          };
-          const int iu = span(us, u0, u1), iv = span(vs, v0, v1);
-          if (iu < 0 || iv < 0)
-            return false;
-          auto patch = occ::down_cast<Geom_BezierSurface>(patches->Patch(iu + 1, iv + 1)->Copy());
-          patch->Segment((u0 - us[iu]) / (us[iu + 1] - us[iu]),
-                         (u1 - us[iu]) / (us[iu + 1] - us[iu]),
-                         (v0 - vs[iv]) / (vs[iv + 1] - vs[iv]),
-                         (v1 - vs[iv]) / (vs[iv + 1] - vs[iv]));
-          const int                  p = patch->UDegree(), q = patch->VDegree(), degree = p + q;
-          NCollection_Array1<gp_Pnt> poles(1, degree + 1);
-          for (int k = 0; k <= degree; ++k)
-          {
-            gp_XYZ value(0, 0, 0);
-            for (int i = std::max(0, k - q); i <= std::min(p, k); ++i)
-            {
-              const int j = k - i;
-              value +=
-                patch->Pole(a.X() > b.X() ? p - i + 1 : i + 1, a.Y() > b.Y() ? q - j + 1 : j + 1)
-                  .XYZ()
-                * (choose(p, i) * choose(q, j) / choose(degree, k));
-            }
-            poles(k + 1) = gp_Pnt(value);
-          }
-          trace = new Geom_BezierCurve(poles);
-        }
-        GeomConvert_BSplineCurveToBezierCurve guide(part, first, last, 0.);
-        if (guide.NbArcs() != 1)
-          return false;
-        auto      c      = guide.Arc(1);
-        const int degree = std::max(c->Degree(), trace->Degree());
-        c->Increase(degree);
-        trace->Increase(degree);
-        double bound = 0;
-        for (int i = 1; i <= degree + 1; ++i)
-          bound = std::max(bound, c->Pole(i).Distance(trace->Pole(i)));
-        return std::nextafter(bound, HUGE_VAL) <= allowance;
-      };
-      for (size_t i = 1; i < cuts.size(); ++i)
-        if (!polynomialCover(origin + direction * cuts[i - 1],
-                             origin + direction * cuts[i],
-                             first + (last - first) * cuts[i - 1],
-                             first + (last - first) * cuts[i]))
-          return false;
-      return true;
+      poles(k + 1) = gp_Pnt(value);
     }
-    catch (const Standard_Failure&)
-    {
-      return false;
-    }
-  };
-  size_t at = asked.sides.size() * 4;
+    trace = new Geom_BezierCurve(poles);
+  }
+  GeomConvert_BSplineCurveToBezierCurve guide(part, first, last, 0.);
+  if (guide.NbArcs() != 1)
+    return false;
+  auto      c      = guide.Arc(1);
+  const int degree = std::max(c->Degree(), trace->Degree());
+  c->Increase(degree);
+  trace->Increase(degree);
+  double bound = 0;
+  for (int i = 1; i <= degree + 1; ++i)
+    bound = std::max(bound, c->Pole(i).Distance(trace->Pole(i)));
+  return std::nextafter(bound, HUGE_VAL) <= allowance;
+}
+
+} // namespace
+
+void measureTrimmedInterior(Built& built, const Asked& asked)
+{
+  if (asked.points.empty() && asked.guides.empty())
+    return;
+  TrimmedWitness witness(built.face, asked);
+  size_t         at = asked.sides.size() * 4;
   for (const Side& guide : asked.guides)
   {
-    const double first = std::min(guide.from, guide.to), last = std::max(guide.from, guide.to);
-    const Handle(Geom_Curve)  cut = new Geom_TrimmedCurve(guide.curve, first, last);
-    Handle(Geom_BSplineCurve) curve;
-    double                    approximation = 0;
-    if (const auto type = GeomAdaptor_Curve(cut).GetType();
-        type == GeomAbs_OtherCurve || type == GeomAbs_OffsetCurve)
-    {
-      // Keep the approximation's reported error in the distance budget; unlike
-      // CurveToBSplineCurve's fixed offset allowance, this follows the request.
-      GeomConvert_ApproxCurve fit(cut, asked.limits.g0 / 8, GeomAbs_C1, 1000, 14);
-      if (!fit.IsDone() || !std::isfinite(fit.MaxError()))
-        fail(op, no_solution, "a guide has no resolved spline approximation for trim measurement");
-      curve         = fit.Curve();
-      approximation = fit.MaxError();
-    }
-    else
-      curve = GeomConvert::CurveToBSplineCurve(cut);
-    double     observed = 0;
-    const auto covered  = [&](auto&& self, const Handle(Geom_BSplineCurve)& part) -> bool {
-      checkCancelled(op);
-      const double a = part->FirstParameter(), b = part->LastParameter(), m = a + (b - a) / 2;
-      const gp_Pnt point = part->Value(m);
-      const double miss  = distance(point) + approximation;
-      observed           = std::max(observed, miss);
-      if (miss > asked.limits.g0)
-        return false;
-      double radius      = 0;
-      bool   convexCover = convexPlane;
-      for (int i = 1; i <= part->NbPoles(); ++i)
-      {
-        if (!(part->Weight(i) > 0))
-          return false;
-        radius = std::max(radius, point.Distance(part->Pole(i)));
-        if (convexCover && distance(part->Pole(i)) + approximation > asked.limits.g0)
-          convexCover = false;
-      }
-      if (convexCover || miss + std::nextafter(radius, HUGE_VAL) <= asked.limits.g0
-          || pairedCover(part, asked.limits.g0 - approximation))
-        return true;
-      if (m == a || m == b)
-        return false;
-      auto left = occ::down_cast<Geom_BSplineCurve>(part->Copy());
-      left->Segment(a, m);
-      auto right = occ::down_cast<Geom_BSplineCurve>(part->Copy());
-      right->Segment(m, b);
-      return self(self, left) && self(self, right);
-    };
-    if (curve.IsNull() || !covered(covered, curve))
+    double                          approximation = 0;
+    const Handle(Geom_BSplineCurve) curve         = guideSpline(guide, asked, approximation);
+    double                          observed      = 0;
+    if (curve.IsNull() || !witness.covered(curve, approximation, observed))
       fail(op,
            no_solution,
            "guide " + std::to_string(guide.input + 1)
@@ -847,7 +928,7 @@ void measureTrimmedInterior(Built& built, const Asked& asked)
   at += asked.guides.size();
   for (size_t i = 0; i < asked.points.size(); ++i)
   {
-    const double miss             = distance(asked.points[i]);
+    const double miss             = witness.distance(asked.points[i]);
     built.measured.values[at + i] = std::max(built.measured.values[at + i], miss);
     if (miss > asked.limits.g0)
       fail(op,

@@ -184,28 +184,11 @@ Built plate(const Asked& asked)
   return {4, fill.Face(), measureAll(BRep_Tool::Surface(fill.Face()), asked)};
 }
 
-//! The face of the loop `asked` holds once its sides are in turn, held to every check Patch
-//! makes; fails with what it misses otherwise.
-Built fillFace(Asked asked, PatchMethod method, double flatness, const PatchControls& controls)
+//! Periodic spline sides and guides that close, on a private copy quantised to a lattice: their
+//! poles to a millionth of the positional tolerance at most, their knots and ends to a binary
+//! step of the parameter; `canonical` is set where any is.
+void quantizePeriodic(Asked& asked, bool& canonical)
 {
-  const bool gapped    = hasGaps(asked);
-  asked.controls       = controls;
-  Asked input          = asked;
-  bool  copyBudgetMiss = false;
-  auto  placement =
-    method != PatchMethod::Plate ? localSplineRim(asked, &copyBudgetMiss) : std::nullopt;
-  gp_Trsf anchor;
-  bool    anchored = false;
-  if (!placement && copyBudgetMiss)
-  {
-    placement = rebasedSplineRim(asked, anchor);
-    anchored  = placement.has_value();
-  }
-  bool canonical = placement.has_value();
-  // Free spline interpolation can differ by a few ulps across machines. Quantise a
-  // private copy before any net/refinement decisions, not just the linear solve. The
-  // original curves are still measured below; the lattice is at most a millionth
-  // of the requested positional tolerance and uses a binary scale independent of ulps.
   for (auto* sides : {&asked.sides, &asked.guides})
     for (Side& side : *sides)
     {
@@ -245,19 +228,64 @@ Built fillFace(Asked asked, PatchMethod method, double flatness, const PatchCont
                                                  std::max(side.from, side.to));
       canonical   = true;
     }
-  double perimeter = 0;
-  for (const Side& side : asked.sides)
-    perimeter += side.length;
-  const std::vector<gp_Pnt> outline = polygon(asked.sides);
-  const Frame               frame   = meanPlane(outline, perimeter);
-  for (const gp_Pnt& point : outline)
-    asked.size = std::max(asked.size, frame.origin.Distance(point) * 2);
-  const std::string eased =
-    agreeAtCorners(asked.sides, asked.limits, asked.size, asked.size / ladder[0]);
-  // The delivered face is held to what the sides ask near their corners as well.
-  for (size_t i = 0; i < input.sides.size(); ++i)
-    std::copy_n(asked.sides[i].eases, 2, input.sides[i].eases);
+}
 
+//! The constructions of a closed loop in their order, after the exact ones and the plane:
+//! a continuation of a spline face, of a torus, a ball or a plane/round/plane strip, four sides,
+//! and a surface over the mean plane.
+std::optional<Built> fitsInTurn(const Asked& asked, const Frame& frame)
+{
+  std::optional<Built> built;
+  built = splineContinuation(asked, frame);
+  if (!built)
+    built = toroidal(asked, frame);
+  if (!built)
+    built = spherical(asked, frame);
+  if (!built)
+    built = ruledRound(asked, frame);
+  std::optional<Built> rotatingQuad;
+  if (!built && asked.guides.empty() && asked.points.empty()
+      && squarish(asked.sides, asked.limits.g1))
+  {
+    built = foursided(asked, frame);
+    // Retain the established graph preference where a quad turns rapidly.
+    // This is candidate ordering, not a fold proof. A regular rotating quad
+    // remains available when the preferred trimmed construction cannot deliver.
+    if (built && built->measured.within && insideFault(built->face, 0, {}, false))
+    {
+      if (!insideFault(built->face, 0))
+        rotatingQuad = built;
+      built.reset();
+    }
+  }
+  if (!built || !built->measured.within)
+  {
+    try
+    {
+      built = overPlane(asked, frame);
+    }
+    catch (const Failure& failure)
+    {
+      if (failure.reason == "cancelled" || !rotatingQuad)
+        throw;
+      built = rotatingQuad;
+    }
+    if (!built->measured.within && rotatingQuad)
+      built = rotatingQuad;
+  }
+  return built;
+}
+
+//! The face the method and the controls ask for, before it is placed back and checked: the plane,
+//! the plate, the quad, the surface over the mean plane, or the constructions in turn; then the
+//! quad chained from runs of sides where nothing met, and the Adjacent fill over its chart.
+std::optional<Built> constructFill(const Asked&         asked,
+                                   const Frame&         frame,
+                                   PatchMethod          method,
+                                   double               flatness,
+                                   const PatchControls& controls,
+                                   bool                 gapped)
+{
   // A plane in the mean-plane coordinates has orthogonal UV everywhere, so all
   // nonquad flow choices described as Normal can be satisfied exactly there.
   const auto plane = method == PatchMethod::Auto && controls.quad != PatchQuad::On
@@ -311,100 +339,69 @@ Built fillFace(Asked asked, PatchMethod method, double flatness, const PatchCont
   }
   else
   {
-    built = splineContinuation(asked, frame);
-    if (!built)
-      built = toroidal(asked, frame);
-    if (!built)
-      built = spherical(asked, frame);
-    if (!built)
-      built = ruledRound(asked, frame);
-    std::optional<Built> rotatingQuad;
-    if (!built && asked.guides.empty() && asked.points.empty()
-        && squarish(asked.sides, asked.limits.g1))
-    {
-      built = foursided(asked, frame);
-      // Retain the established graph preference where a quad turns rapidly.
-      // This is candidate ordering, not a fold proof. A regular rotating quad
-      // remains available when the preferred trimmed construction cannot deliver.
-      if (built && built->measured.within && insideFault(built->face, 0, {}, false))
-      {
-        if (!insideFault(built->face, 0))
-          rotatingQuad = built;
-        built.reset();
-      }
-    }
-    if (!built || !built->measured.within)
-    {
-      try
-      {
-        built = overPlane(asked, frame);
-      }
-      catch (const Failure& failure)
-      {
-        if (failure.reason == "cancelled" || !rotatingQuad)
-          throw;
-        built = rotatingQuad;
-      }
-      if (!built->measured.within && rotatingQuad)
-        built = rotatingQuad;
-    }
+    built = fitsInTurn(asked, frame);
   }
   if (!built->measured.within && method != PatchMethod::Plate && !gapped)
     if (const auto quad = chainedQuad(asked, frame))
       built = quad;
   if (conformal && built->measured.within && !built->measured.unkept)
     built = adjacent(asked, frame, *built);
-  if (placement && built->measured.within && !built->measured.unkept)
+  return built;
+}
+
+//! The face measured again against the sides as they were given, before their quantised copies;
+//! where the generic projector reads them coarser than the tolerance, from a refined seed.
+void remeasureDelivered(std::optional<Built>& built, const Asked& input, const Asked& asked)
+{
+  Asked delivered    = input;
+  delivered.size     = asked.size;
+  const auto surface = BRep_Tool::Surface(built->face);
+  built->measured    = measureAll(surface, delivered);
+  if (!built->measured.within && !built->measured.unkept)
   {
-    built->face = TopoDS::Face(BRepBuilderAPI_Transform(built->face, *placement, true).Shape());
-    if (anchored)
-      built->face.Move(TopLoc_Location(anchor));
-    const double size = asked.size;
-    asked             = input;
-    asked.size        = size;
-  }
-  if (canonical && built->measured.within && !built->measured.unkept)
-  {
-    Asked delivered    = input;
-    delivered.size     = asked.size;
-    const auto surface = BRep_Tool::Surface(built->face);
-    built->measured    = measureAll(surface, delivered);
-    if (!built->measured.within && !built->measured.unkept)
+    // The generic projector's absolute resolution can exceed the requested
+    // physical tolerance. Refine its UV seed without moving the already-fitted
+    // surface. Successful original measurements and all construction stay intact.
+    try
     {
-      // The generic projector's absolute resolution can exceed the requested
-      // physical tolerance. Refine its UV seed without moving the already-fitted
-      // surface. Successful original measurements and all construction stay intact.
-      try
-      {
-        ShapeAnalysis_Surface project(surface);
-        bool                  finite = true;
-        const Measured        refined =
-          measureAll(surface,
-                     delivered,
-                     [&](const Side&, double, const gp_Pnt& point) -> std::optional<Place> {
-                       const gp_XY seed =
-                         project.ValueOfUV(point, BRepExt::tolerance::exactLength).XY();
-                       const gp_XY uv = nearest(surface, seed, point);
-                       if (!std::isfinite(uv.X()) || !std::isfinite(uv.Y())
-                           || !std::isfinite(surface->Value(uv.X(), uv.Y()).Distance(point)))
-                       {
-                         finite = false;
-                         return std::nullopt;
-                       }
-                       return Place{uv, false};
-                     });
-        if (finite && refined.within && !refined.unkept && refined.excess < built->measured.excess
-            && std::all_of(refined.values.begin(), refined.values.end(), [](double value) {
-                 return std::isfinite(value);
-               }))
-          built->measured = refined;
-      }
-      catch (const Standard_Failure&)
-      {
-        // Retain the original typed refusal when projection is not regular.
-      }
+      ShapeAnalysis_Surface project(surface);
+      bool                  finite = true;
+      const Measured        refined =
+        measureAll(surface,
+                   delivered,
+                   [&](const Side&, double, const gp_Pnt& point) -> std::optional<Place> {
+                     const gp_XY seed =
+                       project.ValueOfUV(point, BRepExt::tolerance::exactLength).XY();
+                     const gp_XY uv = nearest(surface, seed, point);
+                     if (!std::isfinite(uv.X()) || !std::isfinite(uv.Y())
+                         || !std::isfinite(surface->Value(uv.X(), uv.Y()).Distance(point)))
+                     {
+                       finite = false;
+                       return std::nullopt;
+                     }
+                     return Place{uv, false};
+                   });
+      if (finite && refined.within && !refined.unkept && refined.excess < built->measured.excess
+          && std::all_of(refined.values.begin(), refined.values.end(), [](double value) {
+               return std::isfinite(value);
+             }))
+        built->measured = refined;
+    }
+    catch (const Standard_Failure&)
+    {
+      // Retain the original typed refusal when projection is not regular.
     }
   }
+}
+
+//! The face held to every check Patch makes, untrimmed where asked; fails with what it misses.
+Built checkedFill(std::optional<Built>& built,
+                  const Asked&          asked,
+                  const Asked&          input,
+                  const std::string&    eased,
+                  PatchMethod           method,
+                  const PatchControls&  controls)
+{
   measureSpatialBoundary(*built, input, true);
   // Where a corner was eased and nothing met, the corner is the reason.
   if (!eased.empty() && (built->measured.unkept || !built->measured.within))
@@ -453,6 +450,56 @@ Built fillFace(Asked asked, PatchMethod method, double flatness, const PatchCont
     fail(op, no_solution, "the untrimmed result is not a valid face");
   measureTrimmedInterior(*built, input);
   return *built;
+}
+
+//! The face of the loop `asked` holds once its sides are in turn, held to every check Patch
+//! makes; fails with what it misses otherwise.
+Built fillFace(Asked asked, PatchMethod method, double flatness, const PatchControls& controls)
+{
+  const bool gapped    = hasGaps(asked);
+  asked.controls       = controls;
+  Asked input          = asked;
+  bool  copyBudgetMiss = false;
+  auto  placement =
+    method != PatchMethod::Plate ? localSplineRim(asked, &copyBudgetMiss) : std::nullopt;
+  gp_Trsf anchor;
+  bool    anchored = false;
+  if (!placement && copyBudgetMiss)
+  {
+    placement = rebasedSplineRim(asked, anchor);
+    anchored  = placement.has_value();
+  }
+  bool canonical = placement.has_value();
+  // Free spline interpolation can differ by a few ulps across machines. Quantise a
+  // private copy before any net/refinement decisions, not just the linear solve. The
+  // original curves are still measured below; the lattice is at most a millionth
+  // of the requested positional tolerance and uses a binary scale independent of ulps.
+  quantizePeriodic(asked, canonical);
+  double perimeter = 0;
+  for (const Side& side : asked.sides)
+    perimeter += side.length;
+  const std::vector<gp_Pnt> outline = polygon(asked.sides);
+  const Frame               frame   = meanPlane(outline, perimeter);
+  for (const gp_Pnt& point : outline)
+    asked.size = std::max(asked.size, frame.origin.Distance(point) * 2);
+  const std::string eased =
+    agreeAtCorners(asked.sides, asked.limits, asked.size, asked.size / ladder[0]);
+  // The delivered face is held to what the sides ask near their corners as well.
+  for (size_t i = 0; i < input.sides.size(); ++i)
+    std::copy_n(asked.sides[i].eases, 2, input.sides[i].eases);
+  std::optional<Built> built = constructFill(asked, frame, method, flatness, controls, gapped);
+  if (placement && built->measured.within && !built->measured.unkept)
+  {
+    built->face = TopoDS::Face(BRepBuilderAPI_Transform(built->face, *placement, true).Shape());
+    if (anchored)
+      built->face.Move(TopLoc_Location(anchor));
+    const double size = asked.size;
+    asked             = input;
+    asked.size        = size;
+  }
+  if (canonical && built->measured.within && !built->measured.unkept)
+    remeasureDelivered(built, input, asked);
+  return checkedFill(built, asked, input, eased, method, controls);
 }
 
 //! The face of the loop `asked` holds, held to every check Patch makes; fails with what it

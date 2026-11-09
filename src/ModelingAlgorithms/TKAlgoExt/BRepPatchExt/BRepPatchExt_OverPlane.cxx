@@ -60,120 +60,88 @@ constexpr double jumpWeight = 30, jumpReach = 0.3;
 
 constexpr int jumpPlaces = 3;
 
-//! A planar section guide carried along a rim, with support-derived Hermite extensions.
-//! This is the translation member of the curve-network Boolean-sum construction.
-//! It is only a candidate: all original rims, jets, guides and interior checks still apply.
-std::optional<Built> sectionReference(const Asked& asked, const Frame& frame)
+//! Where `side` crosses the plane of `section`, found by bisection to the last bit; nothing
+//! where its ends lie on one side of it.
+std::optional<double> sectionHit(const Side& side, const Frame& section)
 {
-  if (asked.guides.size() != 1 || !asked.points.empty() || asked.sides.size() != 4)
+  const auto height = [&](double f) { return gp_Vec(section.origin, side.at(f)).Dot(section.z); };
+  double     a = 0, b = 1, ha = height(a), hb = height(b);
+  if (ha * hb >= 0)
     return {};
-  std::vector<const Side*> rims;
-  for (const Side& side : asked.sides)
-    if (!side.free)
-      rims.push_back(&side);
-  if (rims.size() != 2)
-    return {};
-  if (rims[1]->order > rims[0]->order)
-    std::swap(rims[0], rims[1]);
-  const Side &rim = *rims[0], &foot = *rims[1], &guide = asked.guides.front();
-  auto        profile = plain(guide, guide.length, false, asked.limits.g0);
-  auto        rail    = plain(rim, rim.length, false, asked.limits.g0);
-  if (profile.IsNull() || rail.IsNull())
-    return {};
-  std::vector<gp_Pnt> samples;
-  for (int i = 1; i <= profile->NbPoles(); ++i)
-    samples.push_back(profile->Pole(i));
-  const Frame section = meanPlane(samples, guide.length);
-  // The section must be planar; reject rather than moving any supplied guide.
-  for (int i = 1; i <= profile->NbPoles(); ++i)
-    if (std::abs(gp_Vec(section.origin, profile->Pole(i)).Dot(section.z)) > asked.limits.g0)
-      return {};
-  const auto intersect = [&](const Side& side) -> std::optional<double> {
-    const auto height = [&](double f) { return gp_Vec(section.origin, side.at(f)).Dot(section.z); };
-    double     a = 0, b = 1, ha = height(a), hb = height(b);
-    if (ha * hb >= 0)
-      return {};
-    for (int i = 0; i < std::numeric_limits<double>::digits; ++i)
+  for (int i = 0; i < std::numeric_limits<double>::digits; ++i)
+  {
+    const double m = (a + b) / 2, h = height(m);
+    if ((h >= 0) == (ha >= 0))
     {
-      const double m = (a + b) / 2, h = height(m);
-      if ((h >= 0) == (ha >= 0))
-      {
-        a  = m;
-        ha = h;
-      }
-      else
-        b = m;
+      a  = m;
+      ha = h;
     }
-    return (a + b) / 2;
-  };
-  const auto ra = intersect(rim), rb = intersect(foot);
-  if (!ra || !rb)
-    return {};
-  const gp_Pnt a = rim.meet(*ra), b = foot.meet(*rb);
-  if (a.Distance(profile->Value(profile->FirstParameter()))
-        + b.Distance(profile->Value(profile->LastParameter()))
-      > a.Distance(profile->Value(profile->LastParameter()))
-          + b.Distance(profile->Value(profile->FirstParameter())))
-    profile->Reverse();
-  gp_Pnt g0, g1;
-  gp_Vec d0, d1, e0, e1;
-  profile->D2(profile->FirstParameter(), g0, d0, e0);
-  profile->D2(profile->LastParameter(), g1, d1, e1);
-  const double h0 = a.Distance(g0), h1 = b.Distance(g1);
-  if (h0 <= asked.limits.g0 || h1 <= asked.limits.g0)
-    return {};
-  const auto jet = [&](const Side&   side,
-                       double        f,
-                       const gp_Pnt& toward,
-                       const gp_Vec& fallback) -> std::pair<gp_Vec, gp_Vec> {
-    if (side.support.IsNull() || side.order == 0)
-      return {fallback, gp_Vec(0, 0, 0)};
-    const SurfaceJet j = side.jet(f);
-    gp_Vec           t = j.n.Crossed(section.z);
-    t.Normalize();
-    if (t.Dot(gp_Vec(side.meet(f), toward)) < 0)
-      t.Reverse();
-    const double E = j.u.SquareMagnitude(), F = j.u.Dot(j.v), G = j.v.SquareMagnitude();
-    const double u = (G * t.Dot(j.u) - F * t.Dot(j.v)) / (E * G - F * F),
-                 v = (E * t.Dot(j.v) - F * t.Dot(j.u)) / (E * G - F * F);
-    gp_Vec e       = j.uu * (u * u) + j.uv * (2 * u * v) + j.vv * (v * v);
-    // Differentiate the plane-intersection constraint, preserving the normal acceleration.
-    const gp_Vec w = section.z - j.n * section.z.Dot(j.n);
-    e -= w * (e.Dot(section.z) / w.SquareMagnitude());
-    return {t, e};
-  };
-  const auto [da, ea] = jet(rim, *ra, g0, d0);
-  auto [db, eb]       = jet(foot, *rb, g1, -d1);
-  if (foot.order > 0)
-    db.Reverse(); // The section arrives at the second rim.
-  else
-    db = d1;
-  const auto hermite = [](const gp_Pnt& p,
-                          const gp_Vec& d,
-                          const gp_Vec& e,
-                          const gp_Pnt& q,
-                          const gp_Vec& f,
-                          const gp_Vec& g,
-                          double        h) {
-    NCollection_Array1<gp_Pnt> poles(1, 6);
-    poles(1)   = p;
-    poles(2)   = p.Translated(d * (h / 5));
-    poles(3)   = p.Translated(d * (2 * h / 5) + e * (h * h / 20));
-    poles(4)   = q.Translated(f * (-2 * h / 5) + g * (h * h / 20));
-    poles(5)   = q.Translated(f * (-h / 5));
-    poles(6)   = q;
-    auto curve = GeomConvert::CurveToBSplineCurve(new Geom_BezierCurve(poles));
-    NCollection_Array1<double> knots = curve->Knots();
-    BSplCLib::Reparametrize(0, h, knots);
-    curve->SetKnots(knots);
-    return curve;
-  };
-  profile->IncreaseDegree(5);
-  GeomConvert_CompCurveToBSplineCurve joined(hermite(a, da, ea, g0, d0, e0, h0));
-  if (!joined.Add(profile, asked.limits.g0 * 1e-6, true, false, 3)
-      || !joined.Add(hermite(g1, d1, e1, b, db, eb, h1), asked.limits.g0 * 1e-6, true, false, 3))
-    return {};
-  const auto                 cross = joined.BSplineCurve();
+    else
+      b = m;
+  }
+  return (a + b) / 2;
+}
+
+//! The way a section leaves `side` at `f` toward `toward`, square to the face's normal in the
+//! section's plane, and its second derivative there kept in that plane; `fallback` and none
+//! where the side has no face to leave.
+std::pair<gp_Vec, gp_Vec> sectionJet(const Side&   side,
+                                     double        f,
+                                     const gp_Pnt& toward,
+                                     const gp_Vec& fallback,
+                                     const Frame&  section)
+{
+  if (side.support.IsNull() || side.order == 0)
+    return {fallback, gp_Vec(0, 0, 0)};
+  const SurfaceJet j = side.jet(f);
+  gp_Vec           t = j.n.Crossed(section.z);
+  t.Normalize();
+  if (t.Dot(gp_Vec(side.meet(f), toward)) < 0)
+    t.Reverse();
+  const double E = j.u.SquareMagnitude(), F = j.u.Dot(j.v), G = j.v.SquareMagnitude();
+  const double u = (G * t.Dot(j.u) - F * t.Dot(j.v)) / (E * G - F * F),
+               v = (E * t.Dot(j.v) - F * t.Dot(j.u)) / (E * G - F * F);
+  gp_Vec e       = j.uu * (u * u) + j.uv * (2 * u * v) + j.vv * (v * v);
+  // Differentiate the plane-intersection constraint, preserving the normal acceleration.
+  const gp_Vec w = section.z - j.n * section.z.Dot(j.n);
+  e -= w * (e.Dot(section.z) / w.SquareMagnitude());
+  return {t, e};
+}
+
+//! The quintic from `p` to `q` with first derivatives `d`, `f` and second `e`, `g` there, over
+//! parameters of length `h`.
+occ::handle<Geom_BSplineCurve> hermiteSpan(const gp_Pnt& p,
+                                           const gp_Vec& d,
+                                           const gp_Vec& e,
+                                           const gp_Pnt& q,
+                                           const gp_Vec& f,
+                                           const gp_Vec& g,
+                                           double        h)
+{
+  NCollection_Array1<gp_Pnt> poles(1, 6);
+  poles(1)                         = p;
+  poles(2)                         = p.Translated(d * (h / 5));
+  poles(3)                         = p.Translated(d * (2 * h / 5) + e * (h * h / 20));
+  poles(4)                         = q.Translated(f * (-2 * h / 5) + g * (h * h / 20));
+  poles(5)                         = q.Translated(f * (-h / 5));
+  poles(6)                         = q;
+  auto                       curve = GeomConvert::CurveToBSplineCurve(new Geom_BezierCurve(poles));
+  NCollection_Array1<double> knots = curve->Knots();
+  BSplCLib::Reparametrize(0, h, knots);
+  curve->SetKnots(knots);
+  return curve;
+}
+
+//! The surface swept by `cross`, the section from the rim's point `a` to the foot, along `rail`,
+//! trimmed by the loop and held to every check of Patch.
+std::optional<Built> sweptReference(const Asked&                          asked,
+                                    const Frame&                          frame,
+                                    const Side&                           rim,
+                                    const Side&                           foot,
+                                    const occ::handle<Geom_BSplineCurve>& rail,
+                                    const occ::handle<Geom_BSplineCurve>& cross,
+                                    const gp_Pnt&                         a)
+{
   NCollection_Array2<gp_Pnt> poles(1, rail->NbPoles(), 1, cross->NbPoles());
   for (int i = 1; i <= rail->NbPoles(); ++i)
     for (int j = 1; j <= cross->NbPoles(); ++j)
@@ -229,15 +197,83 @@ std::optional<Built> sectionReference(const Asked& asked, const Frame& frame)
   return built;
 }
 
+//! A planar section guide carried along a rim, with support-derived Hermite extensions.
+//! This is the translation member of the curve-network Boolean-sum construction.
+//! It is only a candidate: all original rims, jets, guides and interior checks still apply.
+std::optional<Built> sectionReference(const Asked& asked, const Frame& frame)
+{
+  if (asked.guides.size() != 1 || !asked.points.empty() || asked.sides.size() != 4)
+    return {};
+  std::vector<const Side*> rims;
+  for (const Side& side : asked.sides)
+    if (!side.free)
+      rims.push_back(&side);
+  if (rims.size() != 2)
+    return {};
+  if (rims[1]->order > rims[0]->order)
+    std::swap(rims[0], rims[1]);
+  const Side &rim = *rims[0], &foot = *rims[1], &guide = asked.guides.front();
+  auto        profile = plain(guide, guide.length, false, asked.limits.g0);
+  auto        rail    = plain(rim, rim.length, false, asked.limits.g0);
+  if (profile.IsNull() || rail.IsNull())
+    return {};
+  std::vector<gp_Pnt> samples;
+  for (int i = 1; i <= profile->NbPoles(); ++i)
+    samples.push_back(profile->Pole(i));
+  const Frame section = meanPlane(samples, guide.length);
+  // The section must be planar; reject rather than moving any supplied guide.
+  for (int i = 1; i <= profile->NbPoles(); ++i)
+    if (std::abs(gp_Vec(section.origin, profile->Pole(i)).Dot(section.z)) > asked.limits.g0)
+      return {};
+  const auto ra = sectionHit(rim, section), rb = sectionHit(foot, section);
+  if (!ra || !rb)
+    return {};
+  const gp_Pnt a = rim.meet(*ra), b = foot.meet(*rb);
+  if (a.Distance(profile->Value(profile->FirstParameter()))
+        + b.Distance(profile->Value(profile->LastParameter()))
+      > a.Distance(profile->Value(profile->LastParameter()))
+          + b.Distance(profile->Value(profile->FirstParameter())))
+    profile->Reverse();
+  gp_Pnt g0, g1;
+  gp_Vec d0, d1, e0, e1;
+  profile->D2(profile->FirstParameter(), g0, d0, e0);
+  profile->D2(profile->LastParameter(), g1, d1, e1);
+  const double h0 = a.Distance(g0), h1 = b.Distance(g1);
+  if (h0 <= asked.limits.g0 || h1 <= asked.limits.g0)
+    return {};
+  const auto [da, ea] = sectionJet(rim, *ra, g0, d0, section);
+  auto [db, eb]       = sectionJet(foot, *rb, g1, -d1, section);
+  if (foot.order > 0)
+    db.Reverse(); // The section arrives at the second rim.
+  else
+    db = d1;
+  profile->IncreaseDegree(5);
+  GeomConvert_CompCurveToBSplineCurve joined(hermiteSpan(a, da, ea, g0, d0, e0, h0));
+  if (!joined.Add(profile, asked.limits.g0 * 1e-6, true, false, 3)
+      || !joined
+            .Add(hermiteSpan(g1, d1, e1, b, db, eb, h1), asked.limits.g0 * 1e-6, true, false, 3))
+    return {};
+  const auto cross = joined.BSplineCurve();
+  return sweptReference(asked, frame, rim, foot, rail, cross, a);
+}
+
 } // namespace
 
-Built overPlane(const Asked& asked, const Frame& flat, int direction)
+namespace
 {
-  // Corners where the faces on both sides are tangent and bend differently (a rim that runs
-  // from a plane onto a round): there the surface has to change its bend, and a net that
-  // is twice differentiable everywhere can only smear that over a span.
-  std::vector<gp_Pnt> turns;
-  std::vector<gp_Vec> along;
+
+//! The least |n . z| along the rim, n a face's normal and z the mean plane's, for which the fit is
+//! a fixed graph over the plane. A fixed graph avoids spending fairness on tangential parameter
+//! drift. Keep the spatial fit for steep supports, where its movable parameters approximate shape
+//! energy better. The graph also makes the support's G2 conditions exactly linear. Chosen: 0.8.
+constexpr double graphNormal = 0.8;
+
+//! Corners where the faces on both sides are tangent and bend differently (a rim that runs
+//! from a plane onto a round): there the surface has to change its bend, and a net that
+//! is twice differentiable everywhere can only smear that over a span. `turns` gets each such
+//! corner, `along` the rim's tangents on both sides of it.
+void cornerTurns(const Asked& asked, std::vector<gp_Pnt>& turns, std::vector<gp_Vec>& along)
+{
   for (size_t i = 0; i < asked.sides.size(); ++i)
   {
     const Side &a = asked.sides[i], &b = asked.sides[(i + 1) % asked.sides.size()];
@@ -248,11 +284,20 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction)
     along.push_back(a.tangent(1));
     along.push_back(b.tangent(0));
   }
-  // The net's lines through such a corner carry the change best when the rim crosses both
-  // of them well: the net is turned in its plane to where the rim that is nearest to one of
-  // its directions is furthest from it.
-  // And two such lines that run close beside each other leave the surface next to nothing
-  // to hold it between them: the corners are to lie well apart both ways.
+}
+
+//! The net's lines through such a corner carry the change best when the rim crosses both
+//! of them well: the net is turned in its plane to where the rim that is nearest to one of
+//! its directions is furthest from it.
+//! And two such lines that run close beside each other leave the surface next to nothing
+//! to hold it between them: the corners are to lie well apart both ways. `direction` turns the
+//! net a further ninth of a half turn per step.
+Frame turnedFrame(const Asked&               asked,
+                  const Frame&               flat,
+                  const std::vector<gp_Pnt>& turns,
+                  const std::vector<gp_Vec>& along,
+                  int                        direction)
+{
   Frame frame = flat;
   if (!turns.empty())
   {
@@ -293,66 +338,200 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction)
     frame.x = flat.x * std::cos(angle) + flat.y * std::sin(angle);
     frame.y = flat.y * std::cos(angle) - flat.x * std::sin(angle);
   }
-  std::vector<double> breaksU, breaksV;
-  for (const gp_Pnt& turn : turns)
+  return frame;
+}
+
+// A loop that is refused over the mean plane, and whose rim's faces have normals that no plane
+// has all within `steepest` of its own, is a height over no plane at all: it is filled over a
+// chart of its own instead (see overChart). Every other loop is filled as it was, and one that
+// the chart does not fill either is refused as it was.
+Built chartedOrRefused(const Asked&       asked,
+                       const Frame&       flat,
+                       const Frame&       frame,
+                       int                direction,
+                       const std::string& refusal)
+{
+  // The plane's check reads the faces between the ends; whether any plane would do is read
+  // at the ends as well, where a rim's normals close their sweep (the nose of a wing).
+  std::vector<gp_Vec> normals;
+  for (const Side& side : asked.sides)
+    for (int i = 0; direction == 0 && side.order > 0 && i <= gaussPlaces; ++i)
+      normals.push_back(
+        side.jet(std::clamp(static_cast<double>(i) / gaussPlaces, cornerInset, 1 - cornerInset)).n);
+  if (direction == 0 && graphMargin(normals, {frame.x, frame.y, frame.z}) < steepest)
   {
-    breaksU.push_back(frame.project(turn).X());
-    breaksV.push_back(frame.project(turn).Y());
-  }
-  std::vector<gp_XY> loop;
-  for (const gp_Pnt& point : polygon(asked.sides))
-    loop.push_back(frame.project(point));
-  // A loop that is refused over the mean plane, and whose rim's faces have normals that no plane
-  // has all within `steepest` of its own, is a height over no plane at all: it is filled over a
-  // chart of its own instead (see overChart). Every other loop is filled as it was, and one that
-  // the chart does not fill either is refused as it was.
-  const auto refused = [&](const std::string& refusal) -> Built {
-    // The plane's check reads the faces between the ends; whether any plane would do is read
-    // at the ends as well, where a rim's normals close their sweep (the nose of a wing).
-    std::vector<gp_Vec> normals;
-    for (const Side& side : asked.sides)
-      for (int i = 0; direction == 0 && side.order > 0 && i <= gaussPlaces; ++i)
-        normals.push_back(
-          side.jet(std::clamp(static_cast<double>(i) / gaussPlaces, cornerInset, 1 - cornerInset))
-            .n);
-    if (direction == 0 && graphMargin(normals, {frame.x, frame.y, frame.z}) < steepest)
+    std::optional<Built> charted;
+    try
     {
-      std::optional<Built> charted;
-      try
-      {
-        charted = overChart(asked, flat);
-      }
-      catch (const Failure& failure)
-      {
-        if (failure.reason == "cancelled")
-          throw;
-      }
-      catch (const Standard_Failure&)
-      {
-      }
-      if (charted)
-        return *charted;
+      charted = overChart(asked, flat);
     }
-    fail(op, unsupported_geometry, refusal);
-  };
-  double                     area = 0;
-  std::optional<std::string> crossed;
-  try
-  {
-    area = enclosed(loop);
+    catch (const Failure& failure)
+    {
+      if (failure.reason == "cancelled")
+        throw;
+    }
+    catch (const Standard_Failure&)
+    {
+    }
+    if (charted)
+      return *charted;
   }
-  catch (const Failure& failure)
+  fail(op, unsupported_geometry, refusal);
+}
+
+//! The fill of `overPlane` once its net's frame is chosen: what the loop asks of a height over
+//! the plane, read once, and the ladders of nets fitted to it, finer net by finer net.
+class PlaneFill
+{
+public:
+  PlaneFill(const Asked&               asked,
+            const Frame&               flat,
+            int                        direction,
+            const std::vector<gp_Pnt>& turns,
+            const Frame&               frame,
+            std::vector<gp_XY>         loop,
+            double                     area)
+      : asked(asked),
+        flat(flat),
+        direction(direction),
+        turns(turns),
+        frame(frame),
+        loop(std::move(loop)),
+        area(area),
+        within(this->loop, 0)
   {
-    crossed = failure.message;
+    for (const gp_Pnt& turn : turns)
+    {
+      breaksU.push_back(frame.project(turn).X());
+      breaksV.push_back(frame.project(turn).Y());
+    }
   }
-  if (crossed)
-    return refused(*crossed);
-  const Inside within(loop, 0);
-  // A fixed graph avoids spending fairness on tangential parameter drift. Keep the
-  // spatial fit for steep supports, where its movable parameters approximate shape
-  // energy better. The graph also makes the support's G2 conditions exactly linear.
-  constexpr double graphNormal   = 0.8;
-  bool             graphSupports = true;
+
+  PlaneFill(const PlaneFill&)            = delete;
+  PlaneFill& operator=(const PlaneFill&) = delete;
+
+  //! The fill, or a refusal: the faces along the rim are read against the plane, and guides
+  //! and points that lie outside the loop are refused.
+  Built run();
+
+private:
+  //! Where guides are given: the surface without them, where it meets them already.
+  std::optional<Built> unguidedBase() const;
+
+  //! The extent of the loop, the degree of the net and what its fit is held to.
+  void setUp();
+
+  //! The ladders tried in turn, and of what they make the one kept.
+  Built chooseFill();
+
+  //! One ladder of nets, finer and finer, until two agree or the nets allowed end. `wish`
+  //! wishes for the faces' bend along a tangent rim.
+  Built ladderFit(bool wish, int nets);
+
+  //! How many spans a net of `spans` across the loop's longer extent has across `extent`.
+  int spansAlong(int spans, double extent) const;
+
+  //! The net of `spansU` x `spansV` spans, flat in the mean plane, before it is fitted.
+  SplineNet layNet(int spans, int spansU, int spansV) const;
+
+  //! What the fit of a net of `spans` is to meet: places along the sides and guides, the points,
+  //! and the tangent planes at the corners in `forced`.
+  std::vector<Target> targetsOf(const SplineNet&         net,
+                                int                      spans,
+                                bool                     wish,
+                                const std::vector<char>& forced) const;
+
+  //! Across a line through a corner where the rim's faces change their bend, the surface
+  //! may change its own: at the corner, where the rim needs it, and less and less the
+  //! farther along the line from it, so that the step stays at the rim and the surface
+  //! inside is of one bend across the line.
+  std::vector<FitJump> jumpsOf(const SplineNet& net) const;
+
+  //! The surface fitted on `net`, or the net as it is where it is seeded already.
+  occ::handle<Geom_BSplineSurface> fitted(SplineNet&                  net,
+                                          bool                        seeded,
+                                          const std::vector<Target>&  targets,
+                                          const std::vector<char>&    fixed,
+                                          const std::vector<FitJump>& jumps,
+                                          const gp_XYZ&               up,
+                                          bool                        spatial,
+                                          bool                        heightGraph) const;
+
+  //! The surface moved onto its curves by the least movement of its poles; returns what the
+  //! correction leaves where it had no room to make the net finer.
+  double correctOnto(SplineNet&                        net,
+                     occ::handle<Geom_BSplineSurface>& surface,
+                     int                               spansU,
+                     int                               spansV,
+                     const gp_XYZ&                     up,
+                     std::vector<char>&                forced) const;
+
+  //! The trimmed face of `surface`, measured along its edges and inside.
+  Built trimmedFill(const occ::handle<Geom_BSplineSurface>& surface) const;
+
+  //! Whether the ladder stops at `built`, keeping the best found so far in `rungs`.
+  bool settles(const Built& built, double change, bool wasWithin, bool moved, double left);
+
+  //! The first ladder at degree 3 for a loop whose guides and points lie nearly on a quadratic.
+  std::optional<Built> nearlyQuadraticFill();
+
+  //! Whether the faces' bend can be wished for all round the rim.
+  bool wishBend() const;
+
+  //! The strict ladder again with all three components of the Hessian asked of a G2 rim.
+  std::optional<Built> completeHessian();
+
+  //! The surface of the guides as sections, for guides the ladders do not meet.
+  std::optional<Built> sectionFill() const;
+
+  //! For a tangent rim: the strict ladder with more angular headroom, or turned to a frame the
+  //! corners cross better, where either is better than `strict`.
+  Built tangentFill(const Built& strict);
+
+  //! Where curves are only met: the ladder fitted near them and moved onto them, or `strict`.
+  Built looseOrStrict(const Built& strict);
+
+  Built refused(const std::string& refusal) const
+  {
+    return chartedOrRefused(asked, flat, frame, direction, refusal);
+  }
+
+  const Asked&               asked;
+  const Frame&               flat;
+  const int                  direction;
+  const std::vector<gp_Pnt>& turns;
+  const Frame                frame;
+  const std::vector<gp_XY>   loop;
+  const double               area;
+  const Inside               within;
+  std::vector<double>        breaksU, breaksV;
+  bool                       graphSupports = true;
+  gp_XY                      low, high, margin;
+  double                     width = 0, depth = 0, larger = 0;
+  int                        order = 0, degree = 0;
+  bool                       exchange = false, fairRim = false, nearlyQuadratic = false;
+  double                     bend = 0;
+  Limits                     reach{};
+  GraphFit                   graphMode = GraphFit::transverse;
+
+  //! What the ladder in progress has found.
+  struct Rungs
+  {
+    std::optional<Built>      best;
+    int                       tried = 0, unkept = 0;
+    double                    placeOnly     = HUGE_VAL;
+    int                       previousSpans = 0;
+    occ::handle<Geom_Surface> previous;
+    bool                      previousWithin = false, previousSpatial = false, settledOn = false;
+    std::vector<Built>        meeting;
+    // The corners of two sides that are only to be met at which a surface of the ladder left the
+    // sides nearer the corner than the even places of its correction reach (see below).
+    std::vector<char> forced;
+  } rungs;
+};
+
+Built PlaneFill::run()
+{
   for (const Side& side : asked.sides)
     for (int i = 0; side.order > 0 && i < 16; ++i)
     {
@@ -369,7 +548,14 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction)
   for (const gp_Pnt& point : asked.points)
     if (!inside(loop, frame.project(point), outsideSlack * asked.size))
       fail(op, invalid_input, "a point lies outside the boundary");
+  if (const auto base = unguidedBase())
+    return *base;
+  setUp();
+  return chooseFill();
+}
 
+std::optional<Built> PlaneFill::unguidedBase() const
+{
   if (!asked.guides.empty())
   {
     Asked unguided = asked;
@@ -401,47 +587,51 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction)
       }
     }
   }
+  return std::nullopt;
+}
 
-  gp_XY low = loop.front(), high = loop.front();
+void PlaneFill::setUp()
+{
+  low  = loop.front();
+  high = loop.front();
   for (const gp_XY& point : loop)
   {
     low.SetCoord(std::min(low.X(), point.X()), std::min(low.Y(), point.Y()));
     high.SetCoord(std::max(high.X(), point.X()), std::max(high.Y(), point.Y()));
   }
-  const double width = high.X() - low.X(), depth = high.Y() - low.Y(),
-               larger = std::max(width, depth);
+  width  = high.X() - low.X();
+  depth  = high.Y() - low.Y();
+  larger = std::max(width, depth);
   // Each way by its own extent: a tenth of the longer one on every side would leave a thin
   // strip a small part of its own surface.
-  const gp_XY margin(marginShare * width, marginShare * depth);
-  int         order = 0;
+  margin = gp_XY(marginShare * width, marginShare * depth);
   for (const Side& side : asked.sides)
     order = std::max(order, side.order);
   // Degree 5 for tangency and guides; cubic for free boundaries without guides.
   // A net of degree 3 follows a rim's tangent planes as a cubic follows a curve, and the
   // corner of three rounds, a ball's eighth, took it 25 x 25 poles and came out rippled (a
   // largest bend of 0.56 for 0.25); of degree 5 it takes 13 x 13 and bends 0.31 at most.
-  int        degree = order > 0 || !asked.guides.empty() ? 5 : 3;
+  degree            = order > 0 || !asked.guides.empty() ? 5 : 3;
   const auto typeOf = [](const Side& side) { return BRepAdaptor_Surface(side.support).GetType(); };
   const bool supported = std::all_of(asked.sides.begin(), asked.sides.end(), [](const Side& side) {
     return !side.support.IsNull();
   });
-  const bool exchange =
-    order > 0 && asked.guides.empty() && supported
-    && ((asked.sides.size() == 1 && typeOf(asked.sides.front()) == GeomAbs_Cone)
-        || (std::any_of(asked.sides.begin(),
-                        asked.sides.end(),
-                        [&](const Side& side) { return typeOf(side) == GeomAbs_Plane; })
-            && std::any_of(asked.sides.begin(), asked.sides.end(), [&](const Side& side) {
-                 return typeOf(side) != GeomAbs_Plane;
-               })));
+  exchange             = order > 0 && asked.guides.empty() && supported
+             && ((asked.sides.size() == 1 && typeOf(asked.sides.front()) == GeomAbs_Cone)
+                 || (std::any_of(asked.sides.begin(),
+                                 asked.sides.end(),
+                                 [&](const Side& side) { return typeOf(side) == GeomAbs_Plane; })
+                     && std::any_of(asked.sides.begin(), asked.sides.end(), [&](const Side& side) {
+                          return typeOf(side) != GeomAbs_Plane;
+                        })));
 
   // The fairest surface tangent to a ball is not the ball: of all that leave the rim in the
   // neighbours' planes, the one that bends least is flatter. Where the neighbours agree
   // about the bend all round the rim, their bend is wished for as well, and what comes of
   // that is taken where it is within the limits and one to keep; where they do not agree,
   // or it is not, the surface is tangent and no more.
-  const double bend    = rimBend(asked);
-  const bool   fairRim = order == 0 && asked.guides.empty() && asked.points.empty();
+  bend    = rimBend(asked);
+  fairRim = order == 0 && asked.guides.empty() && asked.points.empty();
   // Where curves are only met, the fit is asked to come as near them as a fair surface over
   // its net does, a share of the loop's size and nothing of the tolerance, and the surface is
   // moved onto them afterwards: brought nearer by the fit, a coarse net ripples (z = sin 2a
@@ -449,7 +639,6 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction)
   // over into, the fit is asked for the tolerance itself: its net of degree 5 follows a rim
   // on a face to a millionth with few poles, and moved there afterwards took three times as
   // many.
-  bool nearlyQuadratic = false;
   if (order == 0 && (!asked.guides.empty() || !asked.points.empty()))
   {
     // Recognition only: a quadratic needs neither the general guide fit's degree five
@@ -464,7 +653,7 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction)
     else if (!asked.guides.empty())
       nearlyQuadratic = polynomialHeight(asked, frame, probe, true);
   }
-  Limits reach            = asked.limits;
+  reach                   = asked.limits;
   double inputUncertainty = 0;
   for (const Side& side : asked.sides)
     for (int k = 0; k < places; ++k)
@@ -475,552 +664,629 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction)
   // Leave extra angle headroom when sewing must reparameterize a coarse input edge.
   if (inputUncertainty > 10 * asked.limits.g0)
     reach.g1 *= .5;
-  GraphFit   graphMode = GraphFit::transverse;
-  const auto build     = [&](bool wish, int nets) {
-    std::optional<Built>      best;
-    int                       tried = 0, unkept = 0;
-    double                    placeOnly     = HUGE_VAL;
-    int                       previousSpans = 0;
-    occ::handle<Geom_Surface> previous;
-    bool                      previousWithin = false, previousSpatial = false, settledOn = false;
-    std::vector<Built>        meeting;
-    // The corners of two sides that are only to be met at which a surface of the ladder left the
-    // sides nearer the corner than the even places of its correction reach (see below).
-    std::vector<char> forced(asked.sides.size(), 0);
-    for (int rung : ladder)
-    {
-      const int spans = std::max(rung,
-                                 asked.controls.quality == PatchQuality::Max    ? 16
-                                     : asked.controls.quality == PatchQuality::High ? 10
-                                                                                    : 0);
-      if (spans == previousSpans)
-        continue;
-      previousSpans = spans;
-      // The last is for nets that only meet curves: a height of degree 3, which that many
-      // spans cost no more than the net before it costs one that is free in space.
-      if (nets-- <= 0 || (spans == std::end(ladder)[-1] && order > 0))
-        break;
-      auto along = [&](double extent) {
-        // The complete-G2 retry refines both directions, including a narrow
-        // direction whose aspect-ratio share never exceeds the coarse minimum.
-        // Preserve established G0/G1 and transverse constructions.
-        const int minimum =
-          graphMode == GraphFit::complete
-                ? static_cast<int>(std::lround(static_cast<double>(fewestSpans) * spans / ladder[0]))
-                : fewestSpans;
-        return std::max(minimum, static_cast<int>(std::lround(spans * extent / larger)));
-      };
-      const int spansU = along(width), spansV = along(depth);
-      // Finer where the rim turns faster than the even net follows: by `turnPerSpan` of
-      // turning to a span on the coarsest net, and in step with the net after that.
-      std::vector<Finer> finerU, finerV;
-      for (const Side& side : asked.sides)
-        for (int i = 0; side.order > 0 && i < turningSteps; ++i)
-        {
-          const double f = (i + 0.5) / turningSteps, step = 0.25 / turningSteps;
-          const double turning =
-            side.jet(f - step).n.Angle(side.jet(f + step).n) / (2 * step * side.length);
-          const double span = turnPerSpan * ladder[0] / spans / std::max(turning, 1e-12);
-          if (span >= larger / spans)
-            continue;
-          const gp_XY at = frame.project(side.at(f));
-          finerU.push_back({at.X(), span});
-          finerV.push_back({at.Y(), span});
-        }
-      // A narrow opening needs longitudinal resolution near its ends too:
-      // the G2 boundary layer can be as short as the opening is wide, even
-      // when the boundary tangent hardly turns. Refine only the failed-G2
-      // retry, and only where its even spans exceed that physical scale.
-      if (graphMode == GraphFit::complete)
-      {
-        const double span = std::min(width, depth) / fewestSpans;
-        const auto   ends = [&](double from, double to, int count, std::vector<Finer>& finer) {
-          if ((to - from) / count <= span)
-            return;
-          for (double end : {from, to})
-            for (int i = -fewestSpans; i <= fewestSpans; ++i)
-              finer.push_back({end + i * span, span});
-        };
-        ends(low.X(), high.X(), spansU, finerU);
-        ends(low.Y(), high.Y(), spansV, finerV);
-      }
-      SplineNet net{
-        degree,
-        degree,
-        gradedKnots(low.X() - margin.X(), high.X() + margin.X(), spansU, degree, finerU, breaksU),
-        gradedKnots(low.Y() - margin.Y(), high.Y() + margin.Y(), spansV, degree, finerV, breaksV),
-            {}};
-      // The net lies in the mean plane, each pole where the plane's own parameters put it,
-      // and is free to rise from it: a height over the plane.
-      const int  nu = net.countU(), nv = net.countV();
-      const auto mean = [](const std::vector<double>& knots, int degree, int i) {
-        double sum = 0;
-        for (int k = 1; k <= degree; ++k)
-          sum += knots[i + k];
-        return sum / degree;
-      };
-      net.poles.resize(static_cast<size_t>(nu) * nv);
-      for (int i = 0; i < nu; ++i)
-        for (int j = 0; j < nv; ++j)
-          net.poles[static_cast<size_t>(i) * nv + j] =
-            (frame.origin.XYZ() + frame.x.XYZ() * mean(net.knotsU, degree, i)
-             + frame.y.XYZ() * mean(net.knotsV, degree, j));
-      const gp_XYZ up = frame.z.XYZ();
-      const bool   seeded =
-        order == 0 && (reach.g0 > asked.limits.g0 || !asked.guides.empty() || !asked.points.empty())
-        && polynomialHeight(asked, frame, net, reach.g0 > asked.limits.g0);
-      std::vector<Target> targets;
-      for (const auto* curves : {&asked.sides, &asked.guides})
-        for (const Side& side : *curves)
-        {
-          if (side.free)
-            continue;
-          // The same number of places in every span of the net that the curve passes
-          // through, however briefly: a span it only clips has poles of its own, and
-          // without a place there nothing but the energy would say where they go.
-          std::vector<double> cuts{0, 1};
-          gp_XY               before = frame.project(side.at(0));
-          for (int i = 1; i <= crossingSteps; ++i)
-          {
-            const gp_XY here = frame.project(side.at(static_cast<double>(i) / crossingSteps));
-            for (int way = 1; way <= 2; ++way)
-            {
-              const std::vector<double>& knots = way == 1 ? net.knotsU : net.knotsV;
-              const double               a = before.Coord(way), b = here.Coord(way);
-              for (auto knot = std::upper_bound(knots.begin(), knots.end(), std::min(a, b));
-                   knot != knots.end() && *knot < std::max(a, b);
-                   ++knot)
-                cuts.push_back((i - 1 + (*knot - a) / (b - a)) / crossingSteps);
-            }
-            before = here;
-          }
-          std::sort(cuts.begin(), cuts.end());
-          // Next to a gap, or where the next edge lies on the same face, nothing else is
-          // asked of that end: the face has its say there as along the rest.
-          const auto index = asked.boundaryIndex(side);
-          const auto quiet = [&](size_t other) {
-            const Side& near = asked.sides[other % asked.sides.size()];
-            return near.free || near.support.IsSame(side.support);
-          };
-          const bool lone       = index && hasGaps(asked);
-          const bool quietStart = lone && quiet(*index + asked.sides.size() - 1),
-                     quietEnd   = lone && quiet(*index + 1);
-          auto place            = [&](double f, double share, bool end, bool watch = false) {
-            if (end && ((f == 0 && quietStart) || (f == 1 && quietEnd)))
-            {
-              f   = std::clamp(f, cornerInset, 1 - cornerInset);
-              end = false;
-            }
-            const gp_Pnt point = side.meet(f);
-            // Tangency and bend are not asked for at the ends, where two sides meet.
-            const bool smooth = side.order > 0 && !end;
-            Target     target{point,
-                          frame.project(point),
-                          smooth ? side.order : 0,
-                                             {},
-                                             {},
-                          share * side.length / asked.size,
-                          smooth && wish && side.order == 1};
-            if (smooth)
-            {
-              target.jet          = side.jet(f);
-              target.easing       = side.easing(f);
-              const gp_Vec along3 = side.tangent(f);
-              const gp_XY  along2(along3.Dot(frame.x), along3.Dot(frame.y));
-              target.across = gp_XY(-along2.Y(), along2.X()) / along2.Modulus();
-            }
-            target.watch = watch;
-            targets.push_back(target);
-          };
-          const double least = 1.0 / (crossingSteps * 16);
-          place(0, least, true);
-          place(1, least, true);
-          for (size_t i = 0; i + 1 < cuts.size(); ++i)
-          {
-            const double from = cuts[i], to = cuts[i + 1];
-            if (to - from < BRepExt::tolerance::parameterMerge)
-              continue;
-            for (int k = 0; k < placesPerSpan; ++k)
-            {
-              place(from + (to - from) * (k + 0.5) / placesPerSpan,
-                    std::max(least, (to - from) / placesPerSpan),
-                    false);
-              // And between the places, where the surface is only read.
-              place(from + (to - from) * (k + 1.0) / placesPerSpan,
-                    std::max(least, (to - from) / placesPerSpan),
-                    false,
-                    true);
-            }
-          }
-        }
-      for (const gp_Pnt& point : asked.points)
-        targets.push_back({point, frame.project(point), 0, {}, {}, 1.0 / spans});
-      // Where two sides that are only to be met meet at a corner, a surface that holds both is
-      // tangent there to the plane of their two tangents, whatever it is elsewhere. Within the
-      // tolerance it need not be, and that plane is asked at the corner only once a surface of the
-      // ladder has left the sides near the corner (see below). Not where they run on, where the two
-      // give no plane.
-      for (size_t i = 0; i < asked.sides.size(); ++i)
-      {
-        const Side &a = asked.sides[i], &b = asked.sides[(i + 1) % asked.sides.size()];
-        if (!forced[i] || a.free || b.free || a.order > 0 || b.order > 0)
-          continue;
-        const gp_Vec ta = a.tangent(1).Normalized(), tb = b.tangent(0).Normalized();
-        const gp_Vec normal = ta.Crossed(tb);
-        if (normal.Magnitude() < std::sin(asked.limits.g1 * M_PI / 180))
-          continue;
-        const gp_Pnt corner = b.meet(0);
-        Target       target{corner, frame.project(corner), 1, {}, {}, 1.0 / spans};
-        SurfaceJet   jet{op, corner, ta, tb, {}, {}, {}, normal.Normalized()};
-        target.jet = jet;
-        targets.push_back(target);
-      }
-      const std::vector<char> fixed(net.poles.size(), 0);
-      // Across a line through a corner where the rim's faces change their bend, the surface
-      // may change its own: at the corner, where the rim needs it, and less and less the
-      // farther along the line from it, so that the step stays at the rim and the surface
-      // inside is of one bend across the line.
-      std::vector<FitJump> jumps;
-      for (const gp_Pnt& turn : turns)
-      {
-        const gp_XY corner = frame.project(turn);
-        for (const bool acrossU : {true, false})
-        {
-          const std::vector<double>& knots = acrossU ? net.knotsV : net.knotsU;
-          const double               here  = acrossU ? corner.Y() : corner.X();
-          for (size_t k = degree; k + degree + 1 < knots.size(); ++k)
-            for (int part = 0; knots[k + 1] > knots[k] && part < jumpPlaces; ++part)
-            {
-              const double along = knots[k] + (knots[k + 1] - knots[k]) * (part + 0.5) / jumpPlaces;
-              const double away  = std::abs(along - here) / (jumpReach * asked.size);
-              jumps.push_back({acrossU,
-                               acrossU ? corner.X() : corner.Y(),
-                               along,
-                               jumpWeight * bendingWeight * asked.size * std::min(1.0, away * away)
-                                 * (knots[k + 1] - knots[k]) / jumpPlaces});
-            }
-        }
-      }
-      // Fair inside the loop. Outside it the surface is only kept from running wild: counted
-      // in full there, it would be held to the loop from both sides, like a plate clamped
-      // along a line, and kink across it.
-      const bool heightGraph =
-        order > 0 && graphSupports
-        && std::all_of(targets.begin(), targets.end(), [&](const Target& target) {
-             return target.order == 0 || std::abs(target.jet->n.Dot(frame.z)) >= graphNormal;
-           });
-      const bool spatial =
-        !heightGraph && order > 0 && asked.guides.empty() && nu * nv <= freePoles;
-      // A net free in space and a height over the plane are fair by different measures and
-      // come nearer different surfaces: the one is not a finer net of the other, and where
-      // nets free in space have met the limits, a height is not tried after them.
-      if (!previous.IsNull() && spatial != previousSpatial && best && best->measured.within)
-        break;
-      occ::handle<Geom_BSplineSurface> surface =
-        seeded
-              ? surfaceOf(net)
-              : fit(
-              net,
-              fixed,
-              targets,
-              asked.size,
-              reach,
-              {},
-              [&](double u, double v) { return within(gp_XY(u, v)) ? 1 : outsideWeight; },
-              spatial ? nullptr : &up,
-              jumps,
-              order > 0 || asked.controls.open || !asked.guides.empty() || !asked.points.empty()
-                    ? &frame
-                    : nullptr,
-              asked.flatness,
-              fairRim,
-              heightGraph ? graphMode : GraphFit::none);
-      // The fit leaves of a curve what its net cannot follow fairly; the surface is then
-      // moved onto the curves by the least movement of its poles, with knots added where
-      // it takes them.
-      // Not where the fit has left the tangent planes or the bends outside their limits: a
-      // finer net is then tried in any case.
-      // A boundary-only height graph is fitted by its weighted fair objective and corrected onto
-      // the original rim: multiplier corrections amplify nearly dependent conditions.
-      // Supported surfaces keep their original tangent/bend fit and correction gate.
-      const bool moved =
-        (fairRim || order > 0 || reach.g0 > asked.limits.g0)
-        && measureAll(surface,
-                          {asked.sides,
-                       asked.guides,
-                       asked.points,
-                       {HUGE_VAL, asked.limits.g1, asked.limits.g2},
-                       asked.size,
-                       asked.flatness,
-                       asked.controls},
-                      [&](const Side&, double, const gp_Pnt& point) {
-                        return std::optional<Place>(Place{frame.project(point), false});
-                      })
-             .within;
-      // What the correction leaves at its own places where it had no room to make the net
-      // finer, the net being as fine as it may make it already.
-      double left = 0;
-      if (moved)
-      {
-        const size_t knots = net.knotsU.size() + net.knotsV.size();
-        // Per side, the places near its corners that the correction holds as well: those the
-        // measure reads there (see measuredFractions) where the surface it leaves misses them.
-        std::vector<std::vector<double>> nearCorners(asked.sides.size());
-        const auto                       onto = [&](double span) {
-          std::vector<RimPlace> onto;
-          for (const auto* curves : {&asked.sides, &asked.guides})
-            for (const Side& side : *curves)
-            {
-              if (side.free)
-                continue;
-              const int count = std::clamp(static_cast<int>(rimPlacesPerSpan * side.length / span),
-                                           fewestRimPlaces,
-                                           mostRimPlaces);
-              std::vector<double> fractions;
-              for (int i = 0; i <= count; ++i)
-                fractions.push_back(static_cast<double>(i) / count);
-              if (curves == &asked.sides)
-                fractions.insert(fractions.end(),
-                                 nearCorners[&side - asked.sides.data()].begin(),
-                                 nearCorners[&side - asked.sides.data()].end());
-              for (const double f : fractions)
-              {
-                const gp_Pnt point = side.meet(f);
-                gp_XY        across(0, 0);
-                if (side.order > 0 && f > 0 && f < 1)
-                {
-                  const gp_Vec along3 = side.tangent(f);
-                  const gp_XY  along2(along3.Dot(frame.x), along3.Dot(frame.y));
-                  across = gp_XY(-along2.Y(), along2.X()) / along2.Modulus();
-                }
-                onto.push_back({point, frame.project(point), across, side.order > 1});
-              }
-            }
-          for (const gp_Pnt& point : asked.points)
-            onto.push_back({point, frame.project(point), gp_XY(0, 0), false});
-          return onto;
-        };
-        const auto correct = [&] {
-          return correctRim(
-            op,
-            net,
-            onto,
-            up,
-            std::min(rimShare * asked.limits.g0, exchange ? exchangeWithin : HUGE_VAL),
-            std::min(enoughShare * asked.limits.g0, exchange ? 2 * exchangeWithin : HUGE_VAL),
-            std::min(mostRimSpans,
-                     (order > 0 ? rimFiner : rimFinerMet) * std::max(spansU, spansV)));
-        };
-        double worst = correct();
-        // The correction's even places reach a corner of two sides that are only to be met no
-        // nearer than its step: where the surface leaves a side nearer the corner than that by
-        // more than the tolerance, those places are held as well and the correction made again,
-        // and finer nets are asked the corner's tangent plane (see above).
-        {
-          const occ::handle<Geom_BSplineSurface> corrected = surfaceOf(net);
-          bool                                   more      = false;
-          const size_t                           count     = asked.sides.size();
-          for (size_t s = 0; s < count; ++s)
-          {
-            const Side& side = asked.sides[s];
-            if (side.free || side.order > 0)
-              continue;
-            for (const double f : measuredFractions())
-            {
-              const bool start = f < 0.5 / places, end = f > 1 - 0.5 / places;
-              // The corner at that end, numbered by the side before it.
-              const size_t corner = start ? (s + count - 1) % count : s;
-              if ((!start && !end) || asked.sides[start ? corner : (s + 1) % count].order > 0)
-                continue;
-              const gp_Pnt point = side.meet(f);
-              const gp_XY  uv    = nearest(corrected, frame.project(point), point);
-              if (corrected->Value(uv.X(), uv.Y()).Distance(point) > asked.limits.g0)
-              {
-                nearCorners[s].push_back(f);
-                forced[corner] = 1;
-                more           = true;
-              }
-            }
-          }
-          if (more)
-            worst = correct();
-        }
-        if (net.knotsU.size() + net.knotsV.size() == knots)
-          left = worst;
-        surface = surfaceOf(net);
-      }
-      std::vector<Rim> rims;
-      for (const Side& side : asked.sides)
-        rims.push_back(side.free
-                         ? Rim{}
-                         : preimage(surface,
-                                    side,
-                                    frame,
-                                    std::min(asked.limits.g0, exchange ? exchangeWithin : HUGE_VAL),
-                                    asked.size));
-      closeGaps(asked.sides, rims);
-      // A side is read where the face holds it; a guide and a point at the surface's nearest.
-      Built built{3,
-                      {},
-                  measureAll(surface, asked, [&](const Side& side, double f, const gp_Pnt& point) {
-                    const auto s = asked.boundaryIndex(side);
-                    return std::optional<Place>(
-                      s ? Place{rims[*s].onSurface->Value(side.parameter(f)).XY(), true}
-                        : Place{frame.project(point), false});
-                  })};
-      for (size_t s = 0; s < rims.size(); ++s)
-        rims[s].deviation =
-          std::max(rims[s].deviation, built.measured.values[asked.sides[s].input * 4]);
-      // What is not within the limits is kept for what it says of the miss.
-      built.face = trimmed(surface, asked, rims, area < 0);
-      if (fairRim)
-        for (size_t i = 0; i < rims.size(); ++i)
-          if (!asked.sides[i].free)
-            built.spatialBoundary.push_back({asked.sides[i].input,
-                                             rims[i].onSurface,
-                                             asked.sides[i].from,
-                                             asked.sides[i].to,
-                                             asked.sides[i].originalReversed});
-      for (size_t i = 0; hasGaps(asked) && i < rims.size(); ++i)
-        built.gaps.push_back(asked.sides[i].free ? rims[i].onSurface : occ::handle<Geom2d_Curve>());
-      // The actual trim must meet the original spatial edge too. Let the existing finite
-      // ladder react to a missed trace instead of accepting a coarse preimage and refusing
-      // only after placement. The final world-coordinate measurement remains authoritative.
-      measureSpatialBoundary(built, asked, false);
-      // Within every limit along its edges is not yet a patch: see BRepPatchExt_Inside.hxx. A net
-      // that meets the edges with a surface that is not one to keep is too coarse for what
-      // is asked along them, and what it cannot follow shows inside the loop; a finer one
-      // may do. Points inside may ask for any bend, so with those only a fold is a fault.
-      if (built.measured.within)
-        if (const auto fault = BRepCheck_Analyzer(built.face).IsValid()
-                                     ? insideFault(built.face, asked.points.empty() ? bend : 0)
-                                     : std::optional<std::string>("it is not a valid face"))
-        {
-          built.measured.within = false;
-          built.measured.unkept = true;
-          built.measured.worst  = *fault;
-          built.measured.excess = unkeptExcess;
-        }
-      const double change    = previous.IsNull() || spatial != previousSpatial
-                                     ? HUGE_VAL
-                                     : apart(previous,
-                                      surface,
-                                      // Twice to a span of the finer net each way: the
-                                      // difference of the two is a spline of its spans.
-                                      2 * spansU,
-                                      2 * spansV,
-                                      low,
-                                      high,
-                                      within);
-      const bool   wasWithin = previousWithin;
-      previous               = surface;
-      previousWithin         = built.measured.within;
-      previousSpatial        = spatial;
-      // A net that meets every limit is not yet the surface asked for: that is the fairest of
-      // all that meet them, which the nets of the ladder come nearer to as they become finer,
-      // and a coarse net can meet the edges and still stand far from it inside (a seat of
-      // eight sides: 9.2 off on six spans, 0.17 on every finer net). Two nets in a row that
-      // lie within `settled` of each other have come as near it as finer ones would take
-      // them: then the coarser of them that meets the limits is kept. Until then the finest
-      // that meets them is, should the ladder or the nets allowed end first.
-      const double before = best ? best->measured.excess : HUGE_VAL;
-      if (built.measured.within)
-        meeting.push_back(built);
-      if (built.measured.within || (best && best->measured.within))
-      {
-        if (change <= settled * asked.size)
-        {
-          if (built.measured.within && !wasWithin)
-            best = built;
-          settledOn = true;
-          break;
-        }
-        if (built.measured.within)
-          best = built;
-        continue;
-      }
-      if (built.measured.excess < before)
-        best = built;
-      // A few finer nets for a surface that is not one to keep, and no more: after those
-      // it is the surface asked for that is not one to keep.
-      if (built.measured.unkept)
-      {
-        if (++unkept >= mostUnkept)
-          break;
-        continue;
-      }
-      // A net that the fit left within its tangent planes and bends, and that was moved
-      // onto its curves, is read at the places it was moved onto, and between them. Where
-      // the fitted net was already as fine as the correction may make it, and the
-      // correction's solve still leaves its own places further off than the tolerance, what
-      // is left is what the fit left and the solve could not take, a share of the size that
-      // finer nets of the ladder, fitted finer than their correction may go as well, do not
-      // bring below it: the corner of rounds 2 / 3 / 5 at a hundred times its size (nets of
-      // 25 x 20 and 31 x 26 spans for corrections bounded at 12 and 20) is left 3.7e-6 off by
-      // the first and 6.0e-6 by the second (the limit 1e-6). Where the correction could make
-      // the net finer, a finer net may meet them (a guide across a hole in a plate is met on
-      // the third, at 32 x 40 spans).
-      if (!fairRim && moved && left > asked.limits.g0)
-      {
-        best->measured.worst +=
-          ". The bounded rim correction leaves the curves further off than the tolerance";
-        break;
-      }
-      if (moved)
-      {
-        if (!fairRim && built.measured.excess > stillFalling * placeOnly)
-        {
-          best->measured.worst += ". A finer net came no nearer";
-          break;
-        }
-        placeOnly = std::min(placeOnly, built.measured.excess);
-      }
-      // The coarsest nets miss by what they cannot follow at all, and by no rule, unless
-      // it is by the very same.
-      // But not, where curves are only met and the nets are cheap, while the best of them is
-      // within twice its limits: with each net the fit stops where its own places are met,
-      // and the misses of a ladder are not a falling series (one closed curve 0.5 sin 3a at a
-      // tolerance of 1e-5 misses by 1.35, 4.5, 1.72 and 3.64 times that on the first four
-      // nets and is met on the fifth).
-      // Full Hessian errors need not fall monotonically as the narrow direction
-      // gains spans. Exhaust its existing finite ladder rather than stop on one rise.
-      if (!fairRim && graphMode != GraphFit::complete
-          && ((++tried > unruly && built.measured.excess > stillFalling * before
-               && (order > 0 || best->measured.excess > nearly))
-              || std::abs(built.measured.excess - before) < same * before))
-      {
-        best->measured.worst += ". A finer net came no nearer";
-        break;
-      }
-    }
-    // Where no two nets in a row have come to agree, the ladder has not shown which of the
-    // surfaces it made is near the fairest that meets the limits; of those that meet them, the
-    // one that bends least is nearest it by the energy it is the least of.
-    if (!settledOn && meeting.size() > 1)
-    {
-      double least = HUGE_VAL;
-      for (const Built& candidate : meeting)
-        if (const double bending = bendingInside(candidate.face); bending < least)
-        {
-          least = bending;
-          best  = candidate;
-        }
-    }
-    return *best;
-  };
+}
+
+Built PlaneFill::chooseFill()
+{
   if (nearlyQuadratic)
+    if (const auto guided = nearlyQuadraticFill())
+      return *guided;
+  if (wishBend())
   {
-    // Interpolating parabolic points does not make an exact parabola. Use the nearby
-    // quadratic as a start on a cubic net, then actually meet the interpolated curves
-    // by the same measured rim correction. It is not degree-two recognition.
-    degree             = 3;
-    reach              = Limits{fitReach * asked.size, asked.limits.g1, asked.limits.g2};
-    const Built guided = build(false, static_cast<int>(std::size(ladder)));
-    if (guided.measured.within)
-      return guided;
-    degree = 5;
-    reach  = asked.limits;
+    const Built wished = ladderFit(true, wishNets);
+    if (wished.measured.within)
+      return wished;
   }
+  const Built strict = ladderFit(false, direction == 0 ? static_cast<int>(std::size(ladder)) : 1);
+  if (!strict.measured.within && order == 2 && graphSupports)
+    if (const auto complete = completeHessian())
+      return *complete;
+  if (!strict.measured.within && !asked.guides.empty())
+    if (const auto reference = sectionFill())
+      return *reference;
+  if (order > 0)
+    return tangentFill(strict);
+  return looseOrStrict(strict);
+}
+
+Built PlaneFill::ladderFit(bool wish, int nets)
+{
+  rungs = Rungs{};
+  rungs.forced.assign(asked.sides.size(), 0);
+  for (int rung : ladder)
+  {
+    const int spans = std::max(rung,
+                               asked.controls.quality == PatchQuality::Max    ? 16
+                               : asked.controls.quality == PatchQuality::High ? 10
+                                                                              : 0);
+    if (spans == rungs.previousSpans)
+      continue;
+    rungs.previousSpans = spans;
+    // The last is for nets that only meet curves: a height of degree 3, which that many
+    // spans cost no more than the net before it costs one that is free in space.
+    if (nets-- <= 0 || (spans == std::end(ladder)[-1] && order > 0))
+      break;
+    const int    spansU = spansAlong(spans, width), spansV = spansAlong(spans, depth);
+    SplineNet    net = layNet(spans, spansU, spansV);
+    const int    nu = net.countU(), nv = net.countV();
+    const gp_XYZ up = frame.z.XYZ();
+    const bool   seeded =
+      order == 0 && (reach.g0 > asked.limits.g0 || !asked.guides.empty() || !asked.points.empty())
+      && polynomialHeight(asked, frame, net, reach.g0 > asked.limits.g0);
+    const std::vector<Target>  targets = targetsOf(net, spans, wish, rungs.forced);
+    const std::vector<char>    fixed(net.poles.size(), 0);
+    const std::vector<FitJump> jumps = jumpsOf(net);
+    // Fair inside the loop. Outside it the surface is only kept from running wild: counted
+    // in full there, it would be held to the loop from both sides, like a plate clamped
+    // along a line, and kink across it.
+    const bool heightGraph =
+      order > 0 && graphSupports
+      && std::all_of(targets.begin(), targets.end(), [&](const Target& target) {
+           return target.order == 0 || std::abs(target.jet->n.Dot(frame.z)) >= graphNormal;
+         });
+    const bool spatial = !heightGraph && order > 0 && asked.guides.empty() && nu * nv <= freePoles;
+    // A net free in space and a height over the plane are fair by different measures and
+    // come nearer different surfaces: the one is not a finer net of the other, and where
+    // nets free in space have met the limits, a height is not tried after them.
+    if (!rungs.previous.IsNull() && spatial != rungs.previousSpatial && rungs.best
+        && rungs.best->measured.within)
+      break;
+    occ::handle<Geom_BSplineSurface> surface =
+      fitted(net, seeded, targets, fixed, jumps, up, spatial, heightGraph);
+    // The fit leaves of a curve what its net cannot follow fairly; the surface is then
+    // moved onto the curves by the least movement of its poles, with knots added where
+    // it takes them.
+    // Not where the fit has left the tangent planes or the bends outside their limits: a
+    // finer net is then tried in any case.
+    // A boundary-only height graph is fitted by its weighted fair objective and corrected onto
+    // the original rim: multiplier corrections amplify nearly dependent conditions.
+    // Supported surfaces keep their original tangent/bend fit and correction gate.
+    const bool moved =
+      (fairRim || order > 0 || reach.g0 > asked.limits.g0)
+      && measureAll(surface,
+                    {asked.sides,
+                     asked.guides,
+                     asked.points,
+                     {HUGE_VAL, asked.limits.g1, asked.limits.g2},
+                     asked.size,
+                     asked.flatness,
+                     asked.controls},
+                    [&](const Side&, double, const gp_Pnt& point) {
+                      return std::optional<Place>(Place{frame.project(point), false});
+                    })
+           .within;
+    // What the correction leaves at its own places where it had no room to make the net
+    // finer, the net being as fine as it may make it already.
+    double left = 0;
+    if (moved)
+      left = correctOnto(net, surface, spansU, spansV, up, rungs.forced);
+    Built        built     = trimmedFill(surface);
+    const double change    = rungs.previous.IsNull() || spatial != rungs.previousSpatial
+                               ? HUGE_VAL
+                               : apart(rungs.previous,
+                                    surface,
+                                    // Twice to a span of the finer net each way: the
+                                    // difference of the two is a spline of its spans.
+                                    2 * spansU,
+                                    2 * spansV,
+                                    low,
+                                    high,
+                                    within);
+    const bool   wasWithin = rungs.previousWithin;
+    rungs.previous         = surface;
+    rungs.previousWithin   = built.measured.within;
+    rungs.previousSpatial  = spatial;
+    if (settles(built, change, wasWithin, moved, left))
+      break;
+  }
+  // Where no two nets in a row have come to agree, the ladder has not shown which of the
+  // surfaces it made is near the fairest that meets the limits; of those that meet them, the
+  // one that bends least is nearest it by the energy it is the least of.
+  if (!rungs.settledOn && rungs.meeting.size() > 1)
+  {
+    double least = HUGE_VAL;
+    for (const Built& candidate : rungs.meeting)
+      if (const double bending = bendingInside(candidate.face); bending < least)
+      {
+        least      = bending;
+        rungs.best = candidate;
+      }
+  }
+  return *rungs.best;
+}
+
+int PlaneFill::spansAlong(int spans, double extent) const
+{
+  // The complete-G2 retry refines both directions, including a narrow
+  // direction whose aspect-ratio share never exceeds the coarse minimum.
+  // Preserve established G0/G1 and transverse constructions.
+  const int minimum =
+    graphMode == GraphFit::complete
+      ? static_cast<int>(std::lround(static_cast<double>(fewestSpans) * spans / ladder[0]))
+      : fewestSpans;
+  return std::max(minimum, static_cast<int>(std::lround(spans * extent / larger)));
+}
+
+SplineNet PlaneFill::layNet(int spans, int spansU, int spansV) const
+{
+  // Finer where the rim turns faster than the even net follows: by `turnPerSpan` of
+  // turning to a span on the coarsest net, and in step with the net after that.
+  std::vector<Finer> finerU, finerV;
+  for (const Side& side : asked.sides)
+    for (int i = 0; side.order > 0 && i < turningSteps; ++i)
+    {
+      const double f = (i + 0.5) / turningSteps, step = 0.25 / turningSteps;
+      const double turning =
+        side.jet(f - step).n.Angle(side.jet(f + step).n) / (2 * step * side.length);
+      const double span = turnPerSpan * ladder[0] / spans / std::max(turning, 1e-12);
+      if (span >= larger / spans)
+        continue;
+      const gp_XY at = frame.project(side.at(f));
+      finerU.push_back({at.X(), span});
+      finerV.push_back({at.Y(), span});
+    }
+  // A narrow opening needs longitudinal resolution near its ends too:
+  // the G2 boundary layer can be as short as the opening is wide, even
+  // when the boundary tangent hardly turns. Refine only the failed-G2
+  // retry, and only where its even spans exceed that physical scale.
+  if (graphMode == GraphFit::complete)
+  {
+    const double span = std::min(width, depth) / fewestSpans;
+    const auto   ends = [&](double from, double to, int count, std::vector<Finer>& finer) {
+      if ((to - from) / count <= span)
+        return;
+      for (double end : {from, to})
+        for (int i = -fewestSpans; i <= fewestSpans; ++i)
+          finer.push_back({end + i * span, span});
+    };
+    ends(low.X(), high.X(), spansU, finerU);
+    ends(low.Y(), high.Y(), spansV, finerV);
+  }
+  SplineNet net{
+    degree,
+    degree,
+    gradedKnots(low.X() - margin.X(), high.X() + margin.X(), spansU, degree, finerU, breaksU),
+    gradedKnots(low.Y() - margin.Y(), high.Y() + margin.Y(), spansV, degree, finerV, breaksV),
+    {}};
+  // The net lies in the mean plane, each pole where the plane's own parameters put it,
+  // and is free to rise from it: a height over the plane.
+  const int  nu = net.countU(), nv = net.countV();
+  const auto mean = [](const std::vector<double>& knots, int degree, int i) {
+    double sum = 0;
+    for (int k = 1; k <= degree; ++k)
+      sum += knots[i + k];
+    return sum / degree;
+  };
+  net.poles.resize(static_cast<size_t>(nu) * nv);
+  for (int i = 0; i < nu; ++i)
+    for (int j = 0; j < nv; ++j)
+      net.poles[static_cast<size_t>(i) * nv + j] =
+        (frame.origin.XYZ() + frame.x.XYZ() * mean(net.knotsU, degree, i)
+         + frame.y.XYZ() * mean(net.knotsV, degree, j));
+  return net;
+}
+
+std::vector<Target> PlaneFill::targetsOf(const SplineNet&         net,
+                                         int                      spans,
+                                         bool                     wish,
+                                         const std::vector<char>& forced) const
+{
+  std::vector<Target> targets;
+  for (const auto* curves : {&asked.sides, &asked.guides})
+    for (const Side& side : *curves)
+    {
+      if (side.free)
+        continue;
+      // The same number of places in every span of the net that the curve passes
+      // through, however briefly: a span it only clips has poles of its own, and
+      // without a place there nothing but the energy would say where they go.
+      std::vector<double> cuts{0, 1};
+      gp_XY               before = frame.project(side.at(0));
+      for (int i = 1; i <= crossingSteps; ++i)
+      {
+        const gp_XY here = frame.project(side.at(static_cast<double>(i) / crossingSteps));
+        for (int way = 1; way <= 2; ++way)
+        {
+          const std::vector<double>& knots = way == 1 ? net.knotsU : net.knotsV;
+          const double               a = before.Coord(way), b = here.Coord(way);
+          for (auto knot = std::upper_bound(knots.begin(), knots.end(), std::min(a, b));
+               knot != knots.end() && *knot < std::max(a, b);
+               ++knot)
+            cuts.push_back((i - 1 + (*knot - a) / (b - a)) / crossingSteps);
+        }
+        before = here;
+      }
+      std::sort(cuts.begin(), cuts.end());
+      // Next to a gap, or where the next edge lies on the same face, nothing else is
+      // asked of that end: the face has its say there as along the rest.
+      const auto index = asked.boundaryIndex(side);
+      const auto quiet = [&](size_t other) {
+        const Side& near = asked.sides[other % asked.sides.size()];
+        return near.free || near.support.IsSame(side.support);
+      };
+      const bool lone       = index && hasGaps(asked);
+      const bool quietStart = lone && quiet(*index + asked.sides.size() - 1),
+                 quietEnd   = lone && quiet(*index + 1);
+      auto place            = [&](double f, double share, bool end, bool watch = false) {
+        if (end && ((f == 0 && quietStart) || (f == 1 && quietEnd)))
+        {
+          f   = std::clamp(f, cornerInset, 1 - cornerInset);
+          end = false;
+        }
+        const gp_Pnt point = side.meet(f);
+        // Tangency and bend are not asked for at the ends, where two sides meet.
+        const bool smooth = side.order > 0 && !end;
+        Target     target{point,
+                      frame.project(point),
+                      smooth ? side.order : 0,
+                                     {},
+                                     {},
+                      share * side.length / asked.size,
+                      smooth && wish && side.order == 1};
+        if (smooth)
+        {
+          target.jet          = side.jet(f);
+          target.easing       = side.easing(f);
+          const gp_Vec along3 = side.tangent(f);
+          const gp_XY  along2(along3.Dot(frame.x), along3.Dot(frame.y));
+          target.across = gp_XY(-along2.Y(), along2.X()) / along2.Modulus();
+        }
+        target.watch = watch;
+        targets.push_back(target);
+      };
+      const double least = 1.0 / (crossingSteps * 16);
+      place(0, least, true);
+      place(1, least, true);
+      for (size_t i = 0; i + 1 < cuts.size(); ++i)
+      {
+        const double from = cuts[i], to = cuts[i + 1];
+        if (to - from < BRepExt::tolerance::parameterMerge)
+          continue;
+        for (int k = 0; k < placesPerSpan; ++k)
+        {
+          place(from + (to - from) * (k + 0.5) / placesPerSpan,
+                std::max(least, (to - from) / placesPerSpan),
+                false);
+          // And between the places, where the surface is only read.
+          place(from + (to - from) * (k + 1.0) / placesPerSpan,
+                std::max(least, (to - from) / placesPerSpan),
+                false,
+                true);
+        }
+      }
+    }
+  for (const gp_Pnt& point : asked.points)
+    targets.push_back({point, frame.project(point), 0, {}, {}, 1.0 / spans});
+  // Where two sides that are only to be met meet at a corner, a surface that holds both is
+  // tangent there to the plane of their two tangents, whatever it is elsewhere. Within the
+  // tolerance it need not be, and that plane is asked at the corner only once a surface of the
+  // ladder has left the sides near the corner (see below). Not where they run on, where the two
+  // give no plane.
+  for (size_t i = 0; i < asked.sides.size(); ++i)
+  {
+    const Side &a = asked.sides[i], &b = asked.sides[(i + 1) % asked.sides.size()];
+    if (!forced[i] || a.free || b.free || a.order > 0 || b.order > 0)
+      continue;
+    const gp_Vec ta = a.tangent(1).Normalized(), tb = b.tangent(0).Normalized();
+    const gp_Vec normal = ta.Crossed(tb);
+    if (normal.Magnitude() < std::sin(asked.limits.g1 * M_PI / 180))
+      continue;
+    const gp_Pnt corner = b.meet(0);
+    Target       target{corner, frame.project(corner), 1, {}, {}, 1.0 / spans};
+    SurfaceJet   jet{op, corner, ta, tb, {}, {}, {}, normal.Normalized()};
+    target.jet = jet;
+    targets.push_back(target);
+  }
+  return targets;
+}
+
+std::vector<FitJump> PlaneFill::jumpsOf(const SplineNet& net) const
+{
+  std::vector<FitJump> jumps;
+  for (const gp_Pnt& turn : turns)
+  {
+    const gp_XY corner = frame.project(turn);
+    for (const bool acrossU : {true, false})
+    {
+      const std::vector<double>& knots = acrossU ? net.knotsV : net.knotsU;
+      const double               here  = acrossU ? corner.Y() : corner.X();
+      for (size_t k = degree; k + degree + 1 < knots.size(); ++k)
+        for (int part = 0; knots[k + 1] > knots[k] && part < jumpPlaces; ++part)
+        {
+          const double along = knots[k] + (knots[k + 1] - knots[k]) * (part + 0.5) / jumpPlaces;
+          const double away  = std::abs(along - here) / (jumpReach * asked.size);
+          jumps.push_back({acrossU,
+                           acrossU ? corner.X() : corner.Y(),
+                           along,
+                           jumpWeight * bendingWeight * asked.size * std::min(1.0, away * away)
+                             * (knots[k + 1] - knots[k]) / jumpPlaces});
+        }
+    }
+  }
+  return jumps;
+}
+
+occ::handle<Geom_BSplineSurface> PlaneFill::fitted(SplineNet&                  net,
+                                                   bool                        seeded,
+                                                   const std::vector<Target>&  targets,
+                                                   const std::vector<char>&    fixed,
+                                                   const std::vector<FitJump>& jumps,
+                                                   const gp_XYZ&               up,
+                                                   bool                        spatial,
+                                                   bool                        heightGraph) const
+{
+  occ::handle<Geom_BSplineSurface> surface =
+    seeded ? surfaceOf(net)
+           : fit(
+               net,
+               fixed,
+               targets,
+               asked.size,
+               reach,
+               {},
+               [&](double u, double v) { return within(gp_XY(u, v)) ? 1 : outsideWeight; },
+               spatial ? nullptr : &up,
+               jumps,
+               order > 0 || asked.controls.open || !asked.guides.empty() || !asked.points.empty()
+                 ? &frame
+                 : nullptr,
+               asked.flatness,
+               fairRim,
+               heightGraph ? graphMode : GraphFit::none);
+  return surface;
+}
+
+double PlaneFill::correctOnto(SplineNet&                        net,
+                              occ::handle<Geom_BSplineSurface>& surface,
+                              int                               spansU,
+                              int                               spansV,
+                              const gp_XYZ&                     up,
+                              std::vector<char>&                forced) const
+{
+  double       left  = 0;
+  const size_t knots = net.knotsU.size() + net.knotsV.size();
+  // Per side, the places near its corners that the correction holds as well: those the
+  // measure reads there (see measuredFractions) where the surface it leaves misses them.
+  std::vector<std::vector<double>> nearCorners(asked.sides.size());
+  const auto                       onto = [&](double span) {
+    std::vector<RimPlace> onto;
+    for (const auto* curves : {&asked.sides, &asked.guides})
+      for (const Side& side : *curves)
+      {
+        if (side.free)
+          continue;
+        const int count = std::clamp(static_cast<int>(rimPlacesPerSpan * side.length / span),
+                                     fewestRimPlaces,
+                                     mostRimPlaces);
+        std::vector<double> fractions;
+        for (int i = 0; i <= count; ++i)
+          fractions.push_back(static_cast<double>(i) / count);
+        if (curves == &asked.sides)
+          fractions.insert(fractions.end(),
+                           nearCorners[&side - asked.sides.data()].begin(),
+                           nearCorners[&side - asked.sides.data()].end());
+        for (const double f : fractions)
+        {
+          const gp_Pnt point = side.meet(f);
+          gp_XY        across(0, 0);
+          if (side.order > 0 && f > 0 && f < 1)
+          {
+            const gp_Vec along3 = side.tangent(f);
+            const gp_XY  along2(along3.Dot(frame.x), along3.Dot(frame.y));
+            across = gp_XY(-along2.Y(), along2.X()) / along2.Modulus();
+          }
+          onto.push_back({point, frame.project(point), across, side.order > 1});
+        }
+      }
+    for (const gp_Pnt& point : asked.points)
+      onto.push_back({point, frame.project(point), gp_XY(0, 0), false});
+    return onto;
+  };
+  const auto correct = [&] {
+    return correctRim(
+      op,
+      net,
+      onto,
+      up,
+      std::min(rimShare * asked.limits.g0, exchange ? exchangeWithin : HUGE_VAL),
+      std::min(enoughShare * asked.limits.g0, exchange ? 2 * exchangeWithin : HUGE_VAL),
+      std::min(mostRimSpans, (order > 0 ? rimFiner : rimFinerMet) * std::max(spansU, spansV)));
+  };
+  double worst = correct();
+  // The correction's even places reach a corner of two sides that are only to be met no
+  // nearer than its step: where the surface leaves a side nearer the corner than that by
+  // more than the tolerance, those places are held as well and the correction made again,
+  // and finer nets are asked the corner's tangent plane (see above).
+  {
+    const occ::handle<Geom_BSplineSurface> corrected = surfaceOf(net);
+    bool                                   more      = false;
+    const size_t                           count     = asked.sides.size();
+    for (size_t s = 0; s < count; ++s)
+    {
+      const Side& side = asked.sides[s];
+      if (side.free || side.order > 0)
+        continue;
+      for (const double f : measuredFractions())
+      {
+        const bool start = f < 0.5 / places, end = f > 1 - 0.5 / places;
+        // The corner at that end, numbered by the side before it.
+        const size_t corner = start ? (s + count - 1) % count : s;
+        if ((!start && !end) || asked.sides[start ? corner : (s + 1) % count].order > 0)
+          continue;
+        const gp_Pnt point = side.meet(f);
+        const gp_XY  uv    = nearest(corrected, frame.project(point), point);
+        if (corrected->Value(uv.X(), uv.Y()).Distance(point) > asked.limits.g0)
+        {
+          nearCorners[s].push_back(f);
+          forced[corner] = 1;
+          more           = true;
+        }
+      }
+    }
+    if (more)
+      worst = correct();
+  }
+  if (net.knotsU.size() + net.knotsV.size() == knots)
+    left = worst;
+  surface = surfaceOf(net);
+  return left;
+}
+
+Built PlaneFill::trimmedFill(const occ::handle<Geom_BSplineSurface>& surface) const
+{
+  std::vector<Rim> rims;
+  for (const Side& side : asked.sides)
+    rims.push_back(side.free
+                     ? Rim{}
+                     : preimage(surface,
+                                side,
+                                frame,
+                                std::min(asked.limits.g0, exchange ? exchangeWithin : HUGE_VAL),
+                                asked.size));
+  closeGaps(asked.sides, rims);
+  // A side is read where the face holds it; a guide and a point at the surface's nearest.
+  Built built{3,
+              {},
+              measureAll(surface, asked, [&](const Side& side, double f, const gp_Pnt& point) {
+                const auto s = asked.boundaryIndex(side);
+                return std::optional<Place>(
+                  s ? Place{rims[*s].onSurface->Value(side.parameter(f)).XY(), true}
+                    : Place{frame.project(point), false});
+              })};
+  for (size_t s = 0; s < rims.size(); ++s)
+    rims[s].deviation =
+      std::max(rims[s].deviation, built.measured.values[asked.sides[s].input * 4]);
+  // What is not within the limits is kept for what it says of the miss.
+  built.face = trimmed(surface, asked, rims, area < 0);
+  if (fairRim)
+    for (size_t i = 0; i < rims.size(); ++i)
+      if (!asked.sides[i].free)
+        built.spatialBoundary.push_back({asked.sides[i].input,
+                                         rims[i].onSurface,
+                                         asked.sides[i].from,
+                                         asked.sides[i].to,
+                                         asked.sides[i].originalReversed});
+  for (size_t i = 0; hasGaps(asked) && i < rims.size(); ++i)
+    built.gaps.push_back(asked.sides[i].free ? rims[i].onSurface : occ::handle<Geom2d_Curve>());
+  // The actual trim must meet the original spatial edge too. Let the existing finite
+  // ladder react to a missed trace instead of accepting a coarse preimage and refusing
+  // only after placement. The final world-coordinate measurement remains authoritative.
+  measureSpatialBoundary(built, asked, false);
+  // Within every limit along its edges is not yet a patch: see BRepPatchExt_Inside.hxx. A net
+  // that meets the edges with a surface that is not one to keep is too coarse for what
+  // is asked along them, and what it cannot follow shows inside the loop; a finer one
+  // may do. Points inside may ask for any bend, so with those only a fold is a fault.
+  if (built.measured.within)
+    if (const auto fault = BRepCheck_Analyzer(built.face).IsValid()
+                             ? insideFault(built.face, asked.points.empty() ? bend : 0)
+                             : std::optional<std::string>("it is not a valid face"))
+    {
+      built.measured.within = false;
+      built.measured.unkept = true;
+      built.measured.worst  = *fault;
+      built.measured.excess = unkeptExcess;
+    }
+  return built;
+}
+
+bool PlaneFill::settles(const Built& built, double change, bool wasWithin, bool moved, double left)
+{
+  // A net that meets every limit is not yet the surface asked for: that is the fairest of
+  // all that meet them, which the nets of the ladder come nearer to as they become finer,
+  // and a coarse net can meet the edges and still stand far from it inside (a seat of
+  // eight sides: 9.2 off on six spans, 0.17 on every finer net). Two nets in a row that
+  // lie within `settled` of each other have come as near it as finer ones would take
+  // them: then the coarser of them that meets the limits is kept. Until then the finest
+  // that meets them is, should the ladder or the nets allowed end first.
+  const double before = rungs.best ? rungs.best->measured.excess : HUGE_VAL;
+  if (built.measured.within)
+    rungs.meeting.push_back(built);
+  if (built.measured.within || (rungs.best && rungs.best->measured.within))
+  {
+    if (change <= settled * asked.size)
+    {
+      if (built.measured.within && !wasWithin)
+        rungs.best = built;
+      rungs.settledOn = true;
+      return true;
+    }
+    if (built.measured.within)
+      rungs.best = built;
+    return false;
+  }
+  if (built.measured.excess < before)
+    rungs.best = built;
+  // A few finer nets for a surface that is not one to keep, and no more: after those
+  // it is the surface asked for that is not one to keep.
+  if (built.measured.unkept)
+  {
+    if (++rungs.unkept >= mostUnkept)
+      return true;
+    return false;
+  }
+  // A net that the fit left within its tangent planes and bends, and that was moved
+  // onto its curves, is read at the places it was moved onto, and between them. Where
+  // the fitted net was already as fine as the correction may make it, and the
+  // correction's solve still leaves its own places further off than the tolerance, what
+  // is left is what the fit left and the solve could not take, a share of the size that
+  // finer nets of the ladder, fitted finer than their correction may go as well, do not
+  // bring below it: the corner of rounds 2 / 3 / 5 at a hundred times its size (nets of
+  // 25 x 20 and 31 x 26 spans for corrections bounded at 12 and 20) is left 3.7e-6 off by
+  // the first and 6.0e-6 by the second (the limit 1e-6). Where the correction could make
+  // the net finer, a finer net may meet them (a guide across a hole in a plate is met on
+  // the third, at 32 x 40 spans).
+  if (!fairRim && moved && left > asked.limits.g0)
+  {
+    rungs.best->measured.worst +=
+      ". The bounded rim correction leaves the curves further off than the tolerance";
+    return true;
+  }
+  if (moved)
+  {
+    if (!fairRim && built.measured.excess > stillFalling * rungs.placeOnly)
+    {
+      rungs.best->measured.worst += ". A finer net came no nearer";
+      return true;
+    }
+    rungs.placeOnly = std::min(rungs.placeOnly, built.measured.excess);
+  }
+  // The coarsest nets miss by what they cannot follow at all, and by no rule, unless
+  // it is by the very same.
+  // But not, where curves are only met and the nets are cheap, while the best of them is
+  // within twice its limits: with each net the fit stops where its own places are met,
+  // and the misses of a ladder are not a falling series (one closed curve 0.5 sin 3a at a
+  // tolerance of 1e-5 misses by 1.35, 4.5, 1.72 and 3.64 times that on the first four
+  // nets and is met on the fifth).
+  // Full Hessian errors need not fall monotonically as the narrow direction
+  // gains spans. Exhaust its existing finite ladder rather than stop on one rise.
+  if (!fairRim && graphMode != GraphFit::complete
+      && ((++rungs.tried > unruly && built.measured.excess > stillFalling * before
+           && (order > 0 || rungs.best->measured.excess > nearly))
+          || std::abs(built.measured.excess - before) < same * before))
+  {
+    rungs.best->measured.worst += ". A finer net came no nearer";
+    return true;
+  }
+  return false;
+}
+
+std::optional<Built> PlaneFill::nearlyQuadraticFill()
+{
+  // Interpolating parabolic points does not make an exact parabola. Use the nearby
+  // quadratic as a start on a cubic net, then actually meet the interpolated curves
+  // by the same measured rim correction. It is not degree-two recognition.
+  degree             = 3;
+  reach              = Limits{fitReach * asked.size, asked.limits.g1, asked.limits.g2};
+  const Built guided = ladderFit(false, static_cast<int>(std::size(ladder)));
+  if (guided.measured.within)
+    return guided;
+  degree = 5;
+  reach  = asked.limits;
+  return std::nullopt;
+}
+
+bool PlaneFill::wishBend() const
+{
   // G1 on independently designed spline sheets leaves transverse curvature free.
   // Borrowing each sheet's G2 as a soft target can manufacture alternating bends in
   // an otherwise convex hole. Minimise the requested energy without those targets.
@@ -1046,114 +1312,118 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction)
                                                         before.n.Dot(after.n) < 0 ? -1 : 1);
     wishable                           = miss.within(asked.limits, 2, asked.size);
   }
-  if (wishable)
+  return wishable;
+}
+
+std::optional<Built> PlaneFill::completeHessian()
+{
+  // Approximate position/normal constraints do not guarantee the two Hessian
+  // components omitted by the transverse row. Retry the same accuracy contract
+  // with all three components, preserving already delivered constructions.
+  graphMode = GraphFit::complete;
+  try
   {
-    const Built wished = build(true, wishNets);
-    if (wished.measured.within)
-      return wished;
+    const Built complete =
+      ladderFit(false, direction == 0 ? static_cast<int>(std::size(ladder)) : 1);
+    if (complete.measured.within)
+      return complete;
   }
-  const Built strict = build(false, direction == 0 ? static_cast<int>(std::size(ladder)) : 1);
-  if (!strict.measured.within && order == 2 && graphSupports)
+  catch (const Failure& failure)
   {
-    // Approximate position/normal constraints do not guarantee the two Hessian
-    // components omitted by the transverse row. Retry the same accuracy contract
-    // with all three components, preserving already delivered constructions.
-    graphMode = GraphFit::complete;
+    if (failure.reason != no_solution)
+      throw;
+  }
+  graphMode = GraphFit::transverse;
+  return std::nullopt;
+}
+
+std::optional<Built> PlaneFill::sectionFill() const
+{
+  try
+  {
+    if (const auto reference = sectionReference(asked, frame))
+      return *reference;
+  }
+  catch (const Failure& failure)
+  {
+    if (failure.reason == "cancelled")
+      throw;
+  }
+  catch (const Standard_Failure&)
+  {
+  }
+  return std::nullopt;
+}
+
+Built PlaneFill::tangentFill(const Built& strict)
+{
+  // A near miss can occur between the fit's own places even when every asked and
+  // watched condition was met. Retry once with extra angular headroom; the request
+  // and every delivered contact/interior/validity check keep their original limits.
+  if (order == 1 && direction == 0 && !strict.measured.within && !strict.measured.unkept
+      && strict.measured.excess < 2 && asked.guides.empty() && asked.points.empty())
+  {
+    reach.g1 *= .5;
     try
     {
-      const Built complete = build(false, direction == 0 ? static_cast<int>(std::size(ladder)) : 1);
-      if (complete.measured.within)
-        return complete;
+      const Built tighter = ladderFit(false, static_cast<int>(std::size(ladder)));
+      if (tighter.measured.within)
+        return tighter;
     }
     catch (const Failure& failure)
     {
       if (failure.reason != no_solution)
         throw;
     }
-    graphMode = GraphFit::transverse;
   }
-  if (!strict.measured.within && !asked.guides.empty())
+  if (direction == 0 && strict.measured.within && !turns.empty() && asked.guides.empty()
+      && asked.points.empty())
   {
-    try
+    // Repeated-radius rounds retain their clearance frame. A turned retry on
+    // those supports added CPU time without a candidate worth keeping.
+    std::vector<TopoDS_Face> rounds;
+    std::vector<double>      radii;
+    bool                     repeated = false;
+    for (const Side& side : asked.sides)
     {
-      if (const auto reference = sectionReference(asked, frame))
-        return *reference;
+      if (side.support.IsNull() || BRepAdaptor_Surface(side.support).GetType() != GeomAbs_Cylinder
+          || std::any_of(rounds.begin(), rounds.end(), [&](const TopoDS_Face& face) {
+               return face.IsSame(side.support);
+             }))
+        continue;
+      const double radius = BRepAdaptor_Surface(side.support).Cylinder().Radius();
+      repeated            = repeated || std::any_of(radii.begin(), radii.end(), [&](double other) {
+                   return std::abs(other - radius) < 1e-9 * std::max(other, radius);
+                 });
+      rounds.push_back(side.support);
+      radii.push_back(radius);
     }
-    catch (const Failure& failure)
+    const InsideCurvature before = insideCurvature(strict.face);
+    if (!repeated && before.wrongSign() > .34 * bend)
     {
-      if (failure.reason == "cancelled")
-        throw;
-    }
-    catch (const Standard_Failure&)
-    {
-    }
-  }
-  if (order > 0)
-  {
-    // A near miss can occur between the fit's own places even when every asked and
-    // watched condition was met. Retry once with extra angular headroom; the request
-    // and every delivered contact/interior/validity check keep their original limits.
-    if (order == 1 && direction == 0 && !strict.measured.within && !strict.measured.unkept
-        && strict.measured.excess < 2 && asked.guides.empty() && asked.points.empty())
-    {
-      reach.g1 *= .5;
+      std::optional<Built> turned;
       try
       {
-        const Built tighter = build(false, static_cast<int>(std::size(ladder)));
-        if (tighter.measured.within)
-          return tighter;
+        turned = overPlane(asked, flat, 1);
       }
-      catch (const Failure& failure)
+      catch (const Failure&)
       {
-        if (failure.reason != no_solution)
-          throw;
+        return strict;
+      }
+      if (turned->measured.within)
+      {
+        const InsideCurvature after = insideCurvature(turned->face);
+        if (after.wrongSign() < before.wrongSign() && after.tightest() <= before.tightest()
+            && insideStep(turned->face) <= insideStep(strict.face))
+          return *turned;
       }
     }
-    if (direction == 0 && strict.measured.within && !turns.empty() && asked.guides.empty()
-        && asked.points.empty())
-    {
-      // Repeated-radius rounds retain their clearance frame. A turned retry on
-      // those supports added CPU time without a candidate worth keeping.
-      std::vector<TopoDS_Face> rounds;
-      std::vector<double>      radii;
-      bool                     repeated = false;
-      for (const Side& side : asked.sides)
-      {
-        if (side.support.IsNull() || BRepAdaptor_Surface(side.support).GetType() != GeomAbs_Cylinder
-            || std::any_of(rounds.begin(), rounds.end(), [&](const TopoDS_Face& face) {
-                 return face.IsSame(side.support);
-               }))
-          continue;
-        const double radius = BRepAdaptor_Surface(side.support).Cylinder().Radius();
-        repeated = repeated || std::any_of(radii.begin(), radii.end(), [&](double other) {
-                     return std::abs(other - radius) < 1e-9 * std::max(other, radius);
-                   });
-        rounds.push_back(side.support);
-        radii.push_back(radius);
-      }
-      const InsideCurvature before = insideCurvature(strict.face);
-      if (!repeated && before.wrongSign() > .34 * bend)
-      {
-        std::optional<Built> turned;
-        try
-        {
-          turned = overPlane(asked, flat, 1);
-        }
-        catch (const Failure&)
-        {
-          return strict;
-        }
-        if (turned->measured.within)
-        {
-          const InsideCurvature after = insideCurvature(turned->face);
-          if (after.wrongSign() < before.wrongSign() && after.tightest() <= before.tightest()
-              && insideStep(turned->face) <= insideStep(strict.face))
-            return *turned;
-        }
-      }
-    }
-    return strict;
   }
+  return strict;
+}
+
+Built PlaneFill::looseOrStrict(const Built& strict)
+{
   // Where curves are only met there is a second surface: fitted only as near as a fair one
   // over its net comes, a share of the loop's size, and moved onto the curves afterwards.
   // Brought nearer by the fit, a coarse net ripples to meet a curve (z = sin 2a on a radius
@@ -1170,18 +1440,45 @@ Built overPlane(const Asked& asked, const Frame& flat, int direction)
       return strict;
   }
   reach       = Limits{fitReach * asked.size, asked.limits.g1, asked.limits.g2};
-  Built loose = build(false, static_cast<int>(std::size(ladder)));
+  Built loose = ladderFit(false, static_cast<int>(std::size(ladder)));
   if (!loose.measured.within && !strict.measured.within && degree == 3 && asked.guides.empty()
       && asked.points.empty())
   {
     degree = 5;
-    loose  = build(false, static_cast<int>(std::size(ladder)));
+    loose  = ladderFit(false, static_cast<int>(std::size(ladder)));
   }
   if (!loose.measured.within)
     return strict;
   if (!strict.measured.within)
     return loose;
   return tightestInside(loose.face) < clearlyFairer * tightestInside(strict.face) ? loose : strict;
+}
+
+} // namespace
+
+Built overPlane(const Asked& asked, const Frame& flat, int direction)
+{
+  std::vector<gp_Pnt> turns;
+  std::vector<gp_Vec> along;
+  cornerTurns(asked, turns, along);
+  const Frame        frame = turnedFrame(asked, flat, turns, along, direction);
+  std::vector<gp_XY> loop;
+  for (const gp_Pnt& point : polygon(asked.sides))
+    loop.push_back(frame.project(point));
+  double                     area = 0;
+  std::optional<std::string> crossed;
+  try
+  {
+    area = enclosed(loop);
+  }
+  catch (const Failure& failure)
+  {
+    crossed = failure.message;
+  }
+  if (crossed)
+    return chartedOrRefused(asked, flat, frame, direction, *crossed);
+  PlaneFill fill(asked, flat, direction, turns, frame, std::move(loop), area);
+  return fill.run();
 }
 
 } // namespace BRepExt::patch_fill
