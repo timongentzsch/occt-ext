@@ -1111,6 +1111,441 @@ static bool defectiveLocalJoin(const Piece& a, const Piece& b)
   return false;
 }
 
+namespace
+{
+//! A split group's sections refitted in the frames its joins require.
+void refitFramed(std::vector<Piece>&                             pieces,
+                 const std::vector<std::optional<Station>>&      seeds,
+                 const std::map<int, std::vector<SectionFrame>>& frames)
+{
+  for (const auto& [index, at] : frames)
+  {
+    Stations stations(pieces[index].rail);
+    stations.march(seeds[index]);
+    const Fitted terminalReference = pieces[index].fitted;
+    pieces[index].fitted = fit(pieces[index].rail, stations, false, at, &terminalReference);
+    pieces[index].sheet  = Sheet{pieces[index].fitted.blend};
+    Dips dips{pieces[index].rail, pieces[index].fitted};
+    checkFold(dips);
+  }
+}
+
+//! Where every part is a G2 blend and a rail knot is defective or a part carried, the group
+//! refitted along one centre parameter; whether it was.
+bool reparameterizeGroup(const char*                                op,
+                         std::vector<Piece>&                        pieces,
+                         const std::vector<std::optional<Station>>& seeds,
+                         const std::vector<int>&                    group,
+                         const SplitRequirements&                   requirements)
+{
+  const auto& frames          = requirements.frames;
+  bool        reparameterized = false;
+  bool        defective = false, eligible = true, carried = false;
+  for (int index : group)
+  {
+    const auto& p = pieces[index];
+    eligible &= p.rail.law == Law::G2 && p.rail.sizes.places.empty() && !p.rail.centreParameter
+                && !p.rail.s[0].cliffCurve && !p.rail.s[1].cliffCurve;
+    defective |= defectiveRailKnot(p.rail, p.fitted);
+    carried |= !p.rail.spine.IsNull();
+  }
+  if (eligible && (defective || carried))
+  {
+    Rail carrier = pieces[group.front()].rail;
+    carrier.to   = pieces[group.back()].rail.to;
+    std::vector<Rail> centreRails;
+    centreRails.reserve(group.size());
+    std::vector<std::unique_ptr<Stations>> stations;
+    std::vector<double>                    joins;
+    std::map<double, int>                  events;
+    for (int index : group)
+    {
+      centreRails.push_back(pieces[index].rail);
+      centreRails.back().centreInterpolation = true;
+      stations.push_back(std::make_unique<Stations>(centreRails.back()));
+      stations.back()->march(seeds[index]);
+      const auto& rail = centreRails.back();
+      for (const auto& [u, multiplicity] : breaksOf(rail, *stations.back(), true, true))
+        events[rail.t(u)] = multiplicity;
+      if (index != group.back())
+        joins.push_back(pieces[index].rail.to);
+    }
+    const auto parameter = centreParameter(
+      carrier,
+      [&](double t) {
+        size_t m = 0;
+        while (m + 1 < group.size() && t > pieces[group[m]].rail.to)
+          ++m;
+        Station at;
+        if (!stations[m]->at(t, at))
+          fail(op, no_solution, "a connected centre path has no station");
+        return at.centre;
+      },
+      joins,
+      events);
+    for (size_t m = 0; m < group.size(); ++m)
+    {
+      auto&        piece         = pieces[group[m]];
+      const Fitted reference     = piece.fitted;
+      piece.rail.centreParameter = parameter;
+      const auto frame           = frames.find(group[m]);
+      piece.fitted = fit(piece.rail,
+                         *stations[m],
+                         false,
+                         frame == frames.end() ? std::vector<SectionFrame>{} : frame->second,
+                         &reference,
+                         true);
+      piece.sheet  = Sheet{piece.fitted.blend};
+    }
+    reparameterized = true;
+  }
+  return reparameterized;
+}
+
+//! At each framed join the two parts' normals coupled.
+void coupleFramedJoins(const char*                                op,
+                       std::vector<Piece>&                        pieces,
+                       const std::vector<std::optional<Station>>& seeds,
+                       const std::vector<int>&                    group,
+                       const SplitRequirements&                   requirements)
+{
+  for (size_t m = 1; m < group.size(); ++m)
+  {
+    if (requirements.framedJoins.find(m) == requirements.framedJoins.end())
+      continue;
+    const bool localLaw = requirements.localJoins.count(m) > 0;
+    gp_Pnt2d   supportUV;
+    if (localLaw)
+    {
+      const auto& contact = pieces[group[m - 1]].fitted.contact[0];
+      if (contact.IsNull())
+        fail(op, no_solution, "a split contact has no support parameter curve");
+      supportUV = contact->Value(1);
+    }
+    // How far apart the two sides' own laws put the section at the join.
+    double lawGap = 0;
+    if (!localLaw)
+    {
+      const Rail& railA = pieces[group[m - 1]].rail;
+      const Rail& railB = pieces[group[m]].rail;
+      Stations    atA(railA), atB(railB);
+      atA.march(seeds[group[m - 1]]);
+      atB.march(seeds[group[m]]);
+      Station x, y;
+      Section xs, ys;
+      if (atA.at(railA.last, x) && atB.at(railB.first, y) && sectionAt(railA, x, xs)
+          && sectionAt(railB, y, ys) && xs.poles.size() == ys.poles.size())
+        for (size_t i = 0; i < xs.poles.size(); ++i)
+          lawGap = std::max(lawGap, xs.poles[i].Distance(ys.poles[i]));
+    }
+    const bool glued = coupleSplitNormals(
+      op,
+      pieces[group[m - 1]].fitted.blend,
+      pieces[group[m]].fitted.blend,
+      std::min(fitTolerance(pieces[group[m - 1]].rail), fitTolerance(pieces[group[m]].rail)),
+      pieces[group[m - 1]].rail,
+      pieces[group[m]].rail,
+      localLaw,
+      supportUV,
+      lawGap);
+    if (!glued)
+      fail(op, no_solution, "the coupled jets at a split could not be fitted");
+  }
+}
+
+//! The second jets coupled at the other joins: after a reparameterisation at every unframed one,
+//! and at a local join whose parts still bend apart.
+void coupleLocalJoins(const char*                                op,
+                      std::vector<Piece>&                        pieces,
+                      const std::vector<std::optional<Station>>& seeds,
+                      const std::vector<int>&                    group,
+                      const SplitRequirements&                   requirements,
+                      bool                                       reparameterized)
+{
+  if (reparameterized)
+    for (size_t m = 1; m < group.size(); ++m)
+      if (!requirements.framedJoins.count(m))
+        coupleSplitJets(pieces[group[m - 1]].fitted.blend,
+                        pieces[group[m]].fitted.blend,
+                        pieces[group[m - 1]].rail,
+                        pieces[group[m]].rail);
+  // At a local join both contacts already agree through curvature (coupleSplitNormals). Where
+  // the parts still bend apart by more than a delivered seam, couple the second jets of the
+  // section's interior only, in centre length at the join: along a centre parameter, or by
+  // the chain rule from the stations' centres, without refitting the parts.
+  for (const size_t m : requirements.localJoins)
+  {
+    auto& a = pieces[group[m - 1]];
+    auto& b = pieces[group[m]];
+    if (!defectiveLocalJoin(a, b))
+      continue;
+    if (reparameterized)
+    {
+      coupleSplitJets(a.fitted.blend, b.fitted.blend, a.rail, b.rail, true);
+      continue;
+    }
+    std::array<double, 4> rates{};
+    for (int end = 0; end < 2; ++end)
+    {
+      const auto& piece = end ? b : a;
+      Stations    along(piece.rail);
+      along.march(seeds[group[m - 1 + end]]);
+      // One-sided fifth-order differences of the centre in the fit's u (Fornberg 1988).
+      const double step = (end ? 1 : -1) * 1e-3;
+      gp_XYZ       c[5];
+      for (int i = 0; i < 5; ++i)
+      {
+        Station station;
+        if (!along.at(piece.rail.t((end ? 0 : 1) + i * step), station))
+          fail(op, no_solution, "a local split join has no station beside it");
+        c[i] = station.centre.XYZ();
+      }
+      const gp_XYZ d1 = (c[0] * -25 + c[1] * 48 - c[2] * 36 + c[3] * 16 - c[4] * 3) / (12 * step);
+      const gp_XYZ d2 =
+        (c[0] * 35 - c[1] * 104 + c[2] * 114 - c[3] * 56 + c[4] * 11) / (12 * step * step);
+      const double speed = d1.Modulus();
+      if (!(speed > limit::degenerate * piece.rail.scale))
+        fail(op, no_solution, "a local split join's centre does not move");
+      rates[2 * end]     = speed;
+      rates[2 * end + 1] = d1.Dot(d2) / speed;
+    }
+    coupleSplitJets(a.fitted.blend, b.fitted.blend, a.rail, b.rail, true, &rates);
+  }
+}
+
+//! The group's parts' rows of poles end to end, each join's shared row once, with their u knots.
+void joinedRows(const char*                                          op,
+                const std::vector<Piece>&                            pieces,
+                const std::vector<int>&                              group,
+                int                                                  k,
+                std::vector<double>&                                 knots,
+                std::vector<int>&                                    mults,
+                std::vector<std::vector<std::pair<gp_Pnt, double>>>& rows)
+{
+  const auto& head   = pieces[k].fitted.blend;
+  const int   degree = head->UDegree();
+  for (size_t m = 0; m < group.size(); ++m)
+  {
+    const auto& part         = pieces[group[m]].fitted.blend;
+    const auto  incompatible = [&] {
+      fail(op,
+           no_solution,
+           "the parts of a blend split onto the next face do not join",
+           {pieces[k].rail.edge});
+    };
+    // Sharing one row is valid only for clamped, equally parameterised sections.
+    // Never replace a section by another merely because its pole count agrees.
+    if (part->IsUPeriodic() || part->IsVPeriodic() || part->UDegree() != degree
+        || part->VDegree() != head->VDegree() || part->NbVPoles() != head->NbVPoles()
+        || part->NbVKnots() != head->NbVKnots() || std::abs(part->UKnot(1)) > tol::parameter
+        || std::abs(part->UKnot(part->NbUKnots()) - 1) > tol::parameter
+        || part->UMultiplicity(1) != degree + 1
+        || part->UMultiplicity(part->NbUKnots()) != degree + 1)
+      incompatible();
+    for (int j = 1; j <= head->NbVKnots(); ++j)
+      if (part->VMultiplicity(j) != head->VMultiplicity(j)
+          || std::abs(part->VKnot(j) - head->VKnot(j)) > tol::parameter)
+        incompatible();
+    // Rational sections may differ by one common homogeneous scale. Apply it
+    // to the whole part, preserving its geometry and the shared row's weights.
+    const double weightScale = m ? rows.back()[0].second / part->Weight(1, 1) : 1;
+    if (m)
+    {
+      const double tolerance =
+        std::min(fitTolerance(pieces[group[m - 1]].rail), fitTolerance(pieces[group[m]].rail));
+      double poleGap = 0, weightChange = 0;
+      for (int j = 1; j <= part->NbVPoles(); ++j)
+      {
+        const auto&  previous = rows.back()[j - 1];
+        const double weight   = part->Weight(1, j) * weightScale;
+        if (!(previous.second > 0 && weight > 0))
+          incompatible();
+        poleGap = std::max(poleGap, previous.first.Distance(part->Pole(1, j)));
+        weightChange =
+          std::max(weightChange,
+                   std::abs(previous.second - weight) / std::min(previous.second, weight));
+      }
+      // Replacing the first row affects only the first U span. The
+      // original surface lies in its active pole hull. Pole gap
+      // plus relative weight change * hull diameter bounds
+      // the geometric change. A dimensionless weight threshold alone
+      // rejects harmless rounding in a small section.
+      Bnd_Box hull;
+      for (int i = 1; i <= degree + 1; ++i)
+        for (int j = 1; j <= part->NbVPoles(); ++j)
+          hull.Add(part->Pole(i, j));
+      hull.SetGap(0);
+      if (poleGap + weightChange * std::sqrt(hull.SquareExtent()) > tolerance)
+        incompatible();
+    }
+    for (int i = 1; i <= part->NbUKnots(); ++i)
+    {
+      if (m > 0 && i == 1)
+      {
+        mults.back() = degree;
+        continue;
+      }
+      knots.push_back(part->UKnot(i) + double(m));
+      mults.push_back(part->UMultiplicity(i));
+    }
+    for (int i = 1; i <= part->NbUPoles(); ++i)
+    {
+      std::vector<std::pair<gp_Pnt, double>> row;
+      for (int j = 1; j <= part->NbVPoles(); ++j)
+        row.push_back({part->Pole(i, j), part->Weight(i, j) * weightScale});
+      if (m > 0 && i == 1)
+      {
+        continue;
+      }
+      rows.push_back(row);
+    }
+  }
+}
+
+//! The joined surface with its spans in proportion to each part's share of the rail, where its
+//! joins then store C1 (OpenCascade's offset refuses a surface stored C0); else as it was. The
+//! parts' starts and widths along it.
+void smoothJoins(const char*                        op,
+                 const std::vector<Piece>&          pieces,
+                 const std::vector<int>&            group,
+                 bool                               reparameterized,
+                 const Handle(Geom_BSplineSurface)& head,
+                 const NCollection_Array2<gp_Pnt>&  poles,
+                 const NCollection_Array2<double>&  weights,
+                 const NCollection_Array1<double>&  uk,
+                 const NCollection_Array1<double>&  vk,
+                 const NCollection_Array1<int>&     um,
+                 const NCollection_Array1<int>&     vm,
+                 Handle(Geom_BSplineSurface)&       joined,
+                 std::vector<double>&               starts,
+                 std::vector<double>&               widths)
+{
+  const int degree = head->UDegree();
+  for (size_t m = 0; m < group.size(); ++m)
+  {
+    starts.push_back(double(m));
+    widths.push_back(1);
+  }
+  // A join is stored C0 in the parameter however smooth it is, and OpenCascade's offset refuses a
+  // surface so stored. With spans in proportion to each part's share of the rail's parameter, on
+  // which the sections go on from each other, its derivatives across are the same where the
+  // law's are: stored C1 where the poles then carry on to within a hundredth of the fit's
+  // tolerance and it is tangent to begin with. One unit a part on the average, as they were.
+  double along = 0;
+  for (int index : group)
+    along += reparameterized
+               ? pieces[index].rail.centreParameter->length(pieces[index].rail.to)
+                   - pieces[index].rail.centreParameter->length(pieces[index].rail.from)
+               : pieces[index].rail.to - pieces[index].rail.from;
+  std::vector<double> scaledStarts, scaledWidths;
+  for (int index : group)
+  {
+    scaledStarts.push_back(scaledStarts.empty() ? 0 : scaledStarts.back() + scaledWidths.back());
+    const auto&  rail   = pieces[index].rail;
+    const double length = reparameterized ? rail.centreParameter->length(rail.to)
+                                              - rail.centreParameter->length(rail.from)
+                                          : rail.to - rail.from;
+    scaledWidths.push_back(length * double(group.size()) / along);
+  }
+  NCollection_Array1<double> scaledKnots(uk);
+  for (int i = 1; i <= uk.Upper(); ++i)
+  {
+    const int m    = std::min(int(uk(i)), int(group.size()) - 1);
+    scaledKnots(i) = scaledStarts[m] + (uk(i) - m) * scaledWidths[m];
+  }
+  const Handle(Geom_BSplineSurface) smooth =
+    new Geom_BSplineSurface(poles, weights, scaledKnots, vk, um, vm, degree, head->VDegree());
+  double tolerance = HUGE_VAL;
+  for (int index : group)
+    tolerance = std::min(tolerance, fitTolerance(pieces[index].rail));
+  bool stored = false;
+  for (int i = 2; i < smooth->NbUKnots(); ++i)
+  {
+    if (smooth->UMultiplicity(i) < degree)
+      continue;
+    double tilt = 0;
+    for (int j = 2; j <= smooth->NbVKnots(); ++j)
+      for (const double q : {0.25, 0.5, 0.75})
+      {
+        const double v = smooth->VKnot(j - 1) + (smooth->VKnot(j) - smooth->VKnot(j - 1)) * q;
+        SurfaceJet   a{op}, b{op};
+        surfaceD2OnUSpan(smooth, smooth->UKnot(i), v, i - 1, i, a);
+        surfaceD2OnUSpan(smooth, smooth->UKnot(i), v, i, i + 1, b);
+        a.orient(false);
+        b.orient(false);
+        tilt = std::max(tilt, a.n.Angle(b.n));
+      }
+    if (tilt * 180 / M_PI <= limit::seamDegrees
+        && smooth->RemoveUKnot(i, degree - 1, tolerance / 100))
+    {
+      stored = true;
+      if (reparameterized)
+        smooth->RemoveUKnot(i, degree - 2, tolerance / 100);
+    }
+  }
+  if (stored)
+  {
+    joined = smooth;
+    starts = scaledStarts;
+    widths = scaledWidths;
+  }
+}
+
+//! A framed group's joined surface regular everywhere, and its normal one across each framed join.
+void checkJoined(const char*                        op,
+                 const std::vector<int>&            group,
+                 const SplitRequirements&           requirements,
+                 const Handle(Geom_BSplineSurface)& joined,
+                 const std::vector<double>&         starts)
+{
+  const bool framedGroup = !requirements.framedJoins.empty();
+  if (!requirements.framedJoins.empty())
+    for (int ui = 2; ui <= joined->NbUKnots(); ++ui)
+    {
+      checkCancelled(op);
+      for (int vi = 2; vi <= joined->NbVKnots(); ++vi)
+        for (double fu : {0.211324865405187, 0.788675134594813})
+          for (double fv : {0.211324865405187, 0.788675134594813})
+          {
+            const double u =
+              joined->UKnot(ui - 1) + (joined->UKnot(ui) - joined->UKnot(ui - 1)) * fu;
+            const double v =
+              joined->VKnot(vi - 1) + (joined->VKnot(vi) - joined->VKnot(vi - 1)) * fv;
+            gp_Pnt point;
+            gp_Vec du, dv;
+            joined->D1(u, v, point, du, dv);
+            const double metric = du.Magnitude() * dv.Magnitude();
+            const double normal = du.Crossed(dv).Magnitude();
+            if (!std::isfinite(metric) || !std::isfinite(normal) || !(metric > 0)
+                || !(normal > tol::coarseAngle * metric))
+              fail(op, no_solution, "a split blend surface is singular");
+          }
+    }
+  // Every framed join must retain the constructed common tangent plane.
+  // Unframed groups keep the established section law and its proof contract.
+  if (framedGroup)
+    for (size_t m = 1; m < group.size(); ++m)
+      if (requirements.framedJoins.find(m) != requirements.framedJoins.end())
+        for (int span = 2; span <= joined->NbVKnots(); ++span)
+          for (int sample = 1; sample <= 16; ++sample)
+          {
+            const double v = joined->VKnot(span - 1)
+                             + (joined->VKnot(span) - joined->VKnot(span - 1)) * sample / 17;
+            const double u = starts[m];
+            SurfaceJet   left{op}, right{op};
+            int          split = 2;
+            while (split < joined->NbUKnots() && joined->UKnot(split) < u)
+              ++split;
+            surfaceD2OnUSpan(joined, u, v, split - 1, split, left);
+            surfaceD2OnUSpan(joined, u, v, split, split + 1, right);
+            left.orient(false);
+            right.orient(false);
+            if (!(left.n.Angle(right.n) <= tol::angularResolution))
+              fail(op, no_solution, "the normal of split blends does not agree");
+          }
+}
+} // namespace
+
 void joinSplitPieces(const char*                                op,
                      std::vector<Piece>&                        pieces,
                      const std::vector<std::optional<Station>>& seeds)
@@ -1129,160 +1564,12 @@ void joinSplitPieces(const char*                                op,
       group.push_back(pieces[group.back()].joint[1].piece);
     const auto  requirements = splitFrames(op, pieces, seeds, group);
     const auto& frames       = requirements.frames;
-    for (const auto& [index, at] : frames)
-    {
-      Stations stations(pieces[index].rail);
-      stations.march(seeds[index]);
-      const Fitted terminalReference = pieces[index].fitted;
-      pieces[index].fitted = fit(pieces[index].rail, stations, false, at, &terminalReference);
-      pieces[index].sheet  = Sheet{pieces[index].fitted.blend};
-      Dips dips{pieces[index].rail, pieces[index].fitted};
-      checkFold(dips);
-    }
-    bool reparameterized = false;
-    bool defective = false, eligible = true, carried = false;
-    for (int index : group)
-    {
-      const auto& p = pieces[index];
-      eligible &= p.rail.law == Law::G2 && p.rail.sizes.places.empty()
-        && !p.rail.centreParameter && !p.rail.s[0].cliffCurve && !p.rail.s[1].cliffCurve;
-      defective |= defectiveRailKnot(p.rail, p.fitted);
-      carried |= !p.rail.spine.IsNull();
-    }
-    if (eligible && (defective || carried))
-    {
-      Rail carrier = pieces[group.front()].rail;
-      carrier.to = pieces[group.back()].rail.to;
-      std::vector<Rail> centreRails;
-      centreRails.reserve(group.size());
-      std::vector<std::unique_ptr<Stations>> stations;
-      std::vector<double> joins;
-      std::map<double, int> events;
-      for (int index : group)
-      {
-        centreRails.push_back(pieces[index].rail);
-        centreRails.back().centreInterpolation = true;
-        stations.push_back(std::make_unique<Stations>(centreRails.back()));
-        stations.back()->march(seeds[index]);
-        const auto& rail = centreRails.back();
-        for (const auto& [u, multiplicity] : breaksOf(rail, *stations.back(), true, true))
-          events[rail.t(u)] = multiplicity;
-        if (index != group.back())
-          joins.push_back(pieces[index].rail.to);
-      }
-      const auto parameter = centreParameter(carrier, [&](double t) {
-        size_t m = 0;
-        while (m + 1 < group.size() && t > pieces[group[m]].rail.to)
-          ++m;
-        Station at;
-        if (!stations[m]->at(t, at))
-          fail(op, no_solution, "a connected centre path has no station");
-        return at.centre;
-      }, joins, events);
-      for (size_t m = 0; m < group.size(); ++m)
-      {
-        auto& piece = pieces[group[m]];
-        const Fitted reference = piece.fitted;
-        piece.rail.centreParameter = parameter;
-        const auto frame = frames.find(group[m]);
-        piece.fitted = fit(piece.rail, *stations[m], false,
-                           frame == frames.end() ? std::vector<SectionFrame>{} : frame->second,
-                           &reference, true);
-        piece.sheet = Sheet{piece.fitted.blend};
-      }
-      reparameterized = true;
-    }
-    const bool framedGroup = !requirements.framedJoins.empty();
+    refitFramed(pieces, seeds, frames);
+    const bool reparameterized = reparameterizeGroup(op, pieces, seeds, group, requirements);
+    const bool framedGroup     = !requirements.framedJoins.empty();
     if (framedGroup)
-      for (size_t m = 1; m < group.size(); ++m)
-      {
-        if (requirements.framedJoins.find(m) == requirements.framedJoins.end())
-          continue;
-        const bool localLaw = requirements.localJoins.count(m) > 0;
-        gp_Pnt2d   supportUV;
-        if (localLaw)
-        {
-          const auto& contact = pieces[group[m - 1]].fitted.contact[0];
-          if (contact.IsNull())
-            fail(op, no_solution, "a split contact has no support parameter curve");
-          supportUV = contact->Value(1);
-        }
-        // How far apart the two sides' own laws put the section at the join.
-        double lawGap = 0;
-        if (!localLaw)
-        {
-          const Rail& railA = pieces[group[m - 1]].rail;
-          const Rail& railB = pieces[group[m]].rail;
-          Stations    atA(railA), atB(railB);
-          atA.march(seeds[group[m - 1]]);
-          atB.march(seeds[group[m]]);
-          Station x, y;
-          Section xs, ys;
-          if (atA.at(railA.last, x) && atB.at(railB.first, y) && sectionAt(railA, x, xs)
-              && sectionAt(railB, y, ys) && xs.poles.size() == ys.poles.size())
-            for (size_t i = 0; i < xs.poles.size(); ++i)
-              lawGap = std::max(lawGap, xs.poles[i].Distance(ys.poles[i]));
-        }
-        const bool glued = coupleSplitNormals(
-          op,
-          pieces[group[m - 1]].fitted.blend,
-          pieces[group[m]].fitted.blend,
-          std::min(fitTolerance(pieces[group[m - 1]].rail), fitTolerance(pieces[group[m]].rail)),
-          pieces[group[m - 1]].rail,
-          pieces[group[m]].rail,
-          localLaw,
-          supportUV,
-          lawGap);
-        if (!glued)
-          fail(op, no_solution, "the coupled jets at a split could not be fitted");
-      }
-    if (reparameterized)
-      for (size_t m = 1; m < group.size(); ++m)
-        if (!requirements.framedJoins.count(m))
-          coupleSplitJets(pieces[group[m-1]].fitted.blend, pieces[group[m]].fitted.blend,
-                          pieces[group[m-1]].rail, pieces[group[m]].rail);
-    // At a local join both contacts already agree through curvature (coupleSplitNormals). Where
-    // the parts still bend apart by more than a delivered seam, couple the second jets of the
-    // section's interior only, in centre length at the join: along a centre parameter, or by
-    // the chain rule from the stations' centres, without refitting the parts.
-    for (const size_t m : requirements.localJoins)
-    {
-      auto& a = pieces[group[m - 1]];
-      auto& b = pieces[group[m]];
-      if (!defectiveLocalJoin(a, b))
-        continue;
-      if (reparameterized)
-      {
-        coupleSplitJets(a.fitted.blend, b.fitted.blend, a.rail, b.rail, true);
-        continue;
-      }
-      std::array<double, 4> rates{};
-      for (int end = 0; end < 2; ++end)
-      {
-        const auto& piece = end ? b : a;
-        Stations    along(piece.rail);
-        along.march(seeds[group[m - 1 + end]]);
-        // One-sided fifth-order differences of the centre in the fit's u (Fornberg 1988).
-        const double step = (end ? 1 : -1) * 1e-3;
-        gp_XYZ       c[5];
-        for (int i = 0; i < 5; ++i)
-        {
-          Station station;
-          if (!along.at(piece.rail.t((end ? 0 : 1) + i * step), station))
-            fail(op, no_solution, "a local split join has no station beside it");
-          c[i] = station.centre.XYZ();
-        }
-        const gp_XYZ d1 = (c[0] * -25 + c[1] * 48 - c[2] * 36 + c[3] * 16 - c[4] * 3) / (12 * step);
-        const gp_XYZ d2 =
-          (c[0] * 35 - c[1] * 104 + c[2] * 114 - c[3] * 56 + c[4] * 11) / (12 * step * step);
-        const double speed = d1.Modulus();
-        if (!(speed > limit::degenerate * piece.rail.scale))
-          fail(op, no_solution, "a local split join's centre does not move");
-        rates[2 * end]     = speed;
-        rates[2 * end + 1] = d1.Dot(d2) / speed;
-      }
-      coupleSplitJets(a.fitted.blend, b.fitted.blend, a.rail, b.rail, true, &rates);
-    }
+      coupleFramedJoins(op, pieces, seeds, group, requirements);
+    coupleLocalJoins(op, pieces, seeds, group, requirements, reparameterized);
     bool coupled = false;
     for (int index : group)
       coupled = coupleInnerKinks(op, pieces[index]) || coupled;
@@ -1299,82 +1586,7 @@ void joinSplitPieces(const char*                                op,
     std::vector<double>                                 knots;
     std::vector<int>                                    mults;
     std::vector<std::vector<std::pair<gp_Pnt, double>>> rows;
-    for (size_t m = 0; m < group.size(); ++m)
-    {
-      const auto& part         = pieces[group[m]].fitted.blend;
-      const auto  incompatible = [&] {
-        fail(op,
-             no_solution,
-             "the parts of a blend split onto the next face do not join",
-              {pieces[k].rail.edge});
-      };
-      // Sharing one row is valid only for clamped, equally parameterised sections.
-      // Never replace a section by another merely because its pole count agrees.
-      if (part->IsUPeriodic() || part->IsVPeriodic() || part->UDegree() != degree
-          || part->VDegree() != head->VDegree() || part->NbVPoles() != head->NbVPoles()
-          || part->NbVKnots() != head->NbVKnots() || std::abs(part->UKnot(1)) > tol::parameter
-          || std::abs(part->UKnot(part->NbUKnots()) - 1) > tol::parameter
-          || part->UMultiplicity(1) != degree + 1
-          || part->UMultiplicity(part->NbUKnots()) != degree + 1)
-        incompatible();
-      for (int j = 1; j <= head->NbVKnots(); ++j)
-        if (part->VMultiplicity(j) != head->VMultiplicity(j)
-            || std::abs(part->VKnot(j) - head->VKnot(j)) > tol::parameter)
-          incompatible();
-      // Rational sections may differ by one common homogeneous scale. Apply it
-      // to the whole part, preserving its geometry and the shared row's weights.
-      const double weightScale = m ? rows.back()[0].second / part->Weight(1, 1) : 1;
-      if (m)
-      {
-        const double tolerance =
-          std::min(fitTolerance(pieces[group[m - 1]].rail), fitTolerance(pieces[group[m]].rail));
-        double poleGap = 0, weightChange = 0;
-        for (int j = 1; j <= part->NbVPoles(); ++j)
-        {
-          const auto&  previous = rows.back()[j - 1];
-          const double weight   = part->Weight(1, j) * weightScale;
-          if (!(previous.second > 0 && weight > 0))
-            incompatible();
-          poleGap = std::max(poleGap, previous.first.Distance(part->Pole(1, j)));
-          weightChange =
-            std::max(weightChange,
-                     std::abs(previous.second - weight) / std::min(previous.second, weight));
-        }
-        // Replacing the first row affects only the first U span. The
-        // original surface lies in its active pole hull. Pole gap
-        // plus relative weight change * hull diameter bounds
-        // the geometric change. A dimensionless weight threshold alone
-        // rejects harmless rounding in a small section.
-        Bnd_Box hull;
-        for (int i = 1; i <= degree + 1; ++i)
-          for (int j = 1; j <= part->NbVPoles(); ++j)
-            hull.Add(part->Pole(i, j));
-        hull.SetGap(0);
-        if (poleGap + weightChange * std::sqrt(hull.SquareExtent()) > tolerance)
-          incompatible();
-      }
-      for (int i = 1; i <= part->NbUKnots(); ++i)
-      {
-        if (m > 0 && i == 1)
-        {
-          mults.back() = degree;
-          continue;
-        }
-        knots.push_back(part->UKnot(i) + double(m));
-        mults.push_back(part->UMultiplicity(i));
-      }
-      for (int i = 1; i <= part->NbUPoles(); ++i)
-      {
-        std::vector<std::pair<gp_Pnt, double>> row;
-        for (int j = 1; j <= part->NbVPoles(); ++j)
-          row.push_back({part->Pole(i, j), part->Weight(i, j) * weightScale});
-        if (m > 0 && i == 1)
-        {
-          continue;
-        }
-        rows.push_back(row);
-      }
-    }
+    joinedRows(op, pieces, group, k, knots, mults, rows);
     NCollection_Array2<gp_Pnt> poles(1, int(rows.size()), 1, head->NbVPoles());
     NCollection_Array2<double> weights(1, int(rows.size()), 1, head->NbVPoles());
     for (int i = 0; i < int(rows.size()); ++i)
@@ -1398,118 +1610,21 @@ void joinSplitPieces(const char*                                op,
     Handle(Geom_BSplineSurface) joined =
       new Geom_BSplineSurface(poles, weights, uk, vk, um, vm, degree, head->VDegree());
     std::vector<double> starts, widths;
-    for (size_t m = 0; m < group.size(); ++m)
-    {
-      starts.push_back(double(m));
-      widths.push_back(1);
-    }
-    // A join is stored C0 in the parameter however smooth it is, and OpenCascade's offset refuses a
-    // surface so stored. With spans in proportion to each part's share of the rail's parameter, on
-    // which the sections go on from each other, its derivatives across are the same where the
-    // law's are: stored C1 where the poles then carry on to within a hundredth of the fit's
-    // tolerance and it is tangent to begin with. One unit a part on the average, as they were.
-    double along = 0;
-    for (int index : group)
-      along += reparameterized
-        ? pieces[index].rail.centreParameter->length(pieces[index].rail.to)
-          - pieces[index].rail.centreParameter->length(pieces[index].rail.from)
-        : pieces[index].rail.to - pieces[index].rail.from;
-    std::vector<double> scaledStarts, scaledWidths;
-    for (int index : group)
-    {
-      scaledStarts.push_back(scaledStarts.empty() ? 0 : scaledStarts.back() + scaledWidths.back());
-      const auto& rail = pieces[index].rail;
-      const double length = reparameterized
-        ? rail.centreParameter->length(rail.to) - rail.centreParameter->length(rail.from)
-        : rail.to - rail.from;
-      scaledWidths.push_back(length * double(group.size()) / along);
-    }
-    NCollection_Array1<double> scaledKnots(uk);
-    for (int i = 1; i <= uk.Upper(); ++i)
-    {
-      const int m    = std::min(int(uk(i)), int(group.size()) - 1);
-      scaledKnots(i) = scaledStarts[m] + (uk(i) - m) * scaledWidths[m];
-    }
-    const Handle(Geom_BSplineSurface) smooth =
-      new Geom_BSplineSurface(poles, weights, scaledKnots, vk, um, vm, degree, head->VDegree());
-    double tolerance = HUGE_VAL;
-    for (int index : group)
-      tolerance = std::min(tolerance, fitTolerance(pieces[index].rail));
-    bool stored = false;
-    for (int i = 2; i < smooth->NbUKnots(); ++i)
-    {
-      if (smooth->UMultiplicity(i) < degree)
-        continue;
-      double tilt = 0;
-      for (int j = 2; j <= smooth->NbVKnots(); ++j)
-        for (const double q : {0.25, 0.5, 0.75})
-        {
-          const double v = smooth->VKnot(j - 1) + (smooth->VKnot(j) - smooth->VKnot(j - 1)) * q;
-          SurfaceJet   a{op}, b{op};
-          surfaceD2OnUSpan(smooth, smooth->UKnot(i), v, i - 1, i, a);
-          surfaceD2OnUSpan(smooth, smooth->UKnot(i), v, i, i + 1, b);
-          a.orient(false);
-          b.orient(false);
-          tilt = std::max(tilt, a.n.Angle(b.n));
-        }
-      if (tilt * 180 / M_PI <= limit::seamDegrees
-          && smooth->RemoveUKnot(i, degree - 1, tolerance / 100))
-      {
-        stored = true;
-        if (reparameterized)
-          smooth->RemoveUKnot(i, degree - 2, tolerance / 100);
-      }
-    }
-    if (stored)
-    {
-      joined = smooth;
-      starts = scaledStarts;
-      widths = scaledWidths;
-    }
-    if (!requirements.framedJoins.empty())
-      for (int ui = 2; ui <= joined->NbUKnots(); ++ui)
-      {
-        checkCancelled(op);
-        for (int vi = 2; vi <= joined->NbVKnots(); ++vi)
-          for (double fu : {0.211324865405187, 0.788675134594813})
-            for (double fv : {0.211324865405187, 0.788675134594813})
-            {
-              const double u =
-                joined->UKnot(ui - 1) + (joined->UKnot(ui) - joined->UKnot(ui - 1)) * fu;
-              const double v =
-                joined->VKnot(vi - 1) + (joined->VKnot(vi) - joined->VKnot(vi - 1)) * fv;
-              gp_Pnt point;
-              gp_Vec du, dv;
-              joined->D1(u, v, point, du, dv);
-              const double metric = du.Magnitude() * dv.Magnitude();
-              const double normal = du.Crossed(dv).Magnitude();
-              if (!std::isfinite(metric) || !std::isfinite(normal) || !(metric > 0)
-                  || !(normal > tol::coarseAngle * metric))
-                fail(op, no_solution, "a split blend surface is singular");
-            }
-      }
-    // Every framed join must retain the constructed common tangent plane.
-    // Unframed groups keep the established section law and its proof contract.
-    if (framedGroup)
-      for (size_t m = 1; m < group.size(); ++m)
-        if (requirements.framedJoins.find(m) != requirements.framedJoins.end())
-          for (int span = 2; span <= joined->NbVKnots(); ++span)
-            for (int sample = 1; sample <= 16; ++sample)
-            {
-              const double v = joined->VKnot(span - 1)
-                               + (joined->VKnot(span) - joined->VKnot(span - 1)) * sample / 17;
-              const double u = starts[m];
-              SurfaceJet   left{op}, right{op};
-              int          split = 2;
-              while (split < joined->NbUKnots() && joined->UKnot(split) < u)
-                ++split;
-              surfaceD2OnUSpan(joined, u, v, split - 1, split, left);
-              surfaceD2OnUSpan(joined, u, v, split, split + 1, right);
-              left.orient(false);
-              right.orient(false);
-              if (!(left.n.Angle(right.n) <= tol::angularResolution))
-                fail(op, no_solution, "the normal of split blends does not agree");
-            }
+    smoothJoins(op,
+                pieces,
+                group,
+                reparameterized,
+                head,
+                poles,
+                weights,
+                uk,
+                vk,
+                um,
+                vm,
+                joined,
+                starts,
+                widths);
+    checkJoined(op, group, requirements, joined, starts);
     for (size_t m = 0; m < group.size(); ++m)
       pieces[group[m]].sheet = Sheet{joined, false, starts[m], widths[m], {0, 1}};
   }
