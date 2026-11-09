@@ -116,7 +116,57 @@ struct Attach
            && std::abs(rail.s[0].distance - rail.s[1].distance) < limit::equal * rail.scale;
   }
 
-  void        stop(int k, int end, const TopoDS_Vertex& vertex);
+  void stop(int k, int end, const TopoDS_Vertex& vertex);
+
+  //! A stop at one face (stop): that face, the edges beside the end on each support and the ends
+  //! of those the blend replaces (a sliver's far corner), the piece's middle and its cliff side.
+  struct OneStop
+  {
+    TopoDS_Face   stop;
+    TopoDS_Edge   beside[2];
+    TopoDS_Vertex from[2];
+    double        middle = 0;
+    int           cliff  = -1;
+  };
+
+  //! The steps of stop: the face across both sides, with the slivers it swallows.
+  void stopFace(int k, int end, const TopoDS_Vertex& vertex, OneStop& one);
+  //! Where a contact leaves its support for the stop face before the end's half of the piece.
+  std::optional<Meeting> earlyCrossing(int k, int end, int side, const OneStop& s) const;
+  //! Whether each contact meets the stop face simply: else several faces stop the blend.
+  bool simpleStop(int k, int end, const OneStop& s) const;
+  //! The corner of one side on the stop face, and its place in the stop face's parameters.
+  void stopCorner(int                  k,
+                  int                  end,
+                  int                  side,
+                  const TopoDS_Vertex& vertex,
+                  const OneStop&       s,
+                  gp_Pnt2d&            cornerOnStop);
+  //! A notch's corner: where the blend's edge on the face beyond meets the stop face.
+  void notchStopCorner(int                  k,
+                       int                  end,
+                       int                  side,
+                       const TopoDS_Vertex& vertex,
+                       const OneStop&       s,
+                       gp_Pnt2d&            cornerOnStop);
+  //! A cliff's corner: the far edge's own vertex, or where the stop face crosses the cliff.
+  void cliffStopCorner(int                  k,
+                       int                  end,
+                       int                  side,
+                       const TopoDS_Vertex& vertex,
+                       const OneStop&       s,
+                       gp_Pnt2d&            cornerOnStop);
+  //! A corner where the contact meets the stop face's surface carried past the vertex.
+  void continuedStopCorner(int                  k,
+                           int                  end,
+                           int                  side,
+                           const TopoDS_Vertex& vertex,
+                           const OneStop&       s,
+                           Continuation&        more,
+                           gp_Pnt2d&            cornerOnStop);
+  //! The blend's end on the stop face: the sheet's section where it lies in it, else the meeting.
+  void stopSection(int k, int end, const TopoDS_Face& stop, const gp_Pnt2d& cornerOnStop);
+
   bool        consumed(int                  k,
                        int                  end,
                        const TopoDS_Vertex& vertex,
@@ -135,8 +185,9 @@ struct Attach
     TopoDS_Vertex from;
     Meeting       at;
     TopoDS_Face   face;
-  }; //! The walk out from a stop's vertex along one support to the faces that stop its contact.
+  };
 
+  //! The walk out from a stop's vertex along one support to the faces that stop its contact.
   struct StopWalk
   {
     std::vector<TopoDS_Face>   faces;   // out from the vertex

@@ -367,25 +367,15 @@ TopoDS_Edge Attach::rolledEdge(int k, int side, const TopoDS_Face& stop)
 //! the supports are cut back to where the contacts cross them, and the blend ends in its section
 //! on that face, or its meeting with it. At a vertex of more edges, or where a contact sweeps over
 //! short edges of its support, several faces stop it (stops).
-void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
+void Attach::stopFace(int k, int end, const TopoDS_Vertex& vertex, OneStop& one)
 {
-  const Piece& piece = pieces[k];
-  const Rail&  rail  = piece.rail;
-  const Sheet& sheet = piece.sheet;
-  const auto&  edges = edgesOfVertex.FindFromKey(vertex);
-  if (edges.Extent() > 3)
-  {
-    stops(k, end, vertex);
-    return;
-  }
-  if (edges.Extent() != 3)
-    fail(op,
-         unsupported_geometry,
-         "where blended edges meet other edges, the corner is blended too, which the blend does "
-         "not do yet",
-         {rail.edge});
-  TopoDS_Face stop;
-  TopoDS_Edge beside[2], sliverEdge[2];
+  const Piece&         piece  = pieces[k];
+  const Rail&          rail   = piece.rail;
+  const auto&          edges  = edgesOfVertex.FindFromKey(vertex);
+  TopoDS_Face&         stop   = one.stop;
+  TopoDS_Edge(&beside)[2]     = one.beside;
+  TopoDS_Vertex(&from)[2]     = one.from;
+  TopoDS_Edge sliverEdge[2];
   TopoDS_Face sliverOf[2];
   bool continuedSupport[2] = {false, false};
   for (const auto& shape : edges)
@@ -437,7 +427,7 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
       stop = TopoDS::Face(face);
     }
   }
-  TopoDS_Vertex from[2] = {vertex, vertex};
+  from[0] = from[1] = vertex;
   for (int s = 0; s < 2; ++s)
     if (!sliverOf[s].IsNull() && !stop.IsNull())
     {
@@ -483,332 +473,405 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
          unsupported_geometry,
          "the faces at an end of the edge are not one face across both sides",
          {rail.edge});
-  const double middle = piece.uAt(0) / 2 + piece.uAt(1) / 2;
-  const int    cliff  = rail.s[0].cliffCurve ? 0 : rail.s[1].cliffCurve ? 1 : -1;
-  // A contact that leaves its support for the stop face before the end's half of the piece (a
-  // support that narrows towards the stop face, as a triangular top to its oblique end) crosses
-  // the edge between them in the other half.
-  const auto early = [&](int side) {
-    auto found = crossing(piece.fitted.contact[side],
-                          end == 0 ? middle : 0,
-                          end == 0 ? 1 : middle,
-                          piece.uAt(end),
-                          beside[side],
-                          rail.s[side].face);
-    // Or further on along the parts of a split, one sheet: a seam crossed by the other contact
-    // before this one reaches the stop face.
-    for (int m = k; !found && piece.joint[1 - end].meets == Meets::Split
-                    && pieces[m].joint[1 - end].meets == Meets::Split;)
-    {
-      m = pieces[m].joint[1 - end].piece;
-      if (m == k || !pieces[m].rail.s[side].face.IsSame(rail.s[side].face))
-        break;
-      found = crossing(pieces[m].fitted.contact[side],
-                       0,
-                       1,
-                       pieces[m].uAt(end),
-                       beside[side],
-                       rail.s[side].face);
-      if (found)
-        found->first = (pieces[m].sheet.rail(found->first) - sheet.alpha) / sheet.beta;
-    }
-    return found;
-  };
+}
+
+// A contact that leaves its support for the stop face before the end's half of the piece (a
+// support that narrows towards the stop face, as a triangular top to its oblique end) crosses
+// the edge between them in the other half.
+std::optional<Meeting> Attach::earlyCrossing(int k, int end, int side, const OneStop& s) const
+{
+  const Piece&         piece  = pieces[k];
+  const Rail&          rail   = piece.rail;
+  const Sheet&         sheet  = piece.sheet;
+  const double         middle = s.middle;
+  const TopoDS_Edge(&beside)[2] = s.beside;
+  auto found = crossing(piece.fitted.contact[side],
+                        end == 0 ? middle : 0,
+                        end == 0 ? 1 : middle,
+                        piece.uAt(end),
+                        beside[side],
+                        rail.s[side].face);
+  // Or further on along the parts of a split, one sheet: a seam crossed by the other contact
+  // before this one reaches the stop face.
+  for (int m = k; !found && piece.joint[1 - end].meets == Meets::Split
+                  && pieces[m].joint[1 - end].meets == Meets::Split;)
   {
-    bool simple = true;
-    for (int side = 0; side < 2 && simple; ++side)
-      simple = side == cliff || !rail.s[side].trim.IsNull()
-               || crossing(piece.fitted.contact[side],
-                           end == 0 ? 0 : middle,
-                           end == 0 ? middle : 1,
-                           piece.uAt(end),
-                           beside[side],
-                           rail.s[side].face)
-               || beyond(piece.fitted.contact[side],
+    m = pieces[m].joint[1 - end].piece;
+    if (m == k || !pieces[m].rail.s[side].face.IsSame(rail.s[side].face))
+      break;
+    found = crossing(pieces[m].fitted.contact[side],
+                     0,
+                     1,
+                     pieces[m].uAt(end),
+                     beside[side],
+                     rail.s[side].face);
+    if (found)
+      found->first = (pieces[m].sheet.rail(found->first) - sheet.alpha) / sheet.beta;
+  }
+  return found;
+}
+
+bool Attach::simpleStop(int k, int end, const OneStop& s) const
+{
+  const Piece&         piece  = pieces[k];
+  const Rail&          rail   = piece.rail;
+  const double         middle = s.middle;
+  const int            cliff  = s.cliff;
+  const TopoDS_Face&   stop   = s.stop;
+  const TopoDS_Edge(&beside)[2] = s.beside;
+  const TopoDS_Vertex(&from)[2] = s.from;
+  const auto early = [&](int side) { return earlyCrossing(k, end, side, s); };
+  bool simple = true;
+  for (int side = 0; side < 2 && simple; ++side)
+    simple = side == cliff || !rail.s[side].trim.IsNull()
+             || crossing(piece.fitted.contact[side],
                          end == 0 ? 0 : middle,
                          end == 0 ? middle : 1,
                          piece.uAt(end),
                          beside[side],
-                         from[side],
-                         rail.s[side].face,
-                         stop,
-                         tolerance)
-               || continuation(piece.fitted.contact[side],
-                               end == 0 ? 0 : middle,
-                               end == 0 ? middle : 1,
-                               piece.uAt(end),
-                               beside[side],
-                               from[side],
-                               rail.s[side].face,
-                               stop,
-                               tolerance)
-               || early(side);
-    if (!simple)
-    {
-      if (!consumed(k, end, vertex, stop, beside))
-        stops(k, end, vertex);
-      return;
-    }
-  }
-  stopAt[k][end] = stop;
-  gp_Pnt2d cornerOnStop2d[2];
-  for (int side = 0; side < 2; ++side)
-  {
-    if (!rail.s[side].trim.IsNull())
-    {
-      // A notch: the narrow face's edge on the stop face goes with the face, and the face
-      // beyond's edge on the stop face from the far edge's vertex is cut back to where the
-      // blend's edge on the face beyond meets the stop face: the corner.
-      const TopoDS_Face& beyond = rail.s[side].trim;
-      TopoDS_Vertex      a, z, f0, f1;
-      TopExp::Vertices(beside[side], a, z);
-      TopExp::Vertices(rail.s[side].trimEdge, f0, f1);
-      const TopoDS_Vertex across = a.IsSame(vertex) ? z : a;
-      const auto&         trim   = trimOf(k, side);
-      if (!across.IsSame(f0) && !across.IsSame(f1))
-      {
-        capNotch(k, side, end, vertex, stop, cornerOnStop2d[side]);
-        continue;
-      }
-      TopoDS_Edge down;
-      for (const auto& shape : edgesOfVertex.FindFromKey(across))
-        if (onFace(shape, beyond) && onFace(shape, stop))
-          down = TopoDS::Edge(shape);
-      if (down.IsNull())
-        fail(op,
-             unsupported_geometry,
-             "the face beyond a narrow face does not meet the face that stops the blend",
-             {rail.edge});
-      GeomAPI_IntCS                            meet(trim.curve, BRep_Tool::Surface(stop));
-      const gp_Pnt                             V = BRep_Tool::Pnt(vertex);
-      std::optional<std::pair<gp_Pnt, double>> best;
-      if (meet.IsDone())
-        for (int i = 1; i <= meet.NbPoints(); ++i)
-        {
-          double pu, pv, w;
-          meet.Parameters(i, pu, pv, w);
-          if (!best || meet.Point(i).Distance(V) < best->first.Distance(V))
-            best = {meet.Point(i), w};
-        }
-      if (!best)
-        fail(
-          op,
-          no_solution,
-          "the blend's edge on the face beyond a narrow face does not reach the face that stops it",
-          {rail.edge});
-      double                      f, l;
-      const auto                  curve = BRep_Tool::Curve(down, f, l);
-      GeomAPI_ProjectPointOnCurve on(best->first, curve, f, l);
-      if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
-        fail(op,
-             no_solution,
-             "the blend's edge on the face beyond a narrow face misses that face's edge on the "
-             "stop face",
-             {rail.edge});
-      builder.MakeVertex(corner[k][side][end], best->first, tolerance);
-      u[k][side][end] = (best->second - sheet.alpha) / sheet.beta;
-      cut(down, across, corner[k][side][end], on.LowerDistanceParameter());
-      editOf(edits, stop).replace.Bind(beside[side], TopoDS_Edge());
-      if (!pieces[k].rail.s[side].cliffWhole)
-        editOf(edits, rail.s[side].face).replace.Bind(beside[side], TopoDS_Edge());
-      swept.push_back(beside[side]);
-      double g0, l0;
-      cornerOnStop2d[side] =
-        BRep_Tool::CurveOnSurface(down, stop, g0, l0)->Value(on.LowerDistanceParameter());
-      continue;
-    }
-    if (side == cliff)
-    {
-      const Side&   narrow = rail.s[side];
-      TopoDS_Vertex a, z, f0, f1;
-      TopExp::Vertices(beside[side], a, z);
-      TopExp::Vertices(narrow.cliff, f0, f1);
-      const TopoDS_Vertex across = a.IsSame(vertex) ? z : a;
-      if (across.IsSame(f0) || across.IsSame(f1))
-      {
-        // On a cliff the corner is the far edge's own vertex: the narrow face's edge on the
-        // stop face goes, and the blend's end runs to that vertex.
-        corner[k][side][end] = across;
-        GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][side][end]), sheet.contact(side));
-        if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
-          fail(op,
-               no_solution,
-               "the blend's contact misses the end of the face's far edge it rests on",
-               {rail.edge});
-        u[k][side][end] = (on.LowerDistanceParameter() - sheet.alpha) / sheet.beta;
-        editOf(edits, stop).replace.Bind(beside[side], TopoDS_Edge());
-        if (!narrow.cliffWhole)
-          editOf(edits, narrow.face).replace.Bind(beside[side], TopoDS_Edge());
-        swept.push_back(beside[side]);
-        double f0, l0;
-        cornerOnStop2d[side] = BRep_Tool::CurveOnSurface(beside[side], stop, f0, l0)
-                                 ->Value(BRep_Tool::Parameter(corner[k][side][end], beside[side]));
-        continue;
-      }
-      // The narrow face goes on past the stop: the stop face's surface crosses the strip from
-      // the vertex to the far edge, and is carried over it to cap the blend's end there (the
+                         rail.s[side].face)
+             || beyond(piece.fitted.contact[side],
+                       end == 0 ? 0 : middle,
+                       end == 0 ? middle : 1,
+                       piece.uAt(end),
+                       beside[side],
+                       from[side],
+                       rail.s[side].face,
+                       stop,
+                       tolerance)
+             || continuation(piece.fitted.contact[side],
+                             end == 0 ? 0 : middle,
+                             end == 0 ? middle : 1,
+                             piece.uAt(end),
+                             beside[side],
+                             from[side],
+                             rail.s[side].face,
+                             stop,
+                             tolerance)
+             || early(side);
+  return simple;
+}
 
-      if (narrow.cliffWhole)
-        fail(op, no_solution, "the blend's end on a cliff misses the far edge's end", {rail.edge});
-      const auto            placed = BRep_Tool::Surface(stop);
-      GeomAPI_IntCS         meet(narrow.cliffCurve, placed);
-      const gp_Pnt          V = BRep_Tool::Pnt(vertex);
-      std::optional<gp_Pnt> F;
-      if (meet.IsDone())
-        for (int i = 1; i <= meet.NbPoints(); ++i)
-          if (!F || meet.Point(i).Distance(V) < F->Distance(V))
-            F = meet.Point(i);
-      if (!F || !(F->Distance(V) > limit::degenerate * rail.scale))
-        fail(op,
-             unsupported_geometry,
-             "the face that stops a blend on a cliff does not cross the cliff's edge",
-             {rail.edge});
-      builder.MakeVertex(corner[k][side][end], *F, tolerance);
-      GeomAPI_ProjectPointOnCurve on(*F, sheet.contact(side));
-      if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
-        fail(op,
-             no_solution,
-             "the blend's contact misses where the face that stops it crosses the cliff's edge",
-             {rail.edge});
-      u[k][side][end] = (on.LowerDistanceParameter() - sheet.alpha) / sheet.beta;
-      // The cap's edge: the segment from there to the vertex, on both faces' surfaces.
-      const Handle(Geom_Curve) line(GC_MakeSegment(*F, V).Value());
-      const double             length       = F->Distance(V);
-      const auto               narrowPlaced = BRep_Tool::Surface(narrow.face);
-      for (const auto& surface : {placed, narrowPlaced})
-      {
-        GeomAPI_ProjectPointOnSurf mid(line->Value(length / 2), surface);
-        if (mid.NbPoints() == 0 || mid.LowerDistance() > rail.resolved(limit::together))
-          fail(op,
-               unsupported_geometry,
-               "the face that stops a blend on a cliff does not cross the narrow face in a line",
-               {rail.edge});
-      }
-      const auto onStop   = GeomProjLib::Curve2d(line, 0, length, placed),
-                 onNarrow = GeomProjLib::Curve2d(line, 0, length, narrowPlaced);
-      if (onStop.IsNull() || onNarrow.IsNull())
-        fail(op,
-             no_solution,
-             "the cap of a blend on a cliff cannot be laid on its faces",
-             {rail.edge});
-      const auto [stopBasis, stopPlace]     = surfaceOf(stop);
-      const auto [narrowBasis, narrowPlace] = surfaceOf(narrow.face);
-      const TopoDS_Edge cap =
-        edgeBetween(line,
-                    corner[k][side][end],
-                    0,
-                    vertex,
-                    length,
-                    {{onStop, stopBasis, stopPlace}, {onNarrow, narrowBasis, narrowPlace}},
-                    tolerance);
-      editOf(edits, stop).bridges.push_back(cap);
-      editOf(edits, narrow.face).bridges.push_back(cap);
-      continued.push_back({cap, {stop, narrow.face}});
-      cornerOnStop2d[side] = onStop->Value(0);
-      continue;
-    }
-    auto found = crossing(piece.fitted.contact[side],
-                          end == 0 ? 0 : middle,
-                          end == 0 ? middle : 1,
-                          piece.uAt(end),
-                          beside[side],
-                          rail.s[side].face);
-    if (!found)
-      found = beyond(piece.fitted.contact[side],
-                     end == 0 ? 0 : middle,
-                     end == 0 ? middle : 1,
-                     piece.uAt(end),
-                     beside[side],
-                     from[side],
-                     rail.s[side].face,
-                     stop,
-                     tolerance);
-    std::optional<Continuation> more;
-    if (!found)
-      more = continuation(piece.fitted.contact[side],
-                          end == 0 ? 0 : middle,
-                          end == 0 ? middle : 1,
-                          piece.uAt(end),
-                          beside[side],
-                          from[side],
-                          rail.s[side].face,
-                          stop,
-                          tolerance);
-    if (!found && !more)
-      found = early(side);
-    if (!found)
+void Attach::notchStopCorner(int                  k,
+                             int                  end,
+                             int                  side,
+                             const TopoDS_Vertex& vertex,
+                             const OneStop&       s,
+                             gp_Pnt2d&            cornerOnStop)
+{
+  const Piece&         piece  = pieces[k];
+  const Rail&          rail   = piece.rail;
+  const Sheet&         sheet  = piece.sheet;
+  const TopoDS_Face&   stop   = s.stop;
+  const TopoDS_Edge(&beside)[2] = s.beside;
+  // A notch: the narrow face's edge on the stop face goes with the face, and the face
+  // beyond's edge on the stop face from the far edge's vertex is cut back to where the
+  // blend's edge on the face beyond meets the stop face: the corner.
+  const TopoDS_Face& beyond = rail.s[side].trim;
+  TopoDS_Vertex      a, z, f0, f1;
+  TopExp::Vertices(beside[side], a, z);
+  TopExp::Vertices(rail.s[side].trimEdge, f0, f1);
+  const TopoDS_Vertex across = a.IsSame(vertex) ? z : a;
+  const auto&         trim   = trimOf(k, side);
+  if (!across.IsSame(f0) && !across.IsSame(f1))
+  {
+    capNotch(k, side, end, vertex, stop, cornerOnStop);
+    return;
+  }
+  TopoDS_Edge down;
+  for (const auto& shape : edgesOfVertex.FindFromKey(across))
+    if (onFace(shape, beyond) && onFace(shape, stop))
+      down = TopoDS::Edge(shape);
+  if (down.IsNull())
+    fail(op,
+         unsupported_geometry,
+         "the face beyond a narrow face does not meet the face that stops the blend",
+         {rail.edge});
+  GeomAPI_IntCS                            meet(trim.curve, BRep_Tool::Surface(stop));
+  const gp_Pnt                             V = BRep_Tool::Pnt(vertex);
+  std::optional<std::pair<gp_Pnt, double>> best;
+  if (meet.IsDone())
+    for (int i = 1; i <= meet.NbPoints(); ++i)
     {
-      if (!more)
-        fail(op,
-             unsupported_geometry,
-             "the blend runs on past the face that stops it, where its supports do not meet the "
-             "stop face's surface",
-             {rail.edge});
-      // On the stop face's surface itself where the meeting it was found on, true to the
-      // intersector's tolerance, leaves it further off than a corner may be.
-      double     place         = more->u;
-      const auto onStopSurface = [&](double at) {
-        GeomAPI_ProjectPointOnSurf project(sheet.contact(side)->Value(sheet.rail(at)),
-                                           BRep_Tool::Surface(stop));
-        return project.NbPoints() ? project.LowerDistance() : HUGE_VAL;
-      };
-      if (onStopSurface(place) > tolerance)
-      {
-        const double at    = sheet.rail(more->u),
-                     reach = 1e-3 * std::abs(sheet.rail(1) - sheet.rail(0));
-        GeomAPI_IntCS onStop(new Geom_TrimmedCurve(sheet.contact(side), at - reach, at + reach),
-                             BRep_Tool::Surface(stop));
-        for (int i = 1; onStop.IsDone() && i <= onStop.NbPoints(); ++i)
-        {
-          double su, sv, w;
-          onStop.Parameters(i, su, sv, w);
-          const double q = (w - sheet.alpha) / sheet.beta;
-          if (i == 1 || std::abs(q - more->u) < std::abs(place - more->u))
-            place = q;
-        }
-      }
-      u[k][side][end]                   = place;
-      const gp_Pnt                there = sheet.contact(side)->Value(sheet.rail(place));
-      GeomAPI_ProjectPointOnCurve onMeeting(there, more->curve);
-      if (place != more->u && onMeeting.NbPoints() > 0)
-        more->from = onMeeting.LowerDistanceParameter();
-      // A hair over the gap: the check reads the vertex against its tolerance to rounding.
-      builder.MakeVertex(
-        corner[k][side][end],
-        there,
-        std::max(tolerance, 1.01 * there.Distance(more->curve->Value(more->from))));
-      // The new piece of the edge between the support and the stop face, from the
-      // corner back to the vertex, in both faces' wires.
-      const auto [supportSurface, supportPlace] = surfaceOf(rail.s[side].face);
-      const auto [stopSurface, stopPlace]       = surfaceOf(stop);
-      const TopoDS_Edge piece                   = edgeBetween(
-        more->curve,
-        corner[k][side][end],
-        more->from,
-        vertex,
-        more->to,
-        {{more->onSupport, supportSurface, supportPlace}, {more->onStop, stopSurface, stopPlace}},
-        tolerance);
-      editOf(edits, rail.s[side].face).bridges.push_back(piece);
-      editOf(edits, stop).bridges.push_back(piece);
-      continued.push_back({piece, {rail.s[side].face, stop}});
-      cornerOnStop2d[side] = more->onStop->Value(more->from);
-      continue;
+      double pu, pv, w;
+      meet.Parameters(i, pu, pv, w);
+      if (!best || meet.Point(i).Distance(V) < best->first.Distance(V))
+        best = {meet.Point(i), w};
     }
-    u[k][side][end] = found->first;
-    builder.MakeVertex(corner[k][side][end],
-                       sheet.contact(side)->Value(sheet.rail(found->first)),
-                       tolerance);
-    cut(beside[side], from[side], corner[k][side][end], found->second);
+  if (!best)
+    fail(
+      op,
+      no_solution,
+      "the blend's edge on the face beyond a narrow face does not reach the face that stops it",
+      {rail.edge});
+  double                      f, l;
+  const auto                  curve = BRep_Tool::Curve(down, f, l);
+  GeomAPI_ProjectPointOnCurve on(best->first, curve, f, l);
+  if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
+    fail(op,
+         no_solution,
+         "the blend's edge on the face beyond a narrow face misses that face's edge on the "
+         "stop face",
+         {rail.edge});
+  builder.MakeVertex(corner[k][side][end], best->first, tolerance);
+  u[k][side][end] = (best->second - sheet.alpha) / sheet.beta;
+  cut(down, across, corner[k][side][end], on.LowerDistanceParameter());
+  editOf(edits, stop).replace.Bind(beside[side], TopoDS_Edge());
+  if (!pieces[k].rail.s[side].cliffWhole)
+    editOf(edits, rail.s[side].face).replace.Bind(beside[side], TopoDS_Edge());
+  swept.push_back(beside[side]);
+  double g0, l0;
+  cornerOnStop =
+    BRep_Tool::CurveOnSurface(down, stop, g0, l0)->Value(on.LowerDistanceParameter());
+}
+
+void Attach::cliffStopCorner(int                  k,
+                             int                  end,
+                             int                  side,
+                             const TopoDS_Vertex& vertex,
+                             const OneStop&       s,
+                             gp_Pnt2d&            cornerOnStop)
+{
+  const Piece&         piece  = pieces[k];
+  const Rail&          rail   = piece.rail;
+  const Sheet&         sheet  = piece.sheet;
+  const TopoDS_Face&   stop   = s.stop;
+  const TopoDS_Edge(&beside)[2] = s.beside;
+  const Side&   narrow = rail.s[side];
+  TopoDS_Vertex a, z, f0, f1;
+  TopExp::Vertices(beside[side], a, z);
+  TopExp::Vertices(narrow.cliff, f0, f1);
+  const TopoDS_Vertex across = a.IsSame(vertex) ? z : a;
+  if (across.IsSame(f0) || across.IsSame(f1))
+  {
+    // On a cliff the corner is the far edge's own vertex: the narrow face's edge on the
+    // stop face goes, and the blend's end runs to that vertex.
+    corner[k][side][end] = across;
+    GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][side][end]), sheet.contact(side));
+    if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
+      fail(op,
+           no_solution,
+           "the blend's contact misses the end of the face's far edge it rests on",
+           {rail.edge});
+    u[k][side][end] = (on.LowerDistanceParameter() - sheet.alpha) / sheet.beta;
+    editOf(edits, stop).replace.Bind(beside[side], TopoDS_Edge());
+    if (!narrow.cliffWhole)
+      editOf(edits, narrow.face).replace.Bind(beside[side], TopoDS_Edge());
+    swept.push_back(beside[side]);
+    double f0, l0;
+    cornerOnStop = BRep_Tool::CurveOnSurface(beside[side], stop, f0, l0)
+                             ->Value(BRep_Tool::Parameter(corner[k][side][end], beside[side]));
+    return;
+  }
+  // The narrow face goes on past the stop: the stop face's surface crosses the strip from
+  // the vertex to the far edge, and is carried over it to cap the blend's end there (the
+
+  if (narrow.cliffWhole)
+    fail(op, no_solution, "the blend's end on a cliff misses the far edge's end", {rail.edge});
+  const auto            placed = BRep_Tool::Surface(stop);
+  GeomAPI_IntCS         meet(narrow.cliffCurve, placed);
+  const gp_Pnt          V = BRep_Tool::Pnt(vertex);
+  std::optional<gp_Pnt> F;
+  if (meet.IsDone())
+    for (int i = 1; i <= meet.NbPoints(); ++i)
+      if (!F || meet.Point(i).Distance(V) < F->Distance(V))
+        F = meet.Point(i);
+  if (!F || !(F->Distance(V) > limit::degenerate * rail.scale))
+    fail(op,
+         unsupported_geometry,
+         "the face that stops a blend on a cliff does not cross the cliff's edge",
+         {rail.edge});
+  builder.MakeVertex(corner[k][side][end], *F, tolerance);
+  GeomAPI_ProjectPointOnCurve on(*F, sheet.contact(side));
+  if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
+    fail(op,
+         no_solution,
+         "the blend's contact misses where the face that stops it crosses the cliff's edge",
+         {rail.edge});
+  u[k][side][end] = (on.LowerDistanceParameter() - sheet.alpha) / sheet.beta;
+  // The cap's edge: the segment from there to the vertex, on both faces' surfaces.
+  const Handle(Geom_Curve) line(GC_MakeSegment(*F, V).Value());
+  const double             length       = F->Distance(V);
+  const auto               narrowPlaced = BRep_Tool::Surface(narrow.face);
+  for (const auto& surface : {placed, narrowPlaced})
+  {
+    GeomAPI_ProjectPointOnSurf mid(line->Value(length / 2), surface);
+    if (mid.NbPoints() == 0 || mid.LowerDistance() > rail.resolved(limit::together))
+      fail(op,
+           unsupported_geometry,
+           "the face that stops a blend on a cliff does not cross the narrow face in a line",
+           {rail.edge});
+  }
+  const auto onStop   = GeomProjLib::Curve2d(line, 0, length, placed),
+             onNarrow = GeomProjLib::Curve2d(line, 0, length, narrowPlaced);
+  if (onStop.IsNull() || onNarrow.IsNull())
+    fail(op,
+         no_solution,
+         "the cap of a blend on a cliff cannot be laid on its faces",
+         {rail.edge});
+  const auto [stopBasis, stopPlace]     = surfaceOf(stop);
+  const auto [narrowBasis, narrowPlace] = surfaceOf(narrow.face);
+  const TopoDS_Edge cap =
+    edgeBetween(line,
+                corner[k][side][end],
+                0,
+                vertex,
+                length,
+                {{onStop, stopBasis, stopPlace}, {onNarrow, narrowBasis, narrowPlace}},
+                tolerance);
+  editOf(edits, stop).bridges.push_back(cap);
+  editOf(edits, narrow.face).bridges.push_back(cap);
+  continued.push_back({cap, {stop, narrow.face}});
+  cornerOnStop = onStop->Value(0);
+}
+
+void Attach::continuedStopCorner(int                  k,
+                                 int                  end,
+                                 int                  side,
+                                 const TopoDS_Vertex& vertex,
+                                 const OneStop&       s,
+                                 Continuation&        more,
+                                 gp_Pnt2d&            cornerOnStop)
+{
+  const Rail&          rail   = pieces[k].rail;
+  const Sheet&         sheet  = pieces[k].sheet;
+  const TopoDS_Face&   stop   = s.stop;
+  // On the stop face's surface itself where the meeting it was found on, true to the
+  // intersector's tolerance, leaves it further off than a corner may be.
+  double     place         = more.u;
+  const auto onStopSurface = [&](double at) {
+    GeomAPI_ProjectPointOnSurf project(sheet.contact(side)->Value(sheet.rail(at)),
+                                       BRep_Tool::Surface(stop));
+    return project.NbPoints() ? project.LowerDistance() : HUGE_VAL;
+  };
+  if (onStopSurface(place) > tolerance)
+  {
+    const double at    = sheet.rail(more.u),
+                 reach = 1e-3 * std::abs(sheet.rail(1) - sheet.rail(0));
+    GeomAPI_IntCS onStop(new Geom_TrimmedCurve(sheet.contact(side), at - reach, at + reach),
+                         BRep_Tool::Surface(stop));
+    for (int i = 1; onStop.IsDone() && i <= onStop.NbPoints(); ++i)
     {
-      double f0, l0;
-      cornerOnStop2d[side] =
-        BRep_Tool::CurveOnSurface(beside[side], stop, f0, l0)->Value(found->second);
+      double su, sv, w;
+      onStop.Parameters(i, su, sv, w);
+      const double q = (w - sheet.alpha) / sheet.beta;
+      if (i == 1 || std::abs(q - more.u) < std::abs(place - more.u))
+        place = q;
     }
   }
+  u[k][side][end]                   = place;
+  const gp_Pnt                there = sheet.contact(side)->Value(sheet.rail(place));
+  GeomAPI_ProjectPointOnCurve onMeeting(there, more.curve);
+  if (place != more.u && onMeeting.NbPoints() > 0)
+    more.from = onMeeting.LowerDistanceParameter();
+  // A hair over the gap: the check reads the vertex against its tolerance to rounding.
+  builder.MakeVertex(
+    corner[k][side][end],
+    there,
+    std::max(tolerance, 1.01 * there.Distance(more.curve->Value(more.from))));
+  // The new piece of the edge between the support and the stop face, from the
+  // corner back to the vertex, in both faces' wires.
+  const auto [supportSurface, supportPlace] = surfaceOf(rail.s[side].face);
+  const auto [stopSurface, stopPlace]       = surfaceOf(stop);
+  const TopoDS_Edge piece                   = edgeBetween(
+    more.curve,
+    corner[k][side][end],
+    more.from,
+    vertex,
+    more.to,
+    {{more.onSupport, supportSurface, supportPlace}, {more.onStop, stopSurface, stopPlace}},
+    tolerance);
+  editOf(edits, rail.s[side].face).bridges.push_back(piece);
+  editOf(edits, stop).bridges.push_back(piece);
+  continued.push_back({piece, {rail.s[side].face, stop}});
+  cornerOnStop = more.onStop->Value(more.from);
+}
+
+void Attach::stopCorner(int                  k,
+                        int                  end,
+                        int                  side,
+                        const TopoDS_Vertex& vertex,
+                        const OneStop&       s,
+                        gp_Pnt2d&            cornerOnStop)
+{
+  const Piece&         piece  = pieces[k];
+  const Rail&          rail   = piece.rail;
+  const Sheet&         sheet  = piece.sheet;
+  const double         middle = s.middle;
+  const TopoDS_Face&   stop   = s.stop;
+  const TopoDS_Edge(&beside)[2] = s.beside;
+  const TopoDS_Vertex(&from)[2] = s.from;
+  if (!rail.s[side].trim.IsNull())
+  {
+    // A notch: the narrow face's edge on the stop face goes with the face, and the face
+    // beyond's edge on the stop face from the far edge's vertex is cut back to where the
+    notchStopCorner(k, end, side, vertex, s, cornerOnStop);
+    return;
+  }
+  if (side == s.cliff)
+  {
+    cliffStopCorner(k, end, side, vertex, s, cornerOnStop);
+    return;
+  }
+  auto found = crossing(piece.fitted.contact[side],
+                        end == 0 ? 0 : middle,
+                        end == 0 ? middle : 1,
+                        piece.uAt(end),
+                        beside[side],
+                        rail.s[side].face);
+  if (!found)
+    found = beyond(piece.fitted.contact[side],
+                   end == 0 ? 0 : middle,
+                   end == 0 ? middle : 1,
+                   piece.uAt(end),
+                   beside[side],
+                   from[side],
+                   rail.s[side].face,
+                   stop,
+                   tolerance);
+  std::optional<Continuation> more;
+  if (!found)
+    more = continuation(piece.fitted.contact[side],
+                        end == 0 ? 0 : middle,
+                        end == 0 ? middle : 1,
+                        piece.uAt(end),
+                        beside[side],
+                        from[side],
+                        rail.s[side].face,
+                        stop,
+                        tolerance);
+  if (!found && !more)
+    found = earlyCrossing(k, end, side, s);
+  if (!found)
+  {
+    if (!more)
+      fail(op,
+           unsupported_geometry,
+           "the blend runs on past the face that stops it, where its supports do not meet the "
+           "stop face's surface",
+           {rail.edge});
+    continuedStopCorner(k, end, side, vertex, s, *more, cornerOnStop);
+    return;
+  }
+  u[k][side][end] = found->first;
+  builder.MakeVertex(corner[k][side][end],
+                     sheet.contact(side)->Value(sheet.rail(found->first)),
+                     tolerance);
+  cut(beside[side], from[side], corner[k][side][end], found->second);
+  {
+    double f0, l0;
+    cornerOnStop =
+      BRep_Tool::CurveOnSurface(beside[side], stop, f0, l0)->Value(found->second);
+  }
+}
+
+void Attach::stopSection(int k, int end, const TopoDS_Face& stop, const gp_Pnt2d& cornerOnStop)
+{
+  const Piece&         piece  = pieces[k];
+  const Rail&          rail   = piece.rail;
+  const Sheet&         sheet  = piece.sheet;
   const auto [surface, location] = surfaceOf(stop);
   const auto     placed          = BRep_Tool::Surface(stop);
-  const gp_Pnt2d cornerOnStop    = cornerOnStop2d[0];
   const gp_Pnt2d cornerOnSheet   = sheet.uv(sheet.rail(u[k][0][end]), sheet.across[0]);
   // The sheet's own section where it lies in the face, else the two surfaces' meeting.
   const double along = (u[k][0][end] + u[k][1][end]) / 2;
@@ -888,6 +951,39 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
     edge = *met;
   }
   editOf(edits, stop).bridges.push_back(edge);
+}
+
+void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
+{
+  const Piece& piece = pieces[k];
+  const Rail&  rail  = piece.rail;
+  const auto&  edges = edgesOfVertex.FindFromKey(vertex);
+  if (edges.Extent() > 3)
+  {
+    stops(k, end, vertex);
+    return;
+  }
+  if (edges.Extent() != 3)
+    fail(op,
+         unsupported_geometry,
+         "where blended edges meet other edges, the corner is blended too, which the blend does "
+         "not do yet",
+         {rail.edge});
+  OneStop s;
+  stopFace(k, end, vertex, s);
+  s.middle = piece.uAt(0) / 2 + piece.uAt(1) / 2;
+  s.cliff  = rail.s[0].cliffCurve ? 0 : rail.s[1].cliffCurve ? 1 : -1;
+  if (!simpleStop(k, end, s))
+  {
+    if (!consumed(k, end, vertex, s.stop, s.beside))
+      stops(k, end, vertex);
+    return;
+  }
+  stopAt[k][end] = s.stop;
+  gp_Pnt2d cornerOnStop2d[2];
+  for (int side = 0; side < 2; ++side)
+    stopCorner(k, end, side, vertex, s, cornerOnStop2d[side]);
+  stopSection(k, end, s.stop, cornerOnStop2d[0]);
 }
 
 //! Two blends of one kind whose edges meet at a vertex of four faces with none in common (a notch).
