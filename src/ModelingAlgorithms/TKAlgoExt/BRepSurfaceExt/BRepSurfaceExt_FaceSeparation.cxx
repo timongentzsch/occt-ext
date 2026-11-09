@@ -959,6 +959,37 @@ BlockBound block(Chart& chart, int c, int r, long& work)
   return out;
 }
 
+//! Once every block holds: the chart's cells that are no block's neighbours (`far`) apart,
+//! those whose boxes come within the gap proven by their patches.
+template <class Far>
+bool farCellsApart(Chart& chart, Far far, double gap, double finest, long& work)
+{
+  // Pairs whose boxes come within the gap, swept along x.
+  const int        count = int(chart.cells.size());
+  std::vector<Box> boxes;
+  std::vector<int> order(count);
+  for (int p = 0; p < count; ++p)
+  {
+    boxes.push_back(chart.cells[p].patch.box());
+    order[p] = p;
+  }
+  std::sort(order.begin(), order.end(), [&](int p, int q) {
+    return boxes[p].lo.X() < boxes[q].lo.X();
+  });
+  for (int a = 0; a < count; ++a)
+    for (int b = a + 1; b < count && boxes[order[b]].lo.X() <= boxes[order[a]].hi.X() + gap; ++b)
+    {
+      const int p = std::min(order[a], order[b]), q = std::max(order[a], order[b]);
+      if (--work < 0)
+        return false;
+      if (!far(chart, p, q) || boxes[p].apart(boxes[q], gap))
+        continue;
+      if (!apart(chart.cells[p].patch, chart.cells[q].patch, gap, finest, work))
+        return false;
+    }
+  return true;
+}
+
 // Proves the chart's blocks (those `wanted` picks) one to one, refining it as they ask, and
 // then its cells that are no block's neighbours apart. `nearGlue` bounds, for blocks across
 // the glue line, how far from it the two sides may come within `gap` of each other, `onGlue`
@@ -1074,33 +1105,7 @@ bool proveChart(Chart& chart,
         }
       }
     if (!again)
-    {
-      // Pairs whose boxes come within the gap, swept along x.
-      const int        count = int(chart.cells.size());
-      std::vector<Box> boxes;
-      std::vector<int> order(count);
-      for (int p = 0; p < count; ++p)
-      {
-        boxes.push_back(chart.cells[p].patch.box());
-        order[p] = p;
-      }
-      std::sort(order.begin(), order.end(), [&](int p, int q) {
-        return boxes[p].lo.X() < boxes[q].lo.X();
-      });
-      for (int a = 0; a < count; ++a)
-        for (int b = a + 1; b < count && boxes[order[b]].lo.X() <= boxes[order[a]].hi.X() + gap;
-             ++b)
-        {
-          const int p = std::min(order[a], order[b]), q = std::max(order[a], order[b]);
-          if (--work < 0)
-            return false;
-          if (!far(chart, p, q) || boxes[p].apart(boxes[q], gap))
-            continue;
-          if (!apart(chart.cells[p].patch, chart.cells[q].patch, gap, finest, work))
-            return false;
-        }
-      return true;
-    }
+      return farCellsApart(chart, far, gap, finest, work);
     if (round == CHART_ROUNDS || chart.cells.size() * 2 > CHART_CELLS)
       return false;
     over.push_back(worst);
@@ -1292,16 +1297,10 @@ bool besideClear(const FaceData& a, const FaceData& b, const TopoDS_Edge& edge, 
     work);
 }
 
-// A face beside a planar face it shares edges with: the face leaves the plane monotonically
-// from each shared edge and is clear of the plane, or of the planar face's box, elsewhere.
-bool planeClear(const FaceData& plane, const FaceData& f, const ShapeSet& shared, long& work)
+//! The sides of the face `f` that are edges shared with the plane, as bits of `sides`; false
+//! where a shared edge is no single side of the face or a shared vertex lies on no shared edge.
+bool sharedSides(const FaceData& f, const ShapeSet& shared, unsigned& sides)
 {
-  if (plane.kind != FaceData::Plane || f.kind != FaceData::Spline || !f.rectangle)
-    return false;
-  // As for its own check: a rational face of few patches costs the check less than a proof.
-  if (f.patches.size() < SELF_PATCHES && std::any_of(f.patches.begin(), f.patches.end(), rational))
-    return false;
-  unsigned sides = 0;
   for (int k = 1; k <= shared.Extent(); ++k)
   {
     if (shared(k).ShapeType() != TopAbs_EDGE)
@@ -1329,6 +1328,21 @@ bool planeClear(const FaceData& plane, const FaceData& f, const ShapeSet& shared
     if (!onEdge)
       return false;
   }
+  return true;
+}
+
+// A face beside a planar face it shares edges with: the face leaves the plane monotonically
+// from each shared edge and is clear of the plane, or of the planar face's box, elsewhere.
+bool planeClear(const FaceData& plane, const FaceData& f, const ShapeSet& shared, long& work)
+{
+  if (plane.kind != FaceData::Plane || f.kind != FaceData::Spline || !f.rectangle)
+    return false;
+  // As for its own check: a rational face of few patches costs the check less than a proof.
+  if (f.patches.size() < SELF_PATCHES && std::any_of(f.patches.begin(), f.patches.end(), rational))
+    return false;
+  unsigned sides = 0;
+  if (!sharedSides(f, shared, sides))
+    return false;
   const gp_XYZ origin = plane.plane.Location().XYZ(), normal = plane.plane.Axis().Direction().XYZ();
   double       crossing = 1e300;
   for (int k = 1; k <= shared.Extent(); ++k)
@@ -1497,6 +1511,47 @@ bool apartFaces(const FaceData& a, const FaceData& b, long& work)
   return true;
 }
 
+//! Worth trying only where the check costs much: spline faces of many spans, or a spline face
+//! beside another face, whose intersection the check traces along their whole edge.
+bool worthProving(const TopoDS_Shape& shape, const ShapeSet& faces)
+{
+  const int  n     = faces.Extent();
+  const auto spans = [](const TopoDS_Face& face) {
+    auto surface = BRep_Tool::Surface(face);
+    while (!surface.IsNull() && surface->IsKind(STANDARD_TYPE(Geom_RectangularTrimmedSurface)))
+      surface = Handle(Geom_RectangularTrimmedSurface)::DownCast(surface)->BasisSurface();
+    const auto spline = Handle(Geom_BSplineSurface)::DownCast(surface);
+    if (!spline.IsNull())
+      return (spline->NbUKnots() - 1) * (spline->NbVKnots() - 1);
+    return Handle(Geom_BezierSurface)::DownCast(surface).IsNull() ? 0 : 1;
+  };
+  bool worth = false;
+  for (int i = 1; i <= n && !worth; ++i)
+    worth = spans(TopoDS::Face(faces(i))) >= int(SELF_PATCHES);
+  if (!worth)
+  {
+    NCollection_IndexedDataMap<TopoDS_Shape,
+                               NCollection_List<TopoDS_Shape>,
+                               TopTools_ShapeMapHasher>
+      owners;
+    TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, owners);
+    for (int e = 1; e <= owners.Extent() && !worth; ++e)
+    {
+      ShapeSet beside;
+      bool     spline = false;
+      for (const auto& face : owners(e))
+      {
+        beside.Add(face);
+        spline |= spans(TopoDS::Face(face)) > 0;
+      }
+      worth = spline && beside.Extent() >= 2;
+    }
+  }
+  if (!worth)
+    worth = analyticWorth(shape);
+  return worth;
+}
+
 } // namespace
 
 std::vector<TopoDS_Shape> unprovenParts(const TopoDS_Shape& shape, SeparationCount* count)
@@ -1518,48 +1573,11 @@ std::vector<TopoDS_Shape> unprovenParts(const TopoDS_Shape& shape, SeparationCou
     return {shape};
   }
   const int n = faces.Extent();
-  // Worth trying only where the check costs much: spline faces of many spans, or a spline face
-  // beside another face, whose intersection the check traces along their whole edge.
+  if (!worthProving(shape, faces))
   {
-    const auto spans = [](const TopoDS_Face& face) {
-      auto surface = BRep_Tool::Surface(face);
-      while (!surface.IsNull() && surface->IsKind(STANDARD_TYPE(Geom_RectangularTrimmedSurface)))
-        surface = Handle(Geom_RectangularTrimmedSurface)::DownCast(surface)->BasisSurface();
-      const auto spline = Handle(Geom_BSplineSurface)::DownCast(surface);
-      if (!spline.IsNull())
-        return (spline->NbUKnots() - 1) * (spline->NbVKnots() - 1);
-      return Handle(Geom_BezierSurface)::DownCast(surface).IsNull() ? 0 : 1;
-    };
-    bool worth = false;
-    for (int i = 1; i <= n && !worth; ++i)
-      worth = spans(TopoDS::Face(faces(i))) >= int(SELF_PATCHES);
-    if (!worth)
-    {
-      NCollection_IndexedDataMap<TopoDS_Shape,
-                                 NCollection_List<TopoDS_Shape>,
-                                 TopTools_ShapeMapHasher>
-        owners;
-      TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, owners);
-      for (int e = 1; e <= owners.Extent() && !worth; ++e)
-      {
-        ShapeSet beside;
-        bool     spline = false;
-        for (const auto& face : owners(e))
-        {
-          beside.Add(face);
-          spline |= spans(TopoDS::Face(face)) > 0;
-        }
-        worth = spline && beside.Extent() >= 2;
-      }
-    }
-    if (!worth)
-      worth = analyticWorth(shape);
-    if (!worth)
-    {
-      if (count)
-        *count = {};
-      return {shape};
-    }
+    if (count)
+      *count = {};
+    return {shape};
   }
   std::vector<FaceData> data;
   for (int i = 1; i <= n; ++i)

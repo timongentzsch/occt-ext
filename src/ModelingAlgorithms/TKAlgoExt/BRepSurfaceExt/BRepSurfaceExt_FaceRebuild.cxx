@@ -92,6 +92,106 @@ struct Fit
   double                      a, b, c, d;
 };
 
+//! The basis of `degree` along U (`alongU`) or V of the face's parameters from `low` to `high`
+//! as an empty B-spline curve on [0, 1]: `spans` spans, with the source's breakpoints and their
+//! continuity kept where the span count can contain them. Raising a cubic to degree five requires
+//! repeated knots at its C2 joins; uniform simple knots cannot represent that surface.
+Handle(Geom_BSplineCurve) basisCurve(const BRepAdaptor_Surface& source,
+                                     double                     low,
+                                     double                     high,
+                                     int                        spans,
+                                     int                        degree,
+                                     bool                       alongU)
+{
+  const int count = alongU ? source.NbUIntervals(GeomAbs_CN) : source.NbVIntervals(GeomAbs_CN);
+  NCollection_Array1<double> intervals(1, count + 1);
+  if (alongU)
+    source.UIntervals(intervals, GeomAbs_CN);
+  else
+    source.VIntervals(intervals, GeomAbs_CN);
+  std::vector<std::pair<double, int>> values{{0, degree + 1}, {1, degree + 1}};
+  if (count <= spans)
+    for (int i = 2; i <= count; ++i)
+    {
+      const double t = (intervals(i) - low) / (high - low);
+      if (t <= BRepExt::tolerance::parameter || t >= 1 - BRepExt::tolerance::parameter)
+        continue;
+      int continuity = 2;
+      if (source.GetType() == GeomAbs_BSplineSurface)
+      {
+        const auto bs = source.BSpline();
+        const int  n  = alongU ? bs->NbUKnots() : bs->NbVKnots();
+        for (int j = 1; j <= n; ++j)
+          if (std::abs((alongU ? bs->UKnot(j) : bs->VKnot(j)) - intervals(i)) < 1e-10)
+            continuity = (alongU ? bs->UDegree() - bs->UMultiplicity(j)
+                                 : bs->VDegree() - bs->VMultiplicity(j));
+      }
+      else if (alongU && source.GetType() == GeomAbs_SurfaceOfExtrusion
+               && source.BasisCurve()->GetType() == GeomAbs_BSplineCurve)
+      {
+        const auto bs = source.BasisCurve()->BSpline();
+        for (int j = 1; j <= bs->NbKnots(); ++j)
+          if (std::abs(bs->Knot(j) - intervals(i)) < 1e-10)
+            continuity = bs->Degree() - bs->Multiplicity(j);
+      }
+      values.push_back({t, std::max(1, degree - continuity)});
+    }
+  std::sort(values.begin(), values.end());
+  while (int(values.size()) < spans + 1)
+  {
+    size_t at = 1;
+    for (size_t i = 2; i < values.size(); ++i)
+      if (values[i].first - values[i - 1].first > values[at].first - values[at - 1].first)
+        at = i;
+    values.insert(values.begin() + at, {(values[at - 1].first + values[at].first) / 2, 1});
+  }
+  int n = -degree - 1;
+  for (const auto& entry : values)
+    n += entry.second;
+  NCollection_Array1<gp_Pnt> poles(1, n);
+  poles.Init(gp_Pnt());
+  NCollection_Array1<double> knots(1, values.size());
+  NCollection_Array1<int>    mult(1, values.size());
+  for (size_t i = 0; i < values.size(); ++i)
+  {
+    knots(i + 1) = values[i].first;
+    mult(i + 1)  = values[i].second;
+  }
+  return Handle(Geom_BSplineCurve)(new Geom_BSplineCurve(poles, knots, mult, degree));
+}
+
+//! The Greville sites of `curve`: the means of its knots, a site to a pole.
+std::vector<double> sitesOf(const Handle(Geom_BSplineCurve)& curve)
+{
+  std::vector<double> expanded, sites;
+  for (int i = 1; i <= curve->NbKnots(); ++i)
+    for (int j = 0; j < curve->Multiplicity(i); ++j)
+      expanded.push_back(curve->Knot(i));
+  for (int i = 0; i < curve->NbPoles(); ++i)
+  {
+    double t = 0;
+    for (int j = 1; j <= curve->Degree(); ++j)
+      t += expanded[i + j] / curve->Degree();
+    sites.push_back(t);
+  }
+  return sites;
+}
+
+//! The collocation matrix of `curve`'s basis at `sites`.
+math_Matrix collocation(const Handle(Geom_BSplineCurve)& curve, const std::vector<double>& sites)
+{
+  const int   n = curve->NbPoles();
+  math_Matrix m(1, n, 1, n);
+  for (int col = 1; col <= n; ++col)
+  {
+    curve->SetPole(col, gp_Pnt(1, 0, 0));
+    for (int row = 1; row <= n; ++row)
+      m(row, col) = curve->Value(sites[row - 1]).X();
+    curve->SetPole(col, gp_Pnt());
+  }
+  return m;
+}
+
 Fit fitSupport(const char*        op,
                const TopoDS_Face& face,
                int                uDegree,
@@ -117,96 +217,10 @@ Fit fitSupport(const char*        op,
                  : "seam and degenerate trim edges are unsupported");
   }
   BRepAdaptor_Surface source(face);
-  // Retain the source's breakpoints and continuity when the requested span
-  // count can contain them. Raising a cubic to degree five requires repeated
-  // knots at its C2 joins; uniform simple knots cannot represent that surface.
-  auto basis = [&](int degree, bool alongU) {
-    const double low = alongU ? a : c, high = alongU ? b : d;
-    const int    count = alongU ? source.NbUIntervals(GeomAbs_CN) : source.NbVIntervals(GeomAbs_CN);
-    NCollection_Array1<double> intervals(1, count + 1);
-    if (alongU)
-      source.UIntervals(intervals, GeomAbs_CN);
-    else
-      source.VIntervals(intervals, GeomAbs_CN);
-    std::vector<std::pair<double, int>> values{{0, degree + 1}, {1, degree + 1}};
-    if (count <= spans)
-      for (int i = 2; i <= count; ++i)
-      {
-        const double t = (intervals(i) - low) / (high - low);
-        if (t <= BRepExt::tolerance::parameter || t >= 1 - BRepExt::tolerance::parameter)
-          continue;
-        int continuity = 2;
-        if (source.GetType() == GeomAbs_BSplineSurface)
-        {
-          const auto bs = source.BSpline();
-          const int  n  = alongU ? bs->NbUKnots() : bs->NbVKnots();
-          for (int j = 1; j <= n; ++j)
-            if (std::abs((alongU ? bs->UKnot(j) : bs->VKnot(j)) - intervals(i)) < 1e-10)
-              continuity = (alongU ? bs->UDegree() - bs->UMultiplicity(j)
-                                   : bs->VDegree() - bs->VMultiplicity(j));
-        }
-        else if (alongU && source.GetType() == GeomAbs_SurfaceOfExtrusion
-                 && source.BasisCurve()->GetType() == GeomAbs_BSplineCurve)
-        {
-          const auto bs = source.BasisCurve()->BSpline();
-          for (int j = 1; j <= bs->NbKnots(); ++j)
-            if (std::abs(bs->Knot(j) - intervals(i)) < 1e-10)
-              continuity = bs->Degree() - bs->Multiplicity(j);
-        }
-        values.push_back({t, std::max(1, degree - continuity)});
-      }
-    std::sort(values.begin(), values.end());
-    while (int(values.size()) < spans + 1)
-    {
-      size_t at = 1;
-      for (size_t i = 2; i < values.size(); ++i)
-        if (values[i].first - values[i - 1].first > values[at].first - values[at - 1].first)
-          at = i;
-      values.insert(values.begin() + at, {(values[at - 1].first + values[at].first) / 2, 1});
-    }
-    int n = -degree - 1;
-    for (const auto& entry : values)
-      n += entry.second;
-    NCollection_Array1<gp_Pnt> poles(1, n);
-    poles.Init(gp_Pnt());
-    NCollection_Array1<double> knots(1, values.size());
-    NCollection_Array1<int>    mult(1, values.size());
-    for (size_t i = 0; i < values.size(); ++i)
-    {
-      knots(i + 1) = values[i].first;
-      mult(i + 1)  = values[i].second;
-    }
-    return Handle(Geom_BSplineCurve)(new Geom_BSplineCurve(poles, knots, mult, degree));
-  };
-  auto u = basis(uDegree, true), v = basis(vDegree, false);
-  auto sites = [](const Handle(Geom_BSplineCurve)& curve) {
-    std::vector<double> expanded, sites;
-    for (int i = 1; i <= curve->NbKnots(); ++i)
-      for (int j = 0; j < curve->Multiplicity(i); ++j)
-        expanded.push_back(curve->Knot(i));
-    for (int i = 0; i < curve->NbPoles(); ++i)
-    {
-      double t = 0;
-      for (int j = 1; j <= curve->Degree(); ++j)
-        t += expanded[i + j] / curve->Degree();
-      sites.push_back(t);
-    }
-    return sites;
-  };
-  const auto us = sites(u), vs = sites(v);
-  auto       matrix = [](const Handle(Geom_BSplineCurve)& curve, const std::vector<double>& sites) {
-    const int   n = curve->NbPoles();
-    math_Matrix m(1, n, 1, n);
-    for (int col = 1; col <= n; ++col)
-    {
-      curve->SetPole(col, gp_Pnt(1, 0, 0));
-      for (int row = 1; row <= n; ++row)
-        m(row, col) = curve->Value(sites[row - 1]).X();
-      curve->SetPole(col, gp_Pnt());
-    }
-    return m;
-  };
-  math_Gauss solveU(matrix(u, us)), solveV(matrix(v, vs));
+  auto                u = basisCurve(source, a, b, spans, uDegree, true),
+       v                = basisCurve(source, c, d, spans, vDegree, false);
+  const auto us = sitesOf(u), vs = sitesOf(v);
+  math_Gauss solveU(collocation(u, us)), solveV(collocation(v, vs));
   if (!solveU.IsDone() || !solveV.IsDone())
     fail(op, no_solution, "singular surface fit");
   const int                  nu = u->NbPoles(), nv = v->NbPoles();
@@ -253,6 +267,7 @@ Fit fitSupport(const char*        op,
     }
   return {fitted, a, b, c, d};
 }
+
 } // namespace
 
 EvolutionData rebuildFace(OcctKernel& k,

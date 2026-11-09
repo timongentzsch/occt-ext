@@ -116,7 +116,7 @@ EvolutionData alignSurface(OcctKernel& k,
     if (failure.reason != no_solution)
       throw;
   }
-  const bool usePrior = extraRows > 0 && inputShapeInfluence > 0;
+  const bool usePrior      = extraRows > 0 && inputShapeInfluence > 0;
   const auto originalPoles = usePrior ? net.poles : std::vector<gp_XYZ>{};
   for (int pass = 0; pass < (order == 2 || skewed ? 8 : 1); ++pass)
   {
@@ -225,6 +225,70 @@ struct SeamSide
       surface->IncreaseDegree(to, surface->VDegree());
   }
 };
+
+//! Each pole of the row next to the boundary put on the line through the boundary pole and the
+//! reference's next pole, leaned by the skew; with `symmetric` the reference's row as well.
+void alignRows(const char* op,
+               SeamSide&   moving,
+               SeamSide&   fixed,
+               int         count,
+               bool        opposed,
+               bool        symmetric,
+               bool        matchRatio,
+               bool        rational,
+               double      ratio,
+               double      leanStart,
+               double      leanEnd)
+{
+  const auto partner = [&](int i) { return opposed ? count + 1 - i : i; };
+  for (int i = 1; i <= count; ++i)
+  {
+    const gp_Pnt m0 = moving.pole(1, i), m1 = moving.pole(2, i), f0 = fixed.pole(1, partner(i)),
+                 f1           = fixed.pole(2, partner(i));
+    const double movingLength = m0.Distance(m1), fixedLength = f0.Distance(f1);
+    if (movingLength <= gp::Resolution() || fixedLength <= gp::Resolution())
+      fail(op, no_solution, "a row next to the edge lies on the edge");
+    const gp_Vec fromFixed(f1, f0);
+    const gp_Vec fromMoving(m0, m1);
+    gp_Vec       way = symmetric ? fromFixed.Normalized() + fromMoving.Normalized() : fromFixed;
+    // In the symmetric case |a+b| = 2 cos(theta/2) for unit directions.
+    // This conditioning bound must therefore be dimensionless. Physical row
+    // degeneracy has already been tested separately above.
+    if (symmetric && way.Magnitude() <= 1e-9)
+      fail(op, no_solution, "the two surfaces fold back on each other along the edge");
+    way.Normalize();
+    const gp_Pnt seam   = symmetric ? gp_Pnt((m0.XYZ() + f0.XYZ()) / 2) : f0;
+    const double length = matchRatio ? ratio * fixedLength : movingLength;
+    // The lean: along the boundary, towards the other end when positive.
+    const double f    = (i - 1.0) / std::max(count - 1, 1);
+    const double lean = leanStart * (1 - f) - leanEnd * f;
+    gp_Vec running(moving.pole(1, std::max(1, i - 1)), moving.pole(1, std::min(count, i + 1)));
+    gp_Vec leaning = way;
+    if (lean != 0 && running.Magnitude() > gp::Resolution())
+    {
+      running.Normalize();
+      running -= way * running.Dot(way);
+      leaning = (way + running.Normalized() * lean).Normalized();
+    }
+    // A rational boundary is determined by its weights as well as its poles.
+    // Copy both reference weight rows: the boundary denominators then agree,
+    // and a common pole-distance ratio makes the cross derivatives proportional
+    // even when the weights vary along the seam. Deeper rows keep their weights.
+    if (rational)
+    {
+      moving.setWeight(1, i, fixed.weight(1, partner(i)));
+      moving.setWeight(2, i, fixed.weight(2, partner(i)));
+    }
+    moving.setPole(1, i, seam);
+    moving.setPole(2, i, seam.Translated(leaning * length));
+    if (symmetric)
+    {
+      fixed.setPole(1, partner(i), seam);
+      fixed.setPole(2, partner(i), seam.Translated(way * -fixedLength));
+    }
+  }
+}
+
 } // namespace
 
 // The Collinear solver of Edge Align: along the edge shared with a reference, each pole of the row
@@ -291,14 +355,14 @@ EvolutionData alignCollinear(OcctKernel& k,
   // Whether the reference runs the other way along the edge.
   const gp_Pnt a0 = endPoint(moving, false), a1 = endPoint(moving, true),
                b0 = endPoint(fixed, false), b1 = endPoint(fixed, true);
-  const bool   opposed = a0.Distance(b1) + a1.Distance(b0) < a0.Distance(b0) + a1.Distance(b1);
+  const bool opposed = a0.Distance(b1) + a1.Distance(b0) < a0.Distance(b0) + a1.Distance(b1);
   // A part of the reference is the whole of a copy: the moving row is laid on it.
   if (partial)
   {
     const auto [a, b] = fixed.range();
     const double from = opposed ? 1 - partialEnd : partialStart,
                  to   = opposed ? 1 - partialStart : partialEnd;
-    double       u0, u1, v0, v1;
+    double u0, u1, v0, v1;
     fixed.surface->Bounds(u0, u1, v0, v1);
     if (fixed.alongV())
       fixed.surface->Segment(u0, u1, a + from * (b - a), a + to * (b - a));
@@ -352,53 +416,19 @@ EvolutionData alignCollinear(OcctKernel& k,
                / fixed.pole(2, partner(i)).Distance(fixed.pole(1, partner(i))) / count;
   }
   const double leanStart = std::tan(skewStart), leanEnd = std::tan(skewEnd);
-  for (int i = 1; i <= count; ++i)
-  {
-    const gp_Pnt m0 = moving.pole(1, i), m1 = moving.pole(2, i), f0 = fixed.pole(1, partner(i)),
-                 f1           = fixed.pole(2, partner(i));
-    const double movingLength = m0.Distance(m1), fixedLength = f0.Distance(f1);
-    if (movingLength <= gp::Resolution() || fixedLength <= gp::Resolution())
-      fail(op, no_solution, "a row next to the edge lies on the edge");
-    const gp_Vec fromFixed(f1, f0);
-    const gp_Vec fromMoving(m0, m1);
-    gp_Vec       way = symmetric ? fromFixed.Normalized() + fromMoving.Normalized() : fromFixed;
-    // In the symmetric case |a+b| = 2 cos(theta/2) for unit directions.
-    // This conditioning bound must therefore be dimensionless. Physical row
-    // degeneracy has already been tested separately above.
-    if (symmetric && way.Magnitude() <= 1e-9)
-      fail(op, no_solution, "the two surfaces fold back on each other along the edge");
-    way.Normalize();
-    const gp_Pnt seam   = symmetric ? gp_Pnt((m0.XYZ() + f0.XYZ()) / 2) : f0;
-    const double length = matchRatio ? ratio * fixedLength : movingLength;
-    // The lean: along the boundary, towards the other end when positive.
-    const double f    = (i - 1.0) / std::max(count - 1, 1);
-    const double lean = leanStart * (1 - f) - leanEnd * f;
-    gp_Vec running(moving.pole(1, std::max(1, i - 1)), moving.pole(1, std::min(count, i + 1)));
-    gp_Vec leaning = way;
-    if (lean != 0 && running.Magnitude() > gp::Resolution())
-    {
-      running.Normalize();
-      running -= way * running.Dot(way);
-      leaning = (way + running.Normalized() * lean).Normalized();
-    }
-    // A rational boundary is determined by its weights as well as its poles.
-    // Copy both reference weight rows: the boundary denominators then agree,
-    // and a common pole-distance ratio makes the cross derivatives proportional
-    // even when the weights vary along the seam. Deeper rows keep their weights.
-    if (rational)
-    {
-      moving.setWeight(1, i, fixed.weight(1, partner(i)));
-      moving.setWeight(2, i, fixed.weight(2, partner(i)));
-    }
-    moving.setPole(1, i, seam);
-    moving.setPole(2, i, seam.Translated(leaning * length));
-    if (symmetric)
-    {
-      fixed.setPole(1, partner(i), seam);
-      fixed.setPole(2, partner(i), seam.Translated(way * -fixedLength));
-    }
-  }
-  const auto made = surfacing::makeFace(op, moving.surface, tolerance, faceShape.Orientation(), true);
+  alignRows(op,
+            moving,
+            fixed,
+            count,
+            opposed,
+            symmetric,
+            matchRatio,
+            rational,
+            ratio,
+            leanStart,
+            leanEnd);
+  const auto made =
+    surfacing::makeFace(op, moving.surface, tolerance, faceShape.Orientation(), true);
   if (!symmetric)
     return stored(k, made);
   TopoDS_Compound both;

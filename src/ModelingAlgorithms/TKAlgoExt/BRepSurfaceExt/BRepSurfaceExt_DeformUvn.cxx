@@ -130,6 +130,43 @@ void DeformUVN::checkChart(double umin, double umax, double vmin, double vmax) c
 
 namespace BRepExt
 {
+namespace
+{
+
+//! The strip through the pairs of points `placed` gives at `n` + 1 even shares: across, the
+//! line between the two; along, the cubic through each side's points.
+template <class Placed>
+Handle(Geom_BSplineSurface) stripThrough(const Placed& placed, int n)
+{
+  std::vector<double> places;
+  std::vector<gp_Pnt> low, high;
+  for (int k = 0; k <= n; ++k)
+  {
+    places.push_back(double(k) / n);
+    const auto [a, b] = placed(places.back());
+    low.push_back(a);
+    high.push_back(b);
+  }
+  const GeomAlgoExt::CubicThrough law(places, GeomAlgoExt::CubicThrough::Ends::Follow);
+  const auto                      lowPoles = law.through(low), highPoles = law.through(high);
+  NCollection_Array2<gp_Pnt>      poles(1, law.poles, 1, 2);
+  for (int k = 1; k <= law.poles; ++k)
+  {
+    poles(k, 1) = lowPoles[size_t(k - 1)];
+    poles(k, 2) = highPoles[size_t(k - 1)];
+  }
+  NCollection_Array1<double> vKnots(1, 2);
+  NCollection_Array1<int>    vMults(1, 2);
+  vKnots(1) = 0;
+  vKnots(2) = 1;
+  vMults(1) = vMults(2) = 2;
+  Handle(Geom_BSplineSurface) surface =
+    new Geom_BSplineSurface(poles, law.knots, vKnots, law.mults, vMults, 3, 1);
+  return surface;
+}
+
+} // namespace
+
 // The faces that carry a deformation from one curve to another, for curves taken as the
 // reference and the target: a flat strip along a
 // straight reference, wide enough for what moves, and the same strip laid along the target by
@@ -259,31 +296,8 @@ EvolutionData deformSupports(OcctKernel& kernel,
   {
     if (n > 4096)
       fail(op, no_solution, "the target curve bends too sharply to lay a strip along");
-    std::vector<double> places;
-    std::vector<gp_Pnt> low, high;
-    for (int k = 0; k <= n; ++k)
-    {
-      places.push_back(double(k) / n);
-      const auto [a, b] = placed(places.back());
-      low.push_back(a);
-      high.push_back(b);
-    }
-    const GeomAlgoExt::CubicThrough law(places, GeomAlgoExt::CubicThrough::Ends::Follow);
-    const auto                      lowPoles = law.through(low), highPoles = law.through(high);
-    NCollection_Array2<gp_Pnt>      poles(1, law.poles, 1, 2);
-    for (int k = 1; k <= law.poles; ++k)
-    {
-      poles(k, 1) = lowPoles[size_t(k - 1)];
-      poles(k, 2) = highPoles[size_t(k - 1)];
-    }
-    NCollection_Array1<double> vKnots(1, 2);
-    NCollection_Array1<int>    vMults(1, 2);
-    vKnots(1) = 0;
-    vKnots(2) = 1;
-    vMults(1) = vMults(2) = 2;
-    Handle(Geom_BSplineSurface) surface =
-      new Geom_BSplineSurface(poles, law.knots, vKnots, law.mults, vMults, 3, 1);
-    double worst = 0;
+    const Handle(Geom_BSplineSurface) surface = stripThrough(placed, n);
+    double                            worst   = 0;
     for (int k = 0; k < n; ++k)
     {
       const double u    = (k + 0.5) / n;
