@@ -132,7 +132,7 @@ constexpr int coneCuts = 4;
 
 //! How often the fair disc is laid out again as an even lattice in its own chart and faired
 //! there (see proxyChart). A judgement, not derived: measured by how little the chart moves on
-//! the next (see the probe in dox/extensions/operations.md).
+//! the next (see the probe in dox/extensions/operations/BRepPatchExt.md).
 constexpr int relays = 2;
 
 //! The nodes that triangles of `nodes` keep, of which the first `frontier` are the boundary in
@@ -277,7 +277,7 @@ struct Pin
 
 //! What a pin counts for against the umbrella of one node, both lengths. A judgement, not
 //! derived: enough that the disc passes within a small share of the guides' height of them
-//! (see the probe in dox/extensions/operations.md), not so much that it creases at them.
+//! (see the probe in dox/extensions/operations/BRepPatchExt.md), not so much that it creases at them.
 constexpr double pinWeight = 100;
 
 //! The triangle of `chart` that holds `uv` in its source, or the nearest, and the weights of

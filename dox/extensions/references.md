@@ -31,7 +31,7 @@ no speed theorem follows from the citation.
 [5] Standard constructions without a single source. Chaining unordered curves grows greedily from nearest ends. A gap in a chart closes with a straight segment
 between the surface parameters of its two ends.
 
-## Keys used in operations.md
+## Keys used in the operations reference
 
 Entries are cited as `[Key section, equation]`. "Read" states what was read.
 
@@ -110,7 +110,7 @@ Surfaces* (Sage 9.3 edition), `principal_directions`, torus example,
 `BRepTools_Modifier::Rebuild` at
 <https://github.com/Open-Cascade-SAS/OCCT/blob/b8f597c6/src/ModelingData/TKBRep/BRepTools/BRepTools_Modifier.cxx>.
 
-## Cited by name in operations.md (blend chapters)
+## Cited by name in the operations reference (blend page)
 
 * Jaiswal, Ghosal and Gurumoorthy, “Circular blending”, ASME DETC 2001 (theory, algorithm and results read;
   Hermann 1995 and Lukacs 1998 are cited second-hand there).

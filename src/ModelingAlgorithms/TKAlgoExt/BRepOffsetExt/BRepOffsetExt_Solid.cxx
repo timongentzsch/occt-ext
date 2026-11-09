@@ -44,7 +44,7 @@ namespace
 // parallel body is C + B_(r+d), by associativity of the Minkowski sum. Beyond
 // the hole closure the meridian is the disk centred at (R,0), restricted to
 // radial coordinate >= 0. Revolve that clipped disk, not the self-crossing
-// continuation of the toroidal surface. The derivation is in operations.md.
+// continuation of the toroidal surface. The derivation is in dox/extensions/operations/BRepOffsetExt.md.
 TopoDS_Shape closedRingOffset(const TopoDS_Shape& body, double distance, Lineage& faces)
 {
   if (!(distance > 0))

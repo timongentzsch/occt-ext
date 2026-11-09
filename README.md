@@ -19,9 +19,9 @@ This is the first release, v0.1.0. The base is OCCT `b8f597c6` (30 July 2026). N
 | Capability | Stock OCCT | This tree | Evidence |
 | --- | --- | --- | --- |
 | **Rolling-ball fillets** on curved supports, chains of rounds and corners | `BRepFilletAPI_MakeFillet` leaves a defect of up to 7e-3 where a round runs into earlier rounds and 3e-3 on crossed cylinders | Blends exact to the sampling (defect 1e-8 to 1e-14); radius laws along an edge, ranges, stations, chamfers, corners of three or more blends, junctions of two curved surfaces; limited blends built from the blend's own faces, blends that end on a face reached past the vertex, open rails walked along their traced offset spine | [Results](#results), `BRepBlendExt`, `BRepFilletExt` |
-| **Patch**: fill a loop of edges with G0, G1 or G2 to the neighbouring faces | `BRepFill_Filling` / `GeomPlate` plate fit: 0.11 to 0.45 off the defining surface on four cubic sides | Fill 1e-12 from it; n-sided loops, open boundaries chained and closed, interior guides and points; loops that are a height over no plane (rims whose faces sweep a half circle or more) filled over a conformal chart of their own; the same net at a thousandth and a thousand times the size; a G1 request that is geometrically impossible is refused with the reason | [operations.md](dox/extensions/operations.md#breppatchext-boundary-first-fill) |
+| **Patch**: fill a loop of edges with G0, G1 or G2 to the neighbouring faces | `BRepFill_Filling` / `GeomPlate` plate fit: 0.11 to 0.45 off the defining surface on four cubic sides | Fill 1e-12 from it; n-sided loops, open boundaries chained and closed, interior guides and points; loops that are a height over no plane (rims whose faces sweep a half circle or more) filled over a conformal chart of their own; the same net at a thousandth and a thousand times the size; a G1 request that is geometrically impossible is refused with the reason | [BRepPatchExt.md](dox/extensions/operations/BRepPatchExt.md) |
 | **Smooth skins** through sections, and Gordon skins through networks of profiles and guides | `BRepOffsetAPI_ThruSections` bulges to half-width 19.3 through six circles of radius at most 10 | Stays within the sections (10.0); closed rings joined seam to seam; guided skins that contain their guides | [benchmarks.md](dox/extensions/benchmarks.md) |
-| **Framed sweeps and drafts** | `MakePipeShell` twists a profile unless the path starts square to it; `DraftAngle` takes planes, cylinders and cones | Rotation-minimising frames (double reflection, fourth-order error); draft of any wall by its isocline surface | [operations.md](dox/extensions/operations.md) |
+| **Framed sweeps and drafts** | `MakePipeShell` twists a profile unless the path starts square to it; `DraftAngle` takes planes, cylinders and cones | Rotation-minimising frames (double reflection, fourth-order error); draft of any wall by its isocline surface | [BRepSkinExt.md](dox/extensions/operations/BRepSkinExt.md) |
 | **Hollow, shell, offset, thicken, push-pull, defeature** | An offset that reaches a fillet radius returns an invalid or wrong solid (volume off by 3.3e4 on the benchmark) | Faces the distance would shrink to nothing are removed first; exact to 1e-11 on the benchmark; a face offset that keeps every face, sharp edges where the moved faces cross, tangent edges held to the input's own tolerance, each result certified by distances and loadable from a saved file; sheets with C0 creases are divided before they are thickened; several features removed in one call | [benchmarks.md](dox/extensions/benchmarks.md) |
 | **Surface bridging, alignment, squaring, deformation** | no direct counterpart | G1 bridges and alignments whose normals agree with the supports along the shared edge; four-sided surfaces over boundaries with supports; carrying curves and bodies from one face to another in UVN | `BRepSurfaceExt`, `BRepCurveExt` |
 | **Curves**: offset at any scale, outline, regions, tangent circles, spirals | `BRepOffsetAPI_MakeOffset` depends on the curve's size (absolute 1e-7 lengths); `HLRBRep` has documented limits on tangent and edge-on faces | Offsets that behave at any scale, exact silhouette events, all bounded cells of overlapping and nested loops | `BRepCurveExt` |
@@ -235,9 +235,9 @@ Current limits and what remains, with the cause of each:
    still meets the interior-crossing check, which refuses the self-crossing envelope by name; that trimming is not
    built. A fixed-contact conic replacement on a cylindrical cavity and transverse plane retains the envelope outside
    its crossing sector; continuous spline and embedding certificates for it remain open (see the conic-window section
-   of [operations.md](dox/extensions/operations.md)). Isolated shared-edge events between joined contact strips are
+   of [operations.md](dox/extensions/operations/BRepBlendExt.md#fixed-contact-conic-windows)). Isolated shared-edge events between joined contact strips are
    partitioned; overlapping or simultaneous boundary events need a more general contact arrangement (see
-   [operations.md](dox/extensions/operations.md#contact-ownership-on-a-joined-blend-sheet)). A blend ends on a face
+   [operations.md](dox/extensions/operations/BRepBlendExt.md#contact-ownership-on-a-joined-blend-sheet)). A blend ends on a face
    reached past the vertex only where that face's surface also meets the other contact. Some configurations where
    several blends meet are refused although a valid result exists: trimming a blend group needs an owner for every
    retained region and contact before chain ends are cut, and the centre path is parametrised by arc length along the
@@ -249,7 +249,7 @@ Current limits and what remains, with the cause of each:
    family build; the corner bends more than ten times as tightly as its blends on 22 of them, all on one steep
    pentagon). Curvature-continuous and chamfer corners of four or more blends, and conic ones with a face that is not
    a plane, are refused (see
-   [operations.md](dox/extensions/operations.md#split-corners-of-more-than-three-conic-blends)). Across a knot where a
+   [operations.md](dox/extensions/operations/BRepBlendExt.md#split-corners-of-more-than-three-conic-blends)). Across a knot where a
    spline support is only C2 the curvature-continuous section is smoothed in a window derived from leading-order
    secants, not certified suprema; where the spans do not meet at the knot the exact law is kept. A
    curvature-continuous blend must meet the current seam and section-law bounds. A limited blend is built directly
@@ -266,7 +266,7 @@ Current limits and what remains, with the cause of each:
    each side only, the corner's miss is reported, and the coarse nets of such loops can be lopsided. Exact G2 at a regular
    corner whose supports have different second fundamental forms is impossible, since continuity would require the
    fill's one form there to equal both (the [corner compatibility
-   proof](dox/extensions/operations.md#breppatchext-boundary-first-fill)); this includes a bending strip meeting a flat
+   proof](dox/extensions/operations/BRepPatchExt.md#g2-at-a-corner)); this includes a bending strip meeting a flat
    strip and rounds of unequal forms, and neither local refinement nor several internally G2 faces removes the
    obstruction. The eased fill, with its reported corner miss, relaxes that request; some non-four-sided loops are still
    refused because the finite net misses the flat-support limit beyond the ease, which the proof does not show
@@ -287,8 +287,8 @@ Current limits and what remains, with the cause of each:
    fixed-incidence route refuses; general continuation of approximately tangent contacts is open, and a strip needs
    separate sharp-edge traces and a valid closed arrangement. Endpoint gaps are checked independently of result
    tolerances, both seam pcurves included. See [the endpoint certificate
-   limits](dox/extensions/operations.md#face-offset-endpoint-certificate-limits) and [separated tangent
-   junctions](dox/extensions/operations.md#separated-tangent-junctions).
+   limits](dox/extensions/operations/BRepOffsetExt.md#face-offset-endpoint-certificate-limits) and [separated tangent
+   junctions](dox/extensions/operations/BRepOffsetExt.md#separated-tangent-junctions).
 5. **Speed.** The ratios against stock followed by the same check are in [Results](#results) and
    [benchmarks.md](dox/extensions/benchmarks.md), each with its cause. The test that a fitted blend does not cross
    itself is evaluated on every fitted blend; a curvature bound that proves the sections cannot run back would let it be

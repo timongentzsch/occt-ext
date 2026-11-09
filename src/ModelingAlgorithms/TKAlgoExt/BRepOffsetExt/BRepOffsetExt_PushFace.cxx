@@ -102,7 +102,7 @@ std::pair<double, double> leanOf(const TopoDS_Face& face, const gp_Dir& directio
   return {low, high};
 }
 
-// Derived convex specialisation of the neighbour-bounded construction (operations.md).
+// Derived convex specialisation of the neighbour-bounded construction (dox/extensions/operations/BRepOffsetExt.md).
 // Reconstructing the original first is essential: halfspaces cannot represent a concavity.
 TopoDS_Shape planarNeighbours(const TopoDS_Shape& body, const FaceSet& moved,
                              const gp_Vec& move, Lineage& lineage)

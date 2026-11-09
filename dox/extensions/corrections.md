@@ -71,7 +71,7 @@ changed last bits throughout the kernel and made 32 of 90 runs of the incrementa
 one added constant; 16 u against the 10 u bound leaves the margin for directions made by other arithmetic within a
 few units of roundoff of unit length. Not covered: an axis placement's X and Y directions, which the readers rebuild
 from its main and X directions by cross products (`gp_Ax3(P, N, Vx)`), and come back exact only where those
-products are (operations.md, open). Tests: random vectors of sizes 2^-400 to 2^400 normalize within 10.5 u (8.5 u)
+products are (open; see [limits.md](limits.md)). Tests: random vectors of sizes 2^-400 to 2^400 normalize within 10.5 u (8.5 u)
 of unit square length, are restored bit for bit, and vectors 24 units of roundoff off unit length restore
 idempotently; 200 random oblique lines, plane normals and lines on the planes read back bit for bit through the
 binary and the text format (the test fails with the previous readers).

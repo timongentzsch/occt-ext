@@ -18,6 +18,6 @@ Modelling operations built on OCCT's topology, geometry and Boolean toolkits. Ni
 | `BRepToolsExt` | Properties, boxes, dimensions, hidden line, shared checks and history |
 
 Construction, mathematics, sources and unproven choices of each are in
-[dox/extensions/operations.md](../../../dox/extensions/operations.md). The interface to an embedding program
+[dox/extensions/operations.md](../../../dox/extensions/operations.md) (one page per package). The interface to an embedding program
 (`BRepToolsExt_Session.hxx`) and the build options are in the top-level [README](../../../README.md).
 Tests are in `GTests/`, one file per package.

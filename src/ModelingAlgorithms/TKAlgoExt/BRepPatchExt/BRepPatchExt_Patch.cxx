@@ -1007,7 +1007,7 @@ constexpr double cornerInset = 1e-6;
 //! each end down to `cornerInset`, so that what a surface does up to a corner is read as well. How
 //! near is at the corner is a judgement, a fraction of the side and so the same at every size: read
 //! down to 1e-5 or 1e-7 instead, the Patch tests came out the same (see
-//! dox/extensions/operations.md).
+//! dox/extensions/operations/BRepPatchExt.md).
 const std::vector<double>& measuredFractions()
 {
   static const std::vector<double> out = [] {
@@ -2412,7 +2412,7 @@ std::vector<double> flatKnots(const occ::handle<Geom_BSplineCurve>& curve)
 //! spread from 1e-5 to 1 of the size with no gap between settled and unsettled pairs; an
 //! eight-sided seat surface, two domed tops and a hull bottom that a coarse net filled 0.6 to 9 off
 //! their masters stop on the same nets for any value from 3.1e-4 to 2.4e-3 (see
-//! dox/extensions/operations.md).
+//! dox/extensions/operations/BRepPatchExt.md).
 constexpr double settled = 1e-3;
 
 //! How far apart the surfaces of two nets are: from places of the coarser, `countU` x `countV`

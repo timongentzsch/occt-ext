@@ -704,7 +704,7 @@ void curveBreaks(const Adaptor& adaptor, GeomAbs_Shape continuity, std::vector<d
 //! search between its two neighbours. A judgement, not a bound: a bound needs the normals' rate of
 //! turn along the edge, that is the faces' curvatures, bounded over it, and the hull bound on
 //! curvature was three orders above the sampled curvature on blend sheets. Its measured margin is
-//! in operations.md.
+//! in dox/extensions/operations/BRepOffsetExt.md.
 double largestAngle(const TopoDS_Edge& edge, const TopoDS_Face& one, const TopoDS_Face& other)
 {
   double                     first, last, c0, c1;
