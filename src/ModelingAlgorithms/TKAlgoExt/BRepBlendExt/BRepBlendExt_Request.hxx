@@ -24,6 +24,7 @@
 #include <BRepTools_History.hxx>
 #include <TopoDS_Shape.hxx>
 
+#include <functional>
 #include <utility>
 #include <vector>
 
@@ -45,9 +46,25 @@ enum class Law
 //! constructions may request Bounded first and defer further work until those also refuse.
 enum class FitWork { Deferred, Bounded, Extended };
 
+//! What one whole-request stage of blend read of the inputs its later stages change: a later
+//! stage whose own input no stage before it read repeats that stage's work, and its failure.
+struct StageReads
+{
+  //! A bounded fit stopped where an extended one goes on (its sixteenth round), or went on
+  //! where an extended one stops (a round past the eighth that inserts no knot).
+  bool fitBound = false;
+  //! The blends were attached where refineContacts changes what attach does (Attach::refines).
+  bool refines = false;
+  //! Each place the stage passed that intersectSpines changes, as whether it changes it there:
+  //! asked only once the stage has failed.
+  std::vector<std::function<bool()>> spines;
+};
+
 struct Request
 {
   FitWork fitWork = FitWork::Deferred;
+  //! Where the request's stage records what it read (blend); none outside the stages.
+  StageReads* reads = nullptr;
   //! Final contact-arrangement construction, after both existing fit pipelines refuse.
   bool refineContacts = false;
   //! Last construction: stations on the intersection of constant-distance offset supports.

@@ -49,9 +49,19 @@ struct Attach
          const std::vector<Piece>&        pieces,
          const std::vector<Corner>&       cornersAt,
          const Handle(BRepTools_History)& history,
-         bool refineContacts);
+         bool refineContacts,
+         StageReads* reads);
 
   const bool refineContacts;
+  StageReads* const reads;
+  //! Whether the contacts are refined at a place where refining them `changes` what is attached;
+  //! where it does, a stage that does not refine them notes it (StageReads::refines).
+  bool refines(bool changes) const
+  {
+    if (changes && !refineContacts && reads)
+      reads->refines = true;
+    return changes && refineContacts;
+  }
 
   // The stages, in order.
   //! Each end of each piece: a stop face cut back to the blend's end section, a joint or a
@@ -665,8 +675,10 @@ Attach::Attach(TopoDS_Shape                     body_,
                const std::vector<Piece>&        pieces_,
                const std::vector<Corner>&       cornersAt_,
                const Handle(BRepTools_History)& history_,
-               bool refineContacts_)
+               bool refineContacts_,
+               StageReads* reads_)
     : refineContacts(refineContacts_),
+      reads(reads_),
       body(std::move(body_)),
       pieces(pieces_),
       cornersAt(cornersAt_),
@@ -773,13 +785,13 @@ void Attach::chainEnds()
           int crossings = 0;
           for (const auto& p : pieces)
             crossings += p.joint[1].meets == Meets::Split && p.joint[1].crossed.IsSame(edge);
-          const bool paired = refineContacts && crossings == 2
+          const bool paired = refines(crossings == 2
             && beginJoint.meets == Meets::Split && finish.meets == Meets::Split
             && beginJoint.side == notchSide && finish.side == notchSide
             && beginJoint.crossed.IsSame(edge) && finish.crossed.IsSame(edge)
             && pieces[beginJoint.piece].rail.s[notchSide ^ int(beginJoint.swapped)].trim.IsNull()
             && pieces[finish.piece].rail.s[notchSide ^ int(finish.swapped)].trim.IsNull()
-            && !cuts.Contains(edge);
+            && !cuts.Contains(edge));
           if (!paired)
             cut(edge, keep.IsSame(a) ? z : a, corner[k][joint.side][end], on.LowerDistanceParameter());
           else
@@ -846,7 +858,7 @@ void Attach::chainEnds()
           // Two crossings retain the interval between them when the edge reaches
           // the blended chain. Its two ends need not both belong to that chain.
           double otherCrossing = crossing;
-          if (refineContacts && crossings == 2 && (atRail(a) || atRail(z)))
+          if (refines(crossings == 2 && (atRail(a) || atRail(z))))
             for (int m = 0; m < n; ++m)
             {
               const auto& joint = pieces[m].joint[1];
@@ -860,7 +872,7 @@ void Attach::chainEnds()
                   && std::abs(other.LowerDistanceParameter() - crossing) > tol::parameter)
                 otherCrossing = other.LowerDistanceParameter();
             }
-          const TopoDS_Vertex from = refineContacts && otherCrossing != crossing
+          const TopoDS_Vertex from = otherCrossing != crossing
                                        ? (crossing < otherCrossing ? a : z)
                                      : atRail(a) && atRail(z)
                                        ? (crossings > 1 ? (crossing - f < l - crossing ? a : z)
@@ -1691,10 +1703,11 @@ const Attach::TrimCurve& Attach::trimOf(int k, int side)
       .first->second;
   const auto surface = BRep_Tool::Surface(piece.rail.s[side].trim);
   // Along the sheet's rail as its parameter rises, which interpolation needs.
-  const double s0             = std::min(sheet.rail(refineContacts ? piece.uAt(0) : 0),
-                                                    sheet.rail(refineContacts ? piece.uAt(1) : 1)),
-               s1             = std::max(sheet.rail(refineContacts ? piece.uAt(0) : 0),
-                                         sheet.rail(refineContacts ? piece.uAt(1) : 1));
+  const bool   part           = refines(piece.uAt(0) != 0 || piece.uAt(1) != 1);
+  const double s0             = std::min(sheet.rail(part ? piece.uAt(0) : 0),
+                                                    sheet.rail(part ? piece.uAt(1) : 1)),
+               s1             = std::max(sheet.rail(part ? piece.uAt(0) : 0),
+                                         sheet.rail(part ? piece.uAt(1) : 1));
   const double lo             = std::min(sheet.across[0], sheet.across[1]),
                hi             = std::max(sheet.across[0], sheet.across[1]);
   constexpr int         count = 257;
@@ -2681,7 +2694,7 @@ void Attach::stop(int k, int end, const TopoDS_Vertex& vertex)
                            corner[k][0][end],
                            corner[k][1][end],
                            rail.scale);
-    if (!met && refineContacts)
+    if (refines(!met))
       met = planeMeeting(sheet,
                          stop,
                          cornerOnSheet,
@@ -3953,7 +3966,7 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
                              corner[k][0][end],
                              corner[k][1][end],
                              rail.scale);
-    if (!ended && refineContacts)
+    if (refines(!ended))
       ended = planeMeeting(sheet,
                            stopFace,
                            sheet.uv(sheet.rail(u[k][0][end]), sheet.across[0]),
@@ -7031,10 +7044,19 @@ TopoDS_Shape attach(TopoDS_Shape                     body,
                     const std::vector<Corner>&       cornersAt,
                     const Handle(BRepTools_History)& history,
                     std::vector<Join>* joins,
-                    bool refineContacts)
+                    bool refineContacts,
+                    StageReads* reads)
 {
   std::vector<Piece> fragments;
   std::vector<Corner> fragmentCorners;
+  // Only a contact on a face its support trims has an owner to change (refineOwnership).
+  const bool owned = std::any_of(pieces.begin(), pieces.end(), [](const Piece& piece) {
+    return std::any_of(std::begin(piece.rail.s), std::end(piece.rail.s), [](const Side& side) {
+      return !side.trim.IsNull() && !side.trimEdge.IsNull();
+    });
+  });
+  if (owned && !refineContacts && reads)
+    reads->refines = true;
   if (refineContacts)
   {
     fragments = pieces;
@@ -7042,7 +7064,7 @@ TopoDS_Shape attach(TopoDS_Shape                     body,
     refineOwnership(fragments, fragmentCorners);
   }
   Attach a(std::move(body), refineContacts ? fragments : pieces,
-           refineContacts ? fragmentCorners : cornersAt, history, refineContacts);
+           refineContacts ? fragmentCorners : cornersAt, history, refineContacts, reads);
   // Each stage may be cancelled before it starts (Patch also checks within its own).
   for (const auto stage : {&Attach::chainEnds,
                            &Attach::miters,

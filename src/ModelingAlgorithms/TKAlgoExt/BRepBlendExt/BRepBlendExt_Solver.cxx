@@ -667,6 +667,7 @@ static std::optional<Blended> replayOverrun(const Request&                   req
              {rounds[r]});
       Request again;
       again.fitWork = request.fitWork;
+      again.reads = request.reads;
       again.refineContacts = request.refineContacts;
       again.operation = op;
       again.replays   = request.replays + 1;
@@ -1376,8 +1377,12 @@ Blended blend(const Request& request)
 {
   if (request.fitWork != FitWork::Deferred)
     return blendStage(request, true);
-  Request bounded = request;
-  bounded.fitWork = FitWork::Bounded;
+  // Each stage after the first changes one input of the request. Where the stage before it read
+  // none of that input (StageReads), it is that stage again, step by step, and fails as it did.
+  StageReads reads;
+  Request    bounded = request;
+  bounded.fitWork    = FitWork::Bounded;
+  bounded.reads      = &reads;
   std::exception_ptr original;
   try
   {
@@ -1395,9 +1400,11 @@ Blended blend(const Request& request)
   }
   Request extended = request;
   extended.fitWork = FitWork::Extended;
-  for (const bool refine : {false, true})
-  {
-    extended.refineContacts = refine;
+  extended.reads   = &reads;
+  const auto stage = [&](bool run) -> std::optional<Blended> {
+    if (!run)
+      return std::nullopt;
+    reads = {};
     try
     {
       return blendStage(extended, true);
@@ -1410,20 +1417,32 @@ Blended blend(const Request& request)
     catch (const Standard_Failure&)
     {
     }
-  }
+    return std::nullopt;
+  };
+  if (auto made = stage(reads.fitBound))
+    return *made;
+  extended.refineContacts = true;
+  if (auto made = stage(reads.refines))
+    return *made;
+  // A place whose spine cannot be traced (it throws) is one the stage may fail at differently.
+  const auto changes = [](const std::function<bool()>& at) {
+    try
+    {
+      return at();
+    }
+    catch (const Failure& failure)
+    {
+      if (failure.reason == std::string("cancelled"))
+        throw;
+    }
+    catch (const Standard_Failure&)
+    {
+    }
+    return true;
+  };
   extended.intersectSpines = true;
-  try
-  {
-    return blendStage(extended, true);
-  }
-  catch (const Failure& failure)
-  {
-    if (failure.reason == std::string("cancelled"))
-      throw;
-  }
-  catch (const Standard_Failure&)
-  {
-  }
+  if (auto made = stage(std::any_of(reads.spines.begin(), reads.spines.end(), changes)))
+    return *made;
   std::rethrow_exception(original);
 }
 
@@ -1912,6 +1931,7 @@ void Blend::rails()
     Rail& rail = pieces.back().rail;
     rail.op    = op;
     rail.boundedFit = request.fitWork == FitWork::Bounded;
+    rail.reads      = request.reads;
     rail.edge  = edge;
     rail.curve.Initialize(edge);
     rail.law = request.law;
@@ -1990,6 +2010,7 @@ void Blend::fullRail(const std::vector<TopoDS_Shape>& asked)
   Rail& rail = pieces.back().rail;
   rail.op    = op;
   rail.boundedFit = request.fitWork == FitWork::Bounded;
+  rail.reads      = request.reads;
   rail.edge  = rails[0];
   rail.curve.Initialize(rails[0]);
   rail.law       = Law::Full;
@@ -2314,6 +2335,7 @@ void Blend::vertexBlend(const TopoDS_Vertex&                    vertex,
     Rail& rail = piece.rail;
     rail.op    = op;
     rail.boundedFit = request.fitWork == FitWork::Bounded;
+    rail.reads      = request.reads;
     rail.edge  = edgeBetween(line, va, ta, vb, tb, on, tol::length);
     rail.curve.Initialize(rail.edge);
     rail.s[0]     = sides[i];
@@ -2442,13 +2464,20 @@ void Blend::carries()
 
 //! Continue an already identified terminal branch to its restriction arcs. The temporary
 //! tangent carrier is corrected on both exact offsets at every step; it is not an envelope.
+//! Whether continueTerminal may carry a rail's ends on: a conic's of one size, split onto
+//! other faces, off faces.
+static bool continuesTerminal(const Rail& rail)
+{
+  return rail.parameterSupports && !rail.closed && rail.sizes.places.empty()
+         && rail.law == Law::Conic && !rail.s[0].cliffCurve && !rail.s[1].cliffCurve;
+}
+
 static void continueTerminal(Piece& piece, Stations& stations,
                              const NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>& facesOfEdge,
                              const NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>& edgesOfVertex)
 {
   Rail& rail = piece.rail;
-  if (!rail.parameterSupports || rail.closed || !rail.sizes.places.empty()
-      || rail.law != Law::Conic || rail.s[0].cliffCurve || rail.s[1].cliffCurve)
+  if (!continuesTerminal(rail))
     return;
   TopoDS_Vertex vertices[2];
   TopExp::Vertices(TopoDS::Edge(rail.edge.Oriented(TopAbs_FORWARD)), vertices[0], vertices[1]);
@@ -2798,6 +2827,10 @@ void Blend::sheets()
       piece.rail.spine.Nullify();
       piece.rail.spineArc.reset();
     }
+    else if (!request.intersectSpines && request.reads && piece.rail.spine.IsNull())
+      request.reads->spines.push_back([rail = piece.rail]() mutable {
+        return intersectSpine(rail) && !(rail.spineArc && stationsFold(rail) != true);
+      });
     // Where the planes through the edge's points cross before they reach it, the balls found
     // through those points do not go on along it, and through their centres they do (the
     // same balls, placed by another parameter: Rail::byCentre); the piece's chain is made so
@@ -2855,6 +2888,8 @@ void Blend::sheets()
         piece.rail.to = std::min(piece.rail.to, *reached);
       if (request.intersectSpines)
         continueTerminal(piece, stations, facesOfEdge, edgesOfVertex);
+      else if (request.reads && continuesTerminal(piece.rail))
+        request.reads->spines.push_back([] { return true; });
       // An exact sheet needs no fit: its contacts are its own.
       // A conic's corner patch takes its weights from fitted sheets: none extruded there (a
       // chamfer's corner takes none). The corner of more than three conics other than rounds is
@@ -3829,7 +3864,9 @@ Blended Blend::result()
 {
   Blended                         out;
   const Handle(BRepTools_History) made = new BRepTools_History;
-  out.shape = pieces.empty() ? body : attach(body, pieces, corners, made, &out.joins, request.refineContacts);
+  out.shape = pieces.empty() ? body
+                             : attach(body, pieces, corners, made, &out.joins,
+                                      request.refineContacts, request.reads);
   // The input's history: into the copy, then through the blends.
   NCollection_List<TopoDS_Shape> inputs;
   inputs.Append(request.body);

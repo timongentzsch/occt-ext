@@ -652,6 +652,19 @@ a successful existing construction with a different representation. If both
 passes refuse, the original refusal is retained; cancellation propagates.
 This selection rule is derived from ordered choice, independent of geometry.
 
+The later passes (extended fits; refined contacts; then offset spines) each change one input of
+the request, and each runs only where the pass before it read that input (`StageReads`). A bounded
+fit reads its policy where it stops at its sixteenth round or goes on past a round beyond the eighth
+that inserts no knot: everywhere else the extended fit takes the same steps. Attachment reads the
+refined contacts where they take another branch (`Attach::refines`) or give a trimmed contact an
+owner. Each place where offset spines would act records whether its spine is adopted (traced and
+its stations fold) or its terminal contact could be continued; these are asked only once the pass
+has refused. Before the first read of a changed input two passes compute the same thing from the
+same data, so a pass whose changed input was not read repeats the one before it step by step and
+refuses where it did (derived, by induction along the computation). Only the first refusal is
+reported, so skipping such a pass changes no result. Measured on 27 refusal rows of
+torus, cylinder, extrusion and B-spline supports, every pass so predicted refused as before.
+
 The existing interpolation, tolerance, continuity events, positive-weight check
 and downstream result checks remain authoritative. The sixteen-round pass is
 retained for construction selection, not as an existence or error bound.

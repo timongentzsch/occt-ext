@@ -408,6 +408,7 @@ struct Rail
   };
   std::shared_ptr<const std::vector<KnotWindow>> knotWindows;
   bool boundedFit = false;
+  StageReads* reads = nullptr; // Request::reads
   const char*       op = "blendEdges";
   TopoDS_Edge       edge;
   BRepAdaptor_Curve curve;
@@ -1928,6 +1929,7 @@ Standard_EXPORT TopoDS_Shape attach(TopoDS_Shape                     body,
                                     const std::vector<Corner>&       cornersAt,
                                     const Handle(BRepTools_History)& history,
                                     std::vector<Join>* joins = nullptr,
-                                    bool refineContacts = false);
+                                    bool refineContacts = false,
+                                    StageReads* reads = nullptr);
 
 } // namespace BRepExt::blending::detail
