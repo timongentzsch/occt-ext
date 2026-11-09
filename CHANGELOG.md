@@ -23,6 +23,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The upstream all-platform workflow runs by hand only.
 - The benchmark sources and shell drivers are formatted and commented.
 - Comments and documentation no longer compare with unnamed external modellers.
+- The public operations (`BRepToolsExt_Operations.hxx`, `BRepSurfaceExt_Tools.hxx` and their neighbours) name
+  every parameter and document each function in a line. Integer mode codes are scoped enumerations with the same
+  values (`OffsetJoin`, `CurveExtension`, `PatchMethod`, `PatchFlow` and others); Booleans take `Select` and blends
+  `blending::Law`. Source change for callers; no behaviour change.
+- `Rung` is `BooleanAttempt` (`BooleanResult::attempts`), and `BooleanRequest::journal` is `subShapeHistory`.
 
 ### Fixed
 

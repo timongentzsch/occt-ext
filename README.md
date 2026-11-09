@@ -71,8 +71,16 @@ const auto upright = edgesWhere(box, [&](const double* l) {  // the edge along z
   return near(l[0], a) && near(l[3], a) && near(l[1], b) && near(l[4], b);
 });
 const uint32_t body = BRepExt::store(session(), box), picked = BRepExt::store(session(), upright.front());
-const auto     result =
-  BRepExt::chamfer(session(), body, {picked}, d, d, 0, {}, BRepExt::failureHashBound, 0, false);
+const auto     result = BRepExt::chamfer(session(),
+                                         body,
+                                         {picked},                  // edges
+                                         d,                         // distance1
+                                         d,                         // distance2
+                                         0,                         // reference face: none
+                                         {},                        // hashes of tracked faces
+                                         BRepExt::failureHashBound, // bound
+                                         0,                         // angle: none
+                                         false);                    // propagate
 const TopoDS_Shape& made = BRepExt::get(session(), result.resultId);
 // BRepExt::invalidity(made).empty(), and volume(made) == a * b * c - 0.5 * d * d * c to 1e-9 of the box
 ```
