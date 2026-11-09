@@ -65,99 +65,112 @@ Handle(Geom_BSplineCurve) unitCurve(const TopoDS_Edge& edge, bool reversed)
   return spline;
 }
 
-//! A guided skin between two profiles with G2 asked at an end: the sum of the surface straight
-//! across between the guides, and the quintic in the guides' direction that has each profile, the
-//! support's plane and bend along it, less the same between the guides' ends. Along a guide the
-//! last two cancel, so each guide is kept; along a profile the first and last cancel. The two
-//! supports give the plane and the bend, the guides how fast the surface leaves. Between flat
-//! supports this is the guide swept straight across.
-TopoDS_Face guidedSum(OcctKernel&                  kernel,
-                      const char*                  op,
-                      const std::vector<uint32_t>& edges,
-                      uint32_t                     firstFace,
-                      uint32_t                     lastFace,
-                      int                          firstOrder,
-                      int                          lastOrder,
-                      double                       tolerance)
+gp_Pnt startOf(const TopoDS_Edge& e)
 {
-  const auto edgeAt  = [&](size_t i) { return TopoDS::Edge(get(kernel, edges[i])); };
-  const auto startOf = [](const TopoDS_Edge& e) {
-    double     a, b;
-    const auto c = BRep_Tool::Curve(e, a, b);
-    return c->Value(e.Orientation() == TopAbs_REVERSED ? b : a);
-  };
-  const auto endOf = [](const TopoDS_Edge& e) {
-    double     a, b;
-    const auto c = BRep_Tool::Curve(e, a, b);
-    return c->Value(e.Orientation() == TopAbs_REVERSED ? a : b);
-  };
-  const auto first = edgeAt(0), last = edgeAt(1), g0 = edgeAt(2), g1 = edgeAt(3);
-  // Each guide from the first profile to the last, and each profile from the first guide to the
-  // second.
-  const auto distanceTo = [](const gp_Pnt& p, const TopoDS_Edge& e) {
-    BRepExtrema_DistShapeShape near(BRepBuilderAPI_MakeVertex(p).Vertex(), e);
-    return near.Value();
-  };
-  const bool g0Back = distanceTo(startOf(g0), first) > distanceTo(endOf(g0), first);
-  const bool g1Back = distanceTo(startOf(g1), first) > distanceTo(endOf(g1), first);
-  const auto guideA = unitCurve(g0, g0Back), guideB = unitCurve(g1, g1Back);
-  const bool firstBack =
-    startOf(first).Distance(guideA->StartPoint()) > endOf(first).Distance(guideA->StartPoint());
-  const bool lastBack =
-    startOf(last).Distance(guideA->EndPoint()) > endOf(last).Distance(guideA->EndPoint());
-  const auto rimA = unitCurve(first, firstBack), rimB = unitCurve(last, lastBack);
-  // A profile at a share of its edge's parameter, which is where a support's jet is read; the
-  // spline of a conic runs at another pace.
-  const auto pointOn = [](const TopoDS_Edge& edge, bool back) {
-    double                   a, b;
-    const Handle(Geom_Curve) curve   = BRep_Tool::Curve(edge, a, b);
-    const bool               flipped = (edge.Orientation() == TopAbs_REVERSED) != back;
-    return [curve, a, b, flipped](double u) {
-      return curve->Value(a + (b - a) * (flipped ? 1 - u : u));
-    };
-  };
-  const auto rimPointA = pointOn(first, firstBack), rimPointB = pointOn(last, lastBack);
-  const auto jetsOf = [&](uint32_t edgeId,
-                          uint32_t faceId,
-                          int      order,
-                          bool     back) -> std::function<SurfaceJet(double)> {
-    if (order < 1)
-      return {};
-    const auto boundary = surfacing::boundaryOf(kernel, op, edgeId, faceId);
-    const bool flipped  = (boundary.edge.Orientation() == TopAbs_REVERSED) != back;
-    return [boundary, flipped, op](double u) { return boundary.jet(op, flipped ? 1 - u : u); };
-  };
-  // How the surface leaves a profile at u: the guides' way there, in the support's plane, with
-  // the support's bend in that direction.
-  const auto leaving =
-    [&](const std::function<SurfaceJet(double)>& jetAt, int order, double v, double u) {
-      gp_Pnt ignored;
-      gp_Vec a1, a2, b1, b2;
-      guideA->D2(v, ignored, a1, a2);
-      guideB->D2(v, ignored, b1, b2);
-      gp_Vec d1 = a1 * (1 - u) + b1 * u, d2 = a2 * (1 - u) + b2 * u;
-      if (order >= 1)
-      {
-        const auto jet = jetAt(u);
-        d1 -= jet.n * d1.Dot(jet.n);
-        if (order >= 2)
-          d2 += jet.n * (jet.curvature(d1, d1) - d2.Dot(jet.n));
-      }
-      return std::pair{d1, d2};
-    };
-  const auto jetsA    = jetsOf(edges[0], firstFace, firstOrder, firstBack),
-             jetsB    = jetsOf(edges[1], lastFace, lastOrder, lastBack);
-  const auto splineOf = [](const std::vector<gp_Pnt>& values, const std::vector<double>& places) {
-    const GeomAlgoExt::CubicThrough law(places, GeomAlgoExt::CubicThrough::Ends::Follow);
-    const auto                      poles = law.through(values);
-    NCollection_Array1<gp_Pnt>      array(1, law.poles);
-    for (int k = 1; k <= law.poles; ++k)
-      array(k) = poles[size_t(k - 1)];
-    return Handle(Geom_BSplineCurve)(new Geom_BSplineCurve(array, law.knots, law.mults, 3));
-  };
-  // The fields along each profile as splines, and a rational profile the same way, for the sum
-  // of poles, to the tolerance: over a span of 1 of the guides' parameter these are lengths.
-  Handle(Geom_BSplineCurve) a1, a2, b1, b2, onA = rimA, onB = rimB;
+  double     a, b;
+  const auto c = BRep_Tool::Curve(e, a, b);
+  return c->Value(e.Orientation() == TopAbs_REVERSED ? b : a);
+}
+
+gp_Pnt endOf(const TopoDS_Edge& e)
+{
+  double     a, b;
+  const auto c = BRep_Tool::Curve(e, a, b);
+  return c->Value(e.Orientation() == TopAbs_REVERSED ? a : b);
+}
+
+double distanceTo(const gp_Pnt& p, const TopoDS_Edge& e)
+{
+  BRepExtrema_DistShapeShape near(BRepBuilderAPI_MakeVertex(p).Vertex(), e);
+  return near.Value();
+}
+
+//! A profile at a share of its edge's parameter, which is where a support's jet is read; the
+//! spline of a conic runs at another pace.
+std::function<gp_Pnt(double)> pointOn(const TopoDS_Edge& edge, bool back)
+{
+  double                   a, b;
+  const Handle(Geom_Curve) curve   = BRep_Tool::Curve(edge, a, b);
+  const bool               flipped = (edge.Orientation() == TopAbs_REVERSED) != back;
+  return
+    [curve, a, b, flipped](double u) { return curve->Value(a + (b - a) * (flipped ? 1 - u : u)); };
+}
+
+//! The jet of the support along a profile at a share of it, or nothing where nothing is asked.
+std::function<SurfaceJet(double)> jetsOf(OcctKernel& kernel,
+                                         const char* op,
+                                         uint32_t    edgeId,
+                                         uint32_t    faceId,
+                                         int         order,
+                                         bool        back)
+{
+  if (order < 1)
+    return {};
+  const auto boundary = surfacing::boundaryOf(kernel, op, edgeId, faceId);
+  const bool flipped  = (boundary.edge.Orientation() == TopAbs_REVERSED) != back;
+  return [boundary, flipped, op](double u) { return boundary.jet(op, flipped ? 1 - u : u); };
+}
+
+//! How the surface leaves a profile at u: the guides' way there, in the support's plane, with
+//! the support's bend in that direction.
+std::pair<gp_Vec, gp_Vec> leaving(const Handle(Geom_BSplineCurve)&         guideA,
+                                  const Handle(Geom_BSplineCurve)&         guideB,
+                                  const std::function<SurfaceJet(double)>& jetAt,
+                                  int                                      order,
+                                  double                                   v,
+                                  double                                   u)
+{
+  gp_Pnt ignored;
+  gp_Vec a1, a2, b1, b2;
+  guideA->D2(v, ignored, a1, a2);
+  guideB->D2(v, ignored, b1, b2);
+  gp_Vec d1 = a1 * (1 - u) + b1 * u, d2 = a2 * (1 - u) + b2 * u;
+  if (order >= 1)
+  {
+    const auto jet = jetAt(u);
+    d1 -= jet.n * d1.Dot(jet.n);
+    if (order >= 2)
+      d2 += jet.n * (jet.curvature(d1, d1) - d2.Dot(jet.n));
+  }
+  return std::pair{d1, d2};
+}
+
+Handle(Geom_BSplineCurve) splineOf(const std::vector<gp_Pnt>& values,
+                                   const std::vector<double>& places)
+{
+  const GeomAlgoExt::CubicThrough law(places, GeomAlgoExt::CubicThrough::Ends::Follow);
+  const auto                      poles = law.through(values);
+  NCollection_Array1<gp_Pnt>      array(1, law.poles);
+  for (int k = 1; k <= law.poles; ++k)
+    array(k) = poles[size_t(k - 1)];
+  return Handle(Geom_BSplineCurve)(new Geom_BSplineCurve(array, law.knots, law.mults, 3));
+}
+
+//! The fields along each profile as splines, and a rational profile the same way, for the sum
+//! of poles, to the tolerance: over a span of 1 of the guides' parameter these are lengths.
+//! `a1`, `a2` (`b1`, `b2`) are the first and second derivatives across at the first (last)
+//! profile, `onA` and `onB` the profiles.
+void leavingFields(const char*                              op,
+                   const Handle(Geom_BSplineCurve)&         guideA,
+                   const Handle(Geom_BSplineCurve)&         guideB,
+                   const Handle(Geom_BSplineCurve)&         rimA,
+                   const Handle(Geom_BSplineCurve)&         rimB,
+                   const std::function<gp_Pnt(double)>&     rimPointA,
+                   const std::function<gp_Pnt(double)>&     rimPointB,
+                   const std::function<SurfaceJet(double)>& jetsA,
+                   const std::function<SurfaceJet(double)>& jetsB,
+                   int                                      firstOrder,
+                   int                                      lastOrder,
+                   double                                   tolerance,
+                   Handle(Geom_BSplineCurve)&               a1,
+                   Handle(Geom_BSplineCurve)&               a2,
+                   Handle(Geom_BSplineCurve)&               b1,
+                   Handle(Geom_BSplineCurve)&               b2,
+                   Handle(Geom_BSplineCurve)&               onA,
+                   Handle(Geom_BSplineCurve)&               onB)
+{
+  onA = rimA;
+  onB = rimB;
   for (int n = 16;; n *= 2)
   {
     if (n > 4096)
@@ -168,8 +181,8 @@ TopoDS_Face guidedSum(OcctKernel&                  kernel,
     {
       const double u = double(k) / n;
       places.push_back(u);
-      const auto [d1, d2] = leaving(jetsA, firstOrder, 0, u);
-      const auto [e1, e2] = leaving(jetsB, lastOrder, 1, u);
+      const auto [d1, d2] = leaving(guideA, guideB, jetsA, firstOrder, 0, u);
+      const auto [e1, e2] = leaving(guideA, guideB, jetsB, lastOrder, 1, u);
       va1.emplace_back(d1.XYZ());
       va2.emplace_back(d2.XYZ());
       vb1.emplace_back(e1.XYZ());
@@ -189,8 +202,8 @@ TopoDS_Face guidedSum(OcctKernel&                  kernel,
     for (int k = 0; k < n; ++k)
     {
       const double u      = (k + 0.5) / n;
-      const auto [d1, d2] = leaving(jetsA, firstOrder, 0, u);
-      const auto [e1, e2] = leaving(jetsB, lastOrder, 1, u);
+      const auto [d1, d2] = leaving(guideA, guideB, jetsA, firstOrder, 0, u);
+      const auto [e1, e2] = leaving(guideA, guideB, jetsB, lastOrder, 1, u);
       worst               = std::max({worst,
                                       a1->Value(u).Distance(gp_Pnt(d1.XYZ())),
                                       a2->Value(u).Distance(gp_Pnt(d2.XYZ())),
@@ -202,6 +215,19 @@ TopoDS_Face guidedSum(OcctKernel&                  kernel,
     if (worst <= tolerance / 4)
       break;
   }
+}
+
+//! The sum of the quintic along the profiles, less the same quintic between the ends of the
+//! profiles, and the surface straight across between the guides: on one set of knots.
+Handle(Geom_BSplineSurface) sumOfSkins(const Handle(Geom_BSplineCurve)& onA,
+                                       const Handle(Geom_BSplineCurve)& a1,
+                                       const Handle(Geom_BSplineCurve)& a2,
+                                       const Handle(Geom_BSplineCurve)& b1,
+                                       const Handle(Geom_BSplineCurve)& b2,
+                                       const Handle(Geom_BSplineCurve)& onB,
+                                       const Handle(Geom_BSplineCurve)& guideA,
+                                       const Handle(Geom_BSplineCurve)& guideB)
+{
   // The quintic: six rows of poles along the profiles.
   std::vector<Handle(Geom_BSplineCurve)> along{Handle(Geom_BSplineCurve)::DownCast(onA->Copy()),
                                                a1,
@@ -287,11 +313,25 @@ TopoDS_Face guidedSum(OcctKernel&                  kernel,
                             b,
                             gp_Pnt(profilesSkin->Pole(a, b).XYZ() + guidesSkin->Pole(a, b).XYZ()
                                    - crossings->Pole(a, b).XYZ()));
-  const TopoDS_Face face = surfacing::makeFace(op, profilesSkin, tolerance);
-  // What comes back is held to the supports apart from how it was made.
-  for (const auto& [edgeId, faceId, order, v] :
-       std::array{std::tuple{edges[0], firstFace, firstOrder, 0.0},
-                  std::tuple{edges[1], lastFace, lastOrder, 1.0}})
+  return profilesSkin;
+}
+
+//! What comes back is held to the supports apart from how it was made: G1 or G2 to the faces
+//! along the first and the last profile, where asked.
+void measureSupports(OcctKernel&        kernel,
+                     const char*        op,
+                     const TopoDS_Face& face,
+                     uint32_t           firstEdge,
+                     uint32_t           lastEdge,
+                     uint32_t           firstFace,
+                     uint32_t           lastFace,
+                     int                firstOrder,
+                     int                lastOrder,
+                     double             tolerance)
+{
+  for (const auto& [edgeId, faceId, order] :
+       std::array{std::tuple{firstEdge, firstFace, firstOrder},
+                  std::tuple{lastEdge, lastFace, lastOrder}})
   {
     if (order < 1)
       continue;
@@ -309,13 +349,75 @@ TopoDS_Face guidedSum(OcctKernel&                  kernel,
         own     = TopoDS::Edge(it.Current());
       }
     }
-    (void)v;
     surfacing::measure(op,
                        face,
                        {surfacing::constraint(op, face, own, reference, order)},
                        tolerance,
                        false);
   }
+}
+
+//! A guided skin between two profiles with G2 asked at an end: the sum of the surface straight
+//! across between the guides, and the quintic in the guides' direction that has each profile, the
+//! support's plane and bend along it, less the same between the guides' ends. Along a guide the
+//! last two cancel, so each guide is kept; along a profile the first and last cancel. The two
+//! supports give the plane and the bend, the guides how fast the surface leaves. Between flat
+//! supports this is the guide swept straight across.
+TopoDS_Face guidedSum(OcctKernel&                  kernel,
+                      const char*                  op,
+                      const std::vector<uint32_t>& edges,
+                      uint32_t                     firstFace,
+                      uint32_t                     lastFace,
+                      int                          firstOrder,
+                      int                          lastOrder,
+                      double                       tolerance)
+{
+  const auto edgeAt = [&](size_t i) { return TopoDS::Edge(get(kernel, edges[i])); };
+  const auto first = edgeAt(0), last = edgeAt(1), g0 = edgeAt(2), g1 = edgeAt(3);
+  // Each guide from the first profile to the last, and each profile from the first guide to the
+  // second.
+  const bool g0Back = distanceTo(startOf(g0), first) > distanceTo(endOf(g0), first);
+  const bool g1Back = distanceTo(startOf(g1), first) > distanceTo(endOf(g1), first);
+  const auto guideA = unitCurve(g0, g0Back), guideB = unitCurve(g1, g1Back);
+  const bool firstBack =
+    startOf(first).Distance(guideA->StartPoint()) > endOf(first).Distance(guideA->StartPoint());
+  const bool lastBack =
+    startOf(last).Distance(guideA->EndPoint()) > endOf(last).Distance(guideA->EndPoint());
+  const auto rimA = unitCurve(first, firstBack), rimB = unitCurve(last, lastBack);
+  const auto rimPointA = pointOn(first, firstBack), rimPointB = pointOn(last, lastBack);
+  const auto jetsA = jetsOf(kernel, op, edges[0], firstFace, firstOrder, firstBack),
+             jetsB = jetsOf(kernel, op, edges[1], lastFace, lastOrder, lastBack);
+  Handle(Geom_BSplineCurve) a1, a2, b1, b2, onA, onB;
+  leavingFields(op,
+                guideA,
+                guideB,
+                rimA,
+                rimB,
+                rimPointA,
+                rimPointB,
+                jetsA,
+                jetsB,
+                firstOrder,
+                lastOrder,
+                tolerance,
+                a1,
+                a2,
+                b1,
+                b2,
+                onA,
+                onB);
+  const TopoDS_Face face =
+    surfacing::makeFace(op, sumOfSkins(onA, a1, a2, b1, b2, onB, guideA, guideB), tolerance);
+  measureSupports(kernel,
+                  op,
+                  face,
+                  edges[0],
+                  edges[1],
+                  firstFace,
+                  lastFace,
+                  firstOrder,
+                  lastOrder,
+                  tolerance);
   return face;
 }
 
@@ -331,16 +433,13 @@ TopoDS_Face guidedSum(OcctKernel&                  kernel,
 //! (or, at G2, with another bend), the surface follows the guide there, as between two profiles.
 //! Null where the net's skin has weights other than one, to which a correction without weights
 //! does not add; weights off one by rounding only are dropped.
-TopoDS_Face guidedNet(OcctKernel&                  kernel,
-                      const char*                  op,
-                      const std::vector<uint32_t>& edges,
-                      uint32_t                     firstFace,
-                      uint32_t                     lastFace,
-                      int                          firstOrder,
-                      int                          lastOrder,
-                      double                       tolerance)
+//! The net's skin (skinGordon) as a B-spline surface without weights; null where it has none or
+//! has weights other than one beyond rounding.
+Handle(Geom_BSplineSurface) gordonSurface(OcctKernel&                  kernel,
+                                          const std::vector<uint32_t>& edges,
+                                          size_t                       last,
+                                          double                       tolerance)
 {
-  const size_t                last = edges.size() - 3;
   const std::vector<uint32_t> profiles(edges.begin(), edges.begin() + long(last) + 1),
     guides(edges.begin() + long(last) + 1, edges.end());
   const uint32_t netId = skinGordon(kernel, profiles, guides, false, tolerance).resultId;
@@ -378,7 +477,16 @@ TopoDS_Face guidedNet(OcctKernel&                  kernel,
                                       surface->UDegree(),
                                       surface->VDegree());
   }
-  // The first profile at v = 0 and the last at v = 1, both parameters from 0 to 1.
+  return surface;
+}
+
+//! The first profile at v = 0 and the last at v = 1, both parameters from 0 to 1; false where the
+//! last profile is not the side across from the first.
+bool orientNet(OcctKernel&                        kernel,
+               const std::vector<uint32_t>&       edges,
+               size_t                             last,
+               const Handle(Geom_BSplineSurface)& surface)
+{
   const auto middleOf = [&](size_t i) {
     BRepAdaptor_Curve c(TopoDS::Edge(get(kernel, edges[i])));
     return c.Value((c.FirstParameter() + c.LastParameter()) / 2);
@@ -405,7 +513,7 @@ TopoDS_Face guidedNet(OcctKernel&                  kernel,
   if (side == 3)
     surface->VReverse();
   if (sideNearest(middleOf(last)) != 3)
-    return {};
+    return false;
   for (const bool alongU : {true, false})
   {
     NCollection_Array1<double> knots(1, alongU ? surface->NbUKnots() : surface->NbVKnots());
@@ -413,127 +521,135 @@ TopoDS_Face guidedNet(OcctKernel&                  kernel,
     BSplCLib::Reparametrize(0, 1, knots);
     alongU ? surface->SetUKnots(knots) : surface->SetVKnots(knots);
   }
-  // How far across the correction may reach: to the nearest place of the next profile.
-  const auto reach = [&](size_t i, bool fromStart) {
-    BRepAdaptor_Curve     c(TopoDS::Edge(get(kernel, edges[i])));
-    double                bound = fromStart ? 1.0 : 0.0;
-    ShapeAnalysis_Surface on(surface);
-    for (int s = 0; s <= 16; ++s)
-    {
-      const double v = on.ValueOfUV(c.Value(c.FirstParameter()
-                                            + (c.LastParameter() - c.FirstParameter()) * s / 16),
-                                    Precision::Confusion())
-                         .Y();
-      bound = fromStart ? std::min(bound, v) : std::max(bound, v);
-    }
-    return fromStart ? bound : 1 - bound;
-  };
-  std::vector<Handle(Geom_BSplineSurface)> corrections;
-  for (const auto& [edgeId, faceId, order, atStart] :
-       std::array{std::tuple{edges[0], firstFace, firstOrder, true},
-                  std::tuple{edges[last], lastFace, lastOrder, false}})
+  return true;
+}
+
+//! How far across the correction may reach: to the nearest place of the next profile.
+double reachAcross(OcctKernel&                        kernel,
+                   const std::vector<uint32_t>&       edges,
+                   size_t                             i,
+                   bool                               fromStart,
+                   const Handle(Geom_BSplineSurface)& surface)
+{
+  BRepAdaptor_Curve     c(TopoDS::Edge(get(kernel, edges[i])));
+  double                bound = fromStart ? 1.0 : 0.0;
+  ShapeAnalysis_Surface on(surface);
+  for (int s = 0; s <= 16; ++s)
   {
-    if (order < 1)
-      continue;
-    const double width = reach(atStart ? 1 : last - 1, atStart);
-    if (!(width > Precision::PConfusion()))
-      return {};
-    const auto   boundary = surfacing::boundaryOf(kernel, op, edgeId, faceId);
-    const double v        = atStart ? 0 : 1;
-    const int    asked    = order; // a lambda captures no structured binding before C++20
-    // The move of the way out and of the bend at u, both along the support's normal there.
-    const auto moves = [&](double u) {
-      gp_Pnt p;
-      gp_Vec su, sv, suu, svv, suv;
-      surface->D2(u, v, p, su, sv, suu, svv, suv);
-      GeomAPI_ProjectPointOnCurve onRim(p, boundary.curve, boundary.first, boundary.last);
-      const double f   = onRim.NbPoints() > 0 ? onRim.LowerDistanceParameter() : boundary.first;
-      const auto   jet = boundary.jet(op, (f - boundary.first) / (boundary.last - boundary.first));
-      const gp_Vec d1  = sv - jet.n * sv.Dot(jet.n);
-      const gp_Vec d2  = asked >= 2 ? jet.n * (jet.curvature(d1, d1) - svv.Dot(jet.n)) : gp_Vec();
-      return std::pair{d1 - sv, d2};
-    };
-    const auto [m1a, m2a] = moves(0);
-    const auto [m1b, m2b] = moves(1);
-    const auto corrected  = [&](double u) {
-      const auto [m1, m2] = moves(u);
-      return std::pair{m1 - m1a * (1 - u) - m1b * u, m2 - m2a * (1 - u) - m2b * u};
-    };
-    const auto splineOf = [](const std::vector<gp_Pnt>& values, const std::vector<double>& places) {
-      const GeomAlgoExt::CubicThrough law(places, GeomAlgoExt::CubicThrough::Ends::Follow);
-      const auto                      poles = law.through(values);
-      NCollection_Array1<gp_Pnt>      array(1, law.poles);
-      for (int k = 1; k <= law.poles; ++k)
-        array(k) = poles[size_t(k - 1)];
-      return Handle(Geom_BSplineCurve)(new Geom_BSplineCurve(array, law.knots, law.mults, 3));
-    };
-    // The two moves as splines along the profile, to a quarter of the tolerance: on the unit
-    // parameter across they are lengths.
-    Handle(Geom_BSplineCurve) way, bend;
-    for (int n = 16;; n *= 2)
-    {
-      if (n > 4096)
-        fail(op, no_solution, "the supports vary too much along the profiles to follow");
-      std::vector<double> places;
-      std::vector<gp_Pnt> ways, bends;
-      for (int k = 0; k <= n; ++k)
-      {
-        const auto [m1, m2] = corrected(double(k) / n);
-        places.push_back(double(k) / n);
-        ways.emplace_back(m1.XYZ());
-        bends.emplace_back(m2.XYZ());
-      }
-      way          = splineOf(ways, places);
-      bend         = splineOf(bends, places);
-      double worst = 0;
-      for (int k = 0; k < n; ++k)
-      {
-        const auto [m1, m2] = corrected((k + 0.5) / n);
-        worst               = std::max({worst,
-                                        way->Value((k + 0.5) / n).Distance(gp_Pnt(m1.XYZ())),
-                                        bend->Value((k + 0.5) / n).Distance(gp_Pnt(m2.XYZ()))});
-      }
-      if (worst <= tolerance / 4)
-        break;
-    }
-    // The quintic across, on [0, width] from the end: value nothing, first derivative `way`,
-    // second `bend` at the end, and nothing to the second derivative at `width`; nothing beyond.
-    std::vector<Handle(Geom_BSplineCurve)> along{way, bend};
-    GeomAlgoExt::unify(along);
-    const int                  nu = along[0]->NbPoles();
-    NCollection_Array2<gp_Pnt> poles(1, nu, 1, 11);
-    for (int a = 1; a <= nu; ++a)
-    {
-      const gp_XYZ d1 = along[0]->Pole(a).XYZ(), d2 = along[1]->Pole(a).XYZ();
-      for (int b = 1; b <= 11; ++b)
-        poles(a, b) = gp_Pnt(0, 0, 0);
-      // The Bezier poles of the quintic on its stretch (two Bezier pieces sharing the sixth
-      // pole): from the end, nothing, then the way out over a fifth of the stretch, then twice
-      // that with the bend; the other three nothing.
-      const double sign          = atStart ? 1 : -1;
-      poles(a, atStart ? 2 : 10) = gp_Pnt(d1 * (sign * width / 5));
-      poles(a, atStart ? 3 : 9)  = gp_Pnt(d1 * (sign * 2 * width / 5) + d2 * (width * width / 20));
-    }
-    NCollection_Array1<double> vKnots(1, 3);
-    NCollection_Array1<int>    vMults(1, 3);
-    vKnots(1) = 0;
-    vKnots(2) = atStart ? width : 1 - width;
-    vKnots(3) = 1;
-    vMults(1) = vMults(3)                  = 6;
-    vMults(2)                              = 5;
-    Handle(Geom_BSplineSurface) correction = new Geom_BSplineSurface(poles,
-                                                                     along[0]->Knots(),
-                                                                     vKnots,
-                                                                     along[0]->Multiplicities(),
-                                                                     vMults,
-                                                                     3,
-                                                                     5);
-    // Nothing to the second derivative on both sides of the stretch's end: C2 there.
-    if (!correction->RemoveVKnot(2, 3, Precision::Confusion()))
-      return {};
-    corrections.push_back(correction);
+    const double v =
+      on.ValueOfUV(c.Value(c.FirstParameter() + (c.LastParameter() - c.FirstParameter()) * s / 16),
+                   Precision::Confusion())
+        .Y();
+    bound = fromStart ? std::min(bound, v) : std::max(bound, v);
   }
-  // On one set of knots, and summed.
+  return fromStart ? bound : 1 - bound;
+}
+
+//! The correction across the end at `atStart` (v = 0, else v = 1) to `width`: the quintic that
+//! turns the way out into the support's tangent plane and, at G2, sets the bend, and is nothing
+//! to the second derivative at `width`. Null where it is not C2 there.
+Handle(Geom_BSplineSurface) endCorrection(OcctKernel&                        kernel,
+                                          const char*                        op,
+                                          const Handle(Geom_BSplineSurface)& surface,
+                                          uint32_t                           edgeId,
+                                          uint32_t                           faceId,
+                                          int                                order,
+                                          bool                               atStart,
+                                          double                             width,
+                                          double                             tolerance)
+{
+  const auto   boundary = surfacing::boundaryOf(kernel, op, edgeId, faceId);
+  const double v        = atStart ? 0 : 1;
+  const int    asked    = order;
+  // The move of the way out and of the bend at u, both along the support's normal there.
+  const auto moves = [&](double u) {
+    gp_Pnt p;
+    gp_Vec su, sv, suu, svv, suv;
+    surface->D2(u, v, p, su, sv, suu, svv, suv);
+    GeomAPI_ProjectPointOnCurve onRim(p, boundary.curve, boundary.first, boundary.last);
+    const double f   = onRim.NbPoints() > 0 ? onRim.LowerDistanceParameter() : boundary.first;
+    const auto   jet = boundary.jet(op, (f - boundary.first) / (boundary.last - boundary.first));
+    const gp_Vec d1  = sv - jet.n * sv.Dot(jet.n);
+    const gp_Vec d2  = asked >= 2 ? jet.n * (jet.curvature(d1, d1) - svv.Dot(jet.n)) : gp_Vec();
+    return std::pair{d1 - sv, d2};
+  };
+  const auto [m1a, m2a] = moves(0);
+  const auto [m1b, m2b] = moves(1);
+  const auto corrected  = [&](double u) {
+    const auto [m1, m2] = moves(u);
+    return std::pair{m1 - m1a * (1 - u) - m1b * u, m2 - m2a * (1 - u) - m2b * u};
+  };
+  // The two moves as splines along the profile, to a quarter of the tolerance: on the unit
+  // parameter across they are lengths.
+  Handle(Geom_BSplineCurve) way, bend;
+  for (int n = 16;; n *= 2)
+  {
+    if (n > 4096)
+      fail(op, no_solution, "the supports vary too much along the profiles to follow");
+    std::vector<double> places;
+    std::vector<gp_Pnt> ways, bends;
+    for (int k = 0; k <= n; ++k)
+    {
+      const auto [m1, m2] = corrected(double(k) / n);
+      places.push_back(double(k) / n);
+      ways.emplace_back(m1.XYZ());
+      bends.emplace_back(m2.XYZ());
+    }
+    way          = splineOf(ways, places);
+    bend         = splineOf(bends, places);
+    double worst = 0;
+    for (int k = 0; k < n; ++k)
+    {
+      const auto [m1, m2] = corrected((k + 0.5) / n);
+      worst               = std::max({worst,
+                                      way->Value((k + 0.5) / n).Distance(gp_Pnt(m1.XYZ())),
+                                      bend->Value((k + 0.5) / n).Distance(gp_Pnt(m2.XYZ()))});
+    }
+    if (worst <= tolerance / 4)
+      break;
+  }
+  // The quintic across, on [0, width] from the end: value nothing, first derivative `way`,
+  // second `bend` at the end, and nothing to the second derivative at `width`; nothing beyond.
+  std::vector<Handle(Geom_BSplineCurve)> along{way, bend};
+  GeomAlgoExt::unify(along);
+  const int                  nu = along[0]->NbPoles();
+  NCollection_Array2<gp_Pnt> poles(1, nu, 1, 11);
+  for (int a = 1; a <= nu; ++a)
+  {
+    const gp_XYZ d1 = along[0]->Pole(a).XYZ(), d2 = along[1]->Pole(a).XYZ();
+    for (int b = 1; b <= 11; ++b)
+      poles(a, b) = gp_Pnt(0, 0, 0);
+    // The Bezier poles of the quintic on its stretch (two Bezier pieces sharing the sixth
+    // pole): from the end, nothing, then the way out over a fifth of the stretch, then twice
+    // that with the bend; the other three nothing.
+    const double sign          = atStart ? 1 : -1;
+    poles(a, atStart ? 2 : 10) = gp_Pnt(d1 * (sign * width / 5));
+    poles(a, atStart ? 3 : 9)  = gp_Pnt(d1 * (sign * 2 * width / 5) + d2 * (width * width / 20));
+  }
+  NCollection_Array1<double> vKnots(1, 3);
+  NCollection_Array1<int>    vMults(1, 3);
+  vKnots(1) = 0;
+  vKnots(2) = atStart ? width : 1 - width;
+  vKnots(3) = 1;
+  vMults(1) = vMults(3)                  = 6;
+  vMults(2)                              = 5;
+  Handle(Geom_BSplineSurface) correction = new Geom_BSplineSurface(poles,
+                                                                   along[0]->Knots(),
+                                                                   vKnots,
+                                                                   along[0]->Multiplicities(),
+                                                                   vMults,
+                                                                   3,
+                                                                   5);
+  // Nothing to the second derivative on both sides of the stretch's end: C2 there.
+  if (!correction->RemoveVKnot(2, 3, Precision::Confusion()))
+    return {};
+  return correction;
+}
+
+//! On one set of knots, and summed.
+void addCorrections(const Handle(Geom_BSplineSurface)&              surface,
+                    const std::vector<Handle(Geom_BSplineSurface)>& corrections)
+{
   std::vector<Handle(Geom_BSplineSurface)> all{surface};
   all.insert(all.end(), corrections.begin(), corrections.end());
   int du = 1, dv = 1;
@@ -556,36 +672,52 @@ TopoDS_Face guidedNet(OcctKernel&                  kernel,
     for (int a = 1; a <= surface->NbUPoles(); ++a)
       for (int b = 1; b <= surface->NbVPoles(); ++b)
         surface->SetPole(a, b, gp_Pnt(surface->Pole(a, b).XYZ() + correction->Pole(a, b).XYZ()));
-  const TopoDS_Face face = surfacing::makeFace(op, surface, tolerance);
-  // What comes back is held to the supports apart from how it was made.
-  for (const auto& [edgeId, faceId, order] :
-       std::array{std::tuple{edges[0], firstFace, firstOrder},
-                  std::tuple{edges[last], lastFace, lastOrder}})
+}
+
+TopoDS_Face guidedNet(OcctKernel&                  kernel,
+                      const char*                  op,
+                      const std::vector<uint32_t>& edges,
+                      uint32_t                     firstFace,
+                      uint32_t                     lastFace,
+                      int                          firstOrder,
+                      int                          lastOrder,
+                      double                       tolerance)
+{
+  const size_t                last    = edges.size() - 3;
+  Handle(Geom_BSplineSurface) surface = gordonSurface(kernel, edges, last, tolerance);
+  if (surface.IsNull() || !orientNet(kernel, edges, last, surface))
+    return {};
+  std::vector<Handle(Geom_BSplineSurface)> corrections;
+  for (const auto& [edgeId, faceId, order, atStart] :
+       std::array{std::tuple{edges[0], firstFace, firstOrder, true},
+                  std::tuple{edges[last], lastFace, lastOrder, false}})
   {
     if (order < 1)
       continue;
-    const auto  reference = surfacing::boundaryOf(kernel, op, edgeId, faceId);
-    TopoDS_Edge own;
-    double      nearest = Precision::Infinite();
-    for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next())
-    {
-      BRepAdaptor_Curve curve(TopoDS::Edge(it.Current()));
-      const double      d = curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2)
-                         .Distance(reference.point(0.5));
-      if (d < nearest)
-      {
-        nearest = d;
-        own     = TopoDS::Edge(it.Current());
-      }
-    }
-    surfacing::measure(op,
-                       face,
-                       {surfacing::constraint(op, face, own, reference, order)},
-                       tolerance,
-                       false);
+    const double width = reachAcross(kernel, edges, atStart ? 1 : last - 1, atStart, surface);
+    if (!(width > Precision::PConfusion()))
+      return {};
+    const auto correction =
+      endCorrection(kernel, op, surface, edgeId, faceId, order, atStart, width, tolerance);
+    if (correction.IsNull())
+      return {};
+    corrections.push_back(correction);
   }
+  addCorrections(surface, corrections);
+  const TopoDS_Face face = surfacing::makeFace(op, surface, tolerance);
+  measureSupports(kernel,
+                  op,
+                  face,
+                  edges[0],
+                  edges[last],
+                  firstFace,
+                  lastFace,
+                  firstOrder,
+                  lastOrder,
+                  tolerance);
   return face;
 }
+
 } // namespace
 
 EvolutionData skinGuides(OcctKernel&                  kernel,
@@ -648,7 +780,7 @@ EvolutionData skinGuides(OcctKernel&                  kernel,
   // The plane search uses the requested model tolerance; the plate retains all
   // its original physical acceptance checks below.
   TopoDS_Compound planeInputs;
-  BRep_Builder planeBuilder;
+  BRep_Builder    planeBuilder;
   planeBuilder.MakeCompound(planeInputs);
   for (const auto id : edges)
     planeBuilder.Add(planeInputs, get(kernel, id));
@@ -658,12 +790,12 @@ EvolutionData skinGuides(OcctKernel&                  kernel,
     if (!id)
       continue;
     const auto face = TopoDS::Face(get(kernel, id));
-    planarSupports = planarSupports && BRepAdaptor_Surface(face).GetType() == GeomAbs_Plane;
+    planarSupports  = planarSupports && BRepAdaptor_Surface(face).GetType() == GeomAbs_Plane;
     planeBuilder.Add(planeInputs, face);
   }
   const bool planar = planarSupports && BRepBuilderAPI_FindPlane(planeInputs, tolerance).Found();
-  bool attemptedNetwork = false;
-  const auto network = [&]() -> TopoDS_Face {
+  bool       attemptedNetwork = false;
+  const auto network          = [&]() -> TopoDS_Face {
     attemptedNetwork = true;
     try
     {

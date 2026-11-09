@@ -29,17 +29,15 @@
 
 namespace BRepExt
 {
-TopoDS_Shape draftExtrude(const TopoDS_Shape&        profile,
-                          const gp_Vec&              vector,
-                          double                     angle,
-                          Handle(BRepTools_History)& history)
+namespace
 {
-  constexpr const char* op = "extrude";
-  if (!std::isfinite(angle) || std::abs(angle) <= Precision::Angular()
-      || std::abs(angle) >= M_PI / 2)
-    fail(op, invalid_input, "Draft angle must be finite, nonzero and below 90 degrees");
-  if (profile.ShapeType() != TopAbs_FACE)
-    fail(op, unsupported_geometry, "Direct draft requires a planar closed face");
+
+constexpr const char* op = "extrude";
+
+//! The profile's one wire, closed. OCCT's face constructor uses only its first wire; never fill
+//! an omitted hole.
+TopoDS_Wire profileWire(const TopoDS_Shape& profile)
+{
   int         wires = 0;
   TopoDS_Wire wire;
   for (TopExp_Explorer it(profile, TopAbs_WIRE); it.More(); it.Next())
@@ -49,20 +47,16 @@ TopoDS_Shape draftExtrude(const TopoDS_Shape&        profile,
     if (!BRep_Tool::IsClosed(it.Current()))
       fail(op, unsupported_geometry, "Direct draft requires a closed profile wire");
   }
-  // OCCT's face constructor uses only its first wire; never fill an omitted hole.
   if (wires != 1)
     fail(op, unsupported_geometry, "Direct draft requires exactly one profile wire");
-  const BRepAdaptor_Surface support(TopoDS::Face(profile));
-  const gp_Dir              pull(vector);
-  if (support.GetType() != GeomAbs_Plane
-      || std::abs(support.Plane().Axis().Direction().Dot(pull)) < 1 - tolerance::angle)
-    fail(op,
-         unsupported_geometry,
-         "Direct draft requires a planar profile perpendicular to extrusion");
-  if (!BRepCheck_Analyzer(profile).IsValid())
-    fail(op, invalid_input, "The draft profile is invalid");
-  // General curved boundaries use the existing draft path: MakeDraft's approximate
-  // offset sweep is not guaranteed to meet the wall-angle certificate for them.
+  return wire;
+}
+
+//! General curved boundaries use the existing draft path: MakeDraft's approximate
+//! offset sweep is not guaranteed to meet the wall-angle certificate for them. Only lines,
+//! circles and polynomial curves that are straight are drafted here.
+void checkLinesAndCircles(const TopoDS_Shape& profile)
+{
   for (TopExp_Explorer it(profile, TopAbs_EDGE); it.More(); it.Next())
   {
     const BRepAdaptor_Curve curve(TopoDS::Edge(it.Current()));
@@ -88,6 +82,152 @@ TopoDS_Shape draftExtrude(const TopoDS_Shape&        profile,
       if (line.Distance(p) > Precision::Confusion())
         fail(op, unsupported_geometry, "Direct draft requires line or circle profile edges");
   }
+}
+
+//! Verify the actual trimmed faces, not only the sweep's intermediate surfaces: the wall's angle
+//! to the pull direction and its extent, at places inside it.
+void checkWall(const TopoDS_Face&         face,
+               const BRepAdaptor_Surface& surface,
+               const gp_Dir&              pull,
+               const gp_Pnt&              base,
+               double                     height,
+               double                     angle)
+{
+  double u0, u1, v0, v1;
+  BRepTools::UVBounds(face, u0, u1, v0, v1);
+  int samples = 0;
+  for (int i = 0; i < 9; i++)
+    for (int j = 0; j < 5; j++)
+    {
+      const double             u = u0 + (u1 - u0) * (i + .5) / 9, v = v0 + (v1 - v0) * (j + .5) / 5;
+      BRepClass_FaceClassifier inside(face, gp_Pnt2d(u, v), tolerance::sewing);
+      if (inside.State() != TopAbs_IN && inside.State() != TopAbs_ON)
+        continue;
+      gp_Pnt at;
+      gp_Vec du, dv;
+      surface.D1(u, v, at, du, dv);
+      const auto n = du.Crossed(dv);
+      if (!std::isfinite(n.Magnitude()) || n.Magnitude() <= gp::Resolution())
+        fail(op, invalid_result, "The profile draft has a singular wall");
+      const double measured =
+        std::asin(std::clamp(std::abs(n.Dot(gp_Vec(pull))) / n.Magnitude(), 0., 1.));
+      const double z = gp_Vec(base, at).Dot(gp_Vec(pull));
+      if (std::abs(measured - std::abs(angle)) > tolerance::angle || z < -tolerance::sewing
+          || z > height + tolerance::sewing)
+        fail(op, invalid_result, "The profile draft does not meet its requested angle and extent");
+      ++samples;
+    }
+  if (!samples)
+    fail(op, invalid_result, "The profile draft wall could not be checked");
+}
+
+//! The faces of the result sorted into the stationary cap (`bottom`), the far cap and the walls
+//! (`sides`), each wall checked; the caps recorded in `history`.
+void sortFaces(const TopoDS_Shape&       result,
+               const TopoDS_Shape&       profile,
+               const gp_Dir&             pull,
+               const gp_Pnt&             base,
+               double                    height,
+               double                    angle,
+               BRepTools_History&        history,
+               TopoDS_Face&              bottom,
+               std::vector<TopoDS_Face>& sides)
+{
+  int bases = 0, tops = 0;
+  for (TopExp_Explorer it(result, TopAbs_FACE); it.More(); it.Next())
+  {
+    checkCancelled(op);
+    const auto          face = TopoDS::Face(it.Current());
+    BRepAdaptor_Surface surface(face);
+    if (surface.GetType() == GeomAbs_Plane
+        && std::abs(surface.Plane().Axis().Direction().Dot(pull)) > 1 - tolerance::angle)
+    {
+      const double z = gp_Vec(base, surface.Plane().Location()).Dot(gp_Vec(pull));
+      if (std::abs(z) <= tolerance::sewing)
+      {
+        ++bases;
+        bottom = face;
+        history.AddModified(profile, face);
+      }
+      else if (std::abs(z - height) <= tolerance::sewing)
+      {
+        ++tops;
+        history.AddGenerated(profile, face);
+      }
+      else
+        fail(op, invalid_result, "The profile draft has an unexpected cap");
+      continue;
+    }
+    sides.push_back(face);
+    checkWall(face, surface, pull, base, height, angle);
+  }
+  if (bases != 1 || tops != 1 || sides.empty())
+    fail(op, invalid_result, "The profile draft did not preserve its two caps");
+}
+
+//! The sewing's history of the stationary boundary, and each wall generated by an edge of the
+//! profile. Wire-input MakeDraft reports the terminal-cut wall faces. Carry each through our
+//! explicit sewing history, requiring complete unambiguous ancestry for every wall.
+void wallHistory(BRepOffsetAPI_MakeDraft&        maker,
+                 BRepBuilderAPI_Sewing&          sewing,
+                 const TopoDS_Shape&             profile,
+                 const TopoDS_Shape&             result,
+                 const TopoDS_Face&              bottom,
+                 const std::vector<TopoDS_Face>& sides,
+                 BRepTools_History&              history)
+{
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> baseEdges;
+  TopExp::MapShapes(bottom, TopAbs_EDGE, baseEdges);
+  if (!sewingHistory(sewing, {profile}, result, {TopAbs_EDGE, TopAbs_VERTEX}, history).empty())
+    fail(op, invalid_result, "The stationary draft boundary has incomplete sewing history");
+  std::vector<int> owners(sides.size());
+  for (TopExp_Explorer edge(profile, TopAbs_EDGE); edge.More(); edge.Next())
+  {
+    for (const auto& generated : maker.Generated(edge.Current()))
+    {
+      if (generated.ShapeType() != TopAbs_FACE)
+        continue;
+      const auto successor = sewn(sewing, generated);
+      for (size_t i = 0; i < sides.size(); ++i)
+      {
+        if (!successor.IsSame(sides[i]))
+          continue;
+        ++owners[i];
+        history.AddGenerated(edge.Current(), sides[i]);
+        for (TopExp_Explorer boundary(sides[i], TopAbs_EDGE); boundary.More(); boundary.Next())
+          if (!baseEdges.Contains(boundary.Current()))
+            history.AddGenerated(edge.Current(), boundary.Current());
+      }
+    }
+  }
+  for (const int count : owners)
+    if (count != 1)
+      fail(op, invalid_result, "The profile draft has ambiguous generated-wall history");
+}
+
+} // namespace
+
+TopoDS_Shape draftExtrude(const TopoDS_Shape&        profile,
+                          const gp_Vec&              vector,
+                          double                     angle,
+                          Handle(BRepTools_History)& history)
+{
+  if (!std::isfinite(angle) || std::abs(angle) <= Precision::Angular()
+      || std::abs(angle) >= M_PI / 2)
+    fail(op, invalid_input, "Draft angle must be finite, nonzero and below 90 degrees");
+  if (profile.ShapeType() != TopAbs_FACE)
+    fail(op, unsupported_geometry, "Direct draft requires a planar closed face");
+  const TopoDS_Wire         wire = profileWire(profile);
+  const BRepAdaptor_Surface support(TopoDS::Face(profile));
+  const gp_Dir              pull(vector);
+  if (support.GetType() != GeomAbs_Plane
+      || std::abs(support.Plane().Axis().Direction().Dot(pull)) < 1 - tolerance::angle)
+    fail(op,
+         unsupported_geometry,
+         "Direct draft requires a planar profile perpendicular to extrusion");
+  if (!BRepCheck_Analyzer(profile).IsValid())
+    fail(op, invalid_input, "The draft profile is invalid");
+  checkLinesAndCircles(profile);
   const auto              base   = support.Plane().Location();
   const double            height = vector.Magnitude();
   BRepOffsetAPI_MakeDraft maker(wire, pull, std::abs(angle));
@@ -114,96 +254,12 @@ TopoDS_Shape draftExtrude(const TopoDS_Shape&        profile,
   if (!accepts(result, true))
     fail(op, invalid_result, "The profile draft is invalid");
 
-  history                        = new BRepTools_History();
-  int                      bases = 0, tops = 0;
+  history = new BRepTools_History();
   TopoDS_Face              bottom;
   std::vector<TopoDS_Face> sides;
-  for (TopExp_Explorer it(result, TopAbs_FACE); it.More(); it.Next())
-  {
-    checkCancelled(op);
-    const auto          face = TopoDS::Face(it.Current());
-    BRepAdaptor_Surface surface(face);
-    if (surface.GetType() == GeomAbs_Plane
-        && std::abs(surface.Plane().Axis().Direction().Dot(pull)) > 1 - tolerance::angle)
-    {
-      const double z = gp_Vec(base, surface.Plane().Location()).Dot(gp_Vec(pull));
-      if (std::abs(z) <= tolerance::sewing)
-      {
-        ++bases;
-        bottom = face;
-        history->AddModified(profile, face);
-      }
-      else if (std::abs(z - height) <= tolerance::sewing)
-      {
-        ++tops;
-        history->AddGenerated(profile, face);
-      }
-      else
-        fail(op, invalid_result, "The profile draft has an unexpected cap");
-      continue;
-    }
-    sides.push_back(face);
-    // Verify the actual trimmed faces, not only the sweep's intermediate surfaces.
-    double u0, u1, v0, v1;
-    BRepTools::UVBounds(face, u0, u1, v0, v1);
-    int samples = 0;
-    for (int i = 0; i < 9; i++)
-      for (int j = 0; j < 5; j++)
-      {
-        const double u = u0 + (u1 - u0) * (i + .5) / 9, v = v0 + (v1 - v0) * (j + .5) / 5;
-        BRepClass_FaceClassifier inside(face, gp_Pnt2d(u, v), tolerance::sewing);
-        if (inside.State() != TopAbs_IN && inside.State() != TopAbs_ON)
-          continue;
-        gp_Pnt at;
-        gp_Vec du, dv;
-        surface.D1(u, v, at, du, dv);
-        const auto n = du.Crossed(dv);
-        if (!std::isfinite(n.Magnitude()) || n.Magnitude() <= gp::Resolution())
-          fail(op, invalid_result, "The profile draft has a singular wall");
-        const double measured =
-          std::asin(std::clamp(std::abs(n.Dot(gp_Vec(pull))) / n.Magnitude(), 0., 1.));
-        const double z = gp_Vec(base, at).Dot(gp_Vec(pull));
-        if (std::abs(measured - std::abs(angle)) > tolerance::angle || z < -tolerance::sewing
-            || z > height + tolerance::sewing)
-          fail(op,
-               invalid_result,
-               "The profile draft does not meet its requested angle and extent");
-        ++samples;
-      }
-    if (!samples)
-      fail(op, invalid_result, "The profile draft wall could not be checked");
-  }
-  if (bases != 1 || tops != 1 || sides.empty())
-    fail(op, invalid_result, "The profile draft did not preserve its two caps");
-  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> baseEdges;
-  TopExp::MapShapes(bottom, TopAbs_EDGE, baseEdges);
-  if (!sewingHistory(sewing, {profile}, result, {TopAbs_EDGE, TopAbs_VERTEX}, *history).empty())
-    fail(op, invalid_result, "The stationary draft boundary has incomplete sewing history");
-  // Wire-input MakeDraft reports the terminal-cut wall faces. Carry each through our
-  // explicit sewing history, requiring complete unambiguous ancestry for every wall.
-  std::vector<int> owners(sides.size());
-  for (TopExp_Explorer edge(profile, TopAbs_EDGE); edge.More(); edge.Next())
-  {
-    for (const auto& generated : maker.Generated(edge.Current()))
-    {
-      if (generated.ShapeType() != TopAbs_FACE)
-        continue;
-      const auto successor = sewn(sewing, generated);
-      for (size_t i = 0; i < sides.size(); ++i)
-      {
-        if (!successor.IsSame(sides[i]))
-          continue;
-        ++owners[i];
-        history->AddGenerated(edge.Current(), sides[i]);
-        for (TopExp_Explorer boundary(sides[i], TopAbs_EDGE); boundary.More(); boundary.Next())
-          if (!baseEdges.Contains(boundary.Current()))
-            history->AddGenerated(edge.Current(), boundary.Current());
-      }
-    }
-  }
-  for (const int count : owners)
-    if (count != 1)
-      fail(op, invalid_result, "The profile draft has ambiguous generated-wall history");
+  sortFaces(result, profile, pull, base, height, angle, *history, bottom, sides);
+  wallHistory(maker, sewing, profile, result, bottom, sides, *history);
   return result;
 }
+
 } // namespace BRepExt

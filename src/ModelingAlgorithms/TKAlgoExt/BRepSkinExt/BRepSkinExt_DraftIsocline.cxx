@@ -371,92 +371,88 @@ TopoDS_Shape slab(const Ruled& inner,
   return solid;
 }
 
-} // namespace
-
-TopoDS_Shape draftWalls(const TopoDS_Shape&              solid,
-                        const std::vector<TopoDS_Shape>& faces,
-                        double                           angle,
-                        const gp_Dir&                    pull,
-                        const gp_Pln&                    neutral,
-                        double                           tolerance,
-                        Lineage&                         lineage)
+//! For the wall `shape`: its drafted surface into `drafted`, and the solids between the wall and
+//! its draft into `tools`, those below and above the neutral plane into `taken` where the wall
+//! leans in and `joined` where it leans out.
+void wallTools(const TopoDS_Shape&                shape,
+               const gp_Dir&                      pull,
+               const gp_Pln&                      neutral,
+               double                             slope,
+               double                             overlap,
+               double                             tolerance,
+               TopoDS_Compound&                   tools,
+               NCollection_List<TopoDS_Shape>&    taken,
+               NCollection_List<TopoDS_Shape>&    joined,
+               std::vector<Handle(Geom_Surface)>& drafted)
 {
-  if (std::abs(neutral.Axis().Direction().Dot(pull)) < 1.0 - isoclineAngle)
+  const Wall wall = wallOf(TopoDS::Face(shape), neutral, pull, tolerance);
+  // The wall over the whole height, and the walls just inside and outside it.
+  const double z0 = wall.low - overlap, z1 = wall.high + overlap;
+  const auto   shiftAt = [&](double z) { return -z * slope; };
+  // The walls beside it, far enough that the drafted wall stays between them where it
+  // runs on past the neutral plane.
+  const double beside = overlap * (1.0 + std::abs(slope));
+  // Where the curve is bent towards the side it is moved to more than it is moved, it folds.
+  if (std::min(roomFor(wall, pull, shiftAt(z0)), roomFor(wall, pull, shiftAt(z1))) <= collapseSlack)
     fail(op,
-         unsupported_geometry,
-         "a curved face is drafted about a neutral plane across the pull direction only",
-         faces);
-  const double overlap = isoclineOverlap * tolerance;
-  const double slope   = std::tan(angle);
+         no_solution,
+         "the taper moves a wall further than its radius of curvature; reduce the angle",
+         {shape});
+  const Handle(Geom_BSplineCurve) lowR    = shifted(wall, pull, z0, shiftAt(z0)),
+                                  highR   = shifted(wall, pull, z1, shiftAt(z1));
+  const Handle(Geom_BSplineCurve) lowIn   = shifted(wall, pull, z0, -beside),
+                                  highIn  = shifted(wall, pull, z1, -beside);
+  const Handle(Geom_BSplineCurve) lowOut  = shifted(wall, pull, z0, beside),
+                                  highOut = shifted(wall, pull, z1, beside);
+  if (lowR.IsNull() || highR.IsNull() || lowIn.IsNull() || highIn.IsNull() || lowOut.IsNull()
+      || highOut.IsNull())
+    fail(op, no_solution, "the curve of a wall could not be moved sideways to 1e-7", {shape});
+  const Ruled isocline = ruledBetween(lowR, highR), inside = ruledBetween(lowIn, highIn),
+              outside = ruledBetween(lowOut, highOut);
+  if (isocline.surface.IsNull() || inside.surface.IsNull() || outside.surface.IsNull())
+    fail(op, no_solution, "the drafted wall could not be built", {shape});
+  drafted.push_back(isocline.surface);
 
-  TopoDS_Compound tools;
-  BRep_Builder().MakeCompound(tools);
-  NCollection_List<TopoDS_Shape>    taken, joined;
-  std::vector<Handle(Geom_Surface)> drafted;
-  for (const TopoDS_Shape& shape : faces)
+  // Below and above the neutral plane the wall leans to opposite sides.
+  struct Part
   {
-    const Wall wall = wallOf(TopoDS::Face(shape), neutral, pull, tolerance);
-    // The wall over the whole height, and the walls just inside and outside it.
-    const double z0 = wall.low - overlap, z1 = wall.high + overlap;
-    const auto   shiftAt = [&](double z) { return -z * slope; };
-    // The walls beside it, far enough that the drafted wall stays between them where it
-    // runs on past the neutral plane.
-    const double beside = overlap * (1.0 + std::abs(slope));
-    // Where the curve is bent towards the side it is moved to more than it is moved, it folds.
-    if (std::min(roomFor(wall, pull, shiftAt(z0)), roomFor(wall, pull, shiftAt(z1)))
-        <= collapseSlack)
-      fail(op,
-           no_solution,
-           "the taper moves a wall further than its radius of curvature; reduce the angle",
-           {shape});
-    const Handle(Geom_BSplineCurve) lowR    = shifted(wall, pull, z0, shiftAt(z0)),
-                                    highR   = shifted(wall, pull, z1, shiftAt(z1));
-    const Handle(Geom_BSplineCurve) lowIn   = shifted(wall, pull, z0, -beside),
-                                    highIn  = shifted(wall, pull, z1, -beside);
-    const Handle(Geom_BSplineCurve) lowOut  = shifted(wall, pull, z0, beside),
-                                    highOut = shifted(wall, pull, z1, beside);
-    if (lowR.IsNull() || highR.IsNull() || lowIn.IsNull() || highIn.IsNull() || lowOut.IsNull()
-        || highOut.IsNull())
-      fail(op, no_solution, "the curve of a wall could not be moved sideways to 1e-7", {shape});
-    const Ruled isocline = ruledBetween(lowR, highR), inside = ruledBetween(lowIn, highIn),
-                outside = ruledBetween(lowOut, highOut);
-    if (isocline.surface.IsNull() || inside.surface.IsNull() || outside.surface.IsNull())
-      fail(op, no_solution, "the drafted wall could not be built", {shape});
-    drafted.push_back(isocline.surface);
+    double from, to;
+  };
 
-    // Below and above the neutral plane the wall leans to opposite sides.
-    struct Part
-    {
-      double from, to;
-    };
-
-    std::vector<Part> parts;
-    if (wall.low < -tolerance)
-      parts.push_back({wall.low, std::min(wall.high, 0.0)});
-    if (wall.high > tolerance)
-      parts.push_back({std::max(wall.low, 0.0), wall.high});
-    for (const Part& part : parts)
-    {
-      const double middle   = 0.5 * (part.from + part.to);
-      const bool   outwards = shiftAt(middle) > 0;
-      // What is joined ends at the wall's own end; what is taken, and either at the
-      // neutral plane, runs on by the overlap.
-      const bool endsLow      = std::abs(part.from - wall.low) <= tolerance,
-                 endsHigh     = std::abs(part.to - wall.high) <= tolerance;
-      const double       a    = outwards && endsLow ? part.from : part.from - overlap;
-      const double       b    = outwards && endsHigh ? part.to : part.to + overlap;
-      const TopoDS_Shape tool = outwards ? slab(inside, isocline, z0, z1, a, b, wall.closed)
-                                         : slab(isocline, outside, z0, z1, a, b, wall.closed);
-      if (tool.IsNull())
-        fail(op, no_solution, "the solid between a wall and its draft could not be built", {shape});
-      (outwards ? joined : taken).Append(tool);
-      BRep_Builder().Add(tools, tool);
-    }
+  std::vector<Part> parts;
+  if (wall.low < -tolerance)
+    parts.push_back({wall.low, std::min(wall.high, 0.0)});
+  if (wall.high > tolerance)
+    parts.push_back({std::max(wall.low, 0.0), wall.high});
+  for (const Part& part : parts)
+  {
+    const double middle   = 0.5 * (part.from + part.to);
+    const bool   outwards = shiftAt(middle) > 0;
+    // What is joined ends at the wall's own end; what is taken, and either at the
+    // neutral plane, runs on by the overlap.
+    const bool endsLow      = std::abs(part.from - wall.low) <= tolerance,
+               endsHigh     = std::abs(part.to - wall.high) <= tolerance;
+    const double       a    = outwards && endsLow ? part.from : part.from - overlap;
+    const double       b    = outwards && endsHigh ? part.to : part.to + overlap;
+    const TopoDS_Shape tool = outwards ? slab(inside, isocline, z0, z1, a, b, wall.closed)
+                                       : slab(isocline, outside, z0, z1, a, b, wall.closed);
+    if (tool.IsNull())
+      fail(op, no_solution, "the solid between a wall and its draft could not be built", {shape});
+    (outwards ? joined : taken).Append(tool);
+    BRep_Builder().Add(tools, tool);
   }
+}
 
-  // Take, then join.
+//! Take, then join: the solids that the taper removes cut from the body, those it adds fused to
+//! it, both followed in `lineage` and `swept`.
+TopoDS_Shape takeThenJoin(const TopoDS_Shape&                   solid,
+                          const std::vector<TopoDS_Shape>&      faces,
+                          const NCollection_List<TopoDS_Shape>& taken,
+                          const NCollection_List<TopoDS_Shape>& joined,
+                          Lineage&                              lineage,
+                          Lineage&                              swept)
+{
   TopoDS_Shape                   result = solid;
-  Lineage                        swept(tools);
   NCollection_List<TopoDS_Shape> body;
   body.Append(result);
   if (!taken.IsEmpty())
@@ -487,7 +483,17 @@ TopoDS_Shape draftWalls(const TopoDS_Shape&              solid,
     swept.through(fuse);
     result = fuse.Shape();
   }
-  // One face again where what was joined lies in a neighbour; the edges that the body had are kept.
+  return result;
+}
+
+//! One face again where what was joined lies in a neighbour; the edges that the body had are kept.
+TopoDS_Shape unified(const TopoDS_Shape&              joinedBody,
+                     const TopoDS_Shape&              solid,
+                     const std::vector<TopoDS_Shape>& faces,
+                     Lineage&                         lineage,
+                     Lineage&                         swept)
+{
+  TopoDS_Shape                                           result = joinedBody;
   ShapeUpgrade_UnifySameDomain                           unify(result, true, true, false);
   NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> keep;
   NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> ofWalls;
@@ -506,9 +512,18 @@ TopoDS_Shape draftWalls(const TopoDS_Shape&              solid,
   swept.throughHistory(unify.History());
   lineage.within(result);
   swept.within(result);
+  return result;
+}
 
-  // Each face of the result that came with a solid of ours is the drafted wall, or lies in a
-  // face that the body had; anything else is a step that the draft would leave behind.
+//! Each face of the result that came with a solid of ours is the drafted wall, or lies in a
+//! face that the body had; anything else is a step that the draft would leave behind. Returns
+//! the faces of each drafted wall.
+std::vector<std::vector<TopoDS_Shape>> draftedFaces(
+  const std::vector<TopoDS_Shape>&         faces,
+  const std::vector<Handle(Geom_Surface)>& drafted,
+  Lineage&                                 lineage,
+  Lineage&                                 swept)
+{
   NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> known;
   for (const TopoDS_Shape& face : lineage.all())
     known.Add(face);
@@ -537,7 +552,16 @@ TopoDS_Shape draftWalls(const TopoDS_Shape&              solid,
            faces);
     }
   }
-  // Apart from the Boolean's word: the angle of the drafted walls to the pull direction.
+  return walls;
+}
+
+//! Apart from the Boolean's word: the angle of the drafted walls to the pull direction.
+void checkAngles(const std::vector<TopoDS_Shape>&              faces,
+                 const std::vector<std::vector<TopoDS_Shape>>& walls,
+                 double                                        angle,
+                 const gp_Dir&                                 pull,
+                 Lineage&                                      lineage)
+{
   for (size_t i = 0; i < faces.size(); i++)
   {
     if (walls[i].empty())
@@ -563,6 +587,41 @@ TopoDS_Shape draftWalls(const TopoDS_Shape&              solid,
     }
     lineage.set(faces[i], walls[i]);
   }
+}
+
+} // namespace
+
+TopoDS_Shape draftWalls(const TopoDS_Shape&              solid,
+                        const std::vector<TopoDS_Shape>& faces,
+                        double                           angle,
+                        const gp_Dir&                    pull,
+                        const gp_Pln&                    neutral,
+                        double                           tolerance,
+                        Lineage&                         lineage)
+{
+  if (std::abs(neutral.Axis().Direction().Dot(pull)) < 1.0 - isoclineAngle)
+    fail(op,
+         unsupported_geometry,
+         "a curved face is drafted about a neutral plane across the pull direction only",
+         faces);
+  const double overlap = isoclineOverlap * tolerance;
+  const double slope   = std::tan(angle);
+
+  TopoDS_Compound tools;
+  BRep_Builder().MakeCompound(tools);
+  NCollection_List<TopoDS_Shape>    taken, joined;
+  std::vector<Handle(Geom_Surface)> drafted;
+  for (const TopoDS_Shape& shape : faces)
+    wallTools(shape, pull, neutral, slope, overlap, tolerance, tools, taken, joined, drafted);
+
+  // Take, then join.
+  Lineage            swept(tools);
+  const TopoDS_Shape result = unified(takeThenJoin(solid, faces, taken, joined, lineage, swept),
+                                      solid,
+                                      faces,
+                                      lineage,
+                                      swept);
+  checkAngles(faces, draftedFaces(faces, drafted, lineage, swept), angle, pull, lineage);
   return result;
 }
 

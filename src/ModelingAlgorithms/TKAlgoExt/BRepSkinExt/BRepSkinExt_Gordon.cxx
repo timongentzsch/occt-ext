@@ -275,7 +275,7 @@ void certify(const Handle(Geom_BSplineSurface)&            surface,
     surface->Bounds(u0, u1, v0, v1);
     const auto samples = [](const auto& knots) {
       std::vector<double> result;
-      const double full = knots.Last() - knots.First();
+      const double        full = knots.Last() - knots.First();
       for (int k = knots.Lower(); k < knots.Upper(); ++k)
       {
         const int count = std::max(4, int(std::ceil(32 * (knots(k + 1) - knots(k)) / full)));
@@ -285,8 +285,8 @@ void certify(const Handle(Geom_BSplineSurface)&            surface,
       result.push_back(knots.Last());
       return result;
     };
-    const auto us = samples(surface->UKnots()), vs = samples(surface->VKnots());
-    const int nu = int(us.size()) - 1, nv = int(vs.size()) - 1;
+    const auto          us = samples(surface->UKnots()), vs = samples(surface->VKnots());
+    const int           nu = int(us.size()) - 1, nv = int(vs.size()) - 1;
     std::vector<gp_Vec> normals(size_t(nu + 1) * size_t(nv + 1));
     for (int i = 0; i <= nu; ++i)
       for (int j = 0; j <= nv; ++j)
@@ -607,24 +607,23 @@ std::vector<Handle(Geom_BSplineCurve)> onOneGrid(
   return {};
 }
 
-//! The surface through closed rings and guides, as the sum of the skin of the rings and the skin of
-//! the guides less the skin of their crossings. All of them are made again on one grid each, every
-//! guide at one parameter of the rings, the mean of the shares of their lengths at which it crosses
-//! them, and every ring at one of the guides likewise. Null where a curve cannot be made again or a
-//! guide does not run from ring to ring in their order, for GeomFill_Gordon to say what it finds.
-Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&       rings,
-                                     const std::vector<Handle(Geom_BSplineCurve)>& guidesGiven,
-                                     std::vector<std::vector<Crossing>>&           at,
-                                     double                                        tolerance)
+//! The share of the length of `c` up to `u`.
+double shareTo(const Handle(Geom_BSplineCurve)& c, double u)
+{
+  GeomAdaptor_Curve along(c);
+  return GCPnts_AbscissaPoint::Length(along, c->FirstParameter(), u)
+         / GCPnts_AbscissaPoint::Length(along, c->FirstParameter(), c->LastParameter());
+}
+
+//! Every seam halfway along its ring's stretch between the two guides around it, so that rings
+//! of one shape have every guide at one share of their length, and nothing to warp. False where
+//! a seam's place is not found.
+bool reseamRings(std::vector<Handle(Geom_BSplineCurve)>&       rings,
+                 const std::vector<Handle(Geom_BSplineCurve)>& guidesGiven,
+                 std::vector<std::vector<Crossing>>&           at,
+                 double                                        tolerance)
 {
   const size_t np = rings.size(), ng = guidesGiven.size();
-  const auto   shareTo = [](const Handle(Geom_BSplineCurve)& c, double u) {
-    GeomAdaptor_Curve along(c);
-    return GCPnts_AbscissaPoint::Length(along, c->FirstParameter(), u)
-           / GCPnts_AbscissaPoint::Length(along, c->FirstParameter(), c->LastParameter());
-  };
-  // Every seam halfway along its ring's stretch between the two guides around it, so that rings
-  // of one shape have every guide at one share of their length, and nothing to warp.
   for (size_t i = 0; i < np; ++i)
   {
     double low = 1, high = 0;
@@ -641,7 +640,7 @@ Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&    
       GCPnts_AbscissaPoint::Length(along, rings[i]->FirstParameter(), rings[i]->LastParameter());
     GCPnts_AbscissaPoint place(along, share * whole, rings[i]->FirstParameter(), tolerance / 16);
     if (!place.IsDone())
-      return nullptr;
+      return false;
     if (rings[i]->Value(place.Parameter()).Distance(rings[i]->StartPoint()) > tolerance)
     {
       rings[i] = reseamed(rings[i], place.Parameter(), tolerance);
@@ -649,13 +648,26 @@ Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&    
         at[i][j] = crossingOf(rings[i], guidesGiven[j]);
     }
   }
-  // The guides in the order they cross the first ring from its seam.
-  std::vector<size_t> order(ng);
+  return true;
+}
+
+//! The guides in the order they cross the first ring from its seam (`order`), the mean share of
+//! the rings' lengths at each (`nodes`), and per ring the map from those to its own shares. False
+//! where a ring meets the guides in another order.
+bool ringGrid(const std::vector<Handle(Geom_BSplineCurve)>& rings,
+              const std::vector<std::vector<Crossing>>&     at,
+              size_t                                        ng,
+              std::vector<size_t>&                          order,
+              std::vector<double>&                          nodes,
+              std::vector<Monotone>&                        ringShares)
+{
+  const size_t np = rings.size();
+  order.resize(ng);
   std::iota(order.begin(), order.end(), size_t(0));
   std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
     return at[0][a].onFirst < at[0][b].onFirst;
   });
-  std::vector<double>              nodes{0.0};
+  nodes = {0.0};
   std::vector<std::vector<double>> onRing(np, std::vector<double>{0.0});
   for (size_t k = 0; k < ng; ++k)
   {
@@ -668,24 +680,37 @@ Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&    
     nodes.push_back(mean);
   }
   nodes.push_back(1.0);
-  std::vector<Monotone> ringShares;
   for (size_t i = 0; i < np; ++i)
   {
     onRing[i].push_back(1.0);
     for (size_t k = 1; k < onRing[i].size(); ++k)
       if (onRing[i][k] <= onRing[i][k - 1] || nodes[k] <= nodes[k - 1])
-        return nullptr;
+        return false;
     ringShares.emplace_back(nodes, onRing[i]);
   }
-  // Each guide from the first ring to the last, and the rings' places along them.
-  std::vector<Handle(Geom_BSplineCurve)> runs;
-  std::vector<std::vector<double>>       onGuide(ng);
-  std::vector<double>                    places(np, 0.0);
+  return true;
+}
+
+//! Each guide from the first ring to the last (`runs`), the mean share of the guides' lengths at
+//! each ring (`places`), and per guide the map from those to its own shares. False where a guide
+//! is closed or meets the rings in another order.
+bool guideGrid(const std::vector<Handle(Geom_BSplineCurve)>& guidesGiven,
+               const std::vector<std::vector<Crossing>>&     at,
+               const std::vector<size_t>&                    order,
+               size_t                                        np,
+               double                                        tolerance,
+               std::vector<Handle(Geom_BSplineCurve)>&       runs,
+               std::vector<double>&                          places,
+               std::vector<Monotone>&                        guideShares)
+{
+  const size_t                     ng = guidesGiven.size();
+  std::vector<std::vector<double>> onGuide(ng);
+  places.assign(np, 0.0);
   for (size_t k = 0; k < ng; ++k)
   {
     const size_t j = order[k];
     if (closedCurve(guidesGiven[j], tolerance))
-      return nullptr;
+      return false;
     const Handle(Geom_BSplineCurve) run =
       Handle(Geom_BSplineCurve)::DownCast(guidesGiven[j]->Copy());
     const bool   back  = at[0][j].onSecond > at[np - 1][j].onSecond;
@@ -700,23 +725,22 @@ Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&    
     }
     runs.push_back(run);
   }
-  std::vector<Monotone> guideShares;
   for (size_t k = 0; k < ng; ++k)
   {
     for (size_t i = 1; i < np; ++i)
       if (onGuide[k][i] <= onGuide[k][i - 1] || places[i] <= places[i - 1])
-        return nullptr;
+        return false;
     guideShares.emplace_back(places, onGuide[k]);
   }
-  const auto newRings  = onOneGrid(rings, ringShares, nodes, false);
-  const auto newGuides = onOneGrid(runs, guideShares, places, false);
-  if (newRings.empty() || newGuides.empty())
-    return nullptr;
+  return true;
+}
 
-  // The skin of the rings: each column of their poles through the rings' places.
-  const GeomAlgoExt::CubicThrough across(places);
-  const int                       nu = newRings[0]->NbPoles();
-  NCollection_Array2<gp_Pnt>      ringPoles(1, nu, 1, across.poles);
+//! The skin of the rings: each column of their poles through the rings' places.
+Handle(Geom_BSplineSurface) ringSkinOf(const std::vector<Handle(Geom_BSplineCurve)>& newRings,
+                                       const GeomAlgoExt::CubicThrough&              across)
+{
+  const int                  nu = newRings[0]->NbPoles();
+  NCollection_Array2<gp_Pnt> ringPoles(1, nu, 1, across.poles);
   for (int a = 1; a <= nu; ++a)
   {
     std::vector<gp_Pnt> values;
@@ -733,37 +757,46 @@ Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&    
                                                                  across.mults,
                                                                  3,
                                                                  3);
+  return ringSkin;
+}
 
-  // The closed spline round through values at the seam and at the guides' parameters.
-  const auto round = [&](const std::vector<gp_Pnt>& values) {
-    Handle(NCollection_HArray1<gp_Pnt>) points =
-      new NCollection_HArray1<gp_Pnt>(1, int(values.size()));
-    Handle(NCollection_HArray1<double>) params =
-      new NCollection_HArray1<double>(1, int(nodes.size()));
-    for (size_t k = 0; k < values.size(); ++k)
-      points->SetValue(int(k) + 1, values[k]);
-    for (size_t k = 0; k < nodes.size(); ++k)
-      params->SetValue(int(k) + 1, nodes[k]);
-    GeomAPI_Interpolate fit(points, params, true, 0.0);
-    fit.Perform();
-    Handle(Geom_BSplineCurve) curve;
-    if (fit.IsDone())
-    {
-      curve = fit.Curve();
-      // Not periodic it still runs on past its period: clamped by a segment of one period.
-      curve->SetNotPeriodic();
-      curve->Segment(nodes.front(), nodes.back());
-    }
-    return curve;
-  };
-  // The skin of the guides, and with the seam as one of them, the iso of the rings' skin there.
+//! The closed spline round through values at the seam and at the guides' parameters `nodes`.
+Handle(Geom_BSplineCurve) closedRound(const std::vector<gp_Pnt>& values,
+                                      const std::vector<double>& nodes)
+{
+  Handle(NCollection_HArray1<gp_Pnt>) points =
+    new NCollection_HArray1<gp_Pnt>(1, int(values.size()));
+  Handle(NCollection_HArray1<double>) params =
+    new NCollection_HArray1<double>(1, int(nodes.size()));
+  for (size_t k = 0; k < values.size(); ++k)
+    points->SetValue(int(k) + 1, values[k]);
+  for (size_t k = 0; k < nodes.size(); ++k)
+    params->SetValue(int(k) + 1, nodes[k]);
+  GeomAPI_Interpolate fit(points, params, true, 0.0);
+  fit.Perform();
+  Handle(Geom_BSplineCurve) curve;
+  if (fit.IsDone())
+  {
+    curve = fit.Curve();
+    // Not periodic it still runs on past its period: clamped by a segment of one period.
+    curve->SetNotPeriodic();
+    curve->Segment(nodes.front(), nodes.back());
+  }
+  return curve;
+}
+
+//! The skin of the guides, and with the seam as one of them, the iso of the rings' skin there.
+Handle(Geom_BSplineSurface) guideSkinOf(const Handle(Geom_BSplineSurface)&            ringSkin,
+                                        const std::vector<Handle(Geom_BSplineCurve)>& newGuides,
+                                        const std::vector<double>&                    nodes)
+{
   const Handle(Geom_BSplineCurve) seam = Handle(Geom_BSplineCurve)::DownCast(ringSkin->UIso(0.0));
   for (int k = 2; k < newGuides[0]->NbKnots(); ++k)
     seam->InsertKnot(newGuides[0]->Knot(k), newGuides[0]->Multiplicity(k), 1e-12, false);
   const int nv = newGuides[0]->NbPoles();
   if (seam->NbPoles() != nv)
     return nullptr;
-  Handle(Geom_BSplineSurface) guideSkin, crossings;
+  Handle(Geom_BSplineSurface) guideSkin;
   {
     std::vector<Handle(Geom_BSplineCurve)> rows;
     for (int b = 1; b <= nv; ++b)
@@ -771,7 +804,7 @@ Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&    
       std::vector<gp_Pnt> values{seam->Pole(b)};
       for (const auto& g : newGuides)
         values.push_back(g->Pole(b));
-      rows.push_back(round(values));
+      rows.push_back(closedRound(values, nodes));
       if (rows.back().IsNull())
         return nullptr;
     }
@@ -787,38 +820,52 @@ Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&    
                                         3,
                                         3);
   }
+  return guideSkin;
+}
+
+//! The crossings: closed round each ring, then each column across.
+Handle(Geom_BSplineSurface) crossingsOf(const std::vector<Handle(Geom_BSplineCurve)>& newRings,
+                                        const std::vector<double>&                    nodes,
+                                        const GeomAlgoExt::CubicThrough&              across)
+{
+  const size_t                           np = newRings.size();
+  Handle(Geom_BSplineSurface)            crossings;
+  std::vector<Handle(Geom_BSplineCurve)> rows;
+  for (size_t i = 0; i < np; ++i)
   {
-    // The crossings: closed round each ring, then each column across.
-    std::vector<Handle(Geom_BSplineCurve)> rows;
-    for (size_t i = 0; i < np; ++i)
-    {
-      std::vector<gp_Pnt> values{newRings[i]->StartPoint()};
-      for (size_t k = 1; k + 1 < nodes.size(); ++k)
-        values.push_back(newRings[i]->Value(nodes[k]));
-      rows.push_back(round(values));
-      if (rows.back().IsNull())
-        return nullptr;
-    }
-    const int                  count = rows[0]->NbPoles();
-    NCollection_Array2<gp_Pnt> poles(1, count, 1, across.poles);
-    for (int a = 1; a <= count; ++a)
-    {
-      std::vector<gp_Pnt> values;
-      for (const auto& c : rows)
-        values.push_back(c->Pole(a));
-      const auto column = across.through(values);
-      for (int b = 1; b <= across.poles; ++b)
-        poles(a, b) = column[size_t(b - 1)];
-    }
-    crossings = new Geom_BSplineSurface(poles,
-                                        rows[0]->Knots(),
-                                        across.knots,
-                                        rows[0]->Multiplicities(),
-                                        across.mults,
-                                        3,
-                                        3);
+    std::vector<gp_Pnt> values{newRings[i]->StartPoint()};
+    for (size_t k = 1; k + 1 < nodes.size(); ++k)
+      values.push_back(newRings[i]->Value(nodes[k]));
+    rows.push_back(closedRound(values, nodes));
+    if (rows.back().IsNull())
+      return nullptr;
   }
-  // On one set of knots, and summed.
+  const int                  count = rows[0]->NbPoles();
+  NCollection_Array2<gp_Pnt> poles(1, count, 1, across.poles);
+  for (int a = 1; a <= count; ++a)
+  {
+    std::vector<gp_Pnt> values;
+    for (const auto& c : rows)
+      values.push_back(c->Pole(a));
+    const auto column = across.through(values);
+    for (int b = 1; b <= across.poles; ++b)
+      poles(a, b) = column[size_t(b - 1)];
+  }
+  crossings = new Geom_BSplineSurface(poles,
+                                      rows[0]->Knots(),
+                                      across.knots,
+                                      rows[0]->Multiplicities(),
+                                      across.mults,
+                                      3,
+                                      3);
+  return crossings;
+}
+
+//! On one set of knots, and summed: the rings' skin and the guides' less their crossings.
+Handle(Geom_BSplineSurface) summed(const Handle(Geom_BSplineSurface)& ringSkin,
+                                   const Handle(Geom_BSplineSurface)& guideSkin,
+                                   const Handle(Geom_BSplineSurface)& crossings)
+{
   const std::vector<Handle(Geom_BSplineSurface)> skins{ringSkin, guideSkin, crossings};
   for (const auto& from : skins)
     for (const auto& to : skins)
@@ -841,51 +888,143 @@ Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&    
   return ringSkin;
 }
 
+//! The surface through closed rings and guides, as the sum of the skin of the rings and the skin of
+//! the guides less the skin of their crossings. All of them are made again on one grid each, every
+//! guide at one parameter of the rings, the mean of the shares of their lengths at which it crosses
+//! them, and every ring at one of the guides likewise. Null where a curve cannot be made again or a
+//! guide does not run from ring to ring in their order, for GeomFill_Gordon to say what it finds.
+Handle(Geom_BSplineSurface) ringsNet(std::vector<Handle(Geom_BSplineCurve)>&       rings,
+                                     const std::vector<Handle(Geom_BSplineCurve)>& guidesGiven,
+                                     std::vector<std::vector<Crossing>>&           at,
+                                     double                                        tolerance)
+{
+  const size_t np = rings.size(), ng = guidesGiven.size();
+  if (!reseamRings(rings, guidesGiven, at, tolerance))
+    return nullptr;
+  std::vector<size_t>   order;
+  std::vector<double>   nodes;
+  std::vector<Monotone> ringShares;
+  if (!ringGrid(rings, at, ng, order, nodes, ringShares))
+    return nullptr;
+  std::vector<Handle(Geom_BSplineCurve)> runs;
+  std::vector<double>                    places;
+  std::vector<Monotone>                  guideShares;
+  if (!guideGrid(guidesGiven, at, order, np, tolerance, runs, places, guideShares))
+    return nullptr;
+  const auto newRings  = onOneGrid(rings, ringShares, nodes, false);
+  const auto newGuides = onOneGrid(runs, guideShares, places, false);
+  if (newRings.empty() || newGuides.empty())
+    return nullptr;
+  const GeomAlgoExt::CubicThrough   across(places);
+  const Handle(Geom_BSplineSurface) ringSkin  = ringSkinOf(newRings, across);
+  const Handle(Geom_BSplineSurface) guideSkin = guideSkinOf(ringSkin, newGuides, nodes);
+  if (guideSkin.IsNull())
+    return nullptr;
+  const Handle(Geom_BSplineSurface) crossings = crossingsOf(newRings, nodes, across);
+  if (crossings.IsNull())
+    return nullptr;
+  return summed(ringSkin, guideSkin, crossings);
+}
+
 } // namespace
 
-EvolutionData skinGordon(OcctKernel&                  kernel,
-                         const std::vector<uint32_t>& profileIds,
-                         const std::vector<uint32_t>& guideIds,
-                         bool                         solid,
-                         double                       tolerance)
+namespace
 {
-  if (profileIds.size() < 2 || guideIds.size() < 2 || !std::isfinite(tolerance) || tolerance <= 0)
-    fail(op, invalid_input, "two or more profiles and two or more guides are required");
-  const size_t                           np = profileIds.size(), ng = guideIds.size();
-  std::vector<Handle(Geom_BSplineCurve)> profiles(np), guides(ng);
-  for (size_t i = 0; i < np; ++i)
-    profiles[i] = curveOf(get(kernel, profileIds[i]), tolerance);
-  for (size_t j = 0; j < ng; ++j)
-    guides[j] = curveOf(get(kernel, guideIds[j]), tolerance);
 
-  // Where every guide meets every profile.
-  std::vector<std::vector<Crossing>> at(np, std::vector<Crossing>(ng));
-  auto                               meet = [&](size_t i) {
+//! The net of a Gordon surface: the profiles and guides, where every guide meets every profile
+//! and which way each runs against the first of its kind. Closed profiles are begun between the
+//! same two guides and run the same way round; what open curves have beyond the outer curves of
+//! the other kind is left out.
+class GordonNet
+{
+public:
+  GordonNet(OcctKernel&                  kernel,
+            const std::vector<uint32_t>& profileIds,
+            const std::vector<uint32_t>& guideIds,
+            double                       tolerance)
+      : tolerance(tolerance),
+        np(profileIds.size()),
+        ng(guideIds.size()),
+        profiles(np),
+        guides(ng),
+        at(np, std::vector<Crossing>(ng))
+  {
+    for (size_t i = 0; i < np; ++i)
+      profiles[i] = curveOf(get(kernel, profileIds[i]), tolerance);
     for (size_t j = 0; j < ng; ++j)
-    {
-      at[i][j] = crossingOf(profiles[i], guides[j]);
-      if (at[i][j].gap > tolerance)
-        fail(
-          op,
-          no_solution,
-          "no surface through the profiles and guides: not every guide meets every profile (guide "
-            + std::to_string(j + 1) + " passes profile " + std::to_string(i + 1)
-            + " at a distance of " + std::to_string(at[i][j].gap) + ")");
-    }
-  };
-  for (size_t i = 0; i < np; ++i)
-    meet(i);
+      guides[j] = curveOf(get(kernel, guideIds[j]), tolerance);
+    // Where every guide meets every profile.
+    for (size_t i = 0; i < np; ++i)
+      meet(i);
 
-  size_t closedProfiles = 0;
-  for (const auto& c : profiles)
-    closedProfiles += closedCurve(c, tolerance) ? 1 : 0;
-  if (closedProfiles != 0 && closedProfiles != np)
-    fail(op, invalid_input, "the profiles have to be all closed or all open");
-  const bool tube = closedProfiles == np;
+    size_t closedProfiles = 0;
+    for (const auto& c : profiles)
+      closedProfiles += closedCurve(c, tolerance) ? 1 : 0;
+    if (closedProfiles != 0 && closedProfiles != np)
+      fail(op, invalid_input, "the profiles have to be all closed or all open");
+    tube = closedProfiles == np;
+    runWays();
+    if (tube)
+      alignRings();
+    else
+      trimProfiles();
+    trimGuides();
+  }
 
-  // Which way each curve runs against the first of its kind: by its direction at the
-  // crossings they share.
-  std::vector<double> profileWay(np, 1.0), guideWay(ng, 1.0);
+  //! The surface through the net: the sum of skins for rings that do not run alike, else
+  //! GeomFill_Gordon's; fails where neither is found or it is only approximate.
+  Handle(Geom_BSplineSurface) netSurface();
+
+  //! The surface checked against every curve of the net.
+  void certifyNet(const Handle(Geom_BSplineSurface)& surface) const
+  {
+    certify(surface, profiles, guides, at, profileWay, guideWay, tolerance);
+  }
+
+private:
+  //! Where every guide meets profile `i`; fails where one passes it.
+  void meet(size_t i);
+
+  //! Which way each curve runs against the first of its kind: by its direction at the
+  //! crossings they share.
+  void runWays();
+
+  //! All the same way round; the guides in their order round the first profile, and the widest
+  //! stretch of it between two neighbours: the seams go into that stretch.
+  void alignRings();
+
+  //! What a profile has beyond the outer guides is left out.
+  void trimProfiles();
+
+  //! And what a guide has beyond the outer profiles.
+  void trimGuides();
+
+  const double                           tolerance;
+  const size_t                           np, ng;
+  std::vector<Handle(Geom_BSplineCurve)> profiles, guides;
+  std::vector<std::vector<Crossing>>     at;
+  bool                                   tube = false;
+  std::vector<double>                    profileWay, guideWay;
+};
+
+void GordonNet::meet(size_t i)
+{
+  for (size_t j = 0; j < ng; ++j)
+  {
+    at[i][j] = crossingOf(profiles[i], guides[j]);
+    if (at[i][j].gap > tolerance)
+      fail(op,
+           no_solution,
+           "no surface through the profiles and guides: not every guide meets every profile (guide "
+             + std::to_string(j + 1) + " passes profile " + std::to_string(i + 1)
+             + " at a distance of " + std::to_string(at[i][j].gap) + ")");
+  }
+}
+
+void GordonNet::runWays()
+{
+  profileWay.assign(np, 1.0);
+  guideWay.assign(ng, 1.0);
   for (size_t i = 1; i < np; ++i)
   {
     double agree = 0;
@@ -904,100 +1043,98 @@ EvolutionData skinGordon(OcctKernel&                  kernel,
                  .Dot(tangentAt(guides[0], at[i][0].onSecond).Normalized());
     guideWay[j] = agree < 0 ? -1.0 : 1.0;
   }
+}
 
-  if (tube)
+void GordonNet::alignRings()
+{
+  for (size_t i = 1; i < np; ++i)
+    if (profileWay[i] < 0)
+    {
+      profiles[i]->Reverse();
+      profileWay[i] = 1.0;
+      meet(i);
+    }
+  std::vector<size_t> round(ng);
+  std::iota(round.begin(), round.end(), size_t(0));
+  std::sort(round.begin(), round.end(), [&](size_t a, size_t b) {
+    return at[0][a].onFirst < at[0][b].onFirst;
+  });
+  const double period0 = profiles[0]->LastParameter() - profiles[0]->FirstParameter();
+  size_t       widest  = 0;
+  double       width   = -1;
+  for (size_t k = 0; k < ng; ++k)
   {
-    // All the same way round.
-    for (size_t i = 1; i < np; ++i)
-      if (profileWay[i] < 0)
-      {
-        profiles[i]->Reverse();
-        profileWay[i] = 1.0;
-        meet(i);
-      }
-    // The guides in their order round the first profile, and the widest stretch of it
-    // between two neighbours: the seams go into that stretch.
-    std::vector<size_t> round(ng);
-    std::iota(round.begin(), round.end(), size_t(0));
-    std::sort(round.begin(), round.end(), [&](size_t a, size_t b) {
-      return at[0][a].onFirst < at[0][b].onFirst;
+    double w = at[0][round[(k + 1) % ng]].onFirst - at[0][round[k]].onFirst;
+    if (w <= 0)
+      w += period0;
+    if (w > width)
+    {
+      width  = w;
+      widest = k;
+    }
+  }
+  const size_t before = round[widest], after = round[(widest + 1) % ng];
+  for (size_t i = 0; i < np; ++i)
+  {
+    const double first = profiles[i]->FirstParameter(), last = profiles[i]->LastParameter();
+    const double a = at[i][before].onFirst, b = at[i][after].onFirst;
+    // The stretch from `before` on to `after`; it holds the seam already where it wraps
+    // round the curve's ends and neither guide is at them.
+    const gp_Pnt seam  = profiles[i]->StartPoint();
+    const bool   holds = a > b && profiles[i]->Value(a).Distance(seam) > tolerance
+                       && profiles[i]->Value(b).Distance(seam) > tolerance;
+    if (!holds)
+    {
+      double middle = b > a ? (a + b) / 2 : (a + b + (last - first)) / 2;
+      if (b <= a && a - b < BRepExt::tolerance::parameterMerge * (last - first))
+        middle = a + (last - first) / 2; // one guide given twice, or both at the seam
+      if (middle > last)
+        middle -= last - first;
+      if (middle <= first || middle >= last)
+        fail(op, no_solution, "a closed profile could not be begun between two guides");
+      profiles[i] = reseamed(profiles[i], middle, tolerance);
+      meet(i);
+    }
+    // Round every profile the guides come in the same order.
+    std::vector<size_t> here(ng);
+    std::iota(here.begin(), here.end(), size_t(0));
+    std::sort(here.begin(), here.end(), [&](size_t x, size_t y) {
+      return at[i][x].onFirst < at[i][y].onFirst;
     });
-    const double period0 = profiles[0]->LastParameter() - profiles[0]->FirstParameter();
-    size_t       widest  = 0;
-    double       width   = -1;
+    const size_t shift = size_t(std::find(round.begin(), round.end(), here[0]) - round.begin());
     for (size_t k = 0; k < ng; ++k)
-    {
-      double w = at[0][round[(k + 1) % ng]].onFirst - at[0][round[k]].onFirst;
-      if (w <= 0)
-        w += period0;
-      if (w > width)
-      {
-        width  = w;
-        widest = k;
-      }
-    }
-    const size_t before = round[widest], after = round[(widest + 1) % ng];
-    for (size_t i = 0; i < np; ++i)
-    {
-      const double first = profiles[i]->FirstParameter(), last = profiles[i]->LastParameter();
-      const double a = at[i][before].onFirst, b = at[i][after].onFirst;
-      // The stretch from `before` on to `after`; it holds the seam already where it wraps
-      // round the curve's ends and neither guide is at them.
-      const gp_Pnt seam  = profiles[i]->StartPoint();
-      const bool   holds = a > b && profiles[i]->Value(a).Distance(seam) > tolerance
-                         && profiles[i]->Value(b).Distance(seam) > tolerance;
-      if (!holds)
-      {
-        double middle = b > a ? (a + b) / 2 : (a + b + (last - first)) / 2;
-        if (b <= a && a - b < BRepExt::tolerance::parameterMerge * (last - first))
-          middle = a + (last - first) / 2; // one guide given twice, or both at the seam
-        if (middle > last)
-          middle -= last - first;
-        if (middle <= first || middle >= last)
-          fail(op, no_solution, "a closed profile could not be begun between two guides");
-        profiles[i] = reseamed(profiles[i], middle, tolerance);
-        meet(i);
-      }
-      // Round every profile the guides come in the same order.
-      std::vector<size_t> here(ng);
-      std::iota(here.begin(), here.end(), size_t(0));
-      std::sort(here.begin(), here.end(), [&](size_t x, size_t y) {
-        return at[i][x].onFirst < at[i][y].onFirst;
-      });
-      const size_t shift = size_t(std::find(round.begin(), round.end(), here[0]) - round.begin());
-      for (size_t k = 0; k < ng; ++k)
-        if (here[k] != round[(shift + k) % ng])
-          fail(
-            op,
-            no_solution,
-            "no surface through the profiles and guides: the guides do not come in the same order "
-            "round every profile");
-    }
+      if (here[k] != round[(shift + k) % ng])
+        fail(op,
+             no_solution,
+             "no surface through the profiles and guides: the guides do not come in the same order "
+             "round every profile");
   }
-  else
+}
+
+void GordonNet::trimProfiles()
+{
+  for (size_t i = 0; i < np; ++i)
   {
-    // What a profile has beyond the outer guides is left out.
-    for (size_t i = 0; i < np; ++i)
+    double low = at[i][0].onFirst, high = low;
+    for (size_t j = 1; j < ng; ++j)
     {
-      double low = at[i][0].onFirst, high = low;
-      for (size_t j = 1; j < ng; ++j)
-      {
-        low  = std::min(low, at[i][j].onFirst);
-        high = std::max(high, at[i][j].onFirst);
-      }
-      const auto& c = profiles[i];
-      if (c->Value(low).Distance(c->StartPoint()) > tolerance
-          || c->Value(high).Distance(c->EndPoint()) > tolerance)
-      {
-        if (high - low
-            <= BRepExt::tolerance::parameter * (c->LastParameter() - c->FirstParameter()))
-          fail(op, no_solution, "the guides all meet a profile in one point");
-        profiles[i]->Segment(low, high);
-        meet(i);
-      }
+      low  = std::min(low, at[i][j].onFirst);
+      high = std::max(high, at[i][j].onFirst);
+    }
+    const auto& c = profiles[i];
+    if (c->Value(low).Distance(c->StartPoint()) > tolerance
+        || c->Value(high).Distance(c->EndPoint()) > tolerance)
+    {
+      if (high - low <= BRepExt::tolerance::parameter * (c->LastParameter() - c->FirstParameter()))
+        fail(op, no_solution, "the guides all meet a profile in one point");
+      profiles[i]->Segment(low, high);
+      meet(i);
     }
   }
-  // And what a guide has beyond the outer profiles.
+}
+
+void GordonNet::trimGuides()
+{
   for (size_t j = 0; j < ng; ++j)
   {
     if (closedCurve(guides[j], tolerance))
@@ -1019,7 +1156,10 @@ EvolutionData skinGordon(OcctKernel&                  kernel,
         at[i][j] = crossingOf(profiles[i], guides[j]);
     }
   }
+}
 
+Handle(Geom_BSplineSurface) GordonNet::netSurface()
+{
   // Rings that do not run alike, of unlike spans or with arcs at unlike angles, have weights that
   // differ at the crossings, which GeomFill_Gordon takes as no net.
   Handle(Geom_BSplineSurface) network;
@@ -1040,14 +1180,14 @@ EvolutionData skinGordon(OcctKernel&                  kernel,
   Handle(Geom_BSplineSurface) surface = network;
   if (surface.IsNull())
   {
-    GeomFill_Gordon gordon;
+    GeomFill_Gordon            gordon;
     NCollection_Array2<double> profileParams(1, int(np), 1, int(ng));
     NCollection_Array2<double> guideParams(1, int(np), 1, int(ng));
     for (size_t i = 0; i < np; ++i)
       for (size_t j = 0; j < ng; ++j)
       {
         profileParams.ChangeAt(i, j) = at[i][j].onFirst;
-        guideParams.ChangeAt(i, j) = at[i][j].onSecond;
+        guideParams.ChangeAt(i, j)   = at[i][j].onSecond;
       }
     gordon.Init(profileList, guideList, profileParams, guideParams, tolerance);
     gordon.Perform();
@@ -1059,8 +1199,22 @@ EvolutionData skinGordon(OcctKernel&                  kernel,
       fail(op, no_solution, "the surface through the profiles and guides is only approximate");
     surface = gordon.Surface();
   }
+  return surface;
+}
 
-  certify(surface, profiles, guides, at, profileWay, guideWay, tolerance);
+} // namespace
+
+EvolutionData skinGordon(OcctKernel&                  kernel,
+                         const std::vector<uint32_t>& profileIds,
+                         const std::vector<uint32_t>& guideIds,
+                         bool                         solid,
+                         double                       tolerance)
+{
+  if (profileIds.size() < 2 || guideIds.size() < 2 || !std::isfinite(tolerance) || tolerance <= 0)
+    fail(op, invalid_input, "two or more profiles and two or more guides are required");
+  GordonNet                         net(kernel, profileIds, guideIds, tolerance);
+  const Handle(Geom_BSplineSurface) surface = net.netSurface();
+  net.certifyNet(surface);
 
   BRepBuilderAPI_MakeFace face(surface, Precision::Confusion());
   if (!face.IsDone())
@@ -1103,63 +1257,51 @@ EvolutionData skinGordon(OcctKernel&                  kernel,
   return stored(kernel, result);
 }
 
-// A skin through open profiles along guides that cross them anywhere. Each guide is put at one
-// parameter across the profiles, the mean of the shares of their lengths at which it crosses them;
-// the profiles are made again with that parameter (a monotone smooth map from their length to it),
-// and skinned. Each guide then moves the skin by how far it is off it, blended across to the next
-// guide or to the profiles' ends by the cubic that is one at the guide and nothing at the next,
-// with no slope at either (a convention of this code, not derived).
-EvolutionData skinGuided(OcctKernel&                  kernel,
-                         const std::vector<uint32_t>& profileIds,
-                         const std::vector<uint32_t>& guideIds,
-                         double                       tolerance)
+namespace
 {
-  if (profileIds.size() < 2 || guideIds.empty() || !std::isfinite(tolerance) || tolerance <= 0)
-    fail(op, invalid_input, "two or more profiles and one or more guides are required");
-  checkCancelled(op);
-  const size_t                           np = profileIds.size(), ng = guideIds.size();
-  std::vector<Handle(Geom_BSplineCurve)> profiles(np), guides(ng);
-  for (size_t i = 0; i < np; ++i)
-    profiles[i] = curveOf(get(kernel, profileIds[i]), tolerance);
-  for (size_t j = 0; j < ng; ++j)
-    guides[j] = curveOf(get(kernel, guideIds[j]), tolerance);
-  for (const auto* curves : {&profiles, &guides})
-    for (const auto& c : *curves)
-      if (closedCurve(c, tolerance))
-        fail(op, invalid_input, "this skin is of open profiles along open guides");
-  std::vector<std::vector<Crossing>> at(np, std::vector<Crossing>(ng));
-  auto                               meet = [&]() {
-    for (size_t i = 0; i < np; ++i)
-      for (size_t j = 0; j < ng; ++j)
-      {
-        at[i][j] = crossingOf(profiles[i], guides[j]);
-        if (at[i][j].gap > tolerance)
-          fail(op,
-               no_solution,
-               "no surface through the profiles and guides: not every guide meets every profile "
-                                             "(guide "
-                 + std::to_string(j + 1) + " passes profile " + std::to_string(i + 1)
-                 + " at a distance of " + std::to_string(at[i][j].gap) + ")");
-      }
-  };
-  meet();
-  // The profiles run alike: by their directions where the first guide crosses them.
-  for (size_t i = 1; i < np; ++i)
-    if (tangentAt(profiles[i], at[i][0].onFirst).Dot(tangentAt(profiles[0], at[0][0].onFirst)) < 0)
-      profiles[i]->Reverse();
-  // Each guide from the first profile to the last.
-  meet();
-  for (size_t j = 0; j < ng; ++j)
-    if (at[0][j].onSecond > at[np - 1][j].onSecond)
-      guides[j]->Reverse();
-  meet();
 
-  // Where each guide crosses each profile, as a share of the profile's length; the guides in
-  // the order they cross the first, which has to be the order they cross every other.
-  auto lengthTo = [](const Handle(Geom_BSplineCurve)& c, double u) {
-    GeomAdaptor_Curve along(c);
-    return GCPnts_AbscissaPoint::Length(along, c->FirstParameter(), u);
-  };
+//! Where every guide meets every profile; fails where one passes another.
+void meetAll(const std::vector<Handle(Geom_BSplineCurve)>& profiles,
+             const std::vector<Handle(Geom_BSplineCurve)>& guides,
+             std::vector<std::vector<Crossing>>&           at,
+             double                                        tolerance)
+{
+  const size_t np = profiles.size(), ng = guides.size();
+  for (size_t i = 0; i < np; ++i)
+    for (size_t j = 0; j < ng; ++j)
+    {
+      at[i][j] = crossingOf(profiles[i], guides[j]);
+      if (at[i][j].gap > tolerance)
+        fail(op,
+             no_solution,
+             "no surface through the profiles and guides: not every guide meets every profile "
+             "(guide "
+               + std::to_string(j + 1) + " passes profile " + std::to_string(i + 1)
+               + " at a distance of " + std::to_string(at[i][j].gap) + ")");
+    }
+}
+
+//! The length of `c` up to `u`.
+double lengthTo(const Handle(Geom_BSplineCurve)& c, double u)
+{
+  GeomAdaptor_Curve along(c);
+  return GCPnts_AbscissaPoint::Length(along, c->FirstParameter(), u);
+}
+
+//! Where each guide crosses each profile, as a share of the profile's length; the guides in
+//! the order they cross the first (`order`), which has to be the order they cross every other.
+//! `nodes` are the guides' parameters across the profiles, `nodeOf` each guide's node, and `on`
+//! the nodes on each profile.
+void guideNodes(const std::vector<Handle(Geom_BSplineCurve)>& profiles,
+                const std::vector<std::vector<Crossing>>&     at,
+                size_t                                        ng,
+                double                                        tolerance,
+                std::vector<size_t>&                          order,
+                std::vector<double>&                          nodes,
+                std::vector<size_t>&                          nodeOf,
+                std::vector<std::vector<double>>&             on)
+{
+  const size_t                     np = profiles.size();
   std::vector<std::vector<double>> share(np, std::vector<double>(ng));
   for (size_t i = 0; i < np; ++i)
   {
@@ -1167,7 +1309,7 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
     for (size_t j = 0; j < ng; ++j)
       share[i][j] = lengthTo(profiles[i], at[i][j].onFirst) / whole;
   }
-  std::vector<size_t> order(ng);
+  order.resize(ng);
   std::iota(order.begin(), order.end(), size_t(0));
   std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
     return share[0][a] < share[0][b];
@@ -1183,8 +1325,7 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
     }
     return true;
   };
-  std::vector<double> nodes;
-  std::vector<size_t> nodeOf(ng);
+  nodeOf.resize(ng);
   if (!atEnd(order[0], false))
     nodes.push_back(0.0);
   for (size_t k = 0; k < ng; ++k)
@@ -1199,7 +1340,7 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
   if (nodes.back() < 1.0)
     nodes.push_back(1.0);
   // Where each profile has the nodes.
-  std::vector<std::vector<double>> on(np);
+  on.resize(np);
   for (size_t i = 0; i < np; ++i)
   {
     if (nodes.front() == 0.0 && (ng == 0 || nodeOf[0] != 0))
@@ -1220,8 +1361,17 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
              "or in "
              "another order than they meet the first");
   }
+}
 
-  // The profiles again, each guide at its own parameter.
+//! The profiles again, each guide at its own parameter.
+std::vector<Handle(Geom_BSplineCurve)> sectionsOf(
+  const std::vector<Handle(Geom_BSplineCurve)>& profiles,
+  const std::vector<std::vector<Crossing>>&     at,
+  const std::vector<std::vector<double>>&       on,
+  const std::vector<double>&                    nodes,
+  double                                        tolerance)
+{
+  const size_t                           np = profiles.size(), ng = at[0].size();
   std::vector<Handle(Geom_BSplineCurve)> sections(np);
   for (size_t i = 0; i < np; ++i)
   {
@@ -1236,7 +1386,14 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
                         true,
                         tolerance);
   }
-  // The profiles' places across: by how far apart they are on the average.
+  return sections;
+}
+
+//! The profiles' places across: by how far apart they are on the average.
+std::vector<double> placesAcross(const std::vector<Handle(Geom_BSplineCurve)>& sections,
+                                 double                                        tolerance)
+{
+  const size_t        np = sections.size();
   std::vector<double> across{0.0};
   for (size_t i = 1; i < np; ++i)
   {
@@ -1249,9 +1406,14 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
   }
   for (double& v : across)
     v /= across.back();
-  GeomAlgoExt::unify(sections);
+  return across;
+}
 
-  // The profiles' own surface: each column of poles through the profiles, at their places.
+//! The profiles' own surface: each column of poles through the profiles, at their places.
+Handle(Geom_BSplineSurface) profileSkin(const std::vector<Handle(Geom_BSplineCurve)>& sections,
+                                        const std::vector<double>&                    across)
+{
+  const size_t                           np   = sections.size();
   const Handle(Geom_BSplineCurve)&       base = sections[0];
   const int                              nu   = base->NbPoles();
   std::vector<Handle(Geom_BSplineCurve)> columns(static_cast<size_t>(nu));
@@ -1297,8 +1459,21 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
                                                              column->Multiplicities(),
                                                              base->Degree(),
                                                              column->Degree());
+  return skin;
+}
 
-  // How far each guide is off the skin along it, with the profiles' places as its parameter.
+//! How far each guide is off the skin along it, with the profiles' places as its parameter.
+std::vector<Handle(Geom_BSplineCurve)> guideOffsets(
+  const Handle(Geom_BSplineSurface)&            skin,
+  const std::vector<Handle(Geom_BSplineCurve)>& guides,
+  const std::vector<std::vector<Crossing>>&     at,
+  const std::vector<size_t>&                    order,
+  const std::vector<double>&                    nodes,
+  const std::vector<size_t>&                    nodeOf,
+  const std::vector<double>&                    across,
+  double                                        tolerance)
+{
+  const size_t                           np = at.size(), ng = guides.size();
   std::vector<Handle(Geom_BSplineCurve)> offsets;
   for (size_t k = 0; k < ng; ++k)
   {
@@ -1324,13 +1499,21 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
     offsets.push_back(off);
   }
   GeomAlgoExt::unify(offsets);
-  const Handle(Geom_BSplineCurve)& offset = offsets[0];
+  return offsets;
+}
 
-  // The blend across: on each stretch between two guides, or a guide and an end, the cubic
-  // with no slope at either end, as the spline with the stretches' ends as triple knots.
-  const int                  stretches = int(nodes.size()) - 1;
-  NCollection_Array1<double> hatKnots(1, stretches + 1);
-  NCollection_Array1<int>    hatMults(1, stretches + 1);
+//! The blend across: on each stretch between two guides, or a guide and an end, the cubic
+//! with no slope at either end, as the spline with the stretches' ends as triple knots; each
+//! guide's offset moves the skin by its blend.
+Handle(Geom_BSplineSurface) blendMove(const std::vector<Handle(Geom_BSplineCurve)>& offsets,
+                                      const std::vector<double>&                    nodes,
+                                      const std::vector<size_t>&                    nodeOf)
+{
+  const size_t                     ng        = offsets.size();
+  const Handle(Geom_BSplineCurve)& offset    = offsets[0];
+  const int                        stretches = int(nodes.size()) - 1;
+  NCollection_Array1<double>       hatKnots(1, stretches + 1);
+  NCollection_Array1<int>          hatMults(1, stretches + 1);
   for (int k = 0; k <= stretches; ++k)
   {
     hatKnots(k + 1) = nodes[size_t(k)];
@@ -1360,7 +1543,12 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
                                                              offset->Multiplicities(),
                                                              3,
                                                              offset->Degree());
-  // The two of one degree with the same knots, and added.
+  return move;
+}
+
+//! The two of one degree with the same knots, and added.
+void addMove(const Handle(Geom_BSplineSurface)& skin, const Handle(Geom_BSplineSurface)& move)
+{
   const int du = std::max(skin->UDegree(), move->UDegree()),
             dv = std::max(skin->VDegree(), move->VDegree());
   skin->IncreaseDegree(du, dv);
@@ -1377,6 +1565,59 @@ EvolutionData skinGuided(OcctKernel&                  kernel,
   for (int a = 1; a <= skin->NbUPoles(); ++a)
     for (int b = 1; b <= skin->NbVPoles(); ++b)
       skin->SetPole(a, b, gp_Pnt(skin->Pole(a, b).XYZ() + move->Pole(a, b).XYZ()));
+}
+
+} // namespace
+
+// A skin through open profiles along guides that cross them anywhere. Each guide is put at one
+// parameter across the profiles, the mean of the shares of their lengths at which it crosses them;
+// the profiles are made again with that parameter (a monotone smooth map from their length to it),
+// and skinned. Each guide then moves the skin by how far it is off it, blended across to the next
+// guide or to the profiles' ends by the cubic that is one at the guide and nothing at the next,
+// with no slope at either (a convention of this code, not derived).
+EvolutionData skinGuided(OcctKernel&                  kernel,
+                         const std::vector<uint32_t>& profileIds,
+                         const std::vector<uint32_t>& guideIds,
+                         double                       tolerance)
+{
+  if (profileIds.size() < 2 || guideIds.empty() || !std::isfinite(tolerance) || tolerance <= 0)
+    fail(op, invalid_input, "two or more profiles and one or more guides are required");
+  checkCancelled(op);
+  const size_t                           np = profileIds.size(), ng = guideIds.size();
+  std::vector<Handle(Geom_BSplineCurve)> profiles(np), guides(ng);
+  for (size_t i = 0; i < np; ++i)
+    profiles[i] = curveOf(get(kernel, profileIds[i]), tolerance);
+  for (size_t j = 0; j < ng; ++j)
+    guides[j] = curveOf(get(kernel, guideIds[j]), tolerance);
+  for (const auto* curves : {&profiles, &guides})
+    for (const auto& c : *curves)
+      if (closedCurve(c, tolerance))
+        fail(op, invalid_input, "this skin is of open profiles along open guides");
+  std::vector<std::vector<Crossing>> at(np, std::vector<Crossing>(ng));
+  meetAll(profiles, guides, at, tolerance);
+  // The profiles run alike: by their directions where the first guide crosses them.
+  for (size_t i = 1; i < np; ++i)
+    if (tangentAt(profiles[i], at[i][0].onFirst).Dot(tangentAt(profiles[0], at[0][0].onFirst)) < 0)
+      profiles[i]->Reverse();
+  // Each guide from the first profile to the last.
+  meetAll(profiles, guides, at, tolerance);
+  for (size_t j = 0; j < ng; ++j)
+    if (at[0][j].onSecond > at[np - 1][j].onSecond)
+      guides[j]->Reverse();
+  meetAll(profiles, guides, at, tolerance);
+
+  std::vector<size_t>              order;
+  std::vector<double>              nodes;
+  std::vector<size_t>              nodeOf;
+  std::vector<std::vector<double>> on;
+  guideNodes(profiles, at, ng, tolerance, order, nodes, nodeOf, on);
+  std::vector<Handle(Geom_BSplineCurve)> sections = sectionsOf(profiles, at, on, nodes, tolerance);
+  const std::vector<double>              across   = placesAcross(sections, tolerance);
+  GeomAlgoExt::unify(sections);
+  const Handle(Geom_BSplineSurface)            skin = profileSkin(sections, across);
+  const std::vector<Handle(Geom_BSplineCurve)> offsets =
+    guideOffsets(skin, guides, at, order, nodes, nodeOf, across, tolerance);
+  addMove(skin, blendMove(offsets, nodes, nodeOf));
 
   std::vector<double> profileWay(np, 1.0), guideWay(ng, 1.0);
   certify(skin, profiles, guides, at, profileWay, guideWay, tolerance);
@@ -1517,26 +1758,22 @@ std::vector<TopoDS_Wire> ringsInLine(std::vector<TopoDS_Wire> wires)
 
 namespace
 {
-//! A smooth skin through sections: a tensor product whose every line
-//! across the sections is the natural C2 cubic through them, with knots at chord-length places. The
-//! law is measured (its poles fit it to four decimals over 2 to 5 rings), not a
-//! theorem of the skin's; the natural spline has its own variational theorem. Sections are matched
-//! by OpenCascade's compatible wires, a face to each edge; rational sections that do not run alike
-//! are made again by length. A section may be a point, which is a row of equal poles. A skin that
-//! comes back to its first section closes its line across: `Closed` (periodic form). How far apart
-//! two sections are is empirical: for sections of several edges the mean of the distance at the
-//! edges' middles (fits squares to 4e-4 of a share), for one edge the mean over it at 64 even
-//! shares, an estimate of an integral, not tuned. How the points of rational sections of unlike
-//! size or shape are paired is a choice of this code, not derived. Null where a section with
-//! weights that differ has a corner along an edge: not made again by length, those stay with
-//! OpenCascade's skinning.
-TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
-                  const gp_Pnt*                   start,
-                  const gp_Pnt*                   end,
-                  bool                            solid)
+const char* const skinOp = "skin";
+
+//! What the skin is sewn and capped to: BRepOffsetAPI_ThruSections' default.
+constexpr double skinResolution = 1e-6;
+
+using SectionCurves = std::vector<std::vector<Handle(Geom_BSplineCurve)>>;
+
+//! The sections matched by OpenCascade's compatible wires, a face to each edge: `curves[e][s]`
+//! of edge e in section s, on one set of knots per edge from 0 to 1. `loops` where the last
+//! section is the first, `rings` the sections apart from that. False where a section with
+//! weights that differ has a corner along an edge.
+bool matchedCurves(const std::vector<TopoDS_Wire>& given,
+                   SectionCurves&                  curves,
+                   bool&                           loops,
+                   size_t&                         rings)
 {
-  const char* const skinOp = "skin";
-  const double resolution  = 1e-6; // BRepOffsetAPI_ThruSections' default, what it sews and caps to
   NCollection_Sequence<TopoDS_Shape> sections;
   for (const auto& wire : given)
     sections.Append(wire);
@@ -1544,11 +1781,9 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
   compatible.Perform();
   if (!compatible.IsDone())
     fail(skinOp, no_solution, "the sections could not be matched edge to edge");
-  const auto&  matched = compatible.Shape();
-  const bool   loops   = matched.Length() > 2 && matched.First().IsSame(matched.Last());
-  const size_t rings   = size_t(matched.Length()) - (loops ? 1 : 0);
-  // The curves: `curves[e][s]` of edge e in section s.
-  std::vector<std::vector<Handle(Geom_BSplineCurve)>> curves;
+  const auto& matched = compatible.Shape();
+  loops               = matched.Length() > 2 && matched.First().IsSame(matched.Last());
+  rings               = size_t(matched.Length()) - (loops ? 1 : 0);
   for (size_t s = 0; s < rings; ++s)
   {
     size_t e = 0;
@@ -1568,7 +1803,7 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
     if (edge.size() != rings)
       fail(skinOp, no_solution, "the sections could not be matched edge to edge");
     if (!withoutUnlikeWeights(edge, false))
-      return {};
+      return false;
     for (auto& c : edge)
     {
       NCollection_Array1<double> knots(1, c->NbKnots());
@@ -1578,7 +1813,16 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
     }
     GeomAlgoExt::unify(edge);
   }
-  // The places across.
+  return true;
+}
+
+//! The places across: the sections' distances apart, from 0 to 1, with the points at the ends.
+std::vector<double> sectionPlaces(const SectionCurves& curves,
+                                  size_t               rings,
+                                  const gp_Pnt*        start,
+                                  const gp_Pnt*        end,
+                                  bool                 loops)
+{
   const auto sampled = [&](size_t s, const std::vector<Handle(Geom_BSplineCurve)>& edge, int k) {
     return edge[s]->Value(k / 64.0);
   };
@@ -1620,12 +1864,18 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
       fail(skinOp, invalid_input, "two sections lie on each other");
   for (double& v : places)
     v /= places.back();
-  const GeomAlgoExt::CubicThrough across(places,
-                                         loops ? GeomAlgoExt::CubicThrough::Ends::Closed
-                                               : GeomAlgoExt::CubicThrough::Ends::Free);
-  // A face to each edge.
-  BRepBuilderAPI_Sewing    sewing(resolution);
-  std::vector<TopoDS_Face> faces;
+  return places;
+}
+
+//! A face to each edge: every column of poles the cubic `across` through the sections.
+void sectionFaces(const SectionCurves&             curves,
+                  const GeomAlgoExt::CubicThrough& across,
+                  const gp_Pnt*                    start,
+                  const gp_Pnt*                    end,
+                  bool                             loops,
+                  BRepBuilderAPI_Sewing&           sewing,
+                  std::vector<TopoDS_Face>&        faces)
+{
   for (const auto& edge : curves)
   {
     const auto&                base = edge[0];
@@ -1664,7 +1914,15 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
     faces.push_back(face.Face());
     sewing.Add(face.Face());
   }
-  // The ends, flat and closed, of what is asked to be solid.
+}
+
+//! The ends, flat and closed, of what is asked to be solid.
+void addCaps(const SectionCurves&   curves,
+             size_t                 rings,
+             const gp_Pnt*          start,
+             const gp_Pnt*          end,
+             BRepBuilderAPI_Sewing& sewing)
+{
   const auto capOf = [&](size_t s) {
     BRepBuilderAPI_MakeWire wire;
     for (const auto& edge : curves)
@@ -1672,24 +1930,25 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
     BRepBuilderAPI_MakeFace cap(wire.Wire(), true);
     return cap.IsDone() ? cap.Face() : TopoDS_Face();
   };
-  const bool capped = solid && !loops;
-  if (capped)
+  if (!start)
   {
-    if (!start)
-    {
-      const auto cap = capOf(0);
-      if (cap.IsNull())
-        fail(skinOp, no_solution, "a nonplanar end cannot be closed by a planar cap");
-      sewing.Add(cap);
-    }
-    if (!end)
-    {
-      const auto cap = capOf(rings - 1);
-      if (cap.IsNull())
-        fail(skinOp, no_solution, "a nonplanar end cannot be closed by a planar cap");
-      sewing.Add(cap);
-    }
+    const auto cap = capOf(0);
+    if (cap.IsNull())
+      fail(skinOp, no_solution, "a nonplanar end cannot be closed by a planar cap");
+    sewing.Add(cap);
   }
+  if (!end)
+  {
+    const auto cap = capOf(rings - 1);
+    if (cap.IsNull())
+      fail(skinOp, no_solution, "a nonplanar end cannot be closed by a planar cap");
+    sewing.Add(cap);
+  }
+}
+
+//! The sewn faces as one shell, and closed into a valid oriented solid where `solid`.
+TopoDS_Shape closedSkin(BRepBuilderAPI_Sewing& sewing, bool solid)
+{
   sewing.Perform();
   TopoDS_Shape    sewn = sewing.SewedShape();
   TopoDS_Shell    shell;
@@ -1720,6 +1979,44 @@ TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
     fail(skinOp, no_solution, "the skin does not bound a valid oriented solid");
   return body;
 }
+
+//! A smooth skin through sections: a tensor product whose every line
+//! across the sections is the natural C2 cubic through them, with knots at chord-length places. The
+//! law is measured (its poles fit it to four decimals over 2 to 5 rings), not a
+//! theorem of the skin's; the natural spline has its own variational theorem. Sections are matched
+//! by OpenCascade's compatible wires, a face to each edge; rational sections that do not run alike
+//! are made again by length. A section may be a point, which is a row of equal poles. A skin that
+//! comes back to its first section closes its line across: `Closed` (periodic form). How far apart
+//! two sections are is empirical: for sections of several edges the mean of the distance at the
+//! edges' middles (fits squares to 4e-4 of a share), for one edge the mean over it at 64 even
+//! shares, an estimate of an integral, not tuned. How the points of rational sections of unlike
+//! size or shape are paired is a choice of this code, not derived. Null where a section with
+//! weights that differ has a corner along an edge: not made again by length, those stay with
+//! OpenCascade's skinning.
+TopoDS_Shape skin(const std::vector<TopoDS_Wire>& given,
+                  const gp_Pnt*                   start,
+                  const gp_Pnt*                   end,
+                  bool                            solid)
+{
+  SectionCurves curves;
+  bool          loops = false;
+  size_t        rings = 0;
+  if (!matchedCurves(given, curves, loops, rings))
+    return {};
+  const std::vector<double>       places = sectionPlaces(curves, rings, start, end, loops);
+  const GeomAlgoExt::CubicThrough across(places,
+                                         loops ? GeomAlgoExt::CubicThrough::Ends::Closed
+                                               : GeomAlgoExt::CubicThrough::Ends::Free);
+  // A face to each edge.
+  BRepBuilderAPI_Sewing    sewing(skinResolution);
+  std::vector<TopoDS_Face> faces;
+  sectionFaces(curves, across, start, end, loops, sewing, faces);
+  const bool capped = solid && !loops;
+  if (capped)
+    addCaps(curves, rings, start, end, sewing);
+  return closedSkin(sewing, solid);
+}
+
 } // namespace
 
 // A skin through sections: smooth by `skin`; ruled, or of two sections, by OpenCascade's.
