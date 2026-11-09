@@ -351,74 +351,185 @@ struct ProfileCurve
   Handle(Geom_BSplineCurve) curve;
   std::vector<gp_XYZ>       local;
 };
-} // namespace
 
-EvolutionData sweepFramed(OcctKernel&                  kernel,
-                          uint32_t                     profileId,
-                          uint32_t                     pathId,
-                          double                       twist,
-                          double                       scale,
-                          const std::vector<uint32_t>& guideIds,
-                          GuideMethod                  guideMethod,
-                          double                       tolerance,
-                          bool                         solid)
+//! A map at a node applied to a point of the profile's frame.
+gp_Vec applied(const Map& m, const gp_XYZ& x)
 {
-  const auto &profile = get(kernel, profileId), &path = get(kernel, pathId);
-  if (!std::isfinite(tolerance) || tolerance <= 0)
-    fail(op, invalid_input, "tolerance must be positive");
-  if (profile.ShapeType() != TopAbs_WIRE || path.ShapeType() != TopAbs_WIRE)
-    fail(op, invalid_input, "the profile and the path must be curves");
-  if (!std::isfinite(twist) || std::abs(twist) > 8 * M_PI)
-    fail(op, invalid_input, "the twist must be within four turns");
-  if (!std::isfinite(scale) || scale <= 0)
-    fail(op, invalid_input, "the scale must be positive");
-  if (guideMethod < GuideMethod::Point || guideMethod > GuideMethod::Curve)
-    fail(op, invalid_input, "the guide method is point (0), chord (1), or curve (2)");
-  for (const uint32_t id : guideIds)
-    if (get(kernel, id).ShapeType() != TopAbs_WIRE)
-      fail(op, invalid_input, "a guide must be a curve");
-  if (guideIds.size() > 3)
-    fail(op, unsupported_geometry, "at most three guides are followed");
-  if (!guideIds.empty() && (twist != 0 || scale != 1))
-    fail(op,
-         invalid_input,
-         "the guides set the profile's place, turn and size: no twist or scale with them");
-  // Three guides set every point of the plane: the method is for two.
-  const GuideMethod method    = guideIds.size() == 2 ? guideMethod : GuideMethod::Point;
-  const TopoDS_Wire spineWire = TopoDS::Wire(path), profileWire = TopoDS::Wire(profile);
-  if (BRep_Tool::IsClosed(spineWire))
-    fail(op, unsupported_geometry, "a closed path is not swept with frames of our own");
+  return m[3] + m[0] * x.X() + m[1] * x.Y() + m[2] * x.Z();
+}
 
-  const std::vector<Piece> pieces = piecesOf(spineWire);
-  if (pieces.empty())
-    fail(op, invalid_input, "the path has no edges");
-  std::vector<Stretch> stretches;
-  std::vector<size_t>  firstStretch; // of each piece, and one past the last
-  for (size_t k = 0; k < pieces.size(); ++k)
+//! A sweep of a profile along a smooth open path with frames of its own: carried by double
+//! reflection, twisted and scaled, or set by up to three guides. The frames are read at nodes
+//! made twice as many until the cubic through them meets the tolerance and they stop changing.
+class FramedSweep
+{
+public:
+  FramedSweep(OcctKernel&                  kernel,
+              const TopoDS_Shape&          profile,
+              const TopoDS_Wire&           profileWire,
+              const TopoDS_Wire&           spineWire,
+              double                       twist,
+              double                       scale,
+              const std::vector<uint32_t>& guideIds,
+              GuideMethod                  method,
+              double                       tolerance)
+      : kernel(kernel),
+        profile(profile),
+        profileWire(profileWire),
+        twist(twist),
+        scale(scale),
+        guideIds(guideIds),
+        method(method),
+        tolerance(tolerance),
+        pieces(piecesOf(spineWire))
   {
+    if (pieces.empty())
+      fail(op, invalid_input, "the path has no edges");
+    for (size_t k = 0; k < pieces.size(); ++k)
+    {
+      firstStretch.push_back(stretches.size());
+      for (size_t i = 0; i + 1 < pieces[k].breaks.size(); ++i)
+        stretches.push_back({int(k), pieces[k].breaks[i], pieces[k].breaks[i + 1]});
+    }
     firstStretch.push_back(stretches.size());
-    for (size_t i = 0; i + 1 < pieces[k].breaks.size(); ++i)
-      stretches.push_back({int(k), pieces[k].breaks[i], pieces[k].breaks[i + 1]});
+    placeProfile();
+    checkSmoothPath();
+    followGuides();
+    twistWeight = std::abs(twist) * reach; // how far a share of the twist moves a point
   }
-  firstStretch.push_back(stretches.size());
 
-  // The profile's frame: at its station, with a normal carried there below.
-  const Station station      = stationOf(profileWire, pieces, tolerance);
-  const Piece&  stationPiece = pieces[size_t(station.piece)];
-  gp_Pnt        origin;
-  gp_Vec        heading;
-  stationPiece.at(station.x, origin, heading);
+  //! The faces: the nodes made twice as many until the sweep meets the tolerance.
+  void build();
+
+  //! Flat ends added where the profile is closed and a solid is asked; whether they were.
+  bool capFaces(bool solid);
+
+  //! The faces sewn, and closed into a solid where `capped`.
+  TopoDS_Shape sewn(bool capped);
+
+private:
+  const Piece& stationPiece() const { return pieces[size_t(station.piece)]; }
+
+  //! The profile's frame at its station, with a normal carried there later; its edges as splines
+  //! and how far it reaches from the path's point.
+  void placeProfile();
+
+  //! The frames turn smoothly only along a path without corners. A kink that moves no point
+  //! of the profile by the tolerance is none.
+  void checkSmoothPath();
+
+  //! The guides, and where each crosses the plane of the profile's station.
+  void followGuides();
+
+  double xOf(size_t s, int j) const;
+
+  //! The path's points and tangents at the nodes, its length up to each, and the normals carried
+  //! from the first by double reflection.
+  void carryNodes();
+
+  //! The profile's frame, carried from the node before its station.
+  void frameAtStation();
+
+  gp_XYZ local(const gp_Pnt& p) const;
+
+  double sizeAt(double along) const;
+
+  //! The profile's control points in its frame, and their box.
+  void profileInFrame();
+
+  //! Where the guides put the profile at each node, marched both ways from the profile. The
+  //! first guide's point keeps its place on that guide, and the profile its size and the
+  //! path's frame. A second guide turns the section about that point too, so that the
+  //! second guide's point stays on it and the section is scaled to keep it there (Point),
+  //! points at it (Chord), or so that the profile passes through it, the point of contact
+  //! sliding along the profile (Curve). Three set the section by the map of the plane that
+  //! takes their three points to where those guides are.
+  void guideNodes();
+
+  //! Where the guides cross the profile's plane, in the profile's frame.
+  void guideContacts();
+
+  //! For Curve: the directions from the pin of the profile's points at `gap` from it.
+  std::vector<double> directionsAt(double gap) const;
+
+  //! The turn about the pin for Curve nearest `previous`, that puts the profile through `to`.
+  double curveTurn(const gp_XY& to, double previous) const;
+
+  //! The map of the plane that takes the guides' contacts to `to`; `turn` is the turn before,
+  //! and gets this one.
+  PlaneMap mapFor(const std::vector<gp_XY>& to, double& turn) const;
+
+  //! The map at each node.
+  void mapNodes();
+
+  //! Slopes by x at every node, by differences of the fourth order within a stretch;
+  //! where two stretches of a piece meet the map has one slope, their mean.
+  void slopesOf();
+
+  //! The cubic through values and slopes at the stations, against the map at the nodes
+  //! between them; and that the profile moves forwards everywhere.
+  void checkCubic(int stations, bool& near, bool& forward) const;
+
+  //! The surfaces: for each piece of the path and each edge of the profile, the control
+  //! points of the map's cubic applied to the edge's control points.
+  void makeFaces(int stations);
+
+  //! Where the ends are, for the caps: the maps there, taken from the profile's frame to the
+  //! world's.
+  void endMaps();
+
+  OcctKernel&                  kernel;
+  const TopoDS_Shape&          profile;
+  const TopoDS_Wire&           profileWire;
+  const double                 twist, scale;
+  const std::vector<uint32_t>& guideIds;
+  const GuideMethod            method;
+  const double                 tolerance;
+  const std::vector<Piece>     pieces;
+  std::vector<Stretch>         stretches;
+  std::vector<size_t>          firstStretch; // of each piece, and one past the last
+  Station                      station;
+  gp_Pnt                       origin;
+  gp_Vec                       heading;
+  size_t                       stationStretch = 0;
+  std::vector<ProfileCurve>    curves;
+  double                       reach         = 0;
+  bool                         closedProfile = false;
+  std::vector<std::unique_ptr<BRepAdaptor_CompCurve>> guides;
+  std::vector<double>                                 crossings;
+  double                   twistWeight = 0; // how far a share of the twist moves a point
+  std::vector<TopoDS_Face> faces;
+  std::array<std::pair<gp_Mat, gp_XYZ>, 2> ends; // the map x -> A x + b of each end
+  gp_Vec                                   endNormalBefore;
+  double                                   lengthBefore = -1;
+  // The round in progress.
+  int                fine  = 0;
+  size_t             count = 0;
+  std::vector<Node>  nodes;
+  double             length        = 0;
+  size_t             before        = 0;
+  double             stationLength = 0;
+  gp_Vec             normal, side;
+  gp_XYZ             low, high;
+  std::vector<gp_XY> contacts;
+  gp_XY              pin, spanA, spanB;
+  double             det = 0;
+  std::vector<Map>   maps, slopes;
+};
+
+void FramedSweep::placeProfile()
+{
+  station = stationOf(profileWire, pieces, tolerance);
+  stationPiece().at(station.x, origin, heading);
   if (heading.Magnitude() <= 0)
     fail(op, invalid_input, "the path has no direction where the profile is");
   heading.Normalize();
-  size_t stationStretch = firstStretch[size_t(station.piece)];
+  stationStretch = firstStretch[size_t(station.piece)];
   while (stationStretch + 1 < firstStretch[size_t(station.piece) + 1]
          && stretches[stationStretch].to < station.x)
     ++stationStretch;
 
   // The profile's edges as splines, and how far it reaches from the path's point.
-  std::vector<ProfileCurve> curves;
-  double                    reach = 0;
   for (BRepTools_WireExplorer it(profileWire); it.More(); it.Next())
   {
     double                   first, last;
@@ -435,10 +546,11 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
   }
   if (curves.empty() || reach <= 0)
     fail(op, invalid_input, "the profile has no size");
-  const bool closedProfile = BRep_Tool::IsClosed(profileWire);
+  closedProfile = BRep_Tool::IsClosed(profileWire);
+}
 
-  // The frames turn smoothly only along a path without corners. A kink that moves no point
-  // of the profile by the tolerance is none.
+void FramedSweep::checkSmoothPath()
+{
   for (size_t k = 0; k + 1 < pieces.size(); ++k)
   {
     gp_Pnt p;
@@ -450,10 +562,10 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
     if (out.Angle(in) * reach > tolerance)
       fail(op, unsupported_geometry, "the path has a corner: twist and guides need a smooth path");
   }
+}
 
-  // The guides, and where each crosses the plane of the profile's station.
-  std::vector<std::unique_ptr<BRepAdaptor_CompCurve>> guides;
-  std::vector<double>                                 crossings;
+void FramedSweep::followGuides()
+{
   for (const uint32_t id : guideIds)
   {
     const TopoDS_Wire guideWire = TopoDS::Wire(get(kernel, id));
@@ -477,12 +589,477 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
     if (std::abs(dg.Dot(heading)) <= BRepExt::tolerance::angle * dg.Magnitude())
       fail(op, invalid_input, "a guide runs across the path where the profile is, not beside it");
   }
+}
 
-  const double twistWeight = std::abs(twist) * reach; // how far a share of the twist moves a point
-  std::vector<TopoDS_Face>                 faces;
-  std::array<std::pair<gp_Mat, gp_XYZ>, 2> ends; // the map x -> A x + b of each end
-  gp_Vec                                   endNormalBefore;
-  double                                   lengthBefore = -1;
+double FramedSweep::xOf(size_t s, int j) const
+{
+  return stretches[s].from + (stretches[s].to - stretches[s].from) * j / fine;
+}
+
+void FramedSweep::carryNodes()
+{
+  length = 0;
+  for (size_t s = 0; s < stretches.size(); ++s)
+    for (int j = 0; j <= fine; ++j)
+    {
+      Node&        node  = nodes[s * count + size_t(j)];
+      const Piece& piece = pieces[size_t(stretches[s].piece)];
+      gp_Vec       d;
+      piece.at(xOf(s, j), node.at, d);
+      if (d.Magnitude() <= 0)
+        fail(op, invalid_input, "the path has no direction somewhere");
+      node.t = d.Normalized();
+      if (j > 0)
+        length += lengthOf(piece, xOf(s, j - 1), xOf(s, j));
+      node.length = length;
+    }
+  if (length <= tolerance)
+    fail(op, invalid_input, "the path has no length");
+  {
+    const gp_Vec t0 = nodes[0].t;
+    nodes[0].r =
+      t0.Crossed(std::abs(t0.X()) < 0.9 ? gp_Vec(1, 0, 0) : gp_Vec(0, 1, 0)).Normalized();
+  }
+  for (size_t i = 1; i < nodes.size(); ++i)
+    nodes[i].r =
+      carriedNormal(nodes[i - 1].at, nodes[i - 1].t, nodes[i - 1].r, nodes[i].at, nodes[i].t);
+}
+
+void FramedSweep::frameAtStation()
+{
+  const Stretch& home = stretches[stationStretch];
+  const int      homeStep =
+    std::clamp(int(std::floor((station.x - home.from) / (home.to - home.from) * fine)), 0, fine);
+  before = stationStretch * count + size_t(homeStep);
+  stationLength =
+    nodes[before].length + lengthOf(stationPiece(), xOf(stationStretch, homeStep), station.x);
+  normal = carriedNormal(nodes[before].at, nodes[before].t, nodes[before].r, origin, heading);
+  side   = heading.Crossed(normal);
+}
+
+gp_XYZ FramedSweep::local(const gp_Pnt& p) const
+{
+  const gp_Vec v(origin, p);
+  return gp_XYZ(v.Dot(normal), v.Dot(side), v.Dot(heading));
+}
+
+double FramedSweep::sizeAt(double along) const
+{
+  return 1 + (scale - 1) * along / length;
+}
+
+void FramedSweep::profileInFrame()
+{
+  low  = gp_XYZ(1e300, 1e300, 1e300);
+  high = gp_XYZ(-1e300, -1e300, -1e300);
+  for (auto& c : curves)
+  {
+    c.local.clear();
+    for (int i = 1; i <= c.curve->NbPoles(); ++i)
+    {
+      const gp_XYZ x = local(c.curve->Pole(i));
+      c.local.push_back(x);
+      for (int a = 1; a <= 3; ++a)
+      {
+        low.SetCoord(a, std::min(low.Coord(a), x.Coord(a)));
+        high.SetCoord(a, std::max(high.Coord(a), x.Coord(a)));
+      }
+    }
+  }
+}
+
+void FramedSweep::guideNodes()
+{
+  guideContacts();
+  if (method == GuideMethod::Curve
+      && std::abs(curveTurn(contacts[1] - pin, 0)) * (contacts[1] - pin).Modulus() > tolerance)
+    fail(op, invalid_input, "for Curve the second guide has to touch the profile");
+  std::vector<double> senses;
+  for (size_t k = 0; k < guides.size(); ++k)
+  {
+    gp_Pnt g;
+    gp_Vec dg;
+    guides[k]->D1(crossings[k], g, dg);
+    senses.push_back(dg.Dot(heading));
+  }
+  for (const int step : {1, -1})
+  {
+    std::vector<double> w    = crossings;
+    double              turn = 0;
+    for (auto i = std::ptrdiff_t(before) + (step > 0 ? 1 : 0);
+         i >= 0 && i < std::ptrdiff_t(nodes.size());
+         i += step)
+    {
+      Node&              node     = nodes[size_t(i)];
+      const gp_Vec       binormal = node.t.Crossed(node.r);
+      std::vector<gp_XY> to;
+      for (size_t k = 0; k < guides.size(); ++k)
+      {
+        const BRepAdaptor_CompCurve& guide = *guides[k];
+        // The guide's point in the plane square to the path here.
+        gp_Pnt g;
+        gp_Vec dg;
+        bool   found = false;
+        for (int it = 0; it < 50 && !found; ++it)
+        {
+          guide.D1(w[k], g, dg);
+          const double h = gp_Vec(node.at, g).Dot(node.t), slope = dg.Dot(node.t);
+          if (slope * senses[k] <= 0)
+            fail(op,
+                 no_solution,
+                 "a guide doubles back along the path: it has to run beside it one way");
+          const double move = -h / slope;
+          if (std::abs(move) * dg.Magnitude() <= 1e-3 * tolerance)
+          {
+            found = true;
+            break;
+          }
+          const double next =
+            std::clamp(w[k] + move, guide.FirstParameter(), guide.LastParameter());
+          // Already at the guide's end and asked to go on: it is too short.
+          if (next == w[k])
+            fail(op, no_solution, "a guide does not run beside the whole path");
+          w[k] = next;
+        }
+        if (!found)
+          fail(op, no_solution, "a guide could not be followed along the path");
+        const gp_Vec d(node.at, g);
+        to.emplace_back(d.Dot(node.r), d.Dot(binormal));
+      }
+      node.guided = mapFor(to, turn);
+    }
+  }
+}
+
+void FramedSweep::guideContacts()
+{
+  contacts.clear();
+  for (size_t k = 0; k < guides.size(); ++k)
+  {
+    const gp_XYZ x = local(guides[k]->Value(crossings[k]));
+    contacts.emplace_back(x.X(), x.Y());
+  }
+  pin = contacts[0];
+  if (guides.size() == 2 && (contacts[1] - pin).Modulus() <= tolerance)
+    fail(op, invalid_input, "the two guides cross the profile's plane at one point");
+  spanA = guides.size() == 3 ? contacts[1] - pin : gp_XY();
+  spanB = guides.size() == 3 ? contacts[2] - pin : gp_XY();
+  det   = spanA.Crossed(spanB);
+  if (guides.size() == 3 && std::abs(det) <= tolerance * std::max(spanA.Modulus(), spanB.Modulus()))
+    fail(op, invalid_input, "the three guides cross the profile's plane in a line");
+  if (method == GuideMethod::Curve)
+    for (const auto& c : curves)
+      for (const gp_XYZ& x : c.local)
+        if (std::abs(x.Z()) > tolerance)
+          fail(op,
+               unsupported_geometry,
+               "Curve with two guides needs a flat profile square to the path");
+}
+
+std::vector<double> FramedSweep::directionsAt(double gap) const
+{
+  std::vector<double> found;
+  for (const auto& c : curves)
+  {
+    const double first = c.curve->FirstParameter(), last = c.curve->LastParameter();
+    auto         at = [&](double u) {
+      const gp_XYZ x = local(c.curve->Value(u));
+      return gp_XY(x.X(), x.Y()) - pin;
+    };
+    auto                off  = [&](double u) { return at(u).Modulus() - gap; };
+    auto                keep = [&](double u) { found.push_back(std::atan2(at(u).Y(), at(u).X())); };
+    const int           samples = 32 * c.curve->NbPoles();
+    std::vector<double> u(size_t(samples) + 1), f(size_t(samples) + 1);
+    for (int i = 0; i <= samples; ++i)
+    {
+      u[size_t(i)] = first + (last - first) * i / samples;
+      f[size_t(i)] = off(u[size_t(i)]);
+    }
+    for (size_t i = 0; i + 1 < u.size(); ++i)
+      if (f[i] == 0)
+        keep(u[i]);
+      else if (f[i] * f[i + 1] < 0)
+      {
+        double lo = u[i], hi = u[i + 1];
+        for (int k = 0; k < 60; ++k)
+        {
+          const double mid = (lo + hi) / 2;
+          if ((off(mid) < 0) == (f[i] < 0))
+            lo = mid;
+          else
+            hi = mid;
+        }
+        keep((lo + hi) / 2);
+      }
+    // Where the profile only comes to `gap` and turns back, there is no change of
+    // sign: the nearest it comes, if within the tolerance.
+    for (size_t i = 1; i + 1 < u.size(); ++i)
+      if (std::abs(f[i]) <= std::abs(f[i - 1]) && std::abs(f[i]) <= std::abs(f[i + 1])
+          && f[i - 1] * f[i + 1] > 0)
+      {
+        double lo = u[i - 1], hi = u[i + 1];
+        for (int k = 0; k < 60; ++k)
+        {
+          const double m1 = lo + (hi - lo) / 3, m2 = hi - (hi - lo) / 3;
+          if (std::abs(off(m1)) < std::abs(off(m2)))
+            hi = m2;
+          else
+            lo = m1;
+        }
+        if (std::abs(off((lo + hi) / 2)) <= tolerance)
+          keep((lo + hi) / 2);
+      }
+  }
+  return found;
+}
+
+double FramedSweep::curveTurn(const gp_XY& to, double previous) const
+{
+  double best = 0, gap = -1;
+  for (const double direction : directionsAt(to.Modulus()))
+  {
+    const double turn = nearPeriod(std::atan2(to.Y(), to.X()) - direction, previous, 2 * M_PI);
+    if (gap < 0 || std::abs(turn - previous) < gap)
+    {
+      gap  = std::abs(turn - previous);
+      best = turn;
+    }
+  }
+  if (gap < 0)
+    fail(op,
+         no_solution,
+         "the profile does not reach the second guide: Curve turns it but keeps its size");
+  return best;
+}
+
+PlaneMap FramedSweep::mapFor(const std::vector<gp_XY>& to, double& turn) const
+{
+  PlaneMap m;
+  if (guides.size() == 2)
+  {
+    const gp_XY from = contacts[1] - pin, toward = to[1] - to[0];
+    turn                = method == GuideMethod::Curve
+                            ? curveTurn(toward, turn)
+                            : nearPeriod(std::atan2(toward.Y(), toward.X()) - std::atan2(from.Y(), from.X()),
+                          turn,
+                          2 * M_PI);
+    const double factor = method == GuideMethod::Point ? toward.Modulus() / from.Modulus() : 1;
+    m.a = m.e = factor * std::cos(turn);
+    m.c       = factor * std::sin(turn);
+    m.b       = -m.c;
+  }
+  else if (guides.size() == 3)
+  {
+    // The map that takes the spans from the pin to where the guides are.
+    const gp_XY toA = to[1] - to[0], toB = to[2] - to[0];
+    m.a = (toA.X() * spanB.Y() - toB.X() * spanA.Y()) / det;
+    m.b = (toB.X() * spanA.X() - toA.X() * spanB.X()) / det;
+    m.c = (toA.Y() * spanB.Y() - toB.Y() * spanA.Y()) / det;
+    m.e = (toB.Y() * spanA.X() - toA.Y() * spanB.X()) / det;
+  }
+  m.d = to[0] - gp_XY(m.a * pin.X() + m.b * pin.Y(), m.c * pin.X() + m.e * pin.Y());
+  return m;
+}
+
+void FramedSweep::mapNodes()
+{
+  maps = std::vector<Map>(nodes.size());
+  for (size_t i = 0; i < nodes.size(); ++i)
+  {
+    const Node&  node     = nodes[i];
+    const gp_Vec binormal = node.t.Crossed(node.r);
+    if (!guides.empty())
+    {
+      const PlaneMap& m = node.guided;
+      maps[i]           = {node.r * m.a + binormal * m.c,
+                           node.r * m.b + binormal * m.e,
+                           node.t,
+                           gp_Vec(node.at.XYZ()) + node.r * m.d.X() + binormal * m.d.Y()};
+      continue;
+    }
+    const double angle  = twist * (node.length - stationLength) / length,
+                 factor = sizeAt(node.length) / sizeAt(stationLength);
+    maps[i]             = {(node.r * std::cos(angle) + binormal * std::sin(angle)) * factor,
+                           (binormal * std::cos(angle) - node.r * std::sin(angle)) * factor,
+                           node.t * factor,
+                           gp_Vec(node.at.XYZ())};
+  }
+}
+
+void FramedSweep::slopesOf()
+{
+  slopes = std::vector<Map>(nodes.size());
+  for (size_t s = 0; s < stretches.size(); ++s)
+  {
+    const Map*   m = &maps[s * count];
+    const double h = (stretches[s].to - stretches[s].from) / fine;
+    for (int j = 0; j <= fine; ++j)
+      for (size_t a = 0; a < 4; ++a)
+      {
+        gp_Vec d;
+        if (j >= 2 && j <= fine - 2)
+          d = (m[j - 2][a] - m[j - 1][a] * 8 + m[j + 1][a] * 8 - m[j + 2][a]) / (12 * h);
+        else if (j < 2)
+          d = (m[j][a] * -25 + m[j + 1][a] * 48 - m[j + 2][a] * 36 + m[j + 3][a] * 16
+               - m[j + 4][a] * 3)
+              / (12 * h);
+        else
+          d = (m[j][a] * 25 - m[j - 1][a] * 48 + m[j - 2][a] * 36 - m[j - 3][a] * 16
+               + m[j - 4][a] * 3)
+              / (12 * h);
+        slopes[s * count + size_t(j)][a] = d;
+      }
+    if (s > 0 && stretches[s - 1].piece == stretches[s].piece)
+      for (size_t a = 0; a < 4; ++a)
+      {
+        const gp_Vec mean    = (slopes[s * count][a] + slopes[s * count - 1][a]) / 2;
+        slopes[s * count][a] = slopes[s * count - 1][a] = mean;
+      }
+  }
+}
+
+void FramedSweep::checkCubic(int stations, bool& near, bool& forward) const
+{
+  for (size_t s = 0; s < stretches.size(); ++s)
+  {
+    const Map*   m    = &maps[s * count];
+    const double span = (stretches[s].to - stretches[s].from) / stations;
+    for (int j = 0; j <= fine; ++j)
+    {
+      const size_t i = s * count + size_t(j);
+      if (j % 4 != 0)
+      {
+        const int    j0 = j - j % 4;
+        const double u  = double(j % 4) / 4;
+        const Map &  y0 = m[j0], &y1 = m[j0 + 4], &d0 = slopes[s * count + size_t(j0)],
+                  &d1 = slopes[s * count + size_t(j0) + 4];
+        Map off;
+        for (size_t a = 0; a < 4; ++a)
+          off[a] =
+            y0[a] * (2 * u * u * u - 3 * u * u + 1) + d0[a] * (span * (u * u * u - 2 * u * u + u))
+            + y1[a] * (-2 * u * u * u + 3 * u * u) + d1[a] * (span * (u * u * u - u * u)) - m[j][a];
+        for (const double x : {low.X(), high.X()})
+          for (const double y : {low.Y(), high.Y()})
+            for (const double z : {low.Z(), high.Z()})
+              if (applied(off, gp_XYZ(x, y, z)).Magnitude() > tolerance)
+                near = false;
+      }
+      // Every point of the profile has to move forwards along the path: where one
+      // stands still or moves back, the surface folds over itself there.
+      const Map&    d    = slopes[i];
+      const gp_Vec& t    = nodes[i].t;
+      const double  base = d[3].Dot(t);
+      const gp_XYZ  lean(d[0].Dot(t), d[1].Dot(t), d[2].Dot(t));
+      for (const auto& c : curves)
+      {
+        bool hull = true;
+        for (const auto& x : c.local)
+          if (base + lean.Dot(x) <= 0)
+            hull = false;
+        if (hull)
+          continue;
+        // The control points say only that it may: ask the curve itself.
+        const int samples = 32 * c.curve->NbPoles();
+        for (int k = 0; k <= samples && forward; ++k)
+        {
+          const double w = c.curve->FirstParameter()
+                           + (c.curve->LastParameter() - c.curve->FirstParameter()) * k / samples;
+          if (base + lean.Dot(local(c.curve->Value(w))) <= 0)
+            forward = false;
+        }
+      }
+    }
+  }
+}
+
+void FramedSweep::makeFaces(int stations)
+{
+  faces.clear();
+  for (size_t k = 0; k < pieces.size(); ++k)
+  {
+    const size_t     from = firstStretch[k], to = firstStretch[k + 1];
+    const int        spans = int(to - from) * stations;
+    std::vector<Map> control;
+    control.reserve(size_t(2 * spans + 2));
+    NCollection_Array1<double> vKnots(1, spans + 1);
+    NCollection_Array1<int>    vMults(1, spans + 1);
+    int                        knot = 0;
+    for (size_t s = from; s < to; ++s)
+    {
+      const double span = (stretches[s].to - stretches[s].from) / stations;
+      for (int j = 0; j <= fine; j += 4)
+      {
+        const Map &y = maps[s * count + size_t(j)], &d = slopes[s * count + size_t(j)];
+        Map        in, out;
+        for (size_t a = 0; a < 4; ++a)
+        {
+          in[a]  = y[a] - d[a] * (span / 3);
+          out[a] = y[a] + d[a] * (span / 3);
+        }
+        // Into a station from the stretch before it, out of it into the one after.
+        if (j > 0)
+          control.push_back(in);
+        else if (s == from)
+          control.push_back(y);
+        if (j < fine)
+          control.push_back(out);
+        else if (s + 1 == to)
+          control.push_back(y);
+        if (j > 0 || s == from)
+        {
+          ++knot;
+          vKnots(knot) = double(k) + xOf(s, j);
+          vMults(knot) = 2;
+        }
+      }
+    }
+    vMults(1) = vMults(spans + 1) = 4;
+    const int rows                = int(control.size());
+    for (const auto& c : curves)
+    {
+      const int                  columns = c.curve->NbPoles();
+      NCollection_Array2<gp_Pnt> poles(1, columns, 1, rows);
+      NCollection_Array2<double> weights(1, columns, 1, rows);
+      for (int i = 1; i <= columns; ++i)
+        for (int j = 1; j <= rows; ++j)
+        {
+          poles(i, j)   = gp_Pnt(applied(control[size_t(j - 1)], c.local[size_t(i - 1)]).XYZ());
+          weights(i, j) = c.curve->Weight(i);
+        }
+      const Handle(Geom_BSplineSurface) surface = new Geom_BSplineSurface(poles,
+                                                                          weights,
+                                                                          c.curve->Knots(),
+                                                                          vKnots,
+                                                                          c.curve->Multiplicities(),
+                                                                          vMults,
+                                                                          c.curve->Degree(),
+                                                                          3);
+      BRepBuilderAPI_MakeFace           face(surface, tolerance);
+      if (!face.IsDone())
+        fail(op, no_solution, "a face of the sweep could not be made");
+      faces.push_back(face.Face());
+    }
+  }
+}
+
+void FramedSweep::endMaps()
+{
+  for (const bool last : {false, true})
+  {
+    const Map& map = last ? maps.back() : maps.front();
+    gp_Mat     linear;
+    for (int i = 1; i <= 3; ++i)
+      for (int j = 1; j <= 3; ++j)
+        linear.SetValue(i,
+                        j,
+                        map[0].Coord(i) * normal.Coord(j) + map[1].Coord(i) * side.Coord(j)
+                          + map[2].Coord(i) * heading.Coord(j));
+    ends[last] = {linear, map[3].XYZ() - origin.XYZ().Multiplied(linear)};
+  }
+}
+
+void FramedSweep::build()
+{
   for (int stations = 4;; stations *= 2)
   {
     checkCancelled(op);
@@ -491,37 +1068,10 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
         op,
         no_solution,
         "the sweep could not be made to tolerance with 2048 stations to each stretch of the path");
-    const int         fine = 4 * stations; // steps to a stretch; the stations are every fourth node
-    const auto        count = size_t(fine) + 1;
-    std::vector<Node> nodes(stretches.size() * count);
-    auto              xOf = [&](size_t s, int j) {
-      return stretches[s].from + (stretches[s].to - stretches[s].from) * j / fine;
-    };
-    double length = 0;
-    for (size_t s = 0; s < stretches.size(); ++s)
-      for (int j = 0; j <= fine; ++j)
-      {
-        Node&        node  = nodes[s * count + size_t(j)];
-        const Piece& piece = pieces[size_t(stretches[s].piece)];
-        gp_Vec       d;
-        piece.at(xOf(s, j), node.at, d);
-        if (d.Magnitude() <= 0)
-          fail(op, invalid_input, "the path has no direction somewhere");
-        node.t = d.Normalized();
-        if (j > 0)
-          length += lengthOf(piece, xOf(s, j - 1), xOf(s, j));
-        node.length = length;
-      }
-    if (length <= tolerance)
-      fail(op, invalid_input, "the path has no length");
-    {
-      const gp_Vec t0 = nodes[0].t;
-      nodes[0].r =
-        t0.Crossed(std::abs(t0.X()) < 0.9 ? gp_Vec(1, 0, 0) : gp_Vec(0, 1, 0)).Normalized();
-    }
-    for (size_t i = 1; i < nodes.size(); ++i)
-      nodes[i].r =
-        carriedNormal(nodes[i - 1].at, nodes[i - 1].t, nodes[i - 1].r, nodes[i].at, nodes[i].t);
+    fine  = 4 * stations; // steps to a stretch; the stations are every fourth node
+    count = size_t(fine) + 1;
+    nodes = std::vector<Node>(stretches.size() * count);
+    carryNodes();
     // Have the frames and the length stopped changing? (The first normal is the same each time.)
     const gp_Vec endNormal = nodes.back().r;
     const bool   settled =
@@ -532,343 +1082,16 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
     endNormalBefore = endNormal;
     lengthBefore    = length;
 
-    // The profile's frame, carried from the node before its station.
-    const Stretch& home = stretches[stationStretch];
-    const int      homeStep =
-      std::clamp(int(std::floor((station.x - home.from) / (home.to - home.from) * fine)), 0, fine);
-    const size_t before = stationStretch * count + size_t(homeStep);
-    const double stationLength =
-      nodes[before].length + lengthOf(stationPiece, xOf(stationStretch, homeStep), station.x);
-    const gp_Vec normal =
-      carriedNormal(nodes[before].at, nodes[before].t, nodes[before].r, origin, heading);
-    const gp_Vec side  = heading.Crossed(normal);
-    auto         local = [&](const gp_Pnt& p) {
-      const gp_Vec v(origin, p);
-      return gp_XYZ(v.Dot(normal), v.Dot(side), v.Dot(heading));
-    };
-    const auto sizeAt = [&](double along) { return 1 + (scale - 1) * along / length; };
-
-    // The profile's control points in its frame, and their box.
-    gp_XYZ low(1e300, 1e300, 1e300), high(-1e300, -1e300, -1e300);
-    for (auto& c : curves)
-    {
-      c.local.clear();
-      for (int i = 1; i <= c.curve->NbPoles(); ++i)
-      {
-        const gp_XYZ x = local(c.curve->Pole(i));
-        c.local.push_back(x);
-        for (int a = 1; a <= 3; ++a)
-        {
-          low.SetCoord(a, std::min(low.Coord(a), x.Coord(a)));
-          high.SetCoord(a, std::max(high.Coord(a), x.Coord(a)));
-        }
-      }
-    }
-    // Where the guides put the profile at each node, marched both ways from the profile. The
-    // first guide's point keeps its place on that guide, and the profile its size and the
-    // path's frame. A second guide turns the section about that point too, so that the
-    // second guide's point stays on it and the section is scaled to keep it there (Point),
-    // points at it (Chord), or so that the profile passes through it, the point of contact
-    // sliding along the profile (Curve). Three set the section by the map of the plane that
-    // takes their three points to where those guides are.
+    frameAtStation();
+    profileInFrame();
     if (!guides.empty())
-    {
-      std::vector<gp_XY> contacts;
-      for (size_t k = 0; k < guides.size(); ++k)
-      {
-        const gp_XYZ x = local(guides[k]->Value(crossings[k]));
-        contacts.emplace_back(x.X(), x.Y());
-      }
-      const gp_XY& pin = contacts[0];
-      if (guides.size() == 2 && (contacts[1] - pin).Modulus() <= tolerance)
-        fail(op, invalid_input, "the two guides cross the profile's plane at one point");
-      const gp_XY spanA = guides.size() == 3 ? contacts[1] - pin : gp_XY(),
-                  spanB = guides.size() == 3 ? contacts[2] - pin : gp_XY();
-      const double det  = spanA.Crossed(spanB);
-      if (guides.size() == 3
-          && std::abs(det) <= tolerance * std::max(spanA.Modulus(), spanB.Modulus()))
-        fail(op, invalid_input, "the three guides cross the profile's plane in a line");
-      if (method == GuideMethod::Curve)
-        for (const auto& c : curves)
-          for (const gp_XYZ& x : c.local)
-            if (std::abs(x.Z()) > tolerance)
-              fail(op,
-                   unsupported_geometry,
-                   "Curve with two guides needs a flat profile square to the path");
-      // For Curve: the directions from the pin of the profile's points at `gap` from it.
-      auto directionsAt = [&](double gap) {
-        std::vector<double> found;
-        for (const auto& c : curves)
-        {
-          const double first = c.curve->FirstParameter(), last = c.curve->LastParameter();
-          auto         at = [&](double u) {
-            const gp_XYZ x = local(c.curve->Value(u));
-            return gp_XY(x.X(), x.Y()) - pin;
-          };
-          auto      off     = [&](double u) { return at(u).Modulus() - gap; };
-          auto      keep    = [&](double u) { found.push_back(std::atan2(at(u).Y(), at(u).X())); };
-          const int samples = 32 * c.curve->NbPoles();
-          std::vector<double> u(size_t(samples) + 1), f(size_t(samples) + 1);
-          for (int i = 0; i <= samples; ++i)
-          {
-            u[size_t(i)] = first + (last - first) * i / samples;
-            f[size_t(i)] = off(u[size_t(i)]);
-          }
-          for (size_t i = 0; i + 1 < u.size(); ++i)
-            if (f[i] == 0)
-              keep(u[i]);
-            else if (f[i] * f[i + 1] < 0)
-            {
-              double lo = u[i], hi = u[i + 1];
-              for (int k = 0; k < 60; ++k)
-              {
-                const double mid = (lo + hi) / 2;
-                if ((off(mid) < 0) == (f[i] < 0))
-                  lo = mid;
-                else
-                  hi = mid;
-              }
-              keep((lo + hi) / 2);
-            }
-          // Where the profile only comes to `gap` and turns back, there is no change of
-          // sign: the nearest it comes, if within the tolerance.
-          for (size_t i = 1; i + 1 < u.size(); ++i)
-            if (std::abs(f[i]) <= std::abs(f[i - 1]) && std::abs(f[i]) <= std::abs(f[i + 1])
-                && f[i - 1] * f[i + 1] > 0)
-            {
-              double lo = u[i - 1], hi = u[i + 1];
-              for (int k = 0; k < 60; ++k)
-              {
-                const double m1 = lo + (hi - lo) / 3, m2 = hi - (hi - lo) / 3;
-                if (std::abs(off(m1)) < std::abs(off(m2)))
-                  hi = m2;
-                else
-                  lo = m1;
-              }
-              if (std::abs(off((lo + hi) / 2)) <= tolerance)
-                keep((lo + hi) / 2);
-            }
-        }
-        return found;
-      };
-      // The turn about the pin for Curve nearest `previous`, that puts the profile through `to`.
-      auto curveTurn = [&](const gp_XY& to, double previous) {
-        double best = 0, gap = -1;
-        for (const double direction : directionsAt(to.Modulus()))
-        {
-          const double turn =
-            nearPeriod(std::atan2(to.Y(), to.X()) - direction, previous, 2 * M_PI);
-          if (gap < 0 || std::abs(turn - previous) < gap)
-          {
-            gap  = std::abs(turn - previous);
-            best = turn;
-          }
-        }
-        if (gap < 0)
-          fail(op,
-               no_solution,
-               "the profile does not reach the second guide: Curve turns it but keeps its size");
-        return best;
-      };
-      if (method == GuideMethod::Curve
-          && std::abs(curveTurn(contacts[1] - pin, 0)) * (contacts[1] - pin).Modulus() > tolerance)
-        fail(op, invalid_input, "for Curve the second guide has to touch the profile");
-      auto mapFor = [&](const std::vector<gp_XY>& to, double& turn) {
-        PlaneMap m;
-        if (guides.size() == 2)
-        {
-          const gp_XY from = contacts[1] - pin, toward = to[1] - to[0];
-          turn = method == GuideMethod::Curve
-                   ? curveTurn(toward, turn)
-                   : nearPeriod(std::atan2(toward.Y(), toward.X()) - std::atan2(from.Y(), from.X()),
-                                turn,
-                                2 * M_PI);
-          const double factor =
-            method == GuideMethod::Point ? toward.Modulus() / from.Modulus() : 1;
-          m.a = m.e = factor * std::cos(turn);
-          m.c       = factor * std::sin(turn);
-          m.b       = -m.c;
-        }
-        else if (guides.size() == 3)
-        {
-          // The map that takes the spans from the pin to where the guides are.
-          const gp_XY toA = to[1] - to[0], toB = to[2] - to[0];
-          m.a = (toA.X() * spanB.Y() - toB.X() * spanA.Y()) / det;
-          m.b = (toB.X() * spanA.X() - toA.X() * spanB.X()) / det;
-          m.c = (toA.Y() * spanB.Y() - toB.Y() * spanA.Y()) / det;
-          m.e = (toB.Y() * spanA.X() - toA.Y() * spanB.X()) / det;
-        }
-        m.d = to[0] - gp_XY(m.a * pin.X() + m.b * pin.Y(), m.c * pin.X() + m.e * pin.Y());
-        return m;
-      };
-      std::vector<double> senses;
-      for (size_t k = 0; k < guides.size(); ++k)
-      {
-        gp_Pnt g;
-        gp_Vec dg;
-        guides[k]->D1(crossings[k], g, dg);
-        senses.push_back(dg.Dot(heading));
-      }
-      for (const int step : {1, -1})
-      {
-        std::vector<double> w    = crossings;
-        double              turn = 0;
-        for (auto i = std::ptrdiff_t(before) + (step > 0 ? 1 : 0);
-             i >= 0 && i < std::ptrdiff_t(nodes.size());
-             i += step)
-        {
-          Node&              node     = nodes[size_t(i)];
-          const gp_Vec       binormal = node.t.Crossed(node.r);
-          std::vector<gp_XY> to;
-          for (size_t k = 0; k < guides.size(); ++k)
-          {
-            const BRepAdaptor_CompCurve& guide = *guides[k];
-            // The guide's point in the plane square to the path here.
-            gp_Pnt g;
-            gp_Vec dg;
-            bool   found = false;
-            for (int it = 0; it < 50 && !found; ++it)
-            {
-              guide.D1(w[k], g, dg);
-              const double h = gp_Vec(node.at, g).Dot(node.t), slope = dg.Dot(node.t);
-              if (slope * senses[k] <= 0)
-                fail(op,
-                     no_solution,
-                     "a guide doubles back along the path: it has to run beside it one way");
-              const double move = -h / slope;
-              if (std::abs(move) * dg.Magnitude() <= 1e-3 * tolerance)
-              {
-                found = true;
-                break;
-              }
-              const double next =
-                std::clamp(w[k] + move, guide.FirstParameter(), guide.LastParameter());
-              // Already at the guide's end and asked to go on: it is too short.
-              if (next == w[k])
-                fail(op, no_solution, "a guide does not run beside the whole path");
-              w[k] = next;
-            }
-            if (!found)
-              fail(op, no_solution, "a guide could not be followed along the path");
-            const gp_Vec d(node.at, g);
-            to.emplace_back(d.Dot(node.r), d.Dot(binormal));
-          }
-          node.guided = mapFor(to, turn);
-        }
-      }
-    }
-
-    // The map at each node.
-    std::vector<Map> maps(nodes.size());
-    for (size_t i = 0; i < nodes.size(); ++i)
-    {
-      const Node&  node     = nodes[i];
-      const gp_Vec binormal = node.t.Crossed(node.r);
-      if (!guides.empty())
-      {
-        const PlaneMap& m = node.guided;
-        maps[i]           = {node.r * m.a + binormal * m.c,
-                             node.r * m.b + binormal * m.e,
-                             node.t,
-                             gp_Vec(node.at.XYZ()) + node.r * m.d.X() + binormal * m.d.Y()};
-        continue;
-      }
-      const double angle  = twist * (node.length - stationLength) / length,
-                   factor = sizeAt(node.length) / sizeAt(stationLength);
-      maps[i]             = {(node.r * std::cos(angle) + binormal * std::sin(angle)) * factor,
-                             (binormal * std::cos(angle) - node.r * std::sin(angle)) * factor,
-                             node.t * factor,
-                             gp_Vec(node.at.XYZ())};
-    }
-
-    auto applied = [](const Map& m, const gp_XYZ& x) {
-      return m[3] + m[0] * x.X() + m[1] * x.Y() + m[2] * x.Z();
-    };
-
-    // Slopes by x at every node, by differences of the fourth order within a stretch;
-    // where two stretches of a piece meet the map has one slope, their mean.
-    std::vector<Map> slopes(nodes.size());
-    for (size_t s = 0; s < stretches.size(); ++s)
-    {
-      const Map*   m = &maps[s * count];
-      const double h = (stretches[s].to - stretches[s].from) / fine;
-      for (int j = 0; j <= fine; ++j)
-        for (size_t a = 0; a < 4; ++a)
-        {
-          gp_Vec d;
-          if (j >= 2 && j <= fine - 2)
-            d = (m[j - 2][a] - m[j - 1][a] * 8 + m[j + 1][a] * 8 - m[j + 2][a]) / (12 * h);
-          else if (j < 2)
-            d = (m[j][a] * -25 + m[j + 1][a] * 48 - m[j + 2][a] * 36 + m[j + 3][a] * 16
-                 - m[j + 4][a] * 3)
-                / (12 * h);
-          else
-            d = (m[j][a] * 25 - m[j - 1][a] * 48 + m[j - 2][a] * 36 - m[j - 3][a] * 16
-                 + m[j - 4][a] * 3)
-                / (12 * h);
-          slopes[s * count + size_t(j)][a] = d;
-        }
-      if (s > 0 && stretches[s - 1].piece == stretches[s].piece)
-        for (size_t a = 0; a < 4; ++a)
-        {
-          const gp_Vec mean    = (slopes[s * count][a] + slopes[s * count - 1][a]) / 2;
-          slopes[s * count][a] = slopes[s * count - 1][a] = mean;
-        }
-    }
+      guideNodes();
+    mapNodes();
+    slopesOf();
     // The cubic through values and slopes at the stations, against the map at the nodes
     // between them; and that the profile moves forwards everywhere.
     bool near = true, forward = true;
-    for (size_t s = 0; s < stretches.size(); ++s)
-    {
-      const Map*   m    = &maps[s * count];
-      const double span = (stretches[s].to - stretches[s].from) / stations;
-      for (int j = 0; j <= fine; ++j)
-      {
-        const size_t i = s * count + size_t(j);
-        if (j % 4 != 0)
-        {
-          const int    j0 = j - j % 4;
-          const double u  = double(j % 4) / 4;
-          const Map &  y0 = m[j0], &y1 = m[j0 + 4], &d0 = slopes[s * count + size_t(j0)],
-                    &d1 = slopes[s * count + size_t(j0) + 4];
-          Map off;
-          for (size_t a = 0; a < 4; ++a)
-            off[a] = y0[a] * (2 * u * u * u - 3 * u * u + 1)
-                     + d0[a] * (span * (u * u * u - 2 * u * u + u))
-                     + y1[a] * (-2 * u * u * u + 3 * u * u) + d1[a] * (span * (u * u * u - u * u))
-                     - m[j][a];
-          for (const double x : {low.X(), high.X()})
-            for (const double y : {low.Y(), high.Y()})
-              for (const double z : {low.Z(), high.Z()})
-                if (applied(off, gp_XYZ(x, y, z)).Magnitude() > tolerance)
-                  near = false;
-        }
-        // Every point of the profile has to move forwards along the path: where one
-        // stands still or moves back, the surface folds over itself there.
-        const Map&    d    = slopes[i];
-        const gp_Vec& t    = nodes[i].t;
-        const double  base = d[3].Dot(t);
-        const gp_XYZ  lean(d[0].Dot(t), d[1].Dot(t), d[2].Dot(t));
-        for (const auto& c : curves)
-        {
-          bool hull = true;
-          for (const auto& x : c.local)
-            if (base + lean.Dot(x) <= 0)
-              hull = false;
-          if (hull)
-            continue;
-          // The control points say only that it may: ask the curve itself.
-          const int samples = 32 * c.curve->NbPoles();
-          for (int k = 0; k <= samples && forward; ++k)
-          {
-            const double w = c.curve->FirstParameter()
-                             + (c.curve->LastParameter() - c.curve->FirstParameter()) * k / samples;
-            if (base + lean.Dot(local(c.curve->Value(w))) <= 0)
-              forward = false;
-          }
-        }
-      }
-    }
+    checkCubic(stations, near, forward);
     if (!forward)
       fail(op,
            no_solution,
@@ -878,92 +1101,14 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
     if (!near || !settled)
       continue;
 
-    // The surfaces: for each piece of the path and each edge of the profile, the control
-    // points of the map's cubic applied to the edge's control points.
-    faces.clear();
-    for (size_t k = 0; k < pieces.size(); ++k)
-    {
-      const size_t     from = firstStretch[k], to = firstStretch[k + 1];
-      const int        spans = int(to - from) * stations;
-      std::vector<Map> control;
-      control.reserve(size_t(2 * spans + 2));
-      NCollection_Array1<double> vKnots(1, spans + 1);
-      NCollection_Array1<int>    vMults(1, spans + 1);
-      int                        knot = 0;
-      for (size_t s = from; s < to; ++s)
-      {
-        const double span = (stretches[s].to - stretches[s].from) / stations;
-        for (int j = 0; j <= fine; j += 4)
-        {
-          const Map &y = maps[s * count + size_t(j)], &d = slopes[s * count + size_t(j)];
-          Map        in, out;
-          for (size_t a = 0; a < 4; ++a)
-          {
-            in[a]  = y[a] - d[a] * (span / 3);
-            out[a] = y[a] + d[a] * (span / 3);
-          }
-          // Into a station from the stretch before it, out of it into the one after.
-          if (j > 0)
-            control.push_back(in);
-          else if (s == from)
-            control.push_back(y);
-          if (j < fine)
-            control.push_back(out);
-          else if (s + 1 == to)
-            control.push_back(y);
-          if (j > 0 || s == from)
-          {
-            ++knot;
-            vKnots(knot) = double(k) + xOf(s, j);
-            vMults(knot) = 2;
-          }
-        }
-      }
-      vMults(1) = vMults(spans + 1) = 4;
-      const int rows                = int(control.size());
-      for (const auto& c : curves)
-      {
-        const int                  columns = c.curve->NbPoles();
-        NCollection_Array2<gp_Pnt> poles(1, columns, 1, rows);
-        NCollection_Array2<double> weights(1, columns, 1, rows);
-        for (int i = 1; i <= columns; ++i)
-          for (int j = 1; j <= rows; ++j)
-          {
-            poles(i, j)   = gp_Pnt(applied(control[size_t(j - 1)], c.local[size_t(i - 1)]).XYZ());
-            weights(i, j) = c.curve->Weight(i);
-          }
-        const Handle(Geom_BSplineSurface) surface =
-          new Geom_BSplineSurface(poles,
-                                  weights,
-                                  c.curve->Knots(),
-                                  vKnots,
-                                  c.curve->Multiplicities(),
-                                  vMults,
-                                  c.curve->Degree(),
-                                  3);
-        BRepBuilderAPI_MakeFace face(surface, tolerance);
-        if (!face.IsDone())
-          fail(op, no_solution, "a face of the sweep could not be made");
-        faces.push_back(face.Face());
-      }
-    }
-    // Where the ends are, for the caps: the maps there, taken from the profile's frame to the
-    // world's.
-    for (const bool last : {false, true})
-    {
-      const Map& map = last ? maps.back() : maps.front();
-      gp_Mat     linear;
-      for (int i = 1; i <= 3; ++i)
-        for (int j = 1; j <= 3; ++j)
-          linear.SetValue(i,
-                          j,
-                          map[0].Coord(i) * normal.Coord(j) + map[1].Coord(i) * side.Coord(j)
-                            + map[2].Coord(i) * heading.Coord(j));
-      ends[last] = {linear, map[3].XYZ() - origin.XYZ().Multiplied(linear)};
-    }
+    makeFaces(stations);
+    endMaps();
     break;
   }
+}
 
+bool FramedSweep::capFaces(bool solid)
+{
   // Flat ends close a closed profile into a solid.
   bool capped = false;
   if (solid && closedProfile)
@@ -1013,6 +1158,11 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
       capped = true;
     }
   }
+  return capped;
+}
+
+TopoDS_Shape FramedSweep::sewn(bool capped)
+{
   BRepBuilderAPI_Sewing sewing(tolerance);
   for (const auto& face : faces)
     sewing.Add(face);
@@ -1039,6 +1189,52 @@ EvolutionData sweepFramed(OcctKernel&                  kernel,
   // that it does not pass through itself somewhere else along the path is not claimed.
   if (!BRepCheck_Analyzer(result).IsValid())
     fail(op, no_solution, "the sweep's faces do not make a valid body");
-  return stored(kernel, result);
+  return result;
 }
+
+} // namespace
+
+EvolutionData sweepFramed(OcctKernel&                  kernel,
+                          uint32_t                     profileId,
+                          uint32_t                     pathId,
+                          double                       twist,
+                          double                       scale,
+                          const std::vector<uint32_t>& guideIds,
+                          GuideMethod                  guideMethod,
+                          double                       tolerance,
+                          bool                         solid)
+{
+  const auto &profile = get(kernel, profileId), &path = get(kernel, pathId);
+  if (!std::isfinite(tolerance) || tolerance <= 0)
+    fail(op, invalid_input, "tolerance must be positive");
+  if (profile.ShapeType() != TopAbs_WIRE || path.ShapeType() != TopAbs_WIRE)
+    fail(op, invalid_input, "the profile and the path must be curves");
+  if (!std::isfinite(twist) || std::abs(twist) > 8 * M_PI)
+    fail(op, invalid_input, "the twist must be within four turns");
+  if (!std::isfinite(scale) || scale <= 0)
+    fail(op, invalid_input, "the scale must be positive");
+  if (guideMethod < GuideMethod::Point || guideMethod > GuideMethod::Curve)
+    fail(op, invalid_input, "the guide method is point (0), chord (1), or curve (2)");
+  for (const uint32_t id : guideIds)
+    if (get(kernel, id).ShapeType() != TopAbs_WIRE)
+      fail(op, invalid_input, "a guide must be a curve");
+  if (guideIds.size() > 3)
+    fail(op, unsupported_geometry, "at most three guides are followed");
+  if (!guideIds.empty() && (twist != 0 || scale != 1))
+    fail(op,
+         invalid_input,
+         "the guides set the profile's place, turn and size: no twist or scale with them");
+  // Three guides set every point of the plane: the method is for two.
+  const GuideMethod method    = guideIds.size() == 2 ? guideMethod : GuideMethod::Point;
+  const TopoDS_Wire spineWire = TopoDS::Wire(path), profileWire = TopoDS::Wire(profile);
+  if (BRep_Tool::IsClosed(spineWire))
+    fail(op, unsupported_geometry, "a closed path is not swept with frames of our own");
+
+  FramedSweep
+    sweep(kernel, profile, profileWire, spineWire, twist, scale, guideIds, method, tolerance);
+  sweep.build();
+  const bool capped = sweep.capFaces(solid);
+  return stored(kernel, sweep.sewn(capped));
+}
+
 } // namespace BRepExt
