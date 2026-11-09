@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Timon Gentzsch. LGPL-2.1-only WITH OCCT-exception-1.0. -->
+
 # Corrections to existing OCCT algorithms
 
 Changes to existing OCCT code, one commit each, on top of OCCT `b8f597c6` (30 July 2026).

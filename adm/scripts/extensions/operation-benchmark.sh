@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Timon Gentzsch
+# SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 # Whole-operation comparison of TKAlgoExt with stock OCCT (see operation-benchmark.cxx).
 #   operation-benchmark.sh NATIVE_BUILD_DIRECTORY
 # NATIVE_BUILD_DIRECTORY is a static Release build of this tree with the toolkits TKAlgoExt,

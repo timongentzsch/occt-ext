@@ -1,10 +1,5 @@
 // Copyright (c) 2026 Timon Gentzsch
-//
-// This file is part of Open CASCADE Technology software library.
-// This library is free software; you can redistribute it and/or modify it under
-// the terms of the GNU Lesser General Public License version 2.1 as published
-// by the Free Software Foundation, with special exception defined in the file
-// OCCT_LGPL_EXCEPTION.txt. Consult LICENSE_LGPL_21.txt for the complete license.
+// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 #include <GeomAlgoExt_Bernstein.hxx>
 #include <GeomAlgoExt_Interval.hxx>
 #include <GeomAlgoExt_UniformKnots.hxx>

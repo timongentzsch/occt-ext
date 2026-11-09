@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Timon Gentzsch
-// This file is part of Open CASCADE Technology software library.
-// LGPL-2.1-only WITH OCCT-exception-1.0; see LICENSE_LGPL_21.txt and OCCT_LGPL_EXCEPTION.txt.
+// SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 #include <BRepFill_CompatibleWires.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>

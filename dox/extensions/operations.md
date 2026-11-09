@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Timon Gentzsch. LGPL-2.1-only WITH OCCT-exception-1.0. -->
+
 # Operations in TKAlgoExt
 
 Each entry gives the construction, the mathematics it rests on, the sources read for it, what is
@@ -991,8 +993,7 @@ G1 can be had. The G2 analogue of the vertex-enclosure condition is stated open 
 is the elementary part of it that a fill can be held to. G2 is then met on the middle of each side only; coarse
 nets that meet an eased loop can be lopsided; and the ease of one coarse span is a judgement bounded by
 measurement, not an optimum. A flat strip meeting a bending one is held beyond its ease to the flat G2 limit,
-which no eased fill meets, and is refused naming the corner (the same corner statement is made by a commercial
-fill's manual: the corner's tangent plane and curvature "may not agree to the existing surfaces'").
+which no eased fill meets, and is refused naming the corner.
 
 ### Spatial fit and chart
 

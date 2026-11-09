@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Timon Gentzsch. LGPL-2.1-only WITH OCCT-exception-1.0. -->
+
 # References
 
 Numbered entries are cited by number in [utilities.md](utilities.md) and [corrections.md](corrections.md).

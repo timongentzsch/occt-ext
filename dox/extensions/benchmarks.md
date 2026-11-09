@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Timon Gentzsch. LGPL-2.1-only WITH OCCT-exception-1.0. -->
+
 # Benchmarks and reproduction
 
 ## Whole operations against stock OCCT
