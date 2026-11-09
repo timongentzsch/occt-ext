@@ -44,8 +44,8 @@ enum class Select
                     // share a face, else nothing: the choice Extrude makes from the clash
 };
 
-//! What one rung of the ladder did; these make up the timing table of the ladder.
-struct Rung
+//! What one attempt of the ladder (plain, then fuzzy) did; these make up its timing table.
+struct BooleanAttempt
 {
   std::string name;         // "plain", "fuzzy"
   double      fuzzy    = 0; // the fuzzy value it ran at
@@ -79,7 +79,7 @@ struct BooleanResult
   //! For each face of an operand that is not in the result as it was: what it became. An
   //! empty list is a face that is gone. A face that is not bound is in the result untouched.
   NCollection_DataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> faces;
-  std::vector<Rung>                                                                          rungs;
+  std::vector<BooleanAttempt> attempts;
   //! Exact copies untouched by reunion, for display reuse; never geometry matching.
   std::vector<std::pair<TopoDS_Shape, TopoDS_Shape>> displayCopies;
 
@@ -108,16 +108,16 @@ struct BooleanRequest
   Select                    select    = Select::Union;
   std::vector<TopoDS_Shape> sources, tools;
   bool   cancellable = false;
-  bool   journal     = false;
+  bool   subShapeHistory = false; // also the history of edges and vertices, not only faces
   int    glue        = 0; // BOPAlgo_GlueEnum
   double fuzzy       = 0; // the caller's own fuzzy value for the first rung; 0 for none
 };
 
 //! Run the ladder: plain, then at a fuzzy value; the first rung whose partition is verified
 //! gives the result. Fails with no_solution, saying why each rung was refused, when none is.
-//! `rungs`, if given, receives what every rung did, also when the call fails.
-Standard_EXPORT BooleanResult booleanCells(const BooleanRequest& request,
-                                           std::vector<Rung>*    rungs = nullptr);
+//! `attempts`, if given, receives what every attempt did, also when the call fails.
+Standard_EXPORT BooleanResult booleanCells(const BooleanRequest&        request,
+                                           std::vector<BooleanAttempt>* attempts = nullptr);
 
 //! Copy and unite same-domain result faces, composing operand face history. Kept result
 //! edges/vertices retain intentional boundaries; invalid unification leaves result unchanged.

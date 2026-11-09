@@ -529,7 +529,7 @@ struct Partition
   std::vector<Operand>                  operands;
   std::vector<Cell>                     cells;
   bool                                  represented = false;
-  bool                                  journal     = false;
+  bool                                  subShapeHistory = false;
   double                                tolerance   = 0; // T
   Handle(IntTools_Context)              context     = new IntTools_Context;
   gp_Pnt origin; // about which every volume of the partition is taken
@@ -1049,7 +1049,7 @@ void fuse(Partition&            partition,
           const ShapeList&      lines,
           std::vector<Operand>* prepared = nullptr)
 {
-  partition.journal  = request.journal;
+  partition.subShapeHistory = request.subShapeHistory;
   const double fuzzy = step.fuzzy;
   const double setup = booleanTimingEnabled() ? booleanNow() : 0;
   if (prepared)
@@ -1174,7 +1174,7 @@ void fuse(Partition&            partition,
 //    (where 1 and 2 hold: each cell is one whole operand), since a boundary that crosses a
 //    cell unnoticed has that cell's faces, edges or corners on both of its sides.
 
-void verify(Partition& partition, const BooleanRequest& request, Rung& rung)
+void verify(Partition& partition, const BooleanRequest& request, BooleanAttempt& rung)
 {
   auto&             operands     = partition.operands;
   const double      reach        = kOnFactor * partition.tolerance;
@@ -1749,7 +1749,7 @@ TopoDS_Shape wireOf(const std::vector<TopoDS_Shape>& edges)
 //! sides.
 std::vector<TopoDS_Shape> enclosed(Partition&            partition,
                                    const BooleanRequest& request,
-                                   Rung&                 rung,
+                                   BooleanAttempt&       rung,
                                    bool                  regions = false)
 {
   ShapeList                 faces;
@@ -1975,7 +1975,7 @@ struct Chosen
   bool                      merged = false;
 };
 
-Chosen choose(Partition& partition, const BooleanRequest& request, Rung& rung)
+Chosen choose(Partition& partition, const BooleanRequest& request, BooleanAttempt& rung)
 {
   const auto& operands = partition.operands;
   if (request.select == Select::Region)
@@ -2250,7 +2250,7 @@ Families familiesOf(Partition&                                                  
     for (auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
       for (TopExp_Explorer it(operand.original, type); it.More(); it.Next())
       {
-        if (type != TopAbs_FACE && !partition.journal)
+        if (type != TopAbs_FACE && !partition.subShapeHistory)
           continue;
         if (families.IsBound(it.Current()))
           continue;
@@ -2347,7 +2347,7 @@ TopoDS_Shape reunite(Partition&                                               pa
           unify.KeepShape(copier.ModifiedShape(image));
   unify.Build();
   const auto& united = unify.Shape();
-  if (partition.journal)
+  if (partition.subShapeHistory)
   {
     ShapeSet original, final;
     TopExp::MapShapes(shape, original);
@@ -2392,7 +2392,7 @@ TopoDS_Shape reunite(Partition&                                               pa
   return united;
 }
 
-BooleanResult build(Partition& partition, const BooleanRequest& request, Rung& rung)
+BooleanResult build(Partition& partition, const BooleanRequest& request, BooleanAttempt& rung)
 {
   BooleanPhase buildPhase("build");
   auto         chosen = choose(partition, request, rung);
@@ -2476,7 +2476,7 @@ BooleanResult build(Partition& partition, const BooleanRequest& request, Rung& r
     if (it.Key().ShapeType() == TopAbs_FACE)
       result.faces.Bind(it.Key(), now);
   }
-  if (request.journal)
+  if (request.subShapeHistory)
   {
     for (Families::Iterator it(families); it.More(); it.Next())
     {
@@ -2506,7 +2506,7 @@ BooleanResult build(Partition& partition, const BooleanRequest& request, Rung& r
 
 } // namespace
 
-BooleanResult booleanCells(const BooleanRequest& request, std::vector<Rung>* report)
+BooleanResult booleanCells(const BooleanRequest& request, std::vector<BooleanAttempt>* report)
 {
   checkCancelled(request.operation, request.cancellable);
   BooleanPhase ladderPhase("ladder");
@@ -2592,7 +2592,7 @@ BooleanResult booleanCells(const BooleanRequest& request, std::vector<Rung>* rep
 
   if (booleanTimingEnabled())
     booleanPhase("preparation", since(preparation));
-  std::vector<Rung> rungs;
+  std::vector<BooleanAttempt> rungs;
   BooleanResult     result;
   bool              made = false;
   for (const auto& step : ladder)
@@ -2665,7 +2665,7 @@ BooleanResult booleanCells(const BooleanRequest& request, std::vector<Rung>* rep
            "thicker. Changing fuzzy tolerance cannot replace a verified partition.";
     fail(request.operation, no_solution, why);
   }
-  result.rungs = rungs;
+  result.attempts = rungs;
   return result;
 }
 

@@ -93,10 +93,10 @@ struct Request
 
 //! The blended body, made on a copy of the input without its meshes (it shares nothing with the
 //! input); what became of every face, edge and vertex of the input (for the face history and the
-//! journal); the faces and edges the blends left as they were, each with its copy; and what was
-//! made: the pieces, the edges added as tangent to the picked ones and the pieces on exact sheets.
-//! Construction intent, independent of the mutable BRep continuity flags. A sharp
-//! join remains in the inventory with order zero; it is not a missing contact.
+//! history of edges and vertices); the faces and edges the blends left as they were, each with its
+//! copy; and what was made: the pieces, the edges added as tangent to the picked ones and the
+//! pieces on exact sheets. Construction intent, independent of the mutable BRep continuity flags. A
+//! sharp join remains in the inventory with order zero; it is not a missing contact.
 enum class JoinRole
 {
   Contact, UsedSupport, Joint, SupportBreak, Fold, Roll, Corner, Miter, Stop,

@@ -2372,7 +2372,7 @@ BooleanResult faceBlend(const char*                      op,
   if (result.faces.IsBound(top))
     result.faces.UnBind(top);
   result.faces.Bind(top, remains);
-  result.rungs = cutOff.rungs;
+  result.attempts = cutOff.attempts;
   if (!bevel)
   {
     std::vector<TopoDS_Shape> generated(lid.begin(), lid.end());

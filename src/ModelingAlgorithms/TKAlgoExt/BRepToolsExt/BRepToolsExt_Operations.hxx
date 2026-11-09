@@ -5,7 +5,7 @@
 #include <Standard_Macro.hxx>
 #include <BRepToolsExt_Session.hxx>
 
-// The operations this package adds to the kernel. Each takes and returns arena
+// The operations this package adds to the kernel. Each takes and returns shape
 // handles, reports face history like upstream's *WithHistory methods (see
 // BRepToolsExt_History.hxx) and fails through BRepExt::fail (see GeomAlgoExt_Failure.hxx).
 
@@ -33,13 +33,13 @@ Standard_EXPORT EvolutionData booleanCells(OcctKernel&,
                                            double                       fuzzy,
                                            const std::vector<int>&      hashes,
                                            int                          bound);
-struct Rung;
+struct BooleanAttempt;
 //! What each rung of the ladder did for that selection, whether or not one was accepted.
-Standard_EXPORT std::vector<Rung> booleanReport(OcctKernel&,
-                                                int                          select,
-                                                const std::vector<uint32_t>& sources,
-                                                const std::vector<uint32_t>& tools,
-                                                double                       fuzzy);
+Standard_EXPORT std::vector<BooleanAttempt> booleanReport(OcctKernel&,
+                                                          int                          select,
+                                                          const std::vector<uint32_t>& sources,
+                                                          const std::vector<uint32_t>& tools,
+                                                          double                       fuzzy);
 Standard_EXPORT EvolutionData     shell(OcctKernel&,
                                         uint32_t,
                                         const std::vector<uint32_t>&,

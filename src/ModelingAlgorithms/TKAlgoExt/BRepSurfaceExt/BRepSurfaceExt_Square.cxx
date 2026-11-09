@@ -50,7 +50,7 @@ EvolutionData squareSurface(OcctKernel&                  k,
   auto                  orders = inputOrders;
   std::vector<uint32_t> generated;
 
-  // Generated boundaries are local arena entries, released on every exit.
+  // Generated boundaries are temporary stored shapes, released on every exit.
   struct Release
   {
     OcctKernel&            k;

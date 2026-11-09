@@ -866,13 +866,13 @@ static std::optional<Lifted> liftLoops(const TopoDS_Shape&              body,
       if (!prism.IsDone())
         return {};
       BooleanRequest join;
-      join.operation      = op;
-      join.select         = Select::Union;
-      join.sources        = {solid};
-      join.tools          = {prism.Shape()};
-      join.journal        = true;
-      join.cancellable    = true;
-      const auto extended = booleanCells(join);
+      join.operation       = op;
+      join.select          = Select::Union;
+      join.sources         = {solid};
+      join.tools           = {prism.Shape()};
+      join.subShapeHistory = true;
+      join.cancellable     = true;
+      const auto extended  = booleanCells(join);
       // Extension may restore material only inside the original solid.
       join.select  = Select::Intersection;
       join.sources = {extended.shape};
@@ -963,7 +963,7 @@ static std::optional<Lifted> liftFaces(const char*                      op,
   cut.select                  = Select::Difference;
   cut.sources                 = {kind < 0 ? out.shape : body};
   cut.tools                   = {kind < 0 ? body : out.shape};
-  cut.journal                 = true;
+  cut.subShapeHistory         = true;
   cut.cancellable             = true;
   const BooleanResult feature = booleanCells(cut);
   // The other difference must hold nothing: a feature of one kind only.
@@ -1113,12 +1113,12 @@ static std::optional<Blended> liftFeatures(const Request&                   requ
   {
     const Blended  made = blend(first);
     BooleanRequest back;
-    back.operation   = op;
-    back.select      = kind < 0 && !lifted->continuedBoss ? Select::Difference : Select::Union;
-    back.sources     = {made.shape};
-    back.tools       = lifted->tools;
-    back.journal     = true; // its history, for the faces' history through it
-    back.cancellable = true;
+    back.operation       = op;
+    back.select          = kind < 0 && !lifted->continuedBoss ? Select::Difference : Select::Union;
+    back.sources         = {made.shape};
+    back.tools           = lifted->tools;
+    back.subShapeHistory = true; // its history, for the faces' history through it
+    back.cancellable     = true;
     const BooleanResult put = booleanCells(back);
     if (put.shape.IsNull() || singleSolid(put.shape).IsNull())
       return {};

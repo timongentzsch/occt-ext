@@ -234,16 +234,16 @@ EvolutionData booleanCells(OcctKernel&                  k,
   return finish(k, result, request, hashes, bound);
 }
 
-std::vector<Rung> booleanReport(OcctKernel&                  k,
-                                int                          select,
-                                const std::vector<uint32_t>& sources,
-                                const std::vector<uint32_t>& tools,
-                                double                       fuzzy)
+std::vector<BooleanAttempt> booleanReport(OcctKernel&                  k,
+                                          int                          select,
+                                          const std::vector<uint32_t>& sources,
+                                          const std::vector<uint32_t>& tools,
+                                          double                       fuzzy)
 {
   if (select < 0 || select > 6)
     fail("boolean", invalid_input, "unknown selection of cells");
   auto request = requestOf(k, "boolean", static_cast<Select>(select), sources, tools, 0, fuzzy);
-  std::vector<Rung> rungs;
+  std::vector<BooleanAttempt> rungs;
   try
   {
     booleanCells(request, &rungs);
