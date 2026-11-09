@@ -11,7 +11,7 @@ Modelling operations built on OCCT's topology, geometry and Boolean toolkits. Ni
 | `BRepFilletExt` | Constant, variable, range and station fillets, chamfer, blend validity checks |
 | `BRepPatchExt` | Boundary-first fill of a loop of edges with G0 / G1 / G2 to neighbouring faces |
 | `BRepSurfaceExt` | Alignment, bridging, deformation, face separation proofs |
-| `BRepCurveExt` | Offset, outline, corner rounding, G0 to G3 bridge curves, projection, regions |
+| `BRepCurveExt` | Planar and 3D curve offset, outline, tangent circles, projection, rebuild, refinement, regions, spiral |
 | `BRepOffsetExt` | Solid offset, hollow, shell, thicken, push-pull, defeaturing |
 | `BRepSkinExt` | Gordon and guided skins, framed sweeps, draft |
 | `BRepBooleanExt` | Cell-based Booleans with checked fallbacks |
