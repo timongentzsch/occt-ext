@@ -80,6 +80,19 @@ Bézier whose shoulder weight is sin(w/2) rho/(1 - rho) for a wedge angle w, whi
 rho = 1/2 [standard conic form]. Supports are extended past their ends by continuing the last
 polynomial span, which keeps shape and parametrisation [Hu, as restated by Zang et al.].
 
+The source follows these stages, one file each, with each stage's steps as named functions:
+
+| File | Stage |
+|---|---|
+| `BRepBlendExt_Solver.cxx` | The request: the routes that lift features off, replay overruns or blend one kind of edge first |
+| `BRepBlendExt_Stages.cxx` | The pieces, their joints, their sheets (`Blend::sheets`) and the splits where a contact crosses an edge |
+| `BRepBlendExt_Attach.cxx` | Attachment: the chains' ends and the assembly |
+| `BRepBlendExt_AttachStops.cxx` | The faces that stop a blend (`Attach::stop`, `Attach::stops`) and notches |
+| `BRepBlendExt_AttachMiters.cxx` | Mitres, and balls rolled round a re-entrant vertex |
+| `BRepBlendExt_AttachCorners.cxx` | Corners of three or more blends (`Attach::CentralSplit`) |
+| `BRepBlendExt_AttachFolds.cxx` | Loops where a contact folds over itself, and their patches |
+| `BRepBlendExt_AttachFaces.cxx` | Contacts, blend faces, continuity, tolerances and collisions |
+
 ### Convexity
 
 The sign of the offsets is the sign of the turn h = (n1 x n2) . d/|d| = +-sin(theta) along the edge, proven on

@@ -28,6 +28,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   values (`OffsetJoin`, `CurveExtension`, `PatchMethod`, `PatchFlow` and others); Booleans take `Select` and blends
   `blending::Law`. Source change for callers; no behaviour change.
 - `Rung` is `BooleanAttempt` (`BooleanResult::attempts`), and `BooleanRequest::journal` is `subShapeHistory`.
+- `BRepBlendExt`: the attachment is split into one source file per stage with a shared header, the solver into
+  its entry and its stages, and its longest functions into named steps. No behaviour change.
 
 ### Fixed
 
