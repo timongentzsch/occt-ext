@@ -1383,7 +1383,11 @@ Blended blend(const Request& request)
   Request    bounded = request;
   bounded.fitWork    = FitWork::Bounded;
   bounded.reads      = &reads;
-  std::exception_ptr original;
+  // The first stage's refusal is the one reported, unless it names a construction that failed and
+  // a later stage measured the obstruction on its sheet (FailureKind::Curvature: the sheet crosses
+  // itself, a contact folds): then the last such measurement is reported.
+  std::exception_ptr original, measured;
+  bool               obstruction = false;
   try
   {
     return blendStage(bounded, true);
@@ -1392,7 +1396,8 @@ Blended blend(const Request& request)
   {
     if (failure.reason != no_solution && failure.reason != unsupported_geometry)
       throw;
-    original = std::current_exception();
+    original    = std::current_exception();
+    obstruction = failure.kind == FailureKind::Curvature;
   }
   catch (const Standard_Failure&)
   {
@@ -1413,6 +1418,8 @@ Blended blend(const Request& request)
     {
       if (failure.reason == std::string("cancelled"))
         throw;
+      if (failure.kind == FailureKind::Curvature)
+        measured = std::current_exception();
     }
     catch (const Standard_Failure&)
     {
@@ -1443,7 +1450,7 @@ Blended blend(const Request& request)
   extended.intersectSpines = true;
   if (auto made = stage(std::any_of(reads.spines.begin(), reads.spines.end(), changes)))
     return *made;
-  std::rethrow_exception(original);
+  std::rethrow_exception(obstruction || !measured ? original : measured);
 }
 
 static Blended blendStage(const Request& request, bool continuation)

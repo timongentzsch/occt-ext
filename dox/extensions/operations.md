@@ -662,7 +662,11 @@ its stations fold) or its terminal contact could be continued; these are asked o
 has refused. Before the first read of a changed input two passes compute the same thing from the
 same data, so a pass whose changed input was not read repeats the one before it step by step and
 refuses where it did (derived, by induction along the computation). Only the first refusal is
-reported, so skipping such a pass changes no result. Measured on 27 refusal rows of
+reported, so skipping such a pass changes no result. That refusal gives way to a later pass's only
+where it names a construction that failed (a station not found, a fit not met) and the later pass
+measured the obstruction on its sheet (it crosses itself, a contact folds): on a hole's rim through
+a plate leaning 80 to 85 degrees, the G2 stations fail where the balls' centre path bends at
+kappa r = 1.15 to 3.83, which the offset spine's sheet measures as its crossing. Measured on 27 refusal rows of
 torus, cylinder, extrusion and B-spline supports, every pass so predicted refused as before.
 
 The existing interpolation, tolerance, continuity events, positive-weight check
