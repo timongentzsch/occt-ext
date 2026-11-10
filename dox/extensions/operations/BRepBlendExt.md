@@ -1652,8 +1652,7 @@ and corrects the section/plane residual directly. Centred differences guide the
 section derivative; a predictor-deviation fraction of one eighth controls sampling.
 Those are numerical choices, not existence or approximation certificates. The
 output is corrected points on a seeded component, not a certified spline edge.
-Component discovery, global exposure and installation of these components in the
-body's faces remain open. Variable-radius laws, cliff contacts and section-transition windows
+Global exposure and support-transition installation remain open. Variable-radius laws, cliff contacts and section-transition windows
 are outside this prototype.
 
 | Generated boundary checks | Configurations | Result |
@@ -1666,7 +1665,7 @@ any other swept ball must be removed. Adsul, Machchhar and Sohoni, *Local and Gl
 Analysis of Parametric Solid Sweeps* (2013), section 3, Definitions 21, 23 and 24,
 distinguish the contact set, its trim set and the exposed envelope
 ([paper](https://arxiv.org/html/1305.7351v1)). The numerical boundary tracer supplies
-no global occupancy proof or closed-solid construction.
+no global occupancy proof. Attachment installs the retained boundary graph separately.
 
 The separate `planeBoundaryCurve` fitter produces a shared cubic spline edge and
 pcurves on a nonperiodic spline sheet and a plane. Local transverse charts permit
@@ -1682,10 +1681,13 @@ the stored sheet, not its discrepancy from the implicit section family.
 
 `BoundaryGraph` assembles directed edge occurrences into retained cycles without
 inferring incidence from contact labels. Distinct parameter-domain ports preserve
-both uses of a seam even when their spatial vertices coincide. The current end
-constructors import their original cycle without changing its edges or their
-order. Replacing those constructors with traced contact intervals and support
-events remains unfinished; no stop construction has been superseded yet.
+both uses of a seam even when their spatial vertices coincide. Ordinary end constructors import their original cycle without changing its edges
+or their order. A planar end component returning to its starting contact instead
+supplies all retained intervals and cap arcs from the complete carrier. The same
+graph consumer builds the blend face. Shared events split the original face wires,
+including the two parameter ports of periodic seams. This removes the requirement
+that every stopping plane meet the opposite contact; face-growth and nonplanar end
+constructors remain in use.
 
 | Boundary approximation check | Configurations | Result |
 | --- | ---: | --- |
@@ -1697,16 +1699,15 @@ events remains unfinished; no stop construction has been superseded yet.
 Contact storage now consists of ordered retained intervals, each owning two
 parameter/vertex events and its shared edge. The contact builder visits each
 interval; continuity and tolerance collection visit all retained edges and
-vertices. Existing endpoint constructors still populate one interval. They do
-not yet consume the traced event graph.
+vertices. Ordinary endpoint constructors populate one interval; traced ends populate all
+retained intervals.
 
 The internal `completeCarrier` construction retains the solved support chart
 while continuing a regular constant-distance branch to finite support
 restrictions. Each terminal ball solves the offset-equality equations together
 with the crossed support coordinate. Reparameterisation retains these stations
 before fitting; it does not grow a new branch from the original edge. Closed
-circuits and unresolved terminal events are not completed by this helper. It is
-not yet called by the operation's end constructors.
+circuits and unresolved terminal events are not completed by this helper. The planar end event producer uses it before installing the shared boundary graph.
 
 | Retained-carrier check | Configurations | Result |
 | --- | ---: | --- |

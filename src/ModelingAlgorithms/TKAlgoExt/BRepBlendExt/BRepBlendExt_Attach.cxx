@@ -16,6 +16,7 @@ Attach::Attach(TopoDS_Shape                     body_,
                StageReads* reads_)
     : refineContacts(refineContacts_),
       reads(reads_),
+      retainedBoundaries(pieces_.size()),
       body(std::move(body_)),
       pieces(pieces_),
       cornersAt(cornersAt_),
@@ -389,6 +390,8 @@ void Attach::jointEnd(int k, int end, const TopoDS_Vertex& endVertex)
 
 void Attach::chainEnd(int k, int end)
 {
+  if (retainedBoundaries[k])
+    return;
   const Piece&  piece = pieces[k];
   const Rail&   rail  = piece.rail;
   TopoDS_Vertex ends[2];
@@ -418,6 +421,9 @@ void Attach::chainEnd(int k, int end)
 void Attach::chainEnds()
 {
   for (int k = 0; k < n; ++k)
+    stopPlaces(k);
+  installBoundaries();
+  for (int k = 0; k < n; ++k)
     for (int end = 0; end < 2; ++end)
       chainEnd(k, end);
 }
@@ -425,7 +431,12 @@ void Attach::chainEnds()
 TopoDS_Shape Attach::assemble()
 {
   // The changed faces, and the solids with them and the blend faces; other shells as they were.
-  std::vector<std::pair<TopoDS_Face, std::vector<TopoDS_Face>>> faces;
+  std::vector<std::pair<TopoDS_Face, std::vector<TopoDS_Face>>> faces = retainedFaces;
+  for (const auto& [oldFace, replacements] : retainedFaces)
+    for (const auto& face : replacements)
+      history->AddModified(oldFace, face);
+  for (const auto& [original, replacement] : boundaryHistory)
+    history->AddModified(original, replacement);
   for (const auto& edit : edits)
   {
     if (std::any_of(removed.begin(), removed.end(), [&](const TopoDS_Face& gone) {
@@ -436,6 +447,23 @@ TopoDS_Shape Attach::assemble()
     for (TopExp_Explorer e(edit.face, TopAbs_EDGE); e.More(); e.Next())
       if (!replace.IsBound(e.Current()) && cuts.Contains(e.Current()))
         replace.Bind(e.Current(), cuts.FindFromKey(e.Current()));
+    const auto retained = std::find_if(faces.begin(), faces.end(), [&](const auto& pair) {
+      return pair.first.IsSame(edit.face);
+    });
+    if (retained != faces.end())
+    {
+      if (!replace.IsEmpty() || !edit.bridges.empty())
+      {
+        std::vector<TopoDS_Face> updated;
+        for (const auto& face : retained->second)
+        {
+          const auto parts = rebuiltFaces(face, replace, edit.bridges);
+          updated.insert(updated.end(), parts.begin(), parts.end());
+        }
+        retained->second = std::move(updated);
+      }
+      continue;
+    }
     faces.push_back({edit.face, rebuiltFaces(edit.face, replace, edit.bridges)});
     for (const auto& now : faces.back().second)
       history->AddModified(edit.face, now);

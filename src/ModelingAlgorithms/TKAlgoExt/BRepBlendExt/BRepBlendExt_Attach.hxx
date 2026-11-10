@@ -324,6 +324,13 @@ struct Attach
   void openStop(StopEnd& st);
   //! The two corners, and where the sheet crosses each edge between stop faces.
   void stopPlaces(StopEnd& st);
+  //! Discover all contact labels of a planar end before installing its topology.
+  void stopPlaces(int k);
+  void tracedBoundary(int k);
+  void installBoundaries();
+  std::vector<std::optional<BoundaryGraph>> retainedBoundaries;
+  std::vector<std::pair<TopoDS_Face, std::vector<TopoDS_Face>>> retainedFaces;
+  std::vector<std::pair<TopoDS_Shape, TopoDS_Shape>> boundaryHistory;
   //! The end along the sheet on each stop face, from one place to the next.
   void stopEdges(StopEnd& st);
   //! The cuts, what the contacts swept over, and the faces' new edges.
@@ -548,7 +555,7 @@ struct Attach
   }
 
   TopoDS_Shape               body;
-  const std::vector<Piece>&  pieces;
+  std::vector<Piece>         pieces;
   const std::vector<Corner>& cornersAt;
   Handle(BRepTools_History)  history;
   const char*                op;

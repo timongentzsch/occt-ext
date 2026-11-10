@@ -641,6 +641,8 @@ void Attach::contacts()
 BoundaryGraph Attach::boundaryGraph(const std::vector<int>& group) const
 {
   const int  k = group.front(), last = group.back();
+  if (retainedBoundaries[k])
+    return *retainedBoundaries[k];
   const auto from = [](const TopoDS_Edge& edge, const TopoDS_Vertex& start) {
     return TopExp::FirstVertex(edge).IsSame(start) ? edge : TopoDS::Edge(edge.Reversed());
   };

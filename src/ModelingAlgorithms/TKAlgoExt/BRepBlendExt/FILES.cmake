@@ -1,5 +1,6 @@
 set(OCCT_BRepBlendExt_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
 set(OCCT_BRepBlendExt_FILES
+  BRepBlendExt_AttachBoundary.cxx
   BRepBlendExt_Attach.cxx
   BRepBlendExt_Attach.hxx
   BRepBlendExt_AttachCorners.cxx

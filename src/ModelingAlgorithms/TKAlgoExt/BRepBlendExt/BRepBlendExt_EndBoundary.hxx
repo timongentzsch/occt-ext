@@ -36,14 +36,14 @@ struct EndBoundaryTrace
   std::vector<int> boundaryCoordinates;
 };
 
-//! Experimental continuation of one regular section/plane component from a contact root.
+//! Continuation of one regular section/plane component from a contact root.
 //! An interior seed requires a direction, for continuing across a shared support restriction.
 //! The three offset-equality equations and section/plane equation define a curve in five
 //! parameters. No opposite-contact end assumption is made. A supplied seed selects the
 //! component; this does not discover other components or classify the exposed swept region.
 //! Constant-radius conic/G2 sections on regular surfaces only. Sample spacing is a numerical
 //! policy, not a curve approximation certificate. Each returned point solves the equations
-//! to the existing station tolerance. This is not yet used by solid attachment.
+//! to the existing station tolerance. Attachment discovers components from contact roots.
 Standard_EXPORT EndBoundaryTrace tracePlaneEnd(const Rail&    rail,
                                                const gp_Pln&  plane,
                                                const Station& seed,
