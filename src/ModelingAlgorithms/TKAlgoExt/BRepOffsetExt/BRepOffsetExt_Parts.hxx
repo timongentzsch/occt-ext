@@ -91,9 +91,9 @@ Standard_EXPORT bool tangentAlong(const TopoDS_Edge& edge,
                                   const TopoDS_Face& a,
                                   const TopoDS_Face& b);
 
-// --- What became of each face --------------------------------------------------------------
+// --- Construction lineage -----------------------------------------------------------------
 
-//! The faces that each face of an input has become, carried through any number of stages.
+//! Same-dimensional descendants of every input face, edge and vertex through construction stages.
 class Lineage
 {
 public:
@@ -108,18 +108,18 @@ public:
       if (next.IsEmpty() && !stage.IsDeleted(face))
         out.push_back(face);
       for (const TopoDS_Shape& successor : next)
-        if (successor.ShapeType() == TopAbs_FACE)
+        if (successor.ShapeType() == face.ShapeType())
           out.push_back(successor);
     });
   }
 
-  //! A stage whose faces are images of the input's, reported through Generated: an offset.
+  //! An offset reports same-dimensional images through Generated rather than Modified.
   template <class Stage>
   void images(Stage& stage)
   {
     step([&](const TopoDS_Shape& face, std::vector<TopoDS_Shape>& out) {
       for (const TopoDS_Shape& successor : stage.Generated(face))
-        if (successor.ShapeType() == TopAbs_FACE)
+        if (successor.ShapeType() == face.ShapeType())
           out.push_back(successor);
     });
   }
@@ -131,10 +131,10 @@ public:
     step([&](const TopoDS_Shape& face, std::vector<TopoDS_Shape>& out) {
       const size_t before = out.size();
       for (const TopoDS_Shape& successor : stage.Modified(face))
-        if (successor.ShapeType() == TopAbs_FACE)
+        if (successor.ShapeType() == face.ShapeType())
           out.push_back(successor);
       for (const TopoDS_Shape& successor : stage.Generated(face))
-        if (successor.ShapeType() == TopAbs_FACE)
+        if (successor.ShapeType() == face.ShapeType())
           out.push_back(successor);
       if (out.size() == before && !stage.IsDeleted(face))
         out.push_back(face);
@@ -143,17 +143,16 @@ public:
 
   void throughHistory(const Handle(BRepTools_History)& history);
 
-  //! What `face` has become, said outright: where a stage has no report of its own.
+  //! Descendants supplied directly by a constructor without a builder history.
   void set(const TopoDS_Shape& face, std::vector<TopoDS_Shape> now);
-  //! Then through a later operation, of which `next` is the lineage: each face becomes
-  //! what `next` has it become; one that `next` does not know stays.
+  //! Compose a later construction: an entity not represented by `next` stays unchanged.
   void then(const Lineage& next);
 
-  //! Keep only what is a face of `result`, as `result` holds it.
+  //! Keep only descendants belonging to `result`, with their result orientation.
   void within(const TopoDS_Shape& result);
 
   const std::vector<TopoDS_Shape>& of(const TopoDS_Shape& face) const;
-  //! Every descendant, except those reached only from the listed input faces.
+  //! Every face descendant, except those reached only from the listed input faces.
   //! Exclusion is by source identity; a shared descendant of a retained input stays.
   std::vector<TopoDS_Shape> all(const std::vector<TopoDS_Shape>& excluded = {}) const;
 
@@ -161,6 +160,9 @@ public:
   //! left out, one with nothing left is deleted), or as what it generated.
   void modified(FaceHistory& history) const;
   void generated(FaceHistory& history) const;
+
+  //! Recorded same-dimensional correspondence after within(), as a builder history.
+  Handle(BRepTools_History) history() const;
 
 private:
   template <class Next>

@@ -7,6 +7,8 @@
 #include "BRepExtTest_Support.hxx"
 
 #include <BRepOffsetExt_Kept.hxx>
+#include <BRepOffset_MakeOffset.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBlendExt_Request.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <NCollection_IndexedDataMap.hxx>
@@ -85,6 +87,27 @@ TopoDS_Shape kept(const TopoDS_Shape& body, double distance, double tolerance)
   const TopoDS_Shape made = BRepExt::keptOffset(body, all, distance, tolerance, faces, why);
   if (made.IsNull())
     ADD_FAILURE() << why;
+  else
+    for (const auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
+    {
+      BRepExt::ShapeSet before, after, covered;
+      TopExp::MapShapes(body, type, before);
+      TopExp::MapShapes(made, type, after);
+      for (const auto& source : before)
+      {
+        const auto& products = faces.of(source);
+        EXPECT_FALSE(products.empty());
+        for (const auto& product : products)
+        {
+          EXPECT_TRUE(after.Contains(product));
+          covered.Add(product);
+        }
+      }
+      // Separated contacts add endpoints at one original vertex. Every new endpoint
+      // must be traced to that vertex, including the original common endpoint.
+      if (type == TopAbs_VERTEX)
+        EXPECT_EQ(covered.Extent(), after.Extent());
+    }
   return made;
 }
 
@@ -859,6 +882,34 @@ TEST(BRepOffsetExt, SweptFaceUsesSlantedNeighbourSupports)
       const double area=width<=19 ? 20*width : 380+39*(width-19)-(width*width-361)/2;
       EXPECT_NEAR(volume(result),20*area*std::pow(scale,3),1e-7*std::pow(scale,3));
       EXPECT_EQ(lineage.of(moved[0]).size(),1u);
+      for (const auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
+      {
+        BRepExt::ShapeSet sources, products;
+        TopExp::MapShapes(body, type, sources);
+        TopExp::MapShapes(result, type, products);
+        int retained = 0;
+        for (const auto& source : sources)
+        {
+          const auto& images = lineage.of(source);
+          retained += !images.empty();
+          for (const auto& image : images) EXPECT_TRUE(products.Contains(image));
+          if (type == TopAbs_VERTEX && width >= 19)
+          {
+            ASSERT_EQ(images.size(), 1u);
+            auto expected = BRep_Tool::Pnt(TopoDS::Vertex(source));
+            if (near(expected.X(), 20*scale))
+            {
+              expected.SetX(width*scale);
+              if (near(expected.Z(), 19*scale)) expected.SetZ((39-width)*scale);
+            }
+            EXPECT_LE(expected.Distance(BRep_Tool::Pnt(TopoDS::Vertex(images[0]))),1e-6*scale);
+          }
+        }
+        const int expected = type == TopAbs_FACE ? (width > 19 ? 7 : 6)
+                           : type == TopAbs_EDGE ? (width > 19 ? 15 : width == 19 ? 13 : 11)
+                           : (width >= 19 ? 10 : 6);
+        EXPECT_EQ(retained, expected) << "type=" << type << " distance=" << distance;
+      }
     }
   }
 }
@@ -1393,4 +1444,223 @@ TEST(BRepOffsetExt, ClearanceOfAnAnalyticTrimIgnoresItsDisplacedSpatialCurve)
     EXPECT_TRUE(measured.satisfies(0.9 * scale)) << measured.issue;
     EXPECT_NEAR(measured.minimum, scale, Precision::Confusion());
   }
+}
+
+// Each vertex of an axis-aligned box moves by d on each of its three support planes.
+// Check this closed form independently of the modifier's correspondence, also after a
+// rigid transformation. Face/edge/vertex images must be unique and belong to the output.
+TEST(BRepOffsetExt, KeptOffsetCarriesExactHistoryInEveryDimension)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+    for (const double sign : {-1.0, 1.0})
+      for (const bool turned : {false, true})
+      {
+        const double distance = sign * scale;
+        const auto box = BRepPrimAPI_MakeBox(6 * scale, 4 * scale, 3 * scale).Shape();
+        gp_Trsf transform;
+        if (turned)
+          transform.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 2, 3)), 0.7);
+        const auto body = BRepBuilderAPI_Transform(box, transform, true).Shape();
+        BRepExt::FaceSet moved;
+        for (TopExp_Explorer face(body, TopAbs_FACE); face.More(); face.Next())
+          moved.Add(face.Current());
+        BRepExt::Lineage lineage(body);
+        std::string why;
+        const auto result = BRepExt::keptOffset(body, moved, distance, 1e-6 * scale, lineage, why);
+        ASSERT_FALSE(result.IsNull()) << why;
+        const auto history = lineage.history();
+        for (const auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
+        {
+          BRepExt::ShapeSet before, after, images;
+          TopExp::MapShapes(body, type, before);
+          TopExp::MapShapes(result, type, after);
+          EXPECT_EQ(before.Extent(), after.Extent());
+          for (const auto& source : before)
+          {
+            const auto& products = lineage.of(source);
+            ASSERT_EQ(products.size(), 1u);
+            const auto& image = products.front();
+            EXPECT_EQ(image.ShapeType(), type);
+            EXPECT_TRUE(after.Contains(image));
+            EXPECT_TRUE(images.Add(image));
+            EXPECT_FALSE(history->IsRemoved(source));
+            ASSERT_EQ(history->Modified(source).Size(), 1);
+            EXPECT_TRUE(history->Modified(source).First().IsSame(image));
+            if (type == TopAbs_VERTEX)
+            {
+              const auto local = BRep_Tool::Pnt(TopoDS::Vertex(source)).Transformed(transform.Inverted());
+              gp_Pnt expected(local.X() + (local.X() < 3 * scale ? -distance : distance),
+                              local.Y() + (local.Y() < 2 * scale ? -distance : distance),
+                              local.Z() + (local.Z() < 1.5 * scale ? -distance : distance));
+              expected.Transform(transform);
+              EXPECT_LE(expected.Distance(BRep_Tool::Pnt(TopoDS::Vertex(image))), 1e-6 * scale);
+            }
+          }
+          EXPECT_EQ(images.Extent(), after.Extent());
+        }
+      }
+}
+
+// A top-face move changes only z=c to z=c+d. Compose its offset images with a deep copy:
+// looking at Modified alone would lose every vertex and edge reported by the offset maker.
+TEST(BRepOffsetExt, OffsetImagesComposeThroughADeepCopyInEveryDimension)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+    for (const double sign : {-1.0, 1.0})
+    {
+      const double height = 3 * scale, distance = sign * scale;
+      const auto body = BRepPrimAPI_MakeBox(6 * scale, 4 * scale, height).Shape();
+      const auto top = facesWhere(body, [height](const double* l) {
+        return near(l[2], height) && near(l[5], height);
+      });
+      ASSERT_EQ(top.size(), 1u);
+      BRepOffset_MakeOffset maker;
+      maker.Initialize(body, 0.0, 1e-6 * scale, BRepOffset_Skin, false, false, GeomAbs_Intersection);
+      maker.SetOffsetOnFace(top[0], distance);
+      maker.MakeOffsetShape();
+      ASSERT_TRUE(maker.IsDone());
+      BRepExt::Lineage lineage(body);
+      lineage.images(maker);
+      lineage.within(maker.Shape());
+      BRepBuilderAPI_Copy copy(maker.Shape(), true, true);
+      BRepExt::Lineage copied(maker.Shape());
+      copied.through(copy);
+      lineage.then(copied);
+      lineage.within(copy.Shape());
+      const auto history = lineage.history();
+      for (const auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
+      {
+        BRepExt::ShapeSet before, after, images;
+        TopExp::MapShapes(body, type, before);
+        TopExp::MapShapes(copy.Shape(), type, after);
+        for (const auto& source : before)
+        {
+          const auto& products = lineage.of(source);
+          ASSERT_EQ(products.size(), 1u);
+          const auto& image = products.front();
+          EXPECT_TRUE(after.Contains(image));
+          EXPECT_TRUE(images.Add(image));
+          ASSERT_EQ(history->Modified(source).Size(), 1);
+          EXPECT_TRUE(history->Modified(source).First().IsSame(image));
+          if (type == TopAbs_VERTEX)
+          {
+            auto expected = BRep_Tool::Pnt(TopoDS::Vertex(source));
+            if (expected.Z() > height / 2) expected.SetZ(expected.Z() + distance);
+            EXPECT_LE(expected.Distance(BRep_Tool::Pnt(TopoDS::Vertex(image))), 1e-6 * scale);
+          }
+        }
+        EXPECT_EQ(images.Extent(), after.Extent());
+      }
+    }
+}
+
+// The endpoint/corner sets below are computed from the input, independently of
+// the history reader, including rotations and both directions of the move.
+TEST(BRepOffsetExt, RebuiltAndSweptCapsRetainConstructorBoundaries)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+    for (const double sign : {-1.0, 1.0})
+      for (const bool turned : {false, true})
+        for (const bool rebuilt : {false, true})
+        {
+          const auto box = BRepPrimAPI_MakeBox(6*scale, 4*scale, 3*scale).Shape();
+          const auto top = facesWhere(box, [scale](const double* l) {
+            return near(l[2], 3*scale) && near(l[5], 3*scale);
+          });
+          ASSERT_EQ(top.size(), 1u);
+          gp_Trsf transform;
+          if (turned) transform.SetRotation(gp_Ax1(gp_Pnt(0,0,0), gp_Dir(1,2,3)), 0.7);
+          BRepBuilderAPI_Transform move(box, transform, true);
+          const auto body = move.Shape();
+          const auto moved = move.ModifiedShape(top[0]);
+          BRepExt::Lineage lineage(body);
+          std::string why;
+          std::vector<TopoDS_Shape> at;
+          const auto result = rebuilt
+            ? BRepExt::reconstructOffset(body, {moved}, sign*scale, 1e-6*scale, lineage)
+            : BRepExt::sweepFaces(body, {moved}, sign*scale, 1e-6*scale, lineage, why, at);
+          ASSERT_FALSE(result.IsNull()) << why;
+          for (const auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
+          {
+            BRepExt::ShapeSet before, after, images;
+            TopExp::MapShapes(body, type, before);
+            TopExp::MapShapes(result, type, after);
+            ASSERT_EQ(before.Extent(), after.Extent());
+            for (const auto& source : before)
+            {
+              const auto& products = lineage.of(source);
+              ASSERT_EQ(products.size(), 1u) << "type=" << type << " rebuilt=" << rebuilt;
+              const auto& image = products.front();
+              ASSERT_TRUE(after.Contains(image));
+              images.Add(image);
+              BRepExt::ShapeSet oldVertices, newVertices;
+              TopExp::MapShapes(source, TopAbs_VERTEX, oldVertices);
+              TopExp::MapShapes(image, TopAbs_VERTEX, newVertices);
+              ASSERT_EQ(oldVertices.Extent(), newVertices.Extent());
+              for (const auto& vertex : oldVertices)
+              {
+                auto expected = BRep_Tool::Pnt(TopoDS::Vertex(vertex)).Transformed(transform.Inverted());
+                if (expected.Z() > 1.5*scale) expected.SetZ(expected.Z()+sign*scale);
+                expected.Transform(transform);
+                int matches = 0;
+                for (const auto& next : newVertices)
+                  matches += expected.Distance(BRep_Tool::Pnt(TopoDS::Vertex(next))) <= 1e-6*scale;
+                EXPECT_EQ(matches, 1);
+              }
+            }
+            EXPECT_EQ(images.Extent(), after.Extent());
+          }
+        }
+}
+
+TEST(BRepOffsetExt, RecutCylinderRetainsPrimitiveBoundaryRoles)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+    for (const bool turned : {false, true})
+    {
+      const auto holed = BRepAlgoAPI_Cut(
+        BRepPrimAPI_MakeBox(10*scale, 10*scale, 10*scale).Shape(),
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(5*scale, 5*scale, 0), gp::DZ()),
+                                2*scale, 10*scale).Shape()).Shape();
+      TopoDS_Shape wall;
+      for (TopExp_Explorer f(holed, TopAbs_FACE); f.More(); f.Next())
+        if (BRepAdaptor_Surface(TopoDS::Face(f.Current())).GetType() == GeomAbs_Cylinder)
+          wall = f.Current();
+      ASSERT_FALSE(wall.IsNull());
+      gp_Trsf transform;
+      if (turned) transform.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1,2,3)), 0.7);
+      BRepBuilderAPI_Transform move(holed, transform, true);
+      const auto body = move.Shape();
+      BRepExt::Lineage lineage(body);
+      const auto result = BRepExt::reconstructOffset(body, {move.ModifiedShape(wall).Oriented(wall.Orientation())},
+                                                    -scale, 1e-6*scale, lineage);
+      ASSERT_FALSE(result.IsNull());
+      EXPECT_NEAR(volume(result), (1000-90*M_PI)*scale*scale*scale, 1e-6*scale*scale*scale);
+      for (const auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
+      {
+        BRepExt::ShapeSet sources, products, images;
+        TopExp::MapShapes(body, type, sources);
+        TopExp::MapShapes(result, type, products);
+        EXPECT_EQ(sources.Extent(), products.Extent());
+        for (const auto& source : sources)
+        {
+          const auto& next = lineage.of(source);
+          ASSERT_EQ(next.size(), 1u) << "type=" << type;
+          ASSERT_TRUE(products.Contains(next[0]));
+          images.Add(next[0]);
+          if (type == TopAbs_VERTEX)
+          {
+            const auto before = BRep_Tool::Pnt(TopoDS::Vertex(source)).Transformed(transform.Inverted());
+            const auto after = BRep_Tool::Pnt(TopoDS::Vertex(next[0])).Transformed(transform.Inverted());
+            EXPECT_NEAR(before.Z(), after.Z(), 1e-6*scale);
+            const auto radius = [scale](const gp_Pnt& p) { return std::hypot(p.X()-5*scale, p.Y()-5*scale); };
+            // Recut chooses its own angular frame. Its seam retains its primitive
+            // role and altitude, rather than promising a radial point trajectory.
+            if (radius(before) < 3*scale) EXPECT_NEAR(radius(after), 3*scale, 1e-6*scale);
+            else EXPECT_LE(before.Distance(after), 1e-6*scale);
+          }
+        }
+        EXPECT_EQ(images.Extent(), products.Extent());
+      }
+    }
 }

@@ -8,9 +8,23 @@
 #include <NCollection_Map.hxx>
 #include <string>
 
+class BRepAlgoAPI_Common;
+
 namespace BRepExt
 {
 using FaceSet = NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher>;
+
+//! Boundary cells of a convex halfspace intersection, from its recorded support images.
+//! A ridge is the meet of two distinct facets; a corner is the meet of at least
+//! three. Coplanar subdivisions that disappear have no such boundary cell.
+void supportIntersections(const TopoDS_Shape& input, const TopoDS_Shape& result,
+                          Lineage& supports, const Handle(BRepTools_History)& contacts);
+
+//! Retain the Boolean's support contacts even when a facet shrinks to a ridge
+//! or corner. These are interference entities, not proximity matches.
+void recordSupportContacts(BRepAlgoAPI_Common& stage,
+                           const std::vector<TopoDS_Shape>& sources,
+                           const Lineage& facets, const Handle(BRepTools_History)& contacts);
 
 // Bounded topology-changing fallback; no shape is returned unless its support
 // geometry satisfies a recognized exact construction. `faces` is set to what each face of

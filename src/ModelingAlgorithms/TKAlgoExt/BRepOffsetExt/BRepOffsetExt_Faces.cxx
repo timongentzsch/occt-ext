@@ -510,7 +510,9 @@ EvolutionData offsetFaces(OcctKernel&                  kernel,
   {
     done->faces.modified(history);
   }
-  return history.finish(store(kernel, done->shape));
+  auto evolution = history.finish(store(kernel, done->shape));
+  evolution.history = prepared ? prepared->history() : done->faces.history();
+  return evolution;
 }
 
 } // namespace BRepExt

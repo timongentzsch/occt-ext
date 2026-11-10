@@ -120,7 +120,12 @@ TopoDS_Shape planarNeighbours(const TopoDS_Shape& body, const FaceSet& moved,
     supports.push_back({face, normal, normal.Dot(gp_Vec(surface.Plane().Location().XYZ())),
                         moved.Contains(face)});
   }
+  Handle(BRepTools_History) contacts;
   const auto construct = [&](double fraction, std::vector<std::vector<TopoDS_Shape>>& images) {
+    contacts = new BRepTools_History;
+    Lineage facets(body);
+    std::vector<TopoDS_Shape> sources;
+    for (const auto& support : supports) sources.push_back(support.face);
     const double inf = std::numeric_limits<double>::infinity();
     gp_XYZ lo(inf,inf,inf), hi(-inf,-inf,-inf);
     std::vector<double> constants;
@@ -162,6 +167,10 @@ TopoDS_Shape planarNeighbours(const TopoDS_Shape& body, const FaceSet& moved,
       common.SetNonDestructive(true); common.Build();
       if (!common.IsDone() || common.HasErrors()) return TopoDS_Shape();
       images[i]={boundary};
+      facets.set(supports[i].face, {boundary});
+      contacts->AddModified(supports[i].face, boundary);
+      recordSupportContacts(common, sources, facets, contacts);
+      facets.through(common);
       for (auto& image : images)
       {
         std::vector<TopoDS_Shape> next;
@@ -207,6 +216,7 @@ TopoDS_Shape planarNeighbours(const TopoDS_Shape& body, const FaceSet& moved,
     for (const auto& support : supports) if (support.moving) { signedDistance=support.normal.Dot(move); break; }
     if ((estimatedVolume(result)-estimatedVolume(body))*signedDistance<=0) return {};
     for (size_t i=0; i<supports.size(); ++i) lineage.set(supports[i].face,images[i]);
+    supportIntersections(body, result, lineage, contacts);
     lineage.within(result);
     return result;
   }
@@ -318,11 +328,11 @@ TopoDS_Shape sweepFaces(const TopoDS_Shape&              solid,
     BRep_Builder().Add(original, face);
   BRepBuilderAPI_Copy       copy(original);
   const TopoDS_Shape        skin = copy.Shape();
-  std::vector<TopoDS_Shape> copies;
-  for (const TopoDS_Shape& face : order)
-    copies.push_back(copy.ModifiedShape(face));
-  TopoDS_Shape                           tool;
-  std::vector<std::vector<TopoDS_Shape>> ends(order.size());
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> sources;
+  for (const auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
+    TopExp::MapShapes(original, type, sources);
+  Lineage ends(original);
+  TopoDS_Shape tool;
   try
   {
     if (flat)
@@ -331,8 +341,12 @@ TopoDS_Shape sweepFaces(const TopoDS_Shape&              solid,
       if (!prism.IsDone())
         return {};
       tool = prism.Shape();
-      for (size_t i = 0; i < order.size(); i++)
-        ends[i] = {prism.LastShape(copies[i])};
+      for (const auto& source : sources)
+      {
+        const auto end = prism.LastShape(copy.ModifiedShape(source));
+        ends.set(source, end.IsNull() ? std::vector<TopoDS_Shape>{}
+                                     : std::vector<TopoDS_Shape>{end});
+      }
     }
     else
     {
@@ -357,10 +371,14 @@ TopoDS_Shape sweepFaces(const TopoDS_Shape&              solid,
       if (!thick.IsDone() || thick.Shape().IsNull())
         return {};
       tool = thick.Shape();
-      for (size_t i = 0; i < order.size(); i++)
-        for (const TopoDS_Shape& image : thick.Generated(copies[i]))
-          if (image.ShapeType() == TopAbs_FACE)
-            ends[i].push_back(image);
+      for (const auto& source : sources)
+      {
+        std::vector<TopoDS_Shape> images;
+        for (const auto& image : thick.Generated(copy.ModifiedShape(source)))
+          if (image.ShapeType() == source.ShapeType())
+            images.push_back(image);
+        ends.set(source, std::move(images));
+      }
     }
   }
   catch (const Standard_Failure&)
@@ -424,12 +442,11 @@ TopoDS_Shape sweepFaces(const TopoDS_Shape&              solid,
   swept.through(boolean);
   swept.throughHistory(unify.History());
   swept.within(result);
+  ends.then(swept);
+  ends.within(result);
   for (size_t i = 0; i < order.size(); i++)
   {
-    std::vector<TopoDS_Shape> now;
-    for (const TopoDS_Shape& end : ends[i])
-      for (const TopoDS_Shape& successor : swept.of(end))
-        now.push_back(successor);
+    const auto& now = ends.of(order[i]);
     // Apart from the Boolean's word: where the face is now, it is the distance from where
     // it was. A flat one and its blends are moved back and must lie on the old surface; any
     // other must be the distance from it.
@@ -451,6 +468,16 @@ TopoDS_Shape sweepFaces(const TopoDS_Shape&              solid,
       }
     faces.set(order[i], now);
   }
+  // A cap boundary follows the same copy and sweep as its face. A source may
+  // also retain a piece in the body when the Boolean splits that boundary.
+  for (const auto& source : sources)
+    if (source.ShapeType() != TopAbs_FACE)
+    {
+      auto images = faces.of(source);
+      const auto& cap = ends.of(source);
+      images.insert(images.end(), cap.begin(), cap.end());
+      faces.set(source, std::move(images));
+    }
   // A face that went through the far side of the body is gone, and the body is open there.
   faces.within(result);
   return result;

@@ -2219,14 +2219,24 @@ static TopoDS_Shape offsetWithContacts(const TopoDS_Shape& body,
             "tolerance";
       return {};
     }
-  for (TopExp_Explorer all(body, TopAbs_FACE); all.More(); all.Next())
+  // The modifier and explicit split graph are the correspondence. Preserve it before
+  // those construction objects leave scope; no carrier or coordinate matching is needed.
+  ShapeSet sources;
+  TopExp::MapShapes(body, sources);
+  for (const auto& source : sources)
   {
-    std::vector<TopoDS_Shape> descendants{modified(all.Current())};
+    if (!BRepTools_History::IsSupportedType(source))
+      continue;
+    std::vector<TopoDS_Shape> descendants{modified(source)};
     for (const auto& split : splits)
-      if (all.Current().IsSame(split.third) || all.Current().IsSame(split.sides[0])
-          || all.Current().IsSame(split.sides[1]))
+    {
+      if (source.IsSame(split.third) || source.IsSame(split.sides[0])
+          || source.IsSame(split.sides[1]))
         descendants.push_back(split.patch);
-    lineage.set(all.Current(), std::move(descendants));
+      if (source.IsSame(split.vertex))
+        descendants.insert(descendants.end(), {split.made[0], split.made[1]});
+    }
+    lineage.set(source, std::move(descendants));
   }
   lineage.within(result);
 

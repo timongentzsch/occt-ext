@@ -7,6 +7,7 @@ Part of the [operations reference](../operations.md). Each entry gives the const
 ## Contents
 
 - [Offsets and shells](#offsets-and-shells)
+- [Construction lineage](#construction-lineage)
 - [Face offset that keeps the topology](#face-offset-that-keeps-the-topology)
 - [Local focal witnesses for a sheet's normal sweep](#local-focal-witnesses-for-a-sheets-normal-sweep)
 - [Elementary focal distances](#elementary-focal-distances)
@@ -30,6 +31,45 @@ refused by name. Stock `BRepOffset_MakeOffset` removes vanishing faces only wher
 Push-pull follows [ZouFeng19]: the solid swept by the moved faces is built and joined to or cut from the body by a
 Boolean, which resolves whatever the move does to the rest. Thicken divides a C0 sheet's supports without changing
 their geometry before offsetting.
+
+### Construction lineage
+
+`Lineage` carries same-dimensional descendants of faces, edges and vertices through builder
+stages. Composition substitutes each intermediate entity's descendants; `within` restricts
+them to the final graph. `history` exports that relation as `BRepTools_History`. The face-only
+queries and hash records retain their existing scope.
+
+The topology-preserving offset records the modifier's exact correspondence and the explicit
+endpoints of separated contacts. The offset engine supplies same-dimensional `Generated`
+images. Sweeps retain the copied skin's `LastShape` correspondence for every face, edge and
+vertex, followed through the Boolean and unifier. Prepared face removal and successive face
+moves compose these relations before `offsetFaces` returns `EvolutionData.history`.
+
+Convex reconstruction labels each halfspace with its input support. The Boolean's face
+images and In/On/section contact entities retain that label, including a support that shrinks
+to an edge or vertex. Same-domain and common-block representatives are resolved through the
+same builder. Derived: a ridge is a rank-two support intersection; a corner is a rank-three
+intersection. Every independent incident basis contributes, allowing a non-simple corner to
+split. Coplanar partitions discarded by reconstruction have no independent support basis.
+These relations use constructed topology identities throughout.
+
+Cylindrical reconstruction retains the cylinder constructor's lateral face, rims, seam and
+end vertices, then composes cut and unifier history. Input boundary roles come from the
+input parameter domain. The constructor chooses its angular frame, so the seam relation
+expresses replacement of that primitive role; its altitude and radius are checked.
+
+| Native construction checks | Constructions | Retained face/edge/vertex sources |
+| --- | ---: | --- |
+| Signed, scaled and rotated whole-box moves | 12 | 6 / 12 / 8 |
+| Offset engine followed by a deep copy | 6 | 6 / 12 / 8 |
+| Reconstructed and swept box caps | 24 | 6 / 12 / 8 |
+| Scaled and rotated cylindrical recuts | 6 | 7 / 15 / 10 |
+| Slanted support, before contact | 6 | 7 / 15 / 10 |
+| Slanted support, two corner pairs merging | 3 | 6 / 13 / 10 |
+| Slanted support, past contact | 3 | 6 / 11 / 6 |
+
+Box tests independently check every image's endpoint or corner set against the closed-form
+support translation. Slanted-support tests check surviving and merged corner positions.
 
 ### Face offset that keeps the topology
 

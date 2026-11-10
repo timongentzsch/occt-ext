@@ -9,6 +9,7 @@
 // functions below, which the host defines. The same code therefore runs over any store.
 
 #include <TopoDS_Shape.hxx>
+#include <BRepTools_History.hxx>
 
 #include <cstdint>
 #include <vector>
@@ -26,6 +27,8 @@ struct EvolutionData
   std::vector<int> modified;
   std::vector<int> generated;
   std::vector<int> deleted;
+  //! Composed construction history, including edges and vertices when supplied.
+  Handle(BRepTools_History) history;
 };
 
 //! Register a shape in the host's store and return its handle.

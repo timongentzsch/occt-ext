@@ -462,7 +462,8 @@ bool tangentAlong(const TopoDS_Edge& edge, const TopoDS_Face& a, const TopoDS_Fa
 
 Lineage::Lineage(const TopoDS_Shape& input)
 {
-  TopExp::MapShapes(input, TopAbs_FACE, input_);
+  for (const auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
+    TopExp::MapShapes(input, type, input_);
   for (int i = 1; i <= input_.Extent(); i++)
     now_.push_back({input_.FindKey(i)});
 }
@@ -474,7 +475,7 @@ void Lineage::throughHistory(const Handle(BRepTools_History)& history)
     if (next.IsEmpty() && !history->IsRemoved(face))
       out.push_back(face);
     for (const TopoDS_Shape& successor : next)
-      if (successor.ShapeType() == TopAbs_FACE)
+      if (successor.ShapeType() == face.ShapeType())
         out.push_back(successor);
   });
 }
@@ -502,7 +503,7 @@ void Lineage::then(const Lineage& next)
 void Lineage::within(const TopoDS_Shape& result)
 {
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
-  TopExp::MapShapes(result, TopAbs_FACE, faces);
+  TopExp::MapShapes(result, faces);
   step([&](const TopoDS_Shape& face, std::vector<TopoDS_Shape>& out) {
     const int index = faces.FindIndex(face);
     if (index == 0)
@@ -529,7 +530,7 @@ std::vector<TopoDS_Shape> Lineage::all(const std::vector<TopoDS_Shape>& excluded
     bool omit = false;
     for (const auto& face : excluded)
       omit = omit || face.IsSame(input_.FindKey(i));
-    if (!omit)
+    if (!omit && input_.FindKey(i).ShapeType() == TopAbs_FACE)
       out.insert(out.end(), now_[i - 1].begin(), now_[i - 1].end());
   }
   return out;
@@ -541,7 +542,8 @@ void Lineage::modified(FaceHistory& history) const
   {
     const TopoDS_Shape& face = input_.FindKey(i);
     const auto&         now  = now_[i - 1];
-    if (!history.tracks(face) || (now.size() == 1 && now[0].IsSame(face)))
+    if (face.ShapeType() != TopAbs_FACE || !history.tracks(face)
+        || (now.size() == 1 && now[0].IsSame(face)))
       continue;
     if (now.empty())
       history.deleted(face);
@@ -553,8 +555,25 @@ void Lineage::modified(FaceHistory& history) const
 void Lineage::generated(FaceHistory& history) const
 {
   for (int i = 1; i <= input_.Extent(); i++)
-    if (history.tracks(input_.FindKey(i)))
+    if (input_.FindKey(i).ShapeType() == TopAbs_FACE && history.tracks(input_.FindKey(i)))
       history.generated(input_.FindKey(i), listOf(now_[i - 1]));
+}
+
+Handle(BRepTools_History) Lineage::history() const
+{
+  Handle(BRepTools_History) history = new BRepTools_History;
+  for (int i = 1; i <= input_.Extent(); ++i)
+  {
+    const auto& source = input_.FindKey(i);
+    const auto& images = now_[i - 1];
+    if (images.empty())
+      history->Remove(source);
+    else
+      for (const auto& image : images)
+        if (!image.IsSame(source))
+          history->AddModified(source, image);
+  }
+  return history;
 }
 
 } // namespace BRepExt
