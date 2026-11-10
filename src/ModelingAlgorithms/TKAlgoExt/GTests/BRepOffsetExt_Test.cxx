@@ -1664,3 +1664,80 @@ TEST(BRepOffsetExt, RecutCylinderRetainsPrimitiveBoundaryRoles)
       }
     }
 }
+
+TEST(BRepOffsetExt, ClosedIntersectionBoundariesRetainEdgeAndClosureVertexHistory)
+{
+  for (const double scale : {0.1, 1.0, 10.0})
+    for (const double sign : {-1.0, 1.0})
+      for (const bool turned : {false, true})
+      {
+        const auto box = BRepPrimAPI_MakeBox(30 * scale, 30 * scale, 30 * scale).Shape();
+        const auto sphere = BRepPrimAPI_MakeSphere(gp_Pnt(18 * scale, 4 * scale, 10 * scale),
+                                                   8 * scale).Shape();
+        const auto joined = BRepAlgoAPI_Fuse(box, sphere).Shape();
+        const auto cap = facesWhere(joined, [scale](const double* l) {
+          return near(l[2], 30 * scale) && near(l[5], 30 * scale);
+        });
+        ASSERT_EQ(cap.size(), 1u);
+        gp_Trsf transform;
+        if (turned)
+          transform.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 2, 3)), 0.7);
+        BRepBuilderAPI_Transform placed(joined, transform, true);
+        const auto body = placed.Shape();
+        const auto top = TopoDS::Face(placed.ModifiedShape(cap[0]).Oriented(cap[0].Orientation()));
+        BRepOffset_MakeOffset maker;
+        maker.Initialize(body, 0.0, 1e-6 * scale, BRepOffset_Skin, false, false,
+                         GeomAbs_Intersection);
+        maker.SetOffsetOnFace(top, sign * 0.2 * scale);
+        maker.MakeOffsetShape();
+        ASSERT_TRUE(maker.IsDone());
+        ASSERT_TRUE(BRepCheck_Analyzer(maker.Shape()).IsValid());
+        for (const auto type : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX})
+        {
+          BRepExt::ShapeSet before, after, claimed;
+          TopExp::MapShapes(body, type, before);
+          TopExp::MapShapes(maker.Shape(), type, after);
+          ASSERT_EQ(before.Extent(), after.Extent());
+          for (const auto& source : before)
+          {
+            const auto images = maker.Generated(source);
+            ASSERT_EQ(images.Size(), 1);
+            const auto& image = images.First();
+            EXPECT_TRUE(after.Contains(image));
+            EXPECT_TRUE(claimed.Add(image));
+            EXPECT_FALSE(maker.IsDeleted(source));
+            if (type == TopAbs_VERTEX)
+            {
+              bool closure = false;
+              for (TopExp_Explorer edges(body, TopAbs_EDGE); edges.More(); edges.Next())
+              {
+                TopoDS_Vertex first, last;
+                TopExp::Vertices(TopoDS::Edge(edges.Current()), first, last);
+                if (first.IsNull() || !first.IsSame(last) || !first.IsSame(source))
+                  continue;
+                const auto boundaries = maker.Generated(edges.Current());
+                ASSERT_EQ(boundaries.Size(), 1);
+                TopExp::Vertices(TopoDS::Edge(boundaries.First()), first, last);
+                EXPECT_TRUE(first.IsSame(last));
+                EXPECT_TRUE(first.IsSame(image));
+                const auto point = BRep_Tool::Pnt(TopoDS::Vertex(image)).Transformed(transform.Inverted());
+                EXPECT_LE(std::abs(point.Y()), 1e-6 * scale);
+                EXPECT_LE(std::abs(std::hypot(point.X() - 18 * scale, point.Z() - 10 * scale)
+                                   - std::sqrt(48.0) * scale), 1e-6 * scale);
+                closure = true;
+              }
+              // A closed circle's parameter origin can move; its sole closure vertex
+              // follows the constructor role, independently checked on the same circle.
+              if (closure)
+                continue;
+              auto expected = BRep_Tool::Pnt(TopoDS::Vertex(source)).Transformed(transform.Inverted());
+              if (std::abs(expected.Z() - 30 * scale) < 1e-6 * scale)
+                expected.SetZ(expected.Z() + sign * 0.2 * scale);
+              expected.Transform(transform);
+              EXPECT_LE(expected.Distance(BRep_Tool::Pnt(TopoDS::Vertex(image))), 1e-6 * scale);
+            }
+          }
+          EXPECT_EQ(claimed.Extent(), after.Extent());
+        }
+      }
+}

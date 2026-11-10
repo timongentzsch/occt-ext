@@ -58,6 +58,12 @@ end vertices, then composes cut and unifier history. Input boundary roles come f
 input parameter domain. The constructor chooses its angular frame, so the seam relation
 expresses replacement of that primitive role; its altitude and radius are checked.
 
+The offset engine retains the source edge passed to its later three-dimensional intersection
+constructor, then composes the constructed curves through its edge and vertex replacement maps.
+A closed boundary's unique closure vertex follows the same endpoint role; the intersection
+constructor may choose a different angular parameter origin. Final graph membership filters
+these history images without changing construction.
+
 | Native construction checks | Constructions | Retained face/edge/vertex sources |
 | --- | ---: | --- |
 | Signed, scaled and rotated whole-box moves | 12 | 6 / 12 / 8 |
@@ -67,9 +73,12 @@ expresses replacement of that primitive role; its altitude and radius are checke
 | Slanted support, before contact | 6 | 7 / 15 / 10 |
 | Slanted support, two corner pairs merging | 3 | 6 / 13 / 10 |
 | Slanted support, past contact | 3 | 6 / 11 / 6 |
+| Closed intersection boundaries, signed/scaled/rotated | 12 | Complete bijection in all three dimensions |
 
 Box tests independently check every image's endpoint or corner set against the closed-form
 support translation. Slanted-support tests check surviving and merged corner positions.
+Closed-boundary tests check the circle equation independently and the exact closure role;
+a previously omitted boundary on a nineteen-edge solid now has one descendant instead of zero.
 
 ### Face offset that keeps the topology
 

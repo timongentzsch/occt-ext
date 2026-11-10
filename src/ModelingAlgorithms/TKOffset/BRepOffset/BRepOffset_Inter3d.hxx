@@ -32,6 +32,7 @@
 class BRepAlgo_AsDes;
 class BRepAlgo_Image;
 class TopoDS_Face;
+#include <BRepTools_History.hxx>
 class TopoDS_Shape;
 class BRepOffset_Analyse;
 
@@ -47,7 +48,8 @@ public:
   //! Constructor
   Standard_EXPORT BRepOffset_Inter3d(const occ::handle<BRepAlgo_AsDes>& AsDes,
                                      const TopAbs_State                 Side,
-                                     const double                       Tol);
+                                     const double                       Tol,
+                                     const occ::handle<BRepTools_History>& History = nullptr);
 
   // Computes intersection of the given faces among each other
   Standard_EXPORT void CompletInt(const NCollection_List<TopoDS_Shape>& SetOfFaces,
@@ -131,5 +133,6 @@ private:
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> myNewEdges;
   TopAbs_State                                                  mySide;
   double                                                        myTol;
+  occ::handle<BRepTools_History>                                myHistory;
 };
 #endif // _BRepOffset_Inter3d_HeaderFile

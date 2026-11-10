@@ -680,6 +680,7 @@ void BRepOffset_MakeOffset::Clear()
   myOffsetShape.Nullify();
   myInitOffsetFace.Clear();
   myInitOffsetEdge.Clear();
+  myIntersectionHistory = new BRepTools_History;
   myImageOffset.Clear();
   myImageVV.Clear();
   myFaces.Clear();
@@ -945,7 +946,7 @@ void BRepOffset_MakeOffset::MakeOffsetShape(const Message_ProgressRange& theRang
   aPSInter.SetName((myJoin == GeomAbs_Arc) ? "Connect offset faces by arc"
                                            : "Connect offset faces by intersection");
 
-  BRepOffset_Inter3d Inter(myAsDes, Side, myTol);
+  BRepOffset_Inter3d Inter(myAsDes, Side, myTol, myIntersectionHistory);
   Intersection3D(Inter, aPSInter.Next(90));
   if (myError != BRepOffset_NoError)
   {
@@ -5355,14 +5356,46 @@ const NCollection_List<TopoDS_Shape>& BRepOffset_MakeOffset::Generated(const Top
       break;
   }
 
+  if (!myIntersectionHistory.IsNull())
+    for (const auto& crossing : myIntersectionHistory->Modified(theS))
+    {
+      NCollection_List<TopoDS_Shape> images;
+      myImageOffset.LastImage(crossing, images);
+      for (const auto& image : images)
+        myImageVV.LastImage(image, myGenerated);
+    }
+
+  if (aType == TopAbs_VERTEX && !myIntersectionHistory.IsNull() && myAnalyse.HasAncestor(theS))
+    for (const auto& edge : myAnalyse.Ancestors(theS))
+    {
+      TopoDS_Vertex first, last;
+      TopExp::Vertices(TopoDS::Edge(edge), first, last);
+      if (first.IsNull() || !first.IsSame(last) || !first.IsSame(theS))
+        continue;
+      // A closed boundary has one closure vertex, preserved as a constructor role.
+      for (const auto& crossing : myIntersectionHistory->Modified(edge))
+      {
+        NCollection_List<TopoDS_Shape> images;
+        myImageOffset.LastImage(crossing, images);
+        for (const auto& image : images)
+        {
+          TopoDS_Vertex a, b;
+          TopExp::Vertices(TopoDS::Edge(image), a, b);
+          if (!a.IsNull() && a.IsSame(b))
+            myImageVV.LastImage(a, myGenerated);
+        }
+      }
+    }
+
   if (myResMap.IsEmpty())
   {
     TopExp::MapShapes(myOffsetShape, myResMap);
   }
 
+  NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> aSeen;
   for (NCollection_List<TopoDS_Shape>::Iterator it(myGenerated); it.More();)
   {
-    if (myResMap.Contains(it.Value()))
+    if (myResMap.Contains(it.Value()) && aSeen.Add(it.Value()))
     {
       it.Next();
     }

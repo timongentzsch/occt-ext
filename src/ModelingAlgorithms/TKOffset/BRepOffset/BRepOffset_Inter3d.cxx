@@ -25,6 +25,7 @@
 #include <BRepLib_MakeVertex.hxx>
 #include <BRepOffset_Analyse.hxx>
 #include <BRepOffset_Inter3d.hxx>
+#include <BRepTools_History.hxx>
 #include <BRepOffset_Interval.hxx>
 #include <NCollection_List.hxx>
 #include <BRepOffset_Offset.hxx>
@@ -51,10 +52,12 @@
 
 BRepOffset_Inter3d::BRepOffset_Inter3d(const occ::handle<BRepAlgo_AsDes>& AsDes,
                                        const TopAbs_State                 Side,
-                                       const double                       Tol)
+                                       const double                       Tol,
+                                       const occ::handle<BRepTools_History>& History)
     : myAsDes(AsDes),
       mySide(Side),
-      myTol(Tol)
+      myTol(Tol),
+      myHistory(History)
 {
 }
 
@@ -302,6 +305,12 @@ void BRepOffset_Inter3d::ConnexIntByArc(const NCollection_List<TopoDS_Shape>& /*
         {
           BRepOffset_Tool::Inter3D(F1, F2, LInt1, LInt2, mySide, E, InitF1, InitF2);
           Store(F1, F2, LInt1, LInt2);
+          // E selects the intersection branch. Retain that constructor identity
+          // separately from the connectivity maps used to assemble the result.
+          if (!myHistory.IsNull())
+            for (const auto* images : {&LInt1, &LInt2})
+              for (const auto& image : *images)
+                myHistory->AddModified(E, image);
         }
       }
     }

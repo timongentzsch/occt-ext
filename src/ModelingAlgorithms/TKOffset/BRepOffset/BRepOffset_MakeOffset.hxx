@@ -29,6 +29,7 @@
 #include <NCollection_IndexedMap.hxx>
 #include <BRepOffset_Analyse.hxx>
 #include <BRepAlgo_Image.hxx>
+#include <BRepTools_History.hxx>
 #include <NCollection_List.hxx>
 #include <BRepOffset_Error.hxx>
 #include <BRepOffset_MakeLoops.hxx>
@@ -267,6 +268,7 @@ private:
   BRepAlgo_Image                                                     myInitOffsetEdge;
   BRepAlgo_Image                                                     myImageOffset;
   BRepAlgo_Image                                                     myImageVV;
+  occ::handle<BRepTools_History>                                     myIntersectionHistory;
   NCollection_List<TopoDS_Shape>                                     myWalls;
   occ::handle<BRepAlgo_AsDes>                                        myAsDes;
   NCollection_DataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>
