@@ -3,6 +3,7 @@ set(OCCT_TKAlgoExt_GTests_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
 
 set(OCCT_TKAlgoExt_GTests_FILES
   BRepBlendExt_Test.cxx
+  BRepBlendExt_Boundary_Test.cxx
   BRepBooleanExt_Test.cxx
   BRepCurveExt_Test.cxx
   BRepExtTest_Support.cxx

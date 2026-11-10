@@ -6,6 +6,7 @@
 // Blend: the attachment of the blends to the body (Attach), shared by its stage files.
 
 #include <BRepBlendExt_Internal.hxx>
+#include <BRepBlendExt_BoundaryGraph.hxx>
 #include <BRepAlgoExt_PatchLoop.hxx>
 #include <GC_MakeSegment.hxx>
 #include <math_SVD.hxx>
@@ -98,6 +99,7 @@ struct Attach
                                   int                               poleFoot);
   void              ridges();
   void              contacts();
+  BoundaryGraph     boundaryGraph(const std::vector<int>& group) const;
   void              blendFaces();
   void              continuity();
   std::vector<Join> joins;

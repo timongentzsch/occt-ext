@@ -628,10 +628,87 @@ void Attach::contacts()
   }
 }
 
+BoundaryGraph Attach::boundaryGraph(const std::vector<int>& group) const
+{
+  const int  k = group.front(), last = group.back();
+  const auto from = [](const TopoDS_Edge& edge, const TopoDS_Vertex& start) {
+    return TopExp::FirstVertex(edge).IsSame(start) ? edge : TopoDS::Edge(edge.Reversed());
+  };
+  // Along the first contact, across the far end, back along the second, across the near end.
+  std::vector<TopoDS_Edge> loop;
+  const auto               once = [&](const TopoDS_Edge& edge) {
+    if (loop.empty() || !loop.back().IsSame(edge))
+      loop.push_back(edge);
+  };
+  // An end of several edges runs from side 0's corner to side 1's: forward at the far end,
+  // back at the near one.
+  const auto across = [&](int m, int end, const TopoDS_Vertex& start) {
+    // A blend that closes on the face beyond its narrow face has no section there: its
+    // contacts meet at a corner (Attach::consumed).
+    if (section[m][end].IsNull() && chain[m][end].empty())
+      return;
+    // A degenerate end (Rail::pinch) runs across the sheet as the end does.
+    if (BRep_Tool::Degenerated(section[m][end]))
+    {
+      const bool rising = pieces[m].sheet.across[0] < pieces[m].sheet.across[1];
+      loop.push_back((end == 1) == rising ? section[m][end]
+                                          : TopoDS::Edge(section[m][end].Reversed()));
+      return;
+    }
+    if (chain[m][end].empty())
+    {
+      loop.push_back(from(section[m][end], start));
+      return;
+    }
+    TopoDS_Vertex at    = start;
+    const auto&   edges = chain[m][end];
+    for (size_t i = 0; i < edges.size(); ++i)
+    {
+      const TopoDS_Edge& edge = edges[end == 1 ? i : edges.size() - 1 - i];
+      loop.push_back(from(edge, at));
+      at = TopExp::LastVertex(loop.back(), true);
+    }
+  };
+  // A side's edges in turn, from the corner it starts at.
+  const auto along = [&](int m, int side, const TopoDS_Vertex& start) {
+    const auto edges = sideEdges(m, side);
+    if (edges.size() == 1)
+    {
+      once(side == 0 ? from(edges.front(), start) : TopoDS::Edge(edges.front().Reversed()));
+      return;
+    }
+    TopoDS_Vertex at = start;
+    for (size_t i = 0; i < edges.size(); ++i)
+    {
+      once(from(edges[side == 0 ? i : edges.size() - 1 - i], at));
+      at = TopExp::LastVertex(loop.back(), true);
+    }
+  };
+  for (int m : group)
+    along(m, 0, corner[m][0][0]);
+  across(last, 1, corner[last][0][1]);
+  for (auto m = group.rbegin(); m != group.rend(); ++m)
+    along(*m, 1, corner[*m][1][1]);
+  // A seam's first vertex is that of both its uses, so the closed edge's are set apart.
+  const size_t far = std::find_if(loop.begin(),
+                                  loop.end(),
+                                  [&](const TopoDS_Edge& e) { return e.IsSame(section[last][1]); })
+                     - loop.begin();
+  if (section[k][0].IsSame(section[last][1]) && chain[k][0].empty())
+    loop.push_back(TopoDS::Edge(loop[far].Reversed()));
+  else
+    across(k, 0, corner[k][1][0]);
+  // The existing end constructors supply a single cycle in occurrence order.
+  // Keep their ports separate even when a seam or pinch identifies vertices.
+  BoundaryGraph graph;
+  for (size_t i = 0; i < loop.size(); ++i)
+    graph.arcs.push_back({loop[i], i, (i + 1) % loop.size()});
+  return graph;
+}
+
 void Attach::blendFaces()
 {
-  // The blend faces: around the first contact, the far end, the second contact and the near
-  // end, counter-clockwise in their parameters and facing out as the supports do.
+  // Faces bounded by the retained cycles, facing out as the supports do.
   for (int k = 0; k < n; ++k)
   {
     // One face for the parts of an edge that a split joins, made at the first of them; none
@@ -641,86 +718,26 @@ void Attach::blendFaces()
     std::vector<int> group = {k};
     while (pieces[group.back()].joint[1].meets == Meets::Split)
       group.push_back(pieces[group.back()].joint[1].piece);
-    const int    last  = group.back();
     const Piece& piece = pieces[k];
     const Sheet& sheet = piece.sheet;
     builder.MakeFace(blends[k], sheet.surface, tolerance);
     const bool ccw =
       sheet.swapped ? sheet.across[1] < sheet.across[0] : sheet.across[1] > sheet.across[0];
-    const auto from = [](const TopoDS_Edge& edge, const TopoDS_Vertex& start) {
-      return TopExp::FirstVertex(edge).IsSame(start) ? edge : TopoDS::Edge(edge.Reversed());
-    };
-    // Along the first contact, across the far end, back along the second, across the near end.
-    std::vector<TopoDS_Edge> loop;
-    const auto               once = [&](const TopoDS_Edge& edge) {
-      if (loop.empty() || !loop.back().IsSame(edge))
-        loop.push_back(edge);
-    };
-    // An end of several edges runs from side 0's corner to side 1's: forward at the far end,
-    // back at the near one.
-    const auto across = [&](int m, int end, const TopoDS_Vertex& start) {
-      // A blend that closes on the face beyond its narrow face has no section there: its
-      // contacts meet at a corner (Attach::consumed).
-      if (section[m][end].IsNull() && chain[m][end].empty())
-        return;
-      // A degenerate end (Rail::pinch) runs across the sheet as the end does.
-      if (BRep_Tool::Degenerated(section[m][end]))
-      {
-        const bool rising = pieces[m].sheet.across[0] < pieces[m].sheet.across[1];
-        loop.push_back((end == 1) == rising ? section[m][end]
-                                            : TopoDS::Edge(section[m][end].Reversed()));
-        return;
-      }
-      if (chain[m][end].empty())
-      {
-        loop.push_back(from(section[m][end], start));
-        return;
-      }
-      TopoDS_Vertex at    = start;
-      const auto&   edges = chain[m][end];
-      for (size_t i = 0; i < edges.size(); ++i)
-      {
-        const TopoDS_Edge& edge = edges[end == 1 ? i : edges.size() - 1 - i];
-        loop.push_back(from(edge, at));
-        at = TopExp::LastVertex(loop.back(), true);
-      }
-    };
-    // A side's edges in turn, from the corner it starts at.
-    const auto along = [&](int m, int side, const TopoDS_Vertex& start) {
-      const auto edges = sideEdges(m, side);
-      if (edges.size() == 1)
-      {
-        once(side == 0 ? from(edges.front(), start) : TopoDS::Edge(edges.front().Reversed()));
-        return;
-      }
-      TopoDS_Vertex at = start;
-      for (size_t i = 0; i < edges.size(); ++i)
-      {
-        once(from(edges[side == 0 ? i : edges.size() - 1 - i], at));
-        at = TopExp::LastVertex(loop.back(), true);
-      }
-    };
-    for (int m : group)
-      along(m, 0, corner[m][0][0]);
-    across(last, 1, corner[last][0][1]);
-    for (auto m = group.rbegin(); m != group.rend(); ++m)
-      along(*m, 1, corner[*m][1][1]);
-    // A seam's first vertex is that of both its uses, so the closed edge's are set apart.
-    const size_t far =
-      std::find_if(loop.begin(),
-                   loop.end(),
-                   [&](const TopoDS_Edge& e) { return e.IsSame(section[last][1]); })
-      - loop.begin();
-    if (section[k][0].IsSame(section[last][1]) && chain[k][0].empty())
-      loop.push_back(TopoDS::Edge(loop[far].Reversed()));
-    else
-      across(k, 0, corner[k][1][0]);
-    TopoDS_Wire wire;
-    builder.MakeWire(wire);
-    for (const auto& edge : loop)
-      builder.Add(wire, ccw ? edge : TopoDS::Edge(edge.Reversed()));
-    wire.Closed(true);
-    builder.Add(blends[k], wire);
+    const auto loops = boundaryGraph(group).loops();
+    if (!loops)
+      fail(op,
+           no_solution,
+           "the retained blend boundary has open or ambiguous incidence",
+           {piece.rail.edge});
+    for (const auto& loop : *loops)
+    {
+      TopoDS_Wire wire;
+      builder.MakeWire(wire);
+      for (const auto& edge : loop)
+        builder.Add(wire, ccw ? edge : TopoDS::Edge(edge.Reversed()));
+      wire.Closed(true);
+      builder.Add(blends[k], wire);
+    }
     gp_Pnt         p;
     gp_Vec         du, dv, outward;
     const double   middle = piece.uAt(0) / 2 + piece.uAt(1) / 2;

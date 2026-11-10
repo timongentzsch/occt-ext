@@ -1652,8 +1652,8 @@ and corrects the section/plane residual directly. Centred differences guide the
 section derivative; a predictor-deviation fraction of one eighth controls sampling.
 Those are numerical choices, not existence or approximation certificates. The
 output is corrected points on a seeded component, not a certified spline edge.
-Component discovery, global exposure, common edge/pcurves and a face-boundary graph
-remain open. Variable-radius laws, cliff contacts and section-transition windows
+Component discovery, global exposure and installation of these components in the
+body's faces remain open. Variable-radius laws, cliff contacts and section-transition windows
 are outside this prototype.
 
 | Generated boundary checks | Configurations | Result |
@@ -1667,3 +1667,29 @@ Analysis of Parametric Solid Sweeps* (2013), section 3, Definitions 21, 23 and 2
 distinguish the contact set, its trim set and the exposed envelope
 ([paper](https://arxiv.org/html/1305.7351v1)). The numerical boundary tracer supplies
 no global occupancy proof or closed-solid construction.
+
+The separate `planeBoundaryCurve` fitter produces a shared cubic spline edge and
+pcurves on a nonperiodic spline sheet and a plane. Local transverse charts permit
+turns in either sheet coordinate. Hermite spans are refined until the stored
+curves agree with both stored surfaces within the existing length tolerance.
+The sheet certificate substitutes the polynomial pcurve into the Cox-de Boor
+recurrence on every intersected knot cell. Outward-rounded Bernstein coefficients
+enclose the homogeneous numerator of the discrepancy and a positive denominator.
+This composition and quotient bound are derived; the basis recurrence and convex
+hull property follow de Boor, *Spline Basics* (2001), sections 2 and 10
+([chapter](https://ftp.cs.wisc.edu/Approx/cagdhand.pdf)). The certificate concerns
+the stored sheet, not its discrepancy from the implicit section family.
+
+`BoundaryGraph` assembles directed edge occurrences into retained cycles without
+inferring incidence from contact labels. Distinct parameter-domain ports preserve
+both uses of a seam even when their spatial vertices coincide. The current end
+constructors import their original cycle without changing its edges or their
+order. Replacing those constructors with traced contact intervals and support
+events remains unfinished; no stop construction has been superseded yet.
+
+| Boundary approximation check | Configurations | Result |
+| --- | ---: | --- |
+| Rational and polynomial spline representations, with and without an internal knot | 4 | Dense independent evaluations enclosed by the whole-span discrepancy bound |
+| Cubic defect vanishing at both endpoints and the midpoint | 1 | Whole-span bound detects the interior defect |
+| Parabolic same-contact section, three scales and two poses | 6 | Shared edge and both pcurves within 1e-7 length tolerance |
+| Disjoint cycles, reversed seam occurrences and open/ambiguous incidence | 1 | Occurrences preserved; unresolved incidence identified |

@@ -8,6 +8,9 @@ set(OCCT_BRepBlendExt_FILES
   BRepBlendExt_AttachMiters.cxx
   BRepBlendExt_AttachStops.cxx
   BRepBlendExt_Ball.cxx
+  BRepBlendExt_BoundaryCurve.cxx
+  BRepBlendExt_BoundaryCurve.hxx
+  BRepBlendExt_BoundaryGraph.hxx
   BRepBlendExt_Convexity.cxx
   BRepBlendExt_EndBoundary.cxx
   BRepBlendExt_EndBoundary.hxx
