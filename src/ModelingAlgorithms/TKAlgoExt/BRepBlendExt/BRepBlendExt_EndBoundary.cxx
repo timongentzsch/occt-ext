@@ -391,9 +391,13 @@ EndBoundaryTrace tracePlaneEnd(const Rail&    rail,
       result.boundaryCoordinate = boundary;
       const auto active         = [&](int k, double bound) {
         if (std::abs(next[k] - bound) * end.metric[k] <= equations.tolerance)
+        {
+          if (k == 4)
+            result.contactSide = int(bound);
           if (std::find(result.boundaryCoordinates.begin(), result.boundaryCoordinates.end(), k)
               == result.boundaryCoordinates.end())
             result.boundaryCoordinates.push_back(k);
+        }
       };
       active(4, 0);
       active(4, 1);

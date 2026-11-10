@@ -32,6 +32,8 @@ struct EndBoundaryTrace
   std::vector<EndBoundaryPoint> points;
   End                           end                = End::InvalidSeed;
   int                           boundaryCoordinate = -1;
+  //! Discrete contact incidence, independent of the numerical section coordinate.
+  int                           contactSide = -1;
   //! All simultaneous contact/carrier restrictions, using the same residual allowance.
   std::vector<int> boundaryCoordinates;
 };

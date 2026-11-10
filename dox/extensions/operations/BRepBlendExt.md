@@ -1634,7 +1634,7 @@ Moreton and Séquin, *Functional optimization for fair surface design*, SIGGRAPH
 Dennis and Schnabel, *Numerical Methods for Unconstrained Optimization and Nonlinear Equations*,
 Prentice-Hall (1983).
 
-### Experimental planar boundary curves on exact sections
+### Planar boundary curves on exact sections
 
 For constant-radius sections on two regular surfaces, the equality of their offset
 centres gives three equations in four support parameters. A section point in a plane
@@ -1646,14 +1646,15 @@ simultaneous events retain all their labels. At a smooth support partition, a ne
 support chart can continue the curve from the shared event and its incoming direction.
 These constructions are derived.
 
-`tracePlaneEnd` is an experimental evaluator, not yet called by solid attachment.
-It evaluates the original support surfaces, uses their analytic offset Jacobian,
+`tracePlaneEnd` supplies planar attachment events. It evaluates the original support surfaces, uses their analytic offset Jacobian,
 and corrects the section/plane residual directly. Centred differences guide the
 section derivative; a predictor-deviation fraction of one eighth controls sampling.
 Those are numerical choices, not existence or approximation certificates. The
-output is corrected points on a seeded component, not a certified spline edge.
+output is corrected points on a seeded component; `planeBoundaryCurve` subsequently
+certifies the stored spline edge. Contact incidence is an explicit discrete label,
+independent of rounding in the corrected section parameter.
 Global exposure and support-transition installation remain open. Variable-radius laws, cliff contacts and section-transition windows
-are outside this prototype.
+are outside this construction.
 
 | Generated boundary checks | Configurations | Result |
 | --- | ---: | --- |

@@ -2453,6 +2453,7 @@ TEST(BRepBlendExt, PlaneBoundaryReturnsToOneContactAcrossPosesAndScales)
             const auto   curve = tracePlaneEnd(rail, plane, seed, 1, radius * scale / 10);
             ASSERT_EQ(curve.end, EndBoundaryTrace::End::Contact);
             ASSERT_EQ(curve.boundaryCoordinate, 4);
+            EXPECT_EQ(curve.contactSide, 1);
             ASSERT_GT(curve.points.size(), 2u);
             EXPECT_NEAR(curve.points.front().parameters[4], 1, 1e-10);
             EXPECT_NEAR(curve.points.back().parameters[4], 1, 1e-10);

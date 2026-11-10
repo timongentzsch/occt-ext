@@ -68,7 +68,7 @@ void Attach::stopPlaces(int k)
             // Incidence is determined by the exact section equations, not by a missing
             // opposite corner. An ordinary opposite-contact component keeps its curves.
             if (trace.end == EndBoundaryTrace::End::Contact && trace.points.size() > 1
-                && trace.points.back().parameters[4] == side)
+                && trace.contactSide == side)
             {
               tracedBoundary(k);
               return;
@@ -144,7 +144,9 @@ void Attach::tracedBoundary(int k)
           fail(op, no_solution, "a section-plane component misses its fitted sheet", {rail.edge});
         guide.emplace_back(projection.LowerDistanceParameter(), w);
       }
-      const int lastSide = int(trace.points.back().parameters[4]);
+      const int lastSide = trace.contactSide;
+      guide.front().SetY(root.side);
+      guide.back().SetY(lastSide);
       size_t mate = roots.size();
       for (size_t j = 0; j < roots.size(); ++j)
         if (j != index && roots[j].side == lastSide
