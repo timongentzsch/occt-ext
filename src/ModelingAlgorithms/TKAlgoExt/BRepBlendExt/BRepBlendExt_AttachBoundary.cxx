@@ -4,6 +4,7 @@
 #include <BRepBlendExt_Attach.hxx>
 #include <BRepBlendExt_EndBoundary.hxx>
 #include <BRepBlendExt_BoundaryCurve.hxx>
+#include <GeomAlgoExt_Timing.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_TVertex.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
@@ -27,6 +28,7 @@ Station boundarySeed(const Piece& piece, double u)
 
 void Attach::stopPlaces(int k)
 {
+  BooleanPhase phase("fillet2.endIncidence");
   const Piece& piece = pieces[k];
   const Rail& rail = piece.rail;
   // Continuation currently describes regular constant conic and G2 sections.
@@ -98,7 +100,11 @@ void Attach::stopPlaces(int k)
 
 void Attach::tracedBoundary(int k)
 {
-  const auto completed = completeCarrier(pieces[k]);
+  BooleanPhase phase("fillet2.endBoundary");
+  const auto completed = [&] {
+    BooleanPhase carrier("fillet2.endCarrier");
+    return completeCarrier(pieces[k]);
+  }();
   if (!completed)
     fail(op, no_solution, "the retained end component has no complete regular carrier", {pieces[k].rail.edge});
   contactCrossings.erase(std::remove_if(contactCrossings.begin(), contactCrossings.end(),
@@ -183,7 +189,10 @@ void Attach::tracedBoundary(int k)
       root.used = roots[mate].used = true;
       const auto first = BRepBuilderAPI_MakeVertex(trace.points.front().point).Vertex();
       const auto last = BRepBuilderAPI_MakeVertex(trace.points.back().point).Vertex();
-      const auto fitted = planeBoundaryCurve(sheet, face, guide, first, last);
+      const auto fitted = [&] {
+        BooleanPhase curve("fillet2.endCurve");
+        return planeBoundaryCurve(sheet, face, guide, first, last);
+      }();
       if (!fitted)
         fail(op, no_solution, "a retained planar boundary could not be enclosed at length tolerance", {rail.edge});
       const size_t at = ports.size();
@@ -296,6 +305,7 @@ TopoDS_Edge boundaryPart(const TopoDS_Edge& original, const TopoDS_Vertex& a, do
 
 void Attach::installBoundaries()
 {
+  BooleanPhase phase("fillet2.endInstall");
   if (std::none_of(retainedBoundaries.begin(), retainedBoundaries.end(), [](const auto& b) { return bool(b); }))
     return;
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> oldEdges, oldFaces;

@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <limits>
+#include <map>
 
 namespace BRepExt::blending::detail
 {
@@ -33,13 +34,24 @@ Polynomial binomials(int n)
 Polynomial product(const Polynomial& a, const Polynomial& b)
 {
   const int  m = int(a.size()) - 1, n = int(b.size()) - 1;
-  const auto ca = binomials(m), cb = binomials(n), cc = binomials(m + n);
+  // These outward-rounded constants depend only on the two polynomial degrees.
+  // Reusing them preserves the arithmetic enclosure and accumulation order.
+  static thread_local std::map<std::pair<int, int>, Polynomial> factors;
+  auto [entry, inserted] = factors.try_emplace({m, n});
+  if (inserted)
+  {
+    const auto ca = binomials(m), cb = binomials(n), cc = binomials(m + n);
+    for (int i = 0; i <= m; ++i)
+      for (int j = 0; j <= n; ++j)
+        entry->second.push_back(I::dividePositive(I::multiply(ca[i], cb[j]), cc[i + j]));
+  }
+  const auto& coefficient = entry->second;
   Polynomial out(m + n + 1, I::point(0));
   for (int i = 0; i <= m; ++i)
     for (int j = 0; j <= n; ++j)
       out[i + j] = I::add(out[i + j],
                           I::multiply(I::multiply(a[i], b[j]),
-                                      I::dividePositive(I::multiply(ca[i], cb[j]), cc[i + j])));
+                                      coefficient[i * (n + 1) + j]));
   return out;
 }
 

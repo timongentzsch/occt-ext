@@ -1713,6 +1713,11 @@ event, rather than from every root on an incident infinite plane. This preserves
 ordinary four-sided occurrences, face-growth events and encounters with another
 selected rail before completing a carrier for a same-contact end.
 
+Bernstein-product binomial factors are cached by polynomial degree per thread.
+The cached factors are the same outward-rounded intervals, and the variable
+coefficient products retain their accumulation order. This reduces the cost of
+whole-span boundary certification without changing its bounds or spline data.
+
 At a new split vertex, the original face's parameter port is the projection of
 that shared vertex onto the exact surface. The inherited edge pcurve supplies the
 periodic chart occurrence. Its approximation error is not added to the position
