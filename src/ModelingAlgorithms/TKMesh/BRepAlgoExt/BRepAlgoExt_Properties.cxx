@@ -5,6 +5,7 @@
 #include <BRepAlgoExt_TrimDomain.hxx>
 #include <GeomAlgoExt_ParameterRectangle.hxx>
 #include <BRepAlgoExt_Properties.hxx>
+#include <BRepAlgoExt_PolynomialFlux.hxx>
 
 #include <BRepGProp.hxx>
 #include <vector>
@@ -17,6 +18,9 @@
 #include <BRep_Tool.hxx>
 #include <GeomAdaptor_Surface.hxx>
 #include <BRepAdaptor_Curve2d.hxx>
+#include <Geom2dAPI_InterCurveCurve.hxx>
+#include <Geom2d_Line.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <TopExp_Explorer.hxx>
@@ -30,6 +34,42 @@ namespace BRepExt
 
 namespace
 {
+
+// Algebraic polynomial contours admit degree-exact quadrature. Rational
+// carriers or trims retain the existing adaptive trimmed-property integration.
+int polynomialDegree(const Handle(Adaptor3d_Curve)& c)
+{
+  if (c->GetType() == GeomAbs_Line)
+    return 1;
+  if (c->GetType() == GeomAbs_BezierCurve && !c->IsRational())
+    return c->Degree();
+  if (c->GetType() == GeomAbs_BSplineCurve && !c->IsRational())
+    return c->Degree();
+  return 0;
+}
+
+int polynomialDegree(const BRepAdaptor_Curve2d& c)
+{
+  if (c.GetType() == GeomAbs_Line)
+    return 1;
+  if ((c.GetType() == GeomAbs_BezierCurve || c.GetType() == GeomAbs_BSplineCurve)
+      && !c.IsRational())
+    return c.Degree();
+  return 0;
+}
+
+int polynomialExtrusion(const TopoDS_Face& face, const BRepAdaptor_Surface& s)
+{
+  if (s.GetType() != GeomAbs_SurfaceOfExtrusion)
+    return 0;
+  const int p = polynomialDegree(s.BasisCurve());
+  if (!p)
+    return 0;
+  for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next())
+    if (!polynomialDegree(BRepAdaptor_Curve2d(TopoDS::Edge(it.Current()), face)))
+      return 0;
+  return p;
+}
 
 // Boundary integration of the surface Jacobian. Split at spline spans before
 // adaptive quadrature; the legacy adaptive SurfaceProperties path can report a
@@ -228,7 +268,7 @@ public:
           auto         inner = [&](double u) { return density(u, uv.Y()); };
           double       sum = 0, left = u0;
           const double right = std::clamp(uv.X(), u0, u1);
-          const double tol = tolerance / (100 * std::max(1.0, v1 - v0) * (count + 1));
+          const double tol   = tolerance / (100 * std::max(1.0, v1 - v0) * (count + 1));
           if (extrusion || ruledVolume)
           {
             const auto at = std::min(
@@ -259,6 +299,121 @@ public:
     return volume ? (original.Orientation() == TopAbs_REVERSED ? -total : total) : std::abs(total);
   }
 };
+
+// Keep polynomial-volume temporaries out of the adaptive integration frame.
+Standard_NOINLINE double polynomialFaceFlux(const TopoDS_Face&         original,
+                                            const BRepAdaptor_Surface& surface,
+                                            const gp_Pnt&              origin,
+                                            int                        degree,
+                                            bool                       rectangle)
+{
+  const auto face = TopoDS::Face(original.Oriented(TopAbs_FORWARD));
+  double     u0, u1, v0, v1;
+  BRepTools::UVBounds(face, u0, u1, v0, v1);
+  const int                  count = surface.NbUIntervals(GeomAbs_CN);
+  NCollection_Array1<double> knots(1, count + 1);
+  surface.UIntervals(knots, GeomAbs_CN);
+  std::vector<double> breaks{u0};
+  for (int i = 1; i <= count + 1; ++i)
+    if (knots(i) > u0 && knots(i) < u1)
+      breaks.push_back(knots(i));
+  breaks.push_back(u1);
+  if (rectangle)
+  {
+    polynomialFlux::Flux flux(surface, origin);
+    flux.prepare(breaks);
+    polynomialFlux::Real total = 0;
+    for (size_t i = 1; i < breaks.size(); ++i)
+      total += polynomialFlux::integral(flux, breaks[i - 1], breaks[i], degree);
+    total *= polynomialFlux::Real(v1) - v0;
+    return original.Orientation() == TopAbs_REVERSED ? -double(total) : double(total);
+  }
+
+  // For S=C(u)+vD, g=(S-origin).(Su cross Sv)/3 is independent of v.
+  // Green gives integral g du dv = -integral (v-v0) g du over each UV wire.
+  // This primitive needs no inversion of a boundary that folds over U.
+  polynomialFlux::Flux flux(surface, origin);
+  flux.prepare(breaks);
+  polynomialFlux::Real total = 0;
+  for (TopExp_Explorer wires(face, TopAbs_WIRE); wires.More(); wires.Next())
+  {
+    std::vector<std::pair<polynomialFlux::Vector, polynomialFlux::Vector>> ends;
+    for (BRepTools_WireExplorer walk(TopoDS::Wire(wires.Current()), face); walk.More(); walk.Next())
+    {
+      const auto orientation = walk.Current().Orientation();
+      if (orientation != TopAbs_FORWARD && orientation != TopAbs_REVERSED)
+        continue;
+      BRepAdaptor_Curve2d        boundary(walk.Current(), face);
+      const int                  n = boundary.NbIntervals(GeomAbs_CN);
+      NCollection_Array1<double> intervals(1, n + 1);
+      boundary.Intervals(intervals, GeomAbs_CN);
+      std::vector<double> cuts;
+      for (int i = 1; i <= n + 1; ++i)
+        cuts.push_back(intervals(i));
+      double                first, last;
+      const auto            curve = BRep_Tool::CurveOnSurface(walk.Current(), face, first, last);
+      polynomialFlux::Curve exactBoundary(boundary);
+      exactBoundary.prepareTrim(first, last);
+      const auto p = exactBoundary.evaluate(first), q = exactBoundary.evaluate(last);
+      ends.emplace_back(orientation == TopAbs_FORWARD ? p : q,
+                        orientation == TopAbs_FORWARD ? q : p);
+      const Handle(Geom2d_Curve) trimmed = new Geom2d_TrimmedCurve(curve, first, last);
+      for (size_t i = 1; i + 1 < breaks.size(); ++i)
+      {
+        const Handle(Geom2d_Curve) line = new Geom2d_Line(gp_Pnt2d(breaks[i], 0), gp_Dir2d(0, 1));
+        Geom2dAPI_InterCurveCurve  intersections(trimmed, line, 1e-12);
+        for (int j = 1; j <= intersections.NbPoints(); ++j)
+        {
+          const double t = intersections.Intersector().Point(j).ParamOnFirst();
+          if (t > first && t < last)
+            cuts.push_back(t);
+        }
+      }
+      std::sort(cuts.begin(), cuts.end());
+      cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
+      auto contour = [&](polynomialFlux::Real t) {
+        const auto jet = exactBoundary.trimJet(t);
+        if (jet[2] == 0)
+          return polynomialFlux::Real(0);
+        return -(jet[1] - v0) * flux(jet[0]) * jet[2];
+      };
+      const double sign = orientation == TopAbs_REVERSED ? -1 : 1;
+      for (size_t i = 1; i < cuts.size(); ++i)
+        // The leading determinant coefficient vanishes: g has degree <=2p-2.
+        // A degree-q trim gives contour degree <=2pq-1, hence pq nodes.
+        total += sign
+                 * polynomialFlux::integral(contour,
+                                            cuts[i - 1],
+                                            cuts[i],
+                                            degree * polynomialDegree(boundary));
+    }
+    // Topological edges share vertices, but their pcurves can meet only
+    // within tolerance. Green's theorem needs a closed parameter loop.
+    // Join successive oriented endpoints; otherwise translating the
+    // primitive changes the measured volume by the omitted gap flux.
+    for (size_t i = 0; i < ends.size(); ++i)
+    {
+      const auto p = ends[i].second, q = ends[(i + 1) % ends.size()].first;
+      const auto d = polynomialFlux::difference(q, p);
+      if (d[0] == 0)
+        continue;
+      auto gap = [&](polynomialFlux::Real t) {
+        return -(p[1] + t * d[1] - v0) * flux(p[0] + t * d[0]) * d[0];
+      };
+      std::vector<polynomialFlux::Real> cuts{0, 1};
+      for (double k : breaks)
+      {
+        const auto t = (k - p[0]) / d[0];
+        if (t > 0 && t < 1)
+          cuts.push_back(t);
+      }
+      std::sort(cuts.begin(), cuts.end());
+      for (size_t j = 1; j < cuts.size(); ++j)
+        total += polynomialFlux::integral(gap, cuts[j - 1], cuts[j], degree);
+    }
+  }
+  return original.Orientation() == TopAbs_REVERSED ? -double(total) : double(total);
+}
 
 // Faces of a support other than a plane, cylinder, cone, sphere or torus. The boundary
 // integral above sweeps the support between the trim and the side of its parameter
@@ -340,6 +495,23 @@ double faceMeasure(const TopoDS_Face& face,
       total += measured.area;
       if (converged)
         *converged &= measured.converged;
+    }
+    else if (const int degree = !surface && adaptor.GetType() == GeomAbs_SurfaceOfExtrusion
+                                  ? polynomialExtrusion(face, adaptor)
+                                  : 0;
+             degree)
+    {
+      const bool rectangle = GeomAlgoExt::parameterRectangle(face);
+      if (rectangle && degree <= 8)
+      {
+        // The existing eight-point rule is already exact through degree 15.
+        AreaIntegral integral;
+        total += integral.face(face, true, origin, areaEstimate);
+        if (converged)
+          *converged &= integral.didConverge();
+      }
+      else
+        total += polynomialFaceFlux(face, adaptor, origin, degree, rectangle);
     }
     else if (!surface && trimmedSupport(face) && !GeomAlgoExt::parameterRectangle(face))
     {
