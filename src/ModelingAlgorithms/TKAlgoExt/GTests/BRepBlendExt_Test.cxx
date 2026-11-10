@@ -2405,6 +2405,21 @@ TEST(BRepBlendExt, ContinuedSectionsCarryTheirCompleteSupportBranch)
       }
 }
 
+// The curvature-continuous section is a policy its host supplies (BRepBlendExt_Policy): a build
+// without one refuses that law, and has no such section to check.
+static bool hasCurvatureContinuousSection()
+{
+  try
+  {
+    (void)BREPBLENDEXT_POLICY::g2Poles(0.5);
+    return true;
+  }
+  catch (const BRepExt::Failure&)
+  {
+    return false;
+  }
+}
+
 TEST(BRepBlendExt, PlaneBoundaryReturnsToOneContactAcrossPosesAndScales)
 {
   using namespace BRepExt::blending::detail;
@@ -2417,6 +2432,8 @@ TEST(BRepBlendExt, PlaneBoundaryReturnsToOneContactAcrossPosesAndScales)
         for (const double fraction : {0.25, 0.75})
           for (const auto law : {BRepExt::blending::Law::Conic, BRepExt::blending::Law::G2})
           {
+            if (law == BRepExt::blending::Law::G2 && !hasCurvatureContinuousSection())
+              continue;
             SCOPED_TRACE(testing::Message() << scale << " " << moved << " " << radius << " "
                                             << fraction << " " << int(law));
             const double sphereRadius = 3, cylinderRadius = 2;
@@ -2495,6 +2512,8 @@ TEST(BRepBlendExt, PlaneBoundaryContinuesAcrossASmoothFiniteSupport)
     for (const bool moved : {false, true})
       for (const auto law : {BRepExt::blending::Law::Conic, BRepExt::blending::Law::G2})
       {
+        if (law == BRepExt::blending::Law::G2 && !hasCurvatureContinuousSection())
+          continue;
         SCOPED_TRACE(testing::Message() << scale << " " << moved << " " << int(law));
         const double radius = .25, a = 2 - radius, b = 3 - radius, z = std::sqrt(b * b - a * a);
         const double cut = (2 + a * 3 / b) / 2, angle = std::acos(cut / 2);
