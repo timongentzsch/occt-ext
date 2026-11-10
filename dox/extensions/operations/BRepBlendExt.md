@@ -1652,7 +1652,10 @@ section derivative; a predictor-deviation fraction of one eighth controls sampli
 Those are numerical choices, not existence or approximation certificates. The
 output is corrected points on a seeded component; `planeBoundaryCurve` subsequently
 certifies the stored spline edge. Contact incidence is an explicit discrete label,
-independent of rounding in the corrected section parameter.
+independent of rounding in the corrected section parameter. A finite-carrier event
+coincident with the corrected seed is the initial boundary restriction, not a
+nonzero arc returning to its contact. Event identity uses the existing positional
+metric and equation tolerance in all five parameters.
 Global exposure and support-transition installation remain open. Variable-radius laws, cliff contacts and section-transition windows
 are outside this construction.
 

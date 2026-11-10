@@ -414,8 +414,15 @@ EndBoundaryTrace tracePlaneEnd(const Rail&    rail,
       const bool onContact =
         std::find(result.boundaryCoordinates.begin(), result.boundaryCoordinates.end(), 4)
         != result.boundaryCoordinates.end();
-      result.end =
-        onContact ? EndBoundaryTrace::End::Contact : EndBoundaryTrace::End::SurfaceBoundary;
+      // The corrected seed may already satisfy a finite-carrier restriction. Its
+      // first crossing is then the same event, not a curve returning to a contact.
+      // Compare parameter states in the same positional metric used by correction;
+      // distinct charts at a spatial self-intersection are not merged.
+      bool sameSeed = result.points.size() == 2;
+      for (int k = 0; k < 5 && sameSeed; ++k)
+        sameSeed = std::abs(next[k] - initial[k]) * end.metric[k] <= equations.tolerance;
+      result.end = onContact && !sameSeed ? EndBoundaryTrace::End::Contact
+                                          : EndBoundaryTrace::End::SurfaceBoundary;
       return result;
     }
     length += step;
