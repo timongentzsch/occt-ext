@@ -33,23 +33,23 @@ void Attach::fold(int a, int ea, int b, int eb)
          no_solution,
          "the contact on the cap does not cross itself where the blend folds",
          {one.rail.edge});
-  builder.MakeVertex(corner[a][cap][ea], X, std::max(tolerance, gap));
-  corner[b][capB][eb] = corner[a][cap][ea];
-  builder.MakeVertex(corner[a][other][ea],
+  builder.MakeVertex(contactEnd(a, cap, ea).vertex, X, std::max(tolerance, gap));
+  contactEnd(b, capB, eb).vertex = contactEnd(a, cap, ea).vertex;
+  builder.MakeVertex(contactEnd(a, other, ea).vertex,
                      one.sheet.contact(other)->Value(one.sheet.rail(ua)),
                      tolerance);
-  builder.MakeVertex(corner[b][otherB][eb],
+  builder.MakeVertex(contactEnd(b, otherB, eb).vertex,
                      two.sheet.contact(otherB)->Value(two.sheet.rail(ub)),
                      tolerance);
   for (int side = 0; side < 2; ++side)
   {
-    u[a][side][ea] = ua;
-    u[b][side][eb] = ub;
+    contactEnd(a, side, ea).parameter = ua;
+    contactEnd(b, side, eb).parameter = ub;
   }
   for (const auto& [k, end, at] : {std::tuple{a, ea, ua}, std::tuple{b, eb, ub}})
   {
     const Sheet& sheet = pieces[k].sheet;
-    TopoDS_Edge  x     = isoSection(sheet, sheet.rail(at), corner[k][0][end], corner[k][1][end]);
+    TopoDS_Edge  x     = isoSection(sheet, sheet.rail(at), contactEnd(k, 0, end).vertex, contactEnd(k, 1, end).vertex);
     double       lo, hi;
     BRep_Tool::Range(x, lo, hi);
     builder.UpdateEdge(x,
@@ -82,7 +82,7 @@ void Attach::fold(int a, int ea, int b, int eb)
     f.run.push_back({edge, &p.rail.s[side], TopExp::FirstVertex(edge).IsSame(from)});
   };
   if (one.rail.edge.IsSame(two.rail.edge))
-    runOn(one, other, corner[a][other][ea], ua, corner[b][otherB][eb], ub);
+    runOn(one, other, contactEnd(a, other, ea).vertex, ua, contactEnd(b, otherB, eb).vertex, ub);
   else
   {
     TopoDS_Vertex ends[2], endsB[2];
@@ -106,8 +106,8 @@ void Attach::fold(int a, int ea, int b, int eb)
            {one.rail.edge});
     TopoDS_Vertex J;
     builder.MakeVertex(J, P, std::max(tolerance, apart));
-    runOn(one, other, corner[a][other][ea], ua, J, ja);
-    runOn(two, otherB, J, jb, corner[b][otherB][eb], ub);
+    runOn(one, other, contactEnd(a, other, ea).vertex, ua, J, ja);
+    runOn(two, otherB, J, jb, contactEnd(b, otherB, eb).vertex, ub);
     for (const auto& shape : edgesOfVertex.FindFromKey(V))
     {
       if (railEdge(shape))
@@ -393,23 +393,23 @@ void Attach::creaseFold(int a, int ea, int b, int eb)
   }
   const double tEnd = t->Value(m);
   // X, V and W (where the section through V meets the other contact).
-  builder.MakeVertex(corner[a][cap][ea], X, std::max(tolerance, gap));
-  corner[b][cap][eb] = corner[a][cap][ea];
+  builder.MakeVertex(contactEnd(a, cap, ea).vertex, X, std::max(tolerance, gap));
+  contactEnd(b, cap, eb).vertex = contactEnd(a, cap, ea).vertex;
   gp_Pnt V, W;
   gp_Vec d1, d2;
   at(sa, rm, vm, V, d1, d2);
   at(sa, rm, o, W, d1, d2);
   TopoDS_Vertex vertexV;
   builder.MakeVertex(vertexV, V, tolerance);
-  builder.MakeVertex(corner[a][other][ea], W, tolerance);
-  corner[b][other][eb] = corner[a][other][ea];
-  u[a][cap][ea]        = one.uAt(ea);
-  u[b][cap][eb]        = two.uAt(eb);
-  u[a][other][ea]      = (rm - sa.alpha) / sa.beta;
-  u[b][other][eb]      = (rm - sa.alpha) / sa.beta;
+  builder.MakeVertex(contactEnd(a, other, ea).vertex, W, tolerance);
+  contactEnd(b, other, eb).vertex = contactEnd(a, other, ea).vertex;
+  contactEnd(a, cap, ea).parameter        = one.uAt(ea);
+  contactEnd(b, cap, eb).parameter        = two.uAt(eb);
+  contactEnd(a, other, ea).parameter      = (rm - sa.alpha) / sa.beta;
+  contactEnd(b, other, eb).parameter      = (rm - sa.alpha) / sa.beta;
   const TopoDS_Edge creaseEdge =
     edgeBetween(curve,
-                corner[a][cap][ea],
+                contactEnd(a, cap, ea).vertex,
                 0,
                 vertexV,
                 tEnd,
@@ -418,7 +418,7 @@ void Attach::creaseFold(int a, int ea, int b, int eb)
   const TopoDS_Edge beyond = edgeBetween(sa.section(rm),
                                          vertexV,
                                          vm,
-                                         corner[a][other][ea],
+                                         contactEnd(a, other, ea).vertex,
                                          o,
                                          {{sa.sectionUV(rm), sa.surface, TopLoc_Location()},
                                           {sb.sectionUV(onB(rm)), sb.surface, TopLoc_Location()}},
@@ -462,12 +462,12 @@ void Attach::crossingFold(int a, int ea, int b, int eb)
     const double    r   = end.X();
     builder.MakeVertex(ends[side], crease.curve->Value(side == 0 ? crease.first : crease.last),
                        tolerance);
-    builder.MakeVertex(corner[a][side][ea], sa.contact(side)->Value(r), tolerance);
-    corner[b][side][eb] = corner[a][side][ea];
-    u[a][side][ea]      = r;
-    u[b][side][eb]      = r;
-    const TopoDS_Vertex& from = side == 0 ? corner[a][0][ea] : ends[1];
-    const TopoDS_Vertex& to   = side == 0 ? ends[0] : corner[a][1][ea];
+    builder.MakeVertex(contactEnd(a, side, ea).vertex, sa.contact(side)->Value(r), tolerance);
+    contactEnd(b, side, eb).vertex = contactEnd(a, side, ea).vertex;
+    contactEnd(a, side, ea).parameter      = r;
+    contactEnd(b, side, eb).parameter      = r;
+    const TopoDS_Vertex& from = side == 0 ? contactEnd(a, 0, ea).vertex : ends[1];
+    const TopoDS_Vertex& to   = side == 0 ? ends[0] : contactEnd(a, 1, ea).vertex;
     sections[side]            = edgeBetween(sa.section(r),
                                  from,
                                  side == 0 ? sa.across[0] : end.Y(),
@@ -576,7 +576,7 @@ Handle(Geom_BSplineSurface) Attach::ballPatch(const Folded& f, int nv)
   if (!jetAt(rail.s[cap], onCap.X(), onCap.Y(), foot))
     return {};
   const gp_Pnt  C  = foot.p.Translated(foot.n * (rail.sigma * r));
-  const gp_Vec  up = gp_Vec(C, BRep_Tool::Pnt(corner[f.a][cap][f.ea])) / r;
+  const gp_Vec  up = gp_Vec(C, BRep_Tool::Pnt(contactEnd(f.a, cap, f.ea).vertex)) / r;
   constexpr int nu = 33;
   std::vector<std::vector<std::pair<double, double>>> onEdge;
   const auto                                          places = runPlaces(f, nv, onEdge);
@@ -719,8 +719,8 @@ std::optional<TopoDS_Face> Attach::ballFace(Folded&                            f
   const int    cap = one.joint[f.ea].side;
   double       u0, u1, v0, v1;
   surface->Bounds(u0, u1, v0, v1);
-  const gp_Pnt         X         = BRep_Tool::Pnt(corner[f.a][cap][f.ea]);
-  const TopoDS_Vertex& vx        = corner[f.a][cap][f.ea];
+  const gp_Pnt         X         = BRep_Tool::Pnt(contactEnd(f.a, cap, f.ea).vertex);
+  const TopoDS_Vertex& vx        = contactEnd(f.a, cap, f.ea).vertex;
   const auto           onSection = [&](const TopoDS_Edge& edge, double v) -> Handle(Geom2d_Curve) {
     double       lo, hi;
     const auto   curve = BRep_Tool::Curve(edge, lo, hi);

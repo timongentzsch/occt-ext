@@ -100,9 +100,9 @@ void Attach::miters()
              {a.rail.edge});
       TopoDS_Vertex vq;
       builder.MakeVertex(vq, Q, std::max(tolerance, gapQ));
-      corner[k][sa][ea] = corner[j][sb][eb] = vq;
-      u[k][sa][ea]                          = q->first;
-      u[j][sb][eb]                          = q->second;
+      contactEnd(k, sa, ea).vertex = contactEnd(j, sb, eb).vertex = vq;
+      contactEnd(k, sa, ea).parameter                          = q->first;
+      contactEnd(j, sb, eb).parameter                          = q->second;
       // Between cylinders and tori the meeting is a conic OpenCascade finds exactly; between
       // fitted sheets it is marched, as they touch at the inner corner. Chamfers do not touch
       // there: they cross, and OpenCascade intersects them.
@@ -154,8 +154,8 @@ void Attach::miters()
                                  vq);
             if (!met)
               continue;
-            u[k][sa][ea] = alternative.first;
-            u[j][sb][eb] = alternative.second;
+            contactEnd(k, sa, ea).parameter = alternative.first;
+            contactEnd(j, sb, eb).parameter = alternative.second;
             break;
           }
         }
@@ -171,9 +171,9 @@ void Attach::miters()
       {
         TopoDS_Vertex vp;
         builder.MakeVertex(vp, P, std::max(tolerance, gapP));
-        corner[k][oa][ea] = corner[j][ob][eb] = vp;
-        u[k][oa][ea]                          = pa->first;
-        u[j][ob][eb]                          = pb->first;
+        contactEnd(k, oa, ea).vertex = contactEnd(j, ob, eb).vertex = vp;
+        contactEnd(k, oa, ea).parameter                          = pa->first;
+        contactEnd(j, ob, eb).parameter                          = pb->first;
         cut(third, vertex, vp, pa->second);
         const gp_Pnt2d aP = a.sheet.uv(a.sheet.rail(pa->first), a.sheet.across[oa]),
                        bP = b.sheet.uv(b.sheet.rail(pb->first), b.sheet.across[ob]);
@@ -230,10 +230,10 @@ void Attach::miters()
                                   onSheet(p[w], at[w], BRep_Tool::Pnt(vr)),
                                   w == 0 ? aQ : bQ,
                                   vr);
-      corner[p[w]][far[w]][at[w]] = vx;
-      u[p[w]][far[w]][at[w]]      = crosses[w].first;
-      corner[p[l]][far[l]][at[l]] = vr;
-      u[p[l]][far[l]][at[l]]      = *r;
+      contactEnd(p[w], far[w], at[w]).vertex = vx;
+      contactEnd(p[w], far[w], at[w]).parameter      = crosses[w].first;
+      contactEnd(p[l], far[l], at[l]).vertex = vr;
+      contactEnd(p[l], far[l], at[l]).parameter      = *r;
       cut(third, vertex, vx, crosses[w].second);
       editOf(edits, face).bridges.push_back(*along);
       notches.push_back({p[w], *along, face});
@@ -344,16 +344,16 @@ void Attach::rollRound(int                  k,
   TopoDS_Vertex ta, tb;
   builder.MakeVertex(ta, Ta, tolerance);
   builder.MakeVertex(tb, Tb, tolerance);
-  corner[k][oa][ea] = corner[j][ob][eb] = roll.X;
-  corner[k][sa][ea]                     = ta;
-  corner[j][sb][eb]                     = tb;
-  u[k][oa][ea] = u[k][sa][ea] = pa.first;
-  u[j][ob][eb] = u[j][sb][eb] = pb.first;
+  contactEnd(k, oa, ea).vertex = contactEnd(j, ob, eb).vertex = roll.X;
+  contactEnd(k, sa, ea).vertex                     = ta;
+  contactEnd(j, sb, eb).vertex                     = tb;
+  contactEnd(k, oa, ea).parameter = contactEnd(k, sa, ea).parameter = pa.first;
+  contactEnd(j, ob, eb).parameter = contactEnd(j, sb, eb).parameter = pb.first;
   cut(third, vertex, roll.X, pa.second);
   for (const auto& [m, end, at] : {std::tuple{k, ea, pa.first}, std::tuple{j, eb, pb.first}})
   {
     const Sheet& sheet = pieces[m].sheet;
-    section[m][end]    = isoSection(sheet, sheet.rail(at), corner[m][0][end], corner[m][1][end]);
+    section[m][end]    = isoSection(sheet, sheet.rail(at), contactEnd(m, 0, end).vertex, contactEnd(m, 1, end).vertex);
     builder.UpdateEdge(section[m][end],
                        sheet.sectionUV(sheet.rail(at)),
                        sheet.surface,
@@ -454,8 +454,8 @@ void Attach::rollPatches()
       return TopExp::FirstVertex(edge).IsSame(start) ? edge : TopoDS::Edge(edge.Reversed());
     };
     builder.Add(wire, from(sa, roll.X));
-    builder.Add(wire, from(roll.arc, corner[roll.a][roll.sa][roll.ea]));
-    builder.Add(wire, from(sb, corner[roll.b][roll.sb][roll.eb]));
+    builder.Add(wire, from(roll.arc, contactEnd(roll.a, roll.sa, roll.ea).vertex));
+    builder.Add(wire, from(sb, contactEnd(roll.b, roll.sb, roll.eb).vertex));
     builder.Add(wire, point);
     wire.Closed(true);
     TopoDS_Face face;

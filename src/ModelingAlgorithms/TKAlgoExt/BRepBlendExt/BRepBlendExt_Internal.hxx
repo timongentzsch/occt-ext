@@ -1056,6 +1056,16 @@ public:
   //! The stations found so far, by the edge's parameter.
   const std::map<double, Station>& known() const { return known_; }
 
+  //! Retain a solved support chart when changing the carrier parameterisation.
+  //! Subsequent interpolation stays on that chart instead of regrowing from the edge.
+  bool retain(Station station)
+  {
+    if (!contactAt(rail_, station.t, station))
+      return false;
+    known_[station.t] = station;
+    return true;
+  }
+
   //! Where the rail's carry past an end (towards `from` for 0, `to` for 1) stopped short: where
   //! the ball strays from the rail or no longer rolls on, past which the carry is not made.
   std::optional<double> reached(int end) const { return reached_[end]; }
@@ -1784,6 +1794,10 @@ struct Piece
            && joint[1].meets != Meets::Split;
   }
 };
+
+//! Complete the regular two-support carrier to its finite surface restrictions,
+//! retaining the original fit's support chart. Empty for unresolved or closed paths.
+Standard_EXPORT std::optional<Piece> completeCarrier(const Piece& original);
 
 //! Whether the seam runs to a pole in the strip the blend replaces, on the edge's side of the
 //! contact: it goes with the strip (Attach::sweepToPole), and the contact, which passes the seam's

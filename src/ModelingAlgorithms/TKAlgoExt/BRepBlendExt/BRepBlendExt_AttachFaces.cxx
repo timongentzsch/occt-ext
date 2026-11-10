@@ -47,10 +47,10 @@ void Attach::ridges()
           const auto within = [](const Handle(Geom2d_BSplineCurve)& contact, double t) {
             return std::clamp(t, contact->FirstParameter(), contact->LastParameter());
           };
-          const double ka = within(one.fitted.contact[sk], std::min(u[k][sk][0], u[k][sk][1])),
-                       kb = within(one.fitted.contact[sk], std::max(u[k][sk][0], u[k][sk][1]));
-          const double ma = within(two.fitted.contact[sm], std::min(u[m][sm][0], u[m][sm][1])),
-                       mb = within(two.fitted.contact[sm], std::max(u[m][sm][0], u[m][sm][1]));
+          const double ka = within(one.fitted.contact[sk], std::min(contactEnd(k, sk, 0).parameter, contactEnd(k, sk, 1).parameter)),
+                       kb = within(one.fitted.contact[sk], std::max(contactEnd(k, sk, 0).parameter, contactEnd(k, sk, 1).parameter));
+          const double ma = within(two.fitted.contact[sm], std::min(contactEnd(m, sm, 0).parameter, contactEnd(m, sm, 1).parameter)),
+                       mb = within(two.fitted.contact[sm], std::max(contactEnd(m, sm, 0).parameter, contactEnd(m, sm, 1).parameter));
           // A blend with no length crosses nothing (its corners' balls are one).
           if (!(kb - ka > tol::parameterMerge) || !(mb - ma > tol::parameterMerge))
             continue;
@@ -71,7 +71,7 @@ void Attach::ridges()
             const gp_Pnt there   = a.surface->Value(point.Value().X(), point.Value().Y());
             bool         corner_ = false;
             for (const auto& v :
-                 {corner[k][sk][0], corner[k][sk][1], corner[m][sm][0], corner[m][sm][1]})
+                 {contactEnd(k, sk, 0).vertex, contactEnd(k, sk, 1).vertex, contactEnd(m, sm, 0).vertex, contactEnd(m, sm, 1).vertex})
               corner_ |= !v.IsNull() && BRep_Tool::Pnt(v).Distance(there) <= near;
             if (!corner_)
               at.emplace_back(point.ParamOnFirst(), point.ParamOnSecond());
@@ -135,11 +135,11 @@ void Attach::notchContact(int k, int side)
   // A notch: the blend's edge on the face beyond, which takes it in the far edge's
   // place; the narrow face goes whole, with its far edge.
   const auto&  trim = trimOf(k, side);
-  const double s0 = sheet.rail(u[k][side][0]), s1 = sheet.rail(u[k][side][1]);
+  const double s0 = sheet.rail(contactEnd(k, side, 0).parameter), s1 = sheet.rail(contactEnd(k, side, 1).parameter);
   const auto   closed =
     std::find_if(rolled.begin(), rolled.end(), [&](const auto& r) { return r.first.first == k; });
   if (closed != rolled.end())
-    contact[k][side] = rolledEdge(k, side, closed->second);
+    contactEdge(k, side) = rolledEdge(k, side, closed->second);
   else
   {
     checkTrim(k, side, s0, s1);
@@ -153,11 +153,11 @@ void Attach::notchContact(int k, int side)
            no_solution,
            "the blend's edge on the face beyond a narrow face cannot be laid on it",
            {piece.rail.edge});
-    contact[k][side] =
+    contactEdge(k, side) =
       edgeBetween(trim.curve,
-                  corner[k][side][0],
+                  contactEnd(k, side, 0).vertex,
                   s0,
-                  corner[k][side][1],
+                  contactEnd(k, side, 1).vertex,
                   s1,
                   {{trim.onSheet, sheet.surface, {}}, {onBeyond, surface, location}},
                   tolerance);
@@ -169,13 +169,13 @@ void Attach::notchContact(int k, int side)
     // closed blend's that uses up its narrow face (a chamfer rolling off a cylinder's
     // side onto its other cap).
     editOf(edits, notch.trim)
-      .replace.Bind(notch.trimEdge, sameWay(contact[k][side], notch.trimEdge));
+      .replace.Bind(notch.trimEdge, sameWay(contactEdge(k, side), notch.trimEdge));
     removed.push_back(notch.face);
     swept.push_back(notch.trimEdge);
     return;
   }
   Edit& edit = editOf(edits, notch.trim);
-  edit.bridges.push_back(contact[k][side]);
+  edit.bridges.push_back(contactEdge(k, side));
   // From a split partway: the far edge is cut back to the crossing, the rest stays.
   if (splitNotch(k, side))
     return;
@@ -205,10 +205,10 @@ void Attach::notchContact(int k, int side)
                        .LowerDistanceParameter();
     // The part on the side of the vertex the blend does not reach.
     const double w0 =
-      GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(corner[k][side][0]), farCurve, ff, fl)
+      GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(contactEnd(k, side, 0).vertex), farCurve, ff, fl)
         .LowerDistanceParameter();
     const double w1 =
-      GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(corner[k][side][1]), farCurve, ff, fl)
+      GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(contactEnd(k, side, 1).vertex), farCurve, ff, fl)
         .LowerDistanceParameter();
     const double      inside = (w0 + w1) / 2;
     const TopoDS_Edge part =
@@ -228,7 +228,7 @@ void Attach::cliffContact(int k, int side)
   // it; the narrow face goes whole.
   const TopoDS_Face beyond       = beyondCliff(cliff);
   const auto [surface, location] = surfaceOf(beyond);
-  const double s0 = sheet.rail(u[k][side][0]), s1 = sheet.rail(u[k][side][1]);
+  const double s0 = sheet.rail(contactEnd(k, side, 0).parameter), s1 = sheet.rail(contactEnd(k, side, 1).parameter);
   const auto   onBeyond = GeomProjLib::Curve2d(sheet.contact(side),
                                                std::min(s0, s1),
                                                std::max(s0, s1),
@@ -238,11 +238,11 @@ void Attach::cliffContact(int k, int side)
          no_solution,
          "the blend's contact on the face's far edge cannot be laid on the face beyond",
          {piece.rail.edge});
-  contact[k][side] =
+  contactEdge(k, side) =
     edgeBetween(sheet.contact(side),
-                corner[k][side][0],
+                contactEnd(k, side, 0).vertex,
                 s0,
-                corner[k][side][1],
+                contactEnd(k, side, 1).vertex,
                 s1,
                 {{sheet.contactUV(side), sheet.surface, {}}, {onBeyond, surface, location}},
                 tolerance);
@@ -257,9 +257,9 @@ void Attach::cliffContact(int k, int side)
       return GeomAPI_ProjectPointOnCurve(BRep_Tool::Pnt(v), cliff.cliffCurve, f, l)
         .LowerDistanceParameter();
     };
-    const double         w0 = at(corner[k][side][0]), w1 = at(corner[k][side][1]);
-    const TopoDS_Vertex& low  = w0 < w1 ? corner[k][side][0] : corner[k][side][1];
-    const TopoDS_Vertex& high = w0 < w1 ? corner[k][side][1] : corner[k][side][0];
+    const double         w0 = at(contactEnd(k, side, 0).vertex), w1 = at(contactEnd(k, side, 1).vertex);
+    const TopoDS_Vertex& low  = w0 < w1 ? contactEnd(k, side, 0).vertex : contactEnd(k, side, 1).vertex;
+    const TopoDS_Vertex& high = w0 < w1 ? contactEnd(k, side, 1).vertex : contactEnd(k, side, 0).vertex;
     TopoDS_Vertex        v0, v1;
     TopExp::Vertices(TopoDS::Edge(cliff.cliff.Oriented(TopAbs_FORWARD)), v0, v1);
     Edit& onNarrow = editOf(edits, cliff.face);
@@ -280,10 +280,10 @@ void Attach::cliffContact(int k, int side)
       onNarrow.bridges.push_back(part);
       onBeyond.bridges.push_back(part);
     }
-    onBeyond.bridges.push_back(contact[k][side]);
+    onBeyond.bridges.push_back(contactEdge(k, side));
     return;
   }
-  editOf(edits, beyond).replace.Bind(cliff.cliff, sameWay(contact[k][side], cliff.cliff));
+  editOf(edits, beyond).replace.Bind(cliff.cliff, sameWay(contactEdge(k, side), cliff.cliff));
   removed.push_back(cliff.face);
 }
 
@@ -309,7 +309,7 @@ void Attach::passedContact(int k, int side)
   };
 
   // The places in order from the start's corner to the end's, and the face after each.
-  std::vector<Place>                            places = {{u[k][side][0], corner[k][side][0]}};
+  std::vector<Place>                            places = {{contactEnd(k, side, 0).parameter, contactEnd(k, side, 0).vertex}};
   std::vector<std::pair<TopoDS_Face, gp_Vec2d>> on;
   const auto&                                   start = passages[{k, side, 0}];
   for (auto p = start.rbegin(); p != start.rend(); ++p)
@@ -323,7 +323,7 @@ void Attach::passedContact(int k, int side)
     places.push_back({p.u, p.at});
     on.push_back({p.face, p.shift});
   }
-  places.push_back({u[k][side][1], corner[k][side][1]});
+  places.push_back({contactEnd(k, side, 1).parameter, contactEnd(k, side, 1).vertex});
   std::vector<TopoDS_Edge>& along = runs[{k, side}];
   for (size_t i = 0; i < on.size(); ++i)
   {
@@ -354,7 +354,7 @@ void Attach::passedContact(int k, int side)
       edit.bridges.push_back(part);
     along.push_back(part);
     if (own)
-      contact[k][side] = part;
+      contactEdge(k, side) = part;
     else
       partFace.Bind(part, face);
   }
@@ -385,14 +385,14 @@ bool Attach::ridgedContact(int                         k,
          "the blends of two parts of an outline cross over their cap beside a split, which "
          "the blend does not do yet",
          {piece.rail.edge});
-  const bool rising = u[k][side][0] < u[k][side][1];
+  const bool rising = contactEnd(k, side, 0).parameter < contactEnd(k, side, 1).parameter;
   const auto order  = [&](const auto& x, const auto& y) {
     return rising ? x.first < y.first : x.first > y.first;
   };
   std::sort(stops.begin(), stops.end(), order);
   std::sort(creases.begin(), creases.end(), order);
-  stops.insert(stops.begin(), {u[k][side][0], corner[k][side][0]});
-  stops.push_back({u[k][side][1], corner[k][side][1]});
+  stops.insert(stops.begin(), {contactEnd(k, side, 0).parameter, contactEnd(k, side, 0).vertex});
+  stops.push_back({contactEnd(k, side, 1).parameter, contactEnd(k, side, 1).vertex});
   // Every part of the edge's contact on the face is a bridge then: the parts of the
   // cap they bound are islands of it.
   Edit& edit = editOf(edits, piece.rail.s[side].face);
@@ -426,14 +426,21 @@ bool Attach::ridgedContact(int                         k,
     if (i / 2 < creases.size())
       along.push_back(creases[i / 2].second);
   }
-  contact[k][side] = along.front();
+  contactEdge(k, side) = along.front();
   return true;
 }
 
-void Attach::plainContact(int                         k,
-                          int                         side,
+void Attach::plainContact(int k, int side,
                           const Handle(Geom_Surface)& support,
-                          const TopLoc_Location&      location)
+                          const TopLoc_Location& location)
+{
+  for (auto& interval : contactIntervals[k][side])
+    plainInterval(k, side, interval, support, location);
+}
+
+void Attach::plainInterval(int k, int side, ContactInterval& interval,
+                           const Handle(Geom_Surface)& support,
+                           const TopLoc_Location& location)
 {
   const Piece& piece = pieces[k];
   const Sheet& sheet = piece.sheet;
@@ -449,7 +456,7 @@ void Attach::plainContact(int                         k,
     && pieces[pieces[run.back()].joint[1].piece].rail.s[side].trim.IsNull())
     run.push_back(pieces[run.back()].joint[1].piece);
   const int    last = run.back();
-  TopoDS_Edge& edge = contact[k][side];
+  TopoDS_Edge& edge = interval.edge;
   // On an exact sheet the contact is a line or a circle: laid on the support exactly where
   // OpenCascade can, else the fit's feet.
   Handle(Geom2d_Curve) onSupport = alongRail(piece.fitted.contact[side], sheet);
@@ -467,13 +474,13 @@ void Attach::plainContact(int                         k,
   }
   if (piece.exact())
   {
-    const double s0 = sheet.rail(u[k][side][0]), s1 = sheet.rail(u[k][side][1]);
+    const double s0 = sheet.rail(interval.ends[0].parameter), s1 = sheet.rail(interval.ends[1].parameter);
     const auto   exact =
       GeomProjLib::Curve2d(sheet.contact(side), s0, s1, piece.rail.s[side].surface);
     if (!exact.IsNull())
       onSupport = aligned(exact, s0, onSupport->Value(s0), piece.rail.s[side].surface);
   }
-  const double s0 = sheet.rail(u[k][side][0]), s1 = pieces[last].sheet.rail(u[last][side][1]);
+  const double s0 = sheet.rail(interval.ends[0].parameter), s1 = pieces[last].sheet.rail((last == k ? interval.ends[1] : contactEnd(last, side, 1)).parameter);
   if (piece.rail.parameterSupports
       && !contactWithinFace(piece.rail.s[side].face, onSupport, s0, s1))
     fail(op,
@@ -483,8 +490,8 @@ void Attach::plainContact(int                         k,
   // Where another blend's contact on this face is this one, the face between them is
   // used up (a box rounded to half its width): the two blends meet along it.
   if (const auto same = sharedContact(piece.rail.s[side].face,
-                                      corner[k][side][0],
-                                      corner[last][side][1],
+                                      interval.ends[0].vertex,
+                                      (last == k ? interval.ends[1] : contactEnd(last, side, 1)).vertex,
                                       sheet.contact(side)->Value((s0 + s1) / 2),
                                       piece.rail.scale);
       !same.IsNull())
@@ -499,20 +506,23 @@ void Attach::plainContact(int                         k,
            {piece.rail.edge});
     builder.UpdateEdge(same, onSheet, sheet.surface, TopLoc_Location(), tolerance);
     builder.Range(same, f, l);
+    interval.edge = same;
     for (int m : run)
-      contact[m][side] = same;
+      if (m != k)
+        contactEdge(m, side) = same;
     usedUp.Add(piece.rail.s[side].face);
     return;
   }
   edge = edgeBetween(sheet.contact(side),
-                     corner[k][side][0],
+                     interval.ends[0].vertex,
                      s0,
-                     corner[last][side][1],
+                     (last == k ? interval.ends[1] : contactEnd(last, side, 1)).vertex,
                      s1,
                      {{sheet.contactUV(side), sheet.surface, {}}, {onSupport, support, location}},
                      tolerance);
   for (int m : run)
-    contact[m][side] = edge;
+    if (m != k)
+      contactEdge(m, side) = edge;
   // In a face beside the edge it takes the edge's place; in a face the contact crossed onto,
   // or beside a part of the edge already taken, it closes the gap it leaves.
   Edit& edit = editOf(edits, piece.rail.s[side].face);
@@ -524,7 +534,7 @@ void Attach::plainContact(int                         k,
 
 void Attach::sideContact(int k, int side)
 {
-  if (!contact[k][side].IsNull())
+  if (!contactEdge(k, side).IsNull())
     return; // one edge for parts of a split already made
   if (vanished(k))
     return;
@@ -615,7 +625,7 @@ void Attach::contacts()
         int       users = 0;
         for (int m = 0; m < n; ++m)
           for (int t = 0; t < 2; ++t)
-            users += !contact[k][side].IsNull() && contact[m][t].IsSame(contact[k][side]);
+            users += !contactEdge(k, side).IsNull() && contactEdge(m, t).IsSame(contactEdge(k, side));
         gone = vanished(k) || users == 2;
       }
       if (!gone)
@@ -685,10 +695,10 @@ BoundaryGraph Attach::boundaryGraph(const std::vector<int>& group) const
     }
   };
   for (int m : group)
-    along(m, 0, corner[m][0][0]);
-  across(last, 1, corner[last][0][1]);
+    along(m, 0, contactEnd(m, 0, 0).vertex);
+  across(last, 1, contactEnd(last, 0, 1).vertex);
   for (auto m = group.rbegin(); m != group.rend(); ++m)
-    along(*m, 1, corner[*m][1][1]);
+    along(*m, 1, contactEnd(*m, 1, 1).vertex);
   // A seam's first vertex is that of both its uses, so the closed edge's are set apart.
   const size_t far = std::find_if(loop.begin(),
                                   loop.end(),
@@ -697,7 +707,7 @@ BoundaryGraph Attach::boundaryGraph(const std::vector<int>& group) const
   if (section[k][0].IsSame(section[last][1]) && chain[k][0].empty())
     loop.push_back(TopoDS::Edge(loop[far].Reversed()));
   else
-    across(k, 0, corner[k][1][0]);
+    across(k, 0, contactEnd(k, 1, 0).vertex);
   // The existing end constructors supply a single cycle in occurrence order.
   // Keep their ports separate even when a seam or pinch identifies vertices.
   BoundaryGraph graph;
@@ -831,12 +841,12 @@ void Attach::continuity()
       {
         for (int m = 0; m < n; ++m)
           for (int t = 0; t < 2; ++t)
-            if (m != k && contact[m][t].IsSame(contact[k][side]))
+            if (m != k && contactEdge(m, t).IsSame(contactEdge(k, side)))
             {
               if (!bevel)
-                mark(contact[k][side], blends[k], blends[m], JoinRole::UsedSupport, smooth);
+                mark(contactEdge(k, side), blends[k], blends[m], JoinRole::UsedSupport, smooth);
               else
-                record(contact[k][side], JoinRole::UsedSupport, 0);
+                record(contactEdge(k, side), JoinRole::UsedSupport, 0);
             }
         continue;
       }
@@ -993,10 +1003,11 @@ void Attach::tolerances()
   for (const auto& roll : rolls)
     made.push_back({roll.arc, {roll.patch, pieces[roll.a].rail.s[roll.sa].face}});
   NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> corners;
-  for (const auto& piece : corner)
+  for (const auto& piece : contactIntervals)
     for (const auto& side : piece)
-      for (const auto& vertex : side)
-        corners.Add(vertex);
+      for (const auto& interval : side)
+        for (const auto& event : interval.ends)
+          corners.Add(event.vertex);
   for (const auto& r : ridged)
     for (const auto& vertex : r.at)
       corners.Add(vertex);

@@ -211,6 +211,13 @@ public:
     march(from, sense, nullptr, nullptr, nullptr, length, out);
   }
 
+  //! Continue to an exact finite support restriction, retaining its terminal ball.
+  std::optional<Stop> boundary(const Traced& from, double sense, const Station& origin,
+                              std::vector<Traced>& out) const
+  {
+    return march(from, sense, nullptr, &origin, nullptr, Precision::Infinite(), out, true);
+  }
+
 private:
   bool inside(const Traced& p) const
   {
@@ -295,7 +302,8 @@ private:
                             const Station*       origin,
                             const Station*       other,
                             double               length,
-                            std::vector<Traced>& out) const
+                            std::vector<Traced>& out,
+                            bool finishAtRestriction = false) const
   {
     // Walked the way it goes, kept as the edge runs.
     const auto kept = [sense](Traced q) {
@@ -378,7 +386,47 @@ private:
             break;
         }
       if (!inside(*q))
+      {
+        if (finishAtRestriction)
+        {
+          std::optional<Traced> terminal;
+          for (int side = 0; side < 2; ++side)
+            for (int dim = 0; dim < 2; ++dim)
+            {
+              const int k = 2 * side + dim;
+              if (periodic_[side][dim] || (dim == 1 && pastPoint(rail_.s[side].surface, q->x[k])))
+                continue;
+              const double lo = bounds_[side][2 * dim], hi = bounds_[side][2 * dim + 1];
+              const double bound = q->x[k] < lo ? lo : q->x[k] > hi ? hi : Precision::Infinite();
+              if (Precision::IsInfinite(bound))
+                continue;
+              const double fraction = (bound - p.x[k]) / (q->x[k] - p.x[k]);
+              std::array<double, 4> x;
+              for (int j = 0; j < 4; ++j)
+                x[j] = p.x[j] + fraction * (q->x[j] - p.x[j]);
+              if (!equations_.solve(x, tolerance_,
+                  [&](const std::array<double, 4>& y, const gp_XYZ&, const gp_XYZ*,
+                      std::array<double, 5>& row, double& value) {
+                    row = {0, 0, 0, 0, 0};
+                    row[k] = 1;
+                    value = y[k] - bound;
+                  }))
+                return {};
+              auto root = equations_.traced(x, tolerance_);
+              if (!root || !inside(*root))
+                continue;
+              if (terminal && (terminal->centre - root->centre).Modulus() > tolerance_)
+                return {}; // Distinct admissible exits in one step are unresolved.
+              if (root->tangent.Dot(p.tangent) < 0)
+                turn(*root);
+              terminal = *root;
+            }
+          if (!terminal)
+            return {};
+          out.push_back(kept(*terminal));
+        }
         return Stop::Left;
+      }
       walked += chord;
       out.push_back(kept(*q));
       p = *q;
@@ -456,6 +504,65 @@ std::shared_ptr<SpineArc> spineCurve(const std::vector<Traced>& balls)
   return out;
 }
 } // namespace
+
+std::optional<Piece> completeCarrier(const Piece& original)
+{
+  Rail rail = original.rail;
+  if (!rail.sizes.places.empty() || rail.closed)
+    return {};
+  Station origin;
+  for (int side = 0; side < 2; ++side)
+  {
+    const auto uv = original.fitted.contact[side]->Value(.5);
+    origin.uv[side][0] = uv.X();
+    origin.uv[side][1] = uv.Y();
+  }
+  if (!contactAt(rail, rail.t(.5), origin))
+    return {};
+  SpineTrace trace(rail);
+  const auto start = trace.start(origin);
+  if (!start)
+    return {};
+  std::vector<Traced> left, right;
+  if (trace.boundary(*start, -1, origin, left) != SpineTrace::Stop::Left
+      || trace.boundary(*start, 1, origin, right) != SpineTrace::Stop::Left)
+    return {};
+  std::vector<Traced> balls(left.rbegin(), left.rend());
+  balls.push_back(*start);
+  balls.insert(balls.end(), right.begin(), right.end());
+  if (balls.size() < 3)
+    return {};
+  const auto arc = spineCurve(balls);
+  rail.spine = arc->curve;
+  rail.spineArc = arc;
+  rail.spineParameterFirst = rail.from = rail.first = rail.spineFirst = 0;
+  rail.spineParameterLast = rail.to = rail.last = 1;
+  rail.spineLast = arc->lengths.back();
+  rail.byCentre = true;
+  rail.centreParameter.reset();
+  rail.boundedFit = false;
+  rail.pinch[0] = rail.pinch[1] = false;
+  for (auto& carrier : rail.terminalCarrier)
+    carrier.Nullify();
+  Stations stations(rail);
+  for (size_t k = 0; k < balls.size(); ++k)
+  {
+    Station station;
+    station.t = arc->lengths[k] / arc->lengths.back();
+    for (int side = 0; side < 2; ++side)
+      for (int d = 0; d < 2; ++d)
+        station.uv[side][d] = balls[k].x[2 * side + d];
+    if (!stations.retain(station))
+      return {};
+  }
+  Piece out = original;
+  out.rail = rail;
+  out.fitted = fit(out.rail, stations, false, {});
+  out.sheet = Sheet{out.fitted.blend, false, 0, 1, {0, 1}};
+  if (const auto exact = exactSheet(out.rail, stations))
+    out.sheet = *exact;
+  return out;
+}
 
 //! An open rail's spine: the centres' path traced from the ball at the edge's middle to the balls
 //! the edge's own stations find at its ends (the correspondence of the spine's ends to the

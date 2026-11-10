@@ -26,8 +26,8 @@ void Attach::pinchCorner(const Corner& at)
            no_solution,
            "a blend between faces tangent at its end does not close to the vertex",
            {pieces[k].rail.edge});
-    corner[k][0][end] = corner[k][1][end] = point;
-    u[k][0][end] = u[k][1][end] = along;
+    contactEnd(k, 0, end).vertex = contactEnd(k, 1, end).vertex = point;
+    contactEnd(k, 0, end).parameter = contactEnd(k, 1, end).parameter = along;
     section[k][end]             = degenerateEdge(sheet.sectionUV(sheet.rail(along)),
                                                  sheet.surface,
                                                  TopLoc_Location(),
@@ -52,7 +52,7 @@ void Attach::ballSections(const Corner&                     at,
       int i = 0;
       while (!faces[i].IsSame(piece.rail.s[side].face))
         ++i;
-      corner[k][side][end] = foot[i];
+      contactEnd(k, side, end).vertex = foot[i];
       GeomAPI_ProjectPointOnCurve along(BRep_Tool::Pnt(foot[i]), piece.sheet.contact(side));
       if (along.NbPoints() == 0 || along.LowerDistance() > piece.rail.resolved(limit::together))
         fail(op, no_solution, "a blend's contact misses the corner's ball", {piece.rail.edge});
@@ -63,21 +63,21 @@ void Attach::ballSections(const Corner&                     at,
            no_solution,
            "a blend's contacts reach the corner's ball at different places",
            {piece.rail.edge});
-    u[k][0][end] = ends[0];
-    u[k][1][end] = ends[1];
+    contactEnd(k, 0, end).parameter = ends[0];
+    contactEnd(k, 1, end).parameter = ends[1];
     // Where the corner at the blend's other end has the same ball, the blend has no length:
     // the corners share its section.
     if (const int other = 1 - end; pieces[k].joint[other].meets == Meets::Corner
                                    && !section[k][other].IsNull()
-                                   && corner[k][0][other].IsSame(corner[k][0][end])
-                                   && corner[k][1][other].IsSame(corner[k][1][end]))
+                                   && contactEnd(k, 0, other).vertex.IsSame(contactEnd(k, 0, end).vertex)
+                                   && contactEnd(k, 1, other).vertex.IsSame(contactEnd(k, 1, end).vertex))
     {
       section[k][end] = section[k][other];
       continue;
     }
     const double along = (ends[0] + ends[1]) / 2;
     section[k][end] =
-      isoSection(piece.sheet, piece.sheet.rail(along), corner[k][0][end], corner[k][1][end]);
+      isoSection(piece.sheet, piece.sheet.rail(along), contactEnd(k, 0, end).vertex, contactEnd(k, 1, end).vertex);
     builder.UpdateEdge(section[k][end],
                        piece.sheet.sectionUV(piece.sheet.rail(along)),
                        piece.sheet.surface,
@@ -416,9 +416,9 @@ std::pair<TopoDS_Vertex, double> Attach::contactsCross(const Corner& at, int i, 
          {a.rail.edge});
   TopoDS_Vertex Q;
   builder.MakeVertex(Q, here, std::max(tolerance, gap));
-  corner[ki][si][ei] = corner[kj][sj][ej] = Q;
-  u[ki][si][ei]                           = at2->first;
-  u[kj][sj][ej]                           = at2->second;
+  contactEnd(ki, si, ei).vertex = contactEnd(kj, sj, ej).vertex = Q;
+  contactEnd(ki, si, ei).parameter                           = at2->first;
+  contactEnd(kj, sj, ej).parameter                           = at2->second;
   return {Q, gap};
 }
 
@@ -573,15 +573,15 @@ TopoDS_Face Attach::lawCorner(const Corner& at, size_t c)
   {
     const auto& [k, end] = at.ends[i];
     const Piece&   piece = pieces[k];
-    const int      side0 = corner[k][0][end].IsSame(*sides[i].start) ? 0 : 1;
+    const int      side0 = contactEnd(k, 0, end).vertex.IsSame(*sides[i].start) ? 0 : 1;
     const gp_Pnt2d startOnSheet =
-      piece.sheet.uv(piece.sheet.rail(u[k][side0][end]), piece.sheet.across[side0]);
+      piece.sheet.uv(piece.sheet.rail(contactEnd(k, side0, end).parameter), piece.sheet.across[side0]);
     // Where the side is the blend's own section at its end (both corners at one place along
     // it, the patch's law there the sheet's), it is the line of the sheet's parameters between
     // them, at the side's own rate; else it is projected onto the sheet.
     Handle(Geom2d_Curve) onSheet = segment2d(
       startOnSheet,
-      piece.sheet.uv(piece.sheet.rail(u[k][1 - side0][end]), piece.sheet.across[1 - side0]));
+      piece.sheet.uv(piece.sheet.rail(contactEnd(k, 1 - side0, end).parameter), piece.sheet.across[1 - side0]));
     for (int j = 1; j < 8; ++j)
     {
       const double   t  = j / 8.0;
@@ -677,11 +677,11 @@ TopoDS_Face Attach::tracedCorner(const Corner& at, size_t c,
   {
     const auto& [k, end] = at.ends[i];
     const Piece& piece = pieces[k];
-    const int    side  = corner[k][0][end].IsSame(starts[i]) ? 0 : 1;
+    const int    side  = contactEnd(k, 0, end).vertex.IsSame(starts[i]) ? 0 : 1;
     const gp_Pnt2d from =
-      piece.sheet.uv(piece.sheet.rail(u[k][side][end]), piece.sheet.across[side]);
+      piece.sheet.uv(piece.sheet.rail(contactEnd(k, side, end).parameter), piece.sheet.across[side]);
     const gp_Pnt2d to =
-      piece.sheet.uv(piece.sheet.rail(u[k][1 - side][end]), piece.sheet.across[1 - side]);
+      piece.sheet.uv(piece.sheet.rail(contactEnd(k, 1 - side, end).parameter), piece.sheet.across[1 - side]);
     const Handle(Geom2d_Curve) trace = segment2d(from, to);
     BRepBuilderAPI_MakeEdge make(trace, piece.sheet.surface, starts[i], stops[i], 0, 1);
     if (!make.IsDone())
@@ -723,7 +723,7 @@ TopoDS_Face Attach::tracedCorner(const Corner& at, size_t c,
   for (const auto& [k, end] : at.ends)
     for (int side = 0; side < 2; ++side)
     {
-      const gp_Pnt2d foot = pieces[k].fitted.contact[side]->Value(u[k][side][end]);
+      const gp_Pnt2d foot = pieces[k].fitted.contact[side]->Value(contactEnd(k, side, end).parameter);
       Jet j;
       if (jetAt(pieces[k].rail.s[side], foot.X(), foot.Y(), j))
         outward += j.n;
@@ -1337,22 +1337,22 @@ void Attach::splitCornerEnds(const Corner& at, CentralSplit& cs)
     const auto& [k, end] = at.ends[i];
     const Piece& piece   = pieces[k];
     const int    prev = (i + count - 1) % count, next = (i + 1) % count;
-    const int    a = corner[k][0][end].IsSame(X[prev]) ? 0 : 1;
-    if (!corner[k][a][end].IsSame(X[prev]) || !corner[k][1 - a][end].IsSame(X[i]))
+    const int    a = contactEnd(k, 0, end).vertex.IsSame(X[prev]) ? 0 : 1;
+    if (!contactEnd(k, a, end).vertex.IsSame(X[prev]) || !contactEnd(k, 1 - a, end).vertex.IsSame(X[i]))
       fail(op,
            no_solution,
            "the contacts of the blends at a corner do not cross in turn round it",
            {piece.rail.edge});
     {
-      const gp_Pnt2d foot = piece.fitted.contact[1 - a]->Value(u[k][1 - a][end]);
+      const gp_Pnt2d foot = piece.fitted.contact[1 - a]->Value(contactEnd(k, 1 - a, end).parameter);
       Jet            j;
       if (!jetAt(piece.rail.s[1 - a], foot.X(), foot.Y(), j))
         fail(op, unsupported_geometry, notYet, {piece.rail.edge});
       outwardAt[i] = j.n;
     }
-    const gp_Pnt2d from = piece.sheet.uv(piece.sheet.rail(u[k][a][end]), piece.sheet.across[a]);
+    const gp_Pnt2d from = piece.sheet.uv(piece.sheet.rail(contactEnd(k, a, end).parameter), piece.sheet.across[a]);
     const gp_Pnt2d to =
-      piece.sheet.uv(piece.sheet.rail(u[k][1 - a][end]), piece.sheet.across[1 - a]);
+      piece.sheet.uv(piece.sheet.rail(contactEnd(k, 1 - a, end).parameter), piece.sheet.across[1 - a]);
     const auto& conic = profile[i];
     const bool  reversed =
       std::abs(from.X() - conic->LastParameter()) < std::abs(from.X() - conic->FirstParameter());
@@ -1541,7 +1541,7 @@ void Attach::splitCornerFaces(const Corner&       at,
   {
     const auto& [k, end] = at.ends[i];
     const int  prev      = (i + count - 1) % count;
-    const bool fromPrev  = corner[k][0][end].IsSame(X[prev]);
+    const bool fromPrev  = contactEnd(k, 0, end).vertex.IsSame(X[prev]);
     chain[k][end]        = fromPrev ? std::vector<TopoDS_Edge>{ends[i][0], ends[i][1]}
                                     : std::vector<TopoDS_Edge>{ends[i][1], ends[i][0]};
     section[k][end]      = chain[k][end].front();

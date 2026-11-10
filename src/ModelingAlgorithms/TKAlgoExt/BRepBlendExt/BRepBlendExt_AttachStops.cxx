@@ -142,8 +142,8 @@ void Attach::capNotch(int                  k,
   const auto far =
     nearest(BRep_Tool::Curve(narrow.trimEdge, ef, el),
             "the face that stops a blend at a notch does not cross the narrow face's far edge");
-  builder.MakeVertex(corner[k][side][end], Q, tolerance);
-  u[k][side][end] = (sQ - piece.sheet.alpha) / piece.sheet.beta;
+  builder.MakeVertex(contactEnd(k, side, end).vertex, Q, tolerance);
+  contactEnd(k, side, end).parameter = (sQ - piece.sheet.alpha) / piece.sheet.beta;
   TopoDS_Vertex F;
   builder.MakeVertex(F, far.first, tolerance);
   trimFar[{k, side, end}] = F;
@@ -187,7 +187,7 @@ void Attach::capNotch(int                  k,
       continued.push_back({edge, {stop, face}});
       return onStop;
     };
-  cornerOnStop = segment(corner[k][side][end], F, narrow.trim)->Value(0);
+  cornerOnStop = segment(contactEnd(k, side, end).vertex, F, narrow.trim)->Value(0);
   segment(F, vertex, narrow.face);
 }
 
@@ -253,12 +253,12 @@ bool Attach::consumed(int                  k,
   if (!onPlain)
     return false;
   // The blend closes to that point on the edge between the faces: its corners are one.
-  u[k][0][end] = u[k][1][end] = onPlain->first;
-  builder.MakeVertex(corner[k][0][end],
+  contactEnd(k, 0, end).parameter = contactEnd(k, 1, end).parameter = onPlain->first;
+  builder.MakeVertex(contactEnd(k, 0, end).vertex,
                      sheet.contact(plain)->Value(sheet.rail(onPlain->first)),
                      tolerance);
-  corner[k][1][end] = corner[k][0][end];
-  cut(meet, third, corner[k][0][end], onPlain->second);
+  contactEnd(k, 1, end).vertex = contactEnd(k, 0, end).vertex;
+  cut(meet, third, contactEnd(k, 0, end).vertex, onPlain->second);
   for (const TopoDS_Edge& gone : {beside[0], beside[1], down})
   {
     for (const auto& face : facesOfEdge.FindFromKey(gone))
@@ -284,7 +284,7 @@ TopoDS_Edge Attach::rolledEdge(int k, int side, const TopoDS_Face& stop)
   const TopoDS_Face& beyond      = rail.s[side].trim;
   const auto [surface, location] = surfaceOf(beyond);
   const SurfaceMeeting meeting(sheet.surface, BRep_Tool::Surface(beyond), tolerance);
-  const gp_Pnt a = BRep_Tool::Pnt(corner[k][side][0]), b = BRep_Tool::Pnt(corner[k][side][1]);
+  const gp_Pnt a = BRep_Tool::Pnt(contactEnd(k, side, 0).vertex), b = BRep_Tool::Pnt(contactEnd(k, side, 1).vertex);
   const double lo = std::min(sheet.across[0], sheet.across[1]),
                hi = std::max(sheet.across[0], sheet.across[1]);
   for (int i = 1; i <= meeting.count(); ++i)
@@ -346,11 +346,11 @@ TopoDS_Edge Attach::rolledEdge(int k, int side, const TopoDS_Face& stop)
              no_solution,
              "the blend's edge on the face beyond a narrow face cannot be laid on it",
              {rail.edge});
-      const gp_Pnt2d cornerOnSheet = sheet.uv(sheet.rail(u[k][side][0]), sheet.across[side]);
+      const gp_Pnt2d cornerOnSheet = sheet.uv(sheet.rail(contactEnd(k, side, 0).parameter), sheet.across[side]);
       return edgeBetween(curve,
-                         corner[k][side][0],
+                         contactEnd(k, side, 0).vertex,
                          t0,
-                         corner[k][side][1],
+                         contactEnd(k, side, 1).vertex,
                          t1,
                          {{aligned(onSheet, t0, cornerOnSheet, sheet.surface), sheet.surface, {}},
                           {onBeyond, surface, location}},
@@ -613,9 +613,9 @@ void Attach::notchStopCorner(int                  k,
          "the blend's edge on the face beyond a narrow face misses that face's edge on the "
          "stop face",
          {rail.edge});
-  builder.MakeVertex(corner[k][side][end], best->first, tolerance);
-  u[k][side][end] = (best->second - sheet.alpha) / sheet.beta;
-  cut(down, across, corner[k][side][end], on.LowerDistanceParameter());
+  builder.MakeVertex(contactEnd(k, side, end).vertex, best->first, tolerance);
+  contactEnd(k, side, end).parameter = (best->second - sheet.alpha) / sheet.beta;
+  cut(down, across, contactEnd(k, side, end).vertex, on.LowerDistanceParameter());
   editOf(edits, stop).replace.Bind(beside[side], TopoDS_Edge());
   if (!pieces[k].rail.s[side].cliffWhole)
     editOf(edits, rail.s[side].face).replace.Bind(beside[side], TopoDS_Edge());
@@ -646,21 +646,21 @@ void Attach::cliffStopCorner(int                  k,
   {
     // On a cliff the corner is the far edge's own vertex: the narrow face's edge on the
     // stop face goes, and the blend's end runs to that vertex.
-    corner[k][side][end] = across;
-    GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][side][end]), sheet.contact(side));
+    contactEnd(k, side, end).vertex = across;
+    GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(contactEnd(k, side, end).vertex), sheet.contact(side));
     if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
       fail(op,
            no_solution,
            "the blend's contact misses the end of the face's far edge it rests on",
            {rail.edge});
-    u[k][side][end] = (on.LowerDistanceParameter() - sheet.alpha) / sheet.beta;
+    contactEnd(k, side, end).parameter = (on.LowerDistanceParameter() - sheet.alpha) / sheet.beta;
     editOf(edits, stop).replace.Bind(beside[side], TopoDS_Edge());
     if (!narrow.cliffWhole)
       editOf(edits, narrow.face).replace.Bind(beside[side], TopoDS_Edge());
     swept.push_back(beside[side]);
     double f0, l0;
     cornerOnStop = BRep_Tool::CurveOnSurface(beside[side], stop, f0, l0)
-                             ->Value(BRep_Tool::Parameter(corner[k][side][end], beside[side]));
+                             ->Value(BRep_Tool::Parameter(contactEnd(k, side, end).vertex, beside[side]));
     return;
   }
   // The narrow face goes on past the stop: the stop face's surface crosses the strip from
@@ -681,14 +681,14 @@ void Attach::cliffStopCorner(int                  k,
          unsupported_geometry,
          "the face that stops a blend on a cliff does not cross the cliff's edge",
          {rail.edge});
-  builder.MakeVertex(corner[k][side][end], *F, tolerance);
+  builder.MakeVertex(contactEnd(k, side, end).vertex, *F, tolerance);
   GeomAPI_ProjectPointOnCurve on(*F, sheet.contact(side));
   if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
     fail(op,
          no_solution,
          "the blend's contact misses where the face that stops it crosses the cliff's edge",
          {rail.edge});
-  u[k][side][end] = (on.LowerDistanceParameter() - sheet.alpha) / sheet.beta;
+  contactEnd(k, side, end).parameter = (on.LowerDistanceParameter() - sheet.alpha) / sheet.beta;
   // The cap's edge: the segment from there to the vertex, on both faces' surfaces.
   const Handle(Geom_Curve) line(GC_MakeSegment(*F, V).Value());
   const double             length       = F->Distance(V);
@@ -713,7 +713,7 @@ void Attach::cliffStopCorner(int                  k,
   const auto [narrowBasis, narrowPlace] = surfaceOf(narrow.face);
   const TopoDS_Edge cap =
     edgeBetween(line,
-                corner[k][side][end],
+                contactEnd(k, side, end).vertex,
                 0,
                 vertex,
                 length,
@@ -759,14 +759,14 @@ void Attach::continuedStopCorner(int                  k,
         place = q;
     }
   }
-  u[k][side][end]                   = place;
+  contactEnd(k, side, end).parameter                   = place;
   const gp_Pnt                there = sheet.contact(side)->Value(sheet.rail(place));
   GeomAPI_ProjectPointOnCurve onMeeting(there, more.curve);
   if (place != more.u && onMeeting.NbPoints() > 0)
     more.from = onMeeting.LowerDistanceParameter();
   // A hair over the gap: the check reads the vertex against its tolerance to rounding.
   builder.MakeVertex(
-    corner[k][side][end],
+    contactEnd(k, side, end).vertex,
     there,
     std::max(tolerance, 1.01 * there.Distance(more.curve->Value(more.from))));
   // The new piece of the edge between the support and the stop face, from the
@@ -775,7 +775,7 @@ void Attach::continuedStopCorner(int                  k,
   const auto [stopSurface, stopPlace]       = surfaceOf(stop);
   const TopoDS_Edge piece                   = edgeBetween(
     more.curve,
-    corner[k][side][end],
+    contactEnd(k, side, end).vertex,
     more.from,
     vertex,
     more.to,
@@ -853,11 +853,11 @@ void Attach::stopCorner(int                  k,
     continuedStopCorner(k, end, side, vertex, s, *more, cornerOnStop);
     return;
   }
-  u[k][side][end] = found->first;
-  builder.MakeVertex(corner[k][side][end],
+  contactEnd(k, side, end).parameter = found->first;
+  builder.MakeVertex(contactEnd(k, side, end).vertex,
                      sheet.contact(side)->Value(sheet.rail(found->first)),
                      tolerance);
-  cut(beside[side], from[side], corner[k][side][end], found->second);
+  cut(beside[side], from[side], contactEnd(k, side, end).vertex, found->second);
   {
     double f0, l0;
     cornerOnStop =
@@ -872,9 +872,9 @@ void Attach::stopSection(int k, int end, const TopoDS_Face& stop, const gp_Pnt2d
   const Sheet&         sheet  = piece.sheet;
   const auto [surface, location] = surfaceOf(stop);
   const auto     placed          = BRep_Tool::Surface(stop);
-  const gp_Pnt2d cornerOnSheet   = sheet.uv(sheet.rail(u[k][0][end]), sheet.across[0]);
+  const gp_Pnt2d cornerOnSheet   = sheet.uv(sheet.rail(contactEnd(k, 0, end).parameter), sheet.across[0]);
   // The sheet's own section where it lies in the face, else the two surfaces' meeting.
-  const double along = (u[k][0][end] + u[k][1][end]) / 2;
+  const double along = (contactEnd(k, 0, end).parameter + contactEnd(k, 1, end).parameter) / 2;
   const auto   curve = sheet.section(sheet.rail(along));
   bool         iso   = true;
   for (int i = 0; i <= 8 && iso; ++i)
@@ -893,9 +893,9 @@ void Attach::stopSection(int k, int end, const TopoDS_Face& stop, const gp_Pnt2d
   if (iso)
   {
     edge = edgeBetween(sheet.section(sheet.rail(along)),
-                       corner[k][0][end],
+                       contactEnd(k, 0, end).vertex,
                        ends[0],
-                       corner[k][1][end],
+                       contactEnd(k, 1, end).vertex,
                        ends[1],
                        {},
                        tol::length);
@@ -933,16 +933,16 @@ void Attach::stopSection(int k, int end, const TopoDS_Face& stop, const gp_Pnt2d
                            cornerOnSheet,
                            placedFace(stop),
                            cornerOnStop,
-                           corner[k][0][end],
-                           corner[k][1][end],
+                           contactEnd(k, 0, end).vertex,
+                           contactEnd(k, 1, end).vertex,
                            rail.scale);
     if (refines(!met))
       met = planeMeeting(sheet,
                          stop,
                          cornerOnSheet,
-                         sheet.uv(sheet.rail(u[k][1][end]), sheet.across[1]),
-                         corner[k][0][end],
-                         corner[k][1][end]);
+                         sheet.uv(sheet.rail(contactEnd(k, 1, end).parameter), sheet.across[1]),
+                         contactEnd(k, 0, end).vertex,
+                         contactEnd(k, 1, end).vertex);
     if (!met)
       fail(op,
            no_solution,
@@ -1236,10 +1236,10 @@ bool Attach::notch(int ka, int ea, int kb, int eb)
   {
     const int          w = e.winner, l = 1 - w;
     const TopoDS_Face& face         = pieces[k[l]].rail.s[e.side[l]].face;
-    corner[k[w]][e.side[w]][end[w]] = e.runs ? e.Y : e.X;
-    u[k[w]][e.side[w]][end[w]]      = e.cross.first;
-    corner[k[l]][e.side[l]][end[l]] = e.Q;
-    u[k[l]][e.side[l]][end[l]]      = e.q;
+    contactEnd(k[w], e.side[w], end[w]).vertex = e.runs ? e.Y : e.X;
+    contactEnd(k[w], e.side[w], end[w]).parameter      = e.cross.first;
+    contactEnd(k[l], e.side[l], end[l]).vertex = e.Q;
+    contactEnd(k[l], e.side[l], end[l]).parameter      = e.q;
     editOf(edits, face).bridges.push_back(e.along.back());
     notches.push_back({k[w], e.along.back(), face});
     if (!e.runs)
@@ -1737,8 +1737,8 @@ void Attach::openStop(StopEnd& st)
   openCorner(st, o, stopSurface);
   for (int side = 0; side < 2; ++side)
   {
-    u[k][side][end] = walk[side].at.first;
-    builder.MakeVertex(corner[k][side][end],
+    contactEnd(k, side, end).parameter = walk[side].at.first;
+    builder.MakeVertex(contactEnd(k, side, end).vertex,
                        sheet.contact(side)->Value(sheet.rail(walk[side].at.first)),
                        tolerance);
   }
@@ -1753,22 +1753,22 @@ void Attach::openStop(StopEnd& st)
   };
   // The section on the stop face, from side 0's corner to side 1's.
   gp_Pnt2d onStop;
-  if (!onSurface(BRep_Tool::Pnt(corner[k][0][end]), placedFace(stopFace), onStop))
+  if (!onSurface(BRep_Tool::Pnt(contactEnd(k, 0, end).vertex), placedFace(stopFace), onStop))
     refuse("the faces at an end of the edge do not stop it");
   auto ended = meetingEdge(placedSheet(sheet),
-                           sheet.uv(sheet.rail(u[k][0][end]), sheet.across[0]),
+                           sheet.uv(sheet.rail(contactEnd(k, 0, end).parameter), sheet.across[0]),
                            placedFace(stopFace),
                            onStop,
-                           corner[k][0][end],
-                           corner[k][1][end],
+                           contactEnd(k, 0, end).vertex,
+                           contactEnd(k, 1, end).vertex,
                            rail.scale);
   if (refines(!ended))
     ended = planeMeeting(sheet,
                          stopFace,
-                         sheet.uv(sheet.rail(u[k][0][end]), sheet.across[0]),
-                         sheet.uv(sheet.rail(u[k][1][end]), sheet.across[1]),
-                         corner[k][0][end],
-                         corner[k][1][end]);
+                         sheet.uv(sheet.rail(contactEnd(k, 0, end).parameter), sheet.across[0]),
+                         sheet.uv(sheet.rail(contactEnd(k, 1, end).parameter), sheet.across[1]),
+                         contactEnd(k, 0, end).vertex,
+                         contactEnd(k, 1, end).vertex);
   if (!ended)
     fail(op,
          no_solution,
@@ -1800,7 +1800,7 @@ void Attach::openStop(StopEnd& st)
     cut(between[i], from[i], v, crossed->second);
     through.push_back(v);
   }
-  through.push_back(corner[k][o][end]);
+  through.push_back(contactEnd(k, o, end).vertex);
   for (size_t i = 0; i + 1 < through.size(); ++i)
   {
     gp_Pnt2d     a, b;
@@ -1825,7 +1825,7 @@ void Attach::openStop(StopEnd& st)
   }
   // The crossed edge, the edges each contact crossed onto faces of its surface, and what the
   // contacts swept over; the stop face's vertex on the first edge between stays.
-  cut(walk[s].crossed, walk[s].crossedFrom, corner[k][s][end], walk[s].at.second);
+  cut(walk[s].crossed, walk[s].crossedFrom, contactEnd(k, s, end).vertex, walk[s].at.second);
   for (int side = 0; side < 2; ++side)
   {
     const auto& passed = walk[side].passed;
@@ -1874,11 +1874,11 @@ void Attach::stopPlaces(StopEnd& st)
   param.resize(faces.size() + 1);
   for (int side = 0; side < 2; ++side)
   {
-    u[k][side][end] = walk[side].at.first;
-    builder.MakeVertex(corner[k][side][end],
+    contactEnd(k, side, end).parameter = walk[side].at.first;
+    builder.MakeVertex(contactEnd(k, side, end).vertex,
                        sheet.contact(side)->Value(sheet.rail(walk[side].at.first)),
                        tolerance);
-    at[side == 0 ? 0 : at.size() - 1]    = corner[k][side][end];
+    at[side == 0 ? 0 : at.size() - 1]    = contactEnd(k, side, end).vertex;
     param[side == 0 ? 0 : at.size() - 1] = walk[side].at.second;
   }
   for (size_t i = 0; i < between.size(); ++i)
@@ -1982,7 +1982,7 @@ void Attach::stopEdges(StopEnd& st)
     }
     gp_Pnt2d onSheet;
     if (i == 0)
-      onSheet = sheet.uv(sheet.rail(u[k][0][end]), sheet.across[0]);
+      onSheet = sheet.uv(sheet.rail(contactEnd(k, 0, end).parameter), sheet.across[0]);
     else
     {
       GeomAPI_ProjectPointOnSurf project(BRep_Tool::Pnt(at[i]), sheet.surface);
@@ -2039,7 +2039,7 @@ void Attach::stopCuts(StopEnd& st)
       const auto [stopSurface, stopPlace]       = surfaceOf(stopFace);
       const TopoDS_Edge run                     = edgeBetween(
         more->curve,
-        corner[k][side][end],
+        contactEnd(k, side, end).vertex,
         more->from,
         vertex,
         more->to,
@@ -2050,7 +2050,7 @@ void Attach::stopCuts(StopEnd& st)
       continued.push_back({run, {own, stopFace}});
     }
     else
-      cut(walk[side].crossed, walk[side].crossedFrom, corner[k][side][end], walk[side].at.second);
+      cut(walk[side].crossed, walk[side].crossedFrom, contactEnd(k, side, end).vertex, walk[side].at.second);
     // Each edge the contact crosses onto a face of its support's surface is cut back to the
     // crossing; the contact's part on that face lies in its parameters as the next crossing's.
     const auto& passed = walk[side].passed;
@@ -2084,7 +2084,7 @@ void Attach::stopCuts(StopEnd& st)
         edgeBetween(curve,
                     walk[side].crossedFrom,
                     BRep_Tool::Parameter(walk[side].crossedFrom, crossedEdge),
-                    corner[k][side][end],
+                    contactEnd(k, side, end).vertex,
                     walk[side].at.second,
                     {{onLevel, levelSurface, levelPlace}, {onStop, stopSurface, stopPlace}},
                     tolerance);

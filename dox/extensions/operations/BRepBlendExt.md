@@ -1693,3 +1693,21 @@ events remains unfinished; no stop construction has been superseded yet.
 | Cubic defect vanishing at both endpoints and the midpoint | 1 | Whole-span bound detects the interior defect |
 | Parabolic same-contact section, three scales and two poses | 6 | Shared edge and both pcurves within 1e-7 length tolerance |
 | Disjoint cycles, reversed seam occurrences and open/ambiguous incidence | 1 | Occurrences preserved; unresolved incidence identified |
+
+Contact storage now consists of ordered retained intervals, each owning two
+parameter/vertex events and its shared edge. The contact builder visits each
+interval; continuity and tolerance collection visit all retained edges and
+vertices. Existing endpoint constructors still populate one interval. They do
+not yet consume the traced event graph.
+
+The internal `completeCarrier` construction retains the solved support chart
+while continuing a regular constant-distance branch to finite support
+restrictions. Each terminal ball solves the offset-equality equations together
+with the crossed support coordinate. Reparameterisation retains these stations
+before fitting; it does not grow a new branch from the original edge. Closed
+circuits and unresolved terminal events are not completed by this helper. It is
+not yet called by the operation's end constructors.
+
+| Retained-carrier check | Configurations | Result |
+| --- | ---: | --- |
+| Finite perpendicular spline planes, three scales and two poses | 6 | Both terminal contacts reach their exact restrictions; two disjoint contact intervals retain shared vertices and support pcurves within 1e-7 |

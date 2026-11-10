@@ -121,6 +121,10 @@ struct Attach
                      const Handle(Geom_Surface)& support,
                      const TopLoc_Location&      location);
   //! The contact on its support, shared by a split's parts on the face, or with another blend.
+  struct ContactInterval;
+  void plainInterval(int k, int side, ContactInterval& interval,
+                     const Handle(Geom_Surface)& support,
+                     const TopLoc_Location& location);
   void plainContact(int                         k,
                     int                         side,
                     const Handle(Geom_Surface)& support,
@@ -553,10 +557,38 @@ struct Attach
   NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>
                                                            edgesOfVertex, facesOfEdge;
   const int                                                n;
-  std::vector<std::array<std::array<TopoDS_Vertex, 2>, 2>> corner; // [piece][side][end]
-  std::vector<std::array<std::array<double, 2>, 2>>        u;
-  std::vector<std::array<TopoDS_Edge, 2>>                  section; // [piece][end]
-  std::vector<std::array<TopoDS_Edge, 2>>                  contact; // [piece][side]
+  struct ContactEvent
+  {
+    TopoDS_Vertex vertex;
+    double parameter = 0;
+  };
+  struct ContactInterval
+  {
+    std::array<ContactEvent, 2> ends;
+    TopoDS_Edge edge;
+  };
+  // Ordered retained intervals on each support. Event vertices are shared with the end arcs.
+  std::vector<std::array<std::vector<ContactInterval>, 2>> contactIntervals;
+  std::vector<std::array<TopoDS_Edge, 2>> section;
+
+  ContactEvent& contactEnd(int k, int side, int end)
+  {
+    auto& intervals = contactIntervals[k][side];
+    return end == 0 ? intervals.front().ends[0] : intervals.back().ends[1];
+  }
+  const ContactEvent& contactEnd(int k, int side, int end) const
+  {
+    const auto& intervals = contactIntervals[k][side];
+    return end == 0 ? intervals.front().ends[0] : intervals.back().ends[1];
+  }
+  TopoDS_Edge& contactEdge(int k, int side)
+  {
+    return contactIntervals[k][side].front().edge;
+  }
+  const TopoDS_Edge& contactEdge(int k, int side) const
+  {
+    return contactIntervals[k][side].front().edge;
+  }
   std::vector<std::pair<TopoDS_Edge, std::vector<TopoDS_Face>>>
                                           continued; // edges carried past a stop's vertex
   std::vector<std::array<TopoDS_Face, 2>> stopAt;    // [piece][end]
@@ -608,7 +640,7 @@ struct Attach
     for (int m = 0; m < n; ++m)
       for (int t = 0; t < 2; ++t)
       {
-        const TopoDS_Edge& e = contact[m][t];
+        const TopoDS_Edge& e = contactEdge(m, t);
         if (e.IsNull() || !pieces[m].rail.s[t].face.IsSame(face))
           continue;
         TopoDS_Vertex a, z;
@@ -782,7 +814,12 @@ struct Attach
   std::vector<TopoDS_Edge> sideEdges(int k, int side) const
   {
     const auto it = runs.find({k, side});
-    return it != runs.end() ? it->second : std::vector<TopoDS_Edge>{contact[k][side]};
+    if (it != runs.end())
+      return it->second;
+    std::vector<TopoDS_Edge> edges;
+    for (const auto& interval : contactIntervals[k][side])
+      edges.push_back(interval.edge);
+    return edges;
   }
 
   std::vector<TopoDS_Face> blends; // [piece]

@@ -22,16 +22,17 @@ Attach::Attach(TopoDS_Shape                     body_,
       history(history_),
       op(pieces_.front().rail.op),
       n(int(pieces_.size())),
-      corner(n),
-      u(n),
+      contactIntervals(n),
       section(n),
-      contact(n),
       stopAt(n),
       patches(cornersAt_.size()),
       parts(cornersAt_.size()),
       blends(n),
       chain(n)
 {
+  for (auto& sides : contactIntervals)
+    for (auto& intervals : sides)
+      intervals.emplace_back();
   TopExp::MapShapesAndUniqueAncestors(body, TopAbs_VERTEX, TopAbs_EDGE, edgesOfVertex);
   TopExp::MapShapesAndUniqueAncestors(body, TopAbs_EDGE, TopAbs_FACE, facesOfEdge);
   for (const auto& piece : pieces)
@@ -59,7 +60,7 @@ void Attach::splitNotchCut(int k, int end)
     BRep_Tool::Pnt(a).Distance(start) < BRep_Tool::Pnt(z).Distance(start) ? a : z;
   double                      f, l;
   const auto                  curve = BRep_Tool::Curve(edge, f, l);
-  GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][joint.side][end]), curve, f, l);
+  GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(contactEnd(k, joint.side, end).vertex), curve, f, l);
   if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
     fail(op, no_solution, "a contact misses the far edge it runs off over", {rail.edge});
   // A bounded notch can remove an interior interval, leaving two edge components.
@@ -81,12 +82,12 @@ void Attach::splitNotchCut(int k, int end)
             && pieces[finish.piece].rail.s[notchSide ^ int(finish.swapped)].trim.IsNull()
             && !cuts.Contains(edge));
   if (!paired)
-    cut(edge, keep.IsSame(a) ? z : a, corner[k][joint.side][end], on.LowerDistanceParameter());
+    cut(edge, keep.IsSame(a) ? z : a, contactEnd(k, joint.side, end).vertex, on.LowerDistanceParameter());
   else
   {
     const double crossing = on.LowerDistanceParameter();
     if (const auto found = seamCrossed.find(edge.TShape().get()); found == seamCrossed.end())
-      seamCrossed[edge.TShape().get()] = {corner[k][joint.side][end], crossing};
+      seamCrossed[edge.TShape().get()] = {contactEnd(k, joint.side, end).vertex, crossing};
     else
     {
       const auto& [other, there] = found->second;
@@ -101,8 +102,8 @@ void Attach::splitNotchCut(int k, int end)
       TopExp::Vertices(TopoDS::Edge(edge.Oriented(TopAbs_FORWARD)), e0, e1);
       TopoDS_Compound parts;
       builder.MakeCompound(parts);
-      builder.Add(parts, trimmed(edge, e1, lower ? corner[k][joint.side][end] : other, low));
-      builder.Add(parts, trimmed(edge, e0, lower ? other : corner[k][joint.side][end], high));
+      builder.Add(parts, trimmed(edge, e1, lower ? contactEnd(k, joint.side, end).vertex : other, low));
+      builder.Add(parts, trimmed(edge, e0, lower ? other : contactEnd(k, joint.side, end).vertex, high));
       for (const auto& face : facesOfEdge.FindFromKey(edge))
         editOf(edits, face).replace.Bind(edge, parts);
     }
@@ -137,7 +138,7 @@ void Attach::splitCrossingCut(int k, int end)
   };
   double                      f, l;
   const auto                  curve = BRep_Tool::Curve(edge, f, l);
-  GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][joint.side][end]), curve, f, l);
+  GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(contactEnd(k, joint.side, end).vertex), curve, f, l);
   if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
     fail(op, no_solution, "a contact misses the edge it crosses onto the next face", {rail.edge});
   const double crossing = on.LowerDistanceParameter();
@@ -176,7 +177,7 @@ void Attach::splitCrossingCut(int k, int end)
     // An edge (or a seam) the contact crosses and comes back over, in the strip the
     // blend replaces between the crossings and on the faces past them: it is left in two.
     if (const auto found = seamCrossed.find(edge.TShape().get()); found == seamCrossed.end())
-      seamCrossed[edge.TShape().get()] = {corner[k][joint.side][end], crossing};
+      seamCrossed[edge.TShape().get()] = {contactEnd(k, joint.side, end).vertex, crossing};
     else
     {
       const auto& [other, there] = found->second;
@@ -185,10 +186,10 @@ void Attach::splitCrossingCut(int k, int end)
       builder.MakeCompound(parts);
       builder.Add(
         parts,
-        trimmed(edge, z, lower ? corner[k][joint.side][end] : other, std::min(crossing, there)));
+        trimmed(edge, z, lower ? contactEnd(k, joint.side, end).vertex : other, std::min(crossing, there)));
       builder.Add(
         parts,
-        trimmed(edge, a, lower ? other : corner[k][joint.side][end], std::max(crossing, there)));
+        trimmed(edge, a, lower ? other : contactEnd(k, joint.side, end).vertex, std::max(crossing, there)));
       for (const auto& face : facesOfEdge.FindFromKey(edge))
         editOf(edits, face).replace.Bind(edge, parts);
     }
@@ -200,7 +201,7 @@ void Attach::splitCrossingCut(int k, int end)
          "a contact crosses onto the next face over an edge that does not reach the "
          "blended edges, which the blend does not do yet",
          {rail.edge});
-  cut(edge, from, corner[k][joint.side][end], crossing);
+  cut(edge, from, contactEnd(k, joint.side, end).vertex, crossing);
 }
 
 void Attach::jointEdgeCuts(int k, int end, const TopoDS_Vertex& vertex)
@@ -247,7 +248,7 @@ void Attach::jointEdgeCuts(int k, int end, const TopoDS_Vertex& vertex)
       continue;
     double                      f, l;
     const auto                  curve = BRep_Tool::Curve(TopoDS::Edge(shape), f, l);
-    GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(corner[k][side][end]), curve, f, l);
+    GeomAPI_ProjectPointOnCurve on(BRep_Tool::Pnt(contactEnd(k, side, end).vertex), curve, f, l);
     if (on.NbPoints() == 0 || on.LowerDistance() > rail.resolved(limit::together))
     {
       if (sweepToPole(TopoDS::Edge(shape), vertex))
@@ -267,7 +268,7 @@ void Attach::jointEdgeCuts(int k, int end, const TopoDS_Vertex& vertex)
            "the blend does not do yet",
            {rail.edge});
     }
-    cut(shape, vertex, corner[k][side][end], on.LowerDistanceParameter());
+    cut(shape, vertex, contactEnd(k, side, end).vertex, on.LowerDistanceParameter());
   }
 }
 
@@ -289,9 +290,9 @@ void Attach::jointSection(int k, int end)
         reach[side]       = sheet.swapped ? at.X() : at.Y();
       }
   const TopoDS_Edge x = edgeBetween(sheet.section(sheet.rail(here)),
-                                    corner[k][0][end],
+                                    contactEnd(k, 0, end).vertex,
                                     reach[0],
-                                    corner[k][1][end],
+                                    contactEnd(k, 1, end).vertex,
                                     reach[1],
                                     {},
                                     tol::length);
@@ -367,9 +368,9 @@ void Attach::jointEnd(int k, int end, const TopoDS_Vertex& endVertex)
            {rail.edge});
     TopoDS_Vertex vertex;
     builder.MakeVertex(vertex, point, std::max(tolerance, gap));
-    corner[k][side][end] = corner[joint.piece][to][joint.end] = vertex;
-    u[k][side][end]                                           = here;
-    u[joint.piece][to][joint.end]                             = there;
+    contactEnd(k, side, end).vertex = contactEnd(joint.piece, to, joint.end).vertex = vertex;
+    contactEnd(k, side, end).parameter                                           = here;
+    contactEnd(joint.piece, to, joint.end).parameter                             = there;
   }
   if (joint.meets == Meets::Split
       && (splitNotch(k, joint.side) || splitNotch(joint.piece, joint.side ^ int(joint.swapped))))
@@ -457,7 +458,7 @@ TopoDS_Shape Attach::assemble()
     {
       history->AddGenerated(pieces[k].apex, blends[k]);
       for (int side = 0; side < 2; ++side)
-        history->AddGenerated(pieces[k].apex, contact[k][side]);
+        history->AddGenerated(pieces[k].apex, contactEdge(k, side));
       continue;
     }
     const TopoDS_Shape& edge = pieces[k].rail.edge;

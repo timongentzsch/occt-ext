@@ -3,10 +3,12 @@
 
 #include <BRepBlendExt_BoundaryCurve.hxx>
 #include <BRepBlendExt_BoundaryGraph.hxx>
+#include <BRepBlendExt_Attach.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <Geom_BezierCurve.hxx>
+#include <Geom_Line.hxx>
 #include <Geom2d_BezierCurve.hxx>
 #include <BRepTools.hxx>
 #include <gtest/gtest.h>
@@ -177,4 +179,97 @@ TEST(BRepBlendExt, BoundaryGraphPreservesOccurrencesAndSeparateSeamPorts)
   graph.arcs.pop_back();
   graph.arcs.pop_back();
   EXPECT_FALSE(graph.loops());
+}
+
+TEST(BRepBlendExt, CompleteCarrierRetainsContactChartsAtFiniteRestrictions)
+{
+  for (double scale : {.001, 1., 1000.})
+    for (bool moved : {false, true})
+    {
+      SCOPED_TRACE(testing::Message() << scale << " " << moved);
+      gp_Trsf pose;
+      if (moved)
+      {
+        pose.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), .73);
+        pose.SetTranslationPart(gp_Vec(17 * scale, -23 * scale, 31 * scale));
+      }
+      Piece piece;
+      Rail& rail = piece.rail;
+      rail.first = rail.from = -scale;
+      rail.last = rail.to = scale;
+      rail.scale = .2 * scale;
+      rail.magnitude = 100 * scale;
+      Handle(Geom_Curve) source = new Geom_Line(gp::Origin(), gp::DX());
+      source->Transform(pose);
+      rail.edge = BRepBuilderAPI_MakeEdge(source, -scale, scale);
+      rail.curve.Initialize(rail.edge);
+      for (int side = 0; side < 2; ++side)
+      {
+        NCollection_Array2<gp_Pnt> poles(1, 2, 1, 2);
+        NCollection_Array1<double> uk(1, 2), vk(1, 2);
+        NCollection_Array1<int> mult(1, 2);
+        uk(1) = -2 * scale; uk(2) = 2 * scale;
+        vk(1) = -scale; vk(2) = scale;
+        mult.Init(2);
+        for (int i = 1; i <= 2; ++i)
+          for (int j = 1; j <= 2; ++j)
+            poles(i, j) = (side == 0 ? gp_Pnt(uk(i), vk(j), 0)
+                                      : gp_Pnt(uk(i), 0, vk(j))).Transformed(pose);
+        rail.s[side].surface = new Geom_BSplineSurface(poles, uk, vk, mult, mult, 1, 1);
+        rail.s[side].face = BRepBuilderAPI_MakeFace(rail.s[side].surface, tol::length);
+        rail.s[side].distance = rail.scale;
+        NCollection_Array1<gp_Pnt2d> feet(1, 2);
+        NCollection_Array1<double> knots(1, 2);
+        knots(1) = 0; knots(2) = 1;
+        feet(1) = gp_Pnt2d(-scale, side == 0 ? rail.scale : -rail.scale);
+        feet(2) = gp_Pnt2d(scale, feet(1).Y());
+        piece.fitted.contact[side] = new Geom2d_BSplineCurve(feet, knots, mult, 1);
+      }
+      const auto completed = completeCarrier(piece);
+      ASSERT_TRUE(completed);
+      EXPECT_NEAR(completed->rail.spineLast, 4 * scale, 1e-8 * scale);
+      for (int side = 0; side < 2; ++side)
+        for (int end = 0; end < 2; ++end)
+        {
+          const auto uv = completed->fitted.contact[side]->Value(end);
+          EXPECT_NEAR(uv.X(), (end ? 2 : -2) * scale, 1e-8 * scale);
+          EXPECT_NEAR(uv.Y(), side == 0 ? rail.scale : -rail.scale, 1e-8 * scale);
+          EXPECT_LE(completed->sheet.contact(side)->Value(completed->sheet.rail(end)).Distance(
+                      rail.s[side].surface->Value(uv.X(), uv.Y())), 1e-7);
+        }
+      // The contact builder must preserve a genuine gap between two retained runs.
+      std::vector<Piece> pieces = {*completed};
+      std::vector<Corner> corners;
+      Handle(BRepTools_History) history = new BRepTools_History;
+      Attach attachment(rail.s[0].face, pieces, corners, history, false, nullptr);
+      auto& intervals = attachment.contactIntervals[0][0];
+      intervals.resize(2);
+      const double ends[2][2] = {{.1, .3}, {.6, .9}};
+      for (int run = 0; run < 2; ++run)
+        for (int end = 0; end < 2; ++end)
+        {
+          auto& event = intervals[run].ends[end];
+          event.parameter = ends[run][end];
+          event.vertex = BRepBuilderAPI_MakeVertex(completed->sheet.contact(0)->Value(
+            completed->sheet.rail(event.parameter))).Vertex();
+        }
+      attachment.plainContact(0, 0, rail.s[0].surface, TopLoc_Location());
+      ASSERT_EQ(attachment.sideEdges(0, 0).size(), 2u);
+      for (const auto& interval : intervals)
+      {
+        EXPECT_TRUE(TopExp::FirstVertex(interval.edge).IsSame(interval.ends[0].vertex));
+        EXPECT_TRUE(TopExp::LastVertex(interval.edge).IsSame(interval.ends[1].vertex));
+        double first, last;
+        const auto curve = BRep_Tool::Curve(interval.edge, first, last);
+        const auto pc = BRep_Tool::CurveOnSurface(interval.edge, rail.s[0].face, first, last);
+        ASSERT_FALSE(pc.IsNull());
+        for (int i = 0; i <= 16; ++i)
+        {
+          const double parameter = first + (last - first) * i / 16.;
+          const auto uv = pc->Value(parameter);
+          EXPECT_LE(curve->Value(parameter).Distance(
+                      rail.s[0].surface->Value(uv.X(), uv.Y())), tol::length);
+        }
+      }
+    }
 }
