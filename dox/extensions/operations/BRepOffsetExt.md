@@ -478,3 +478,22 @@ Exact versus approximated offsets: [PMC09 §11.3.7]. A continuous contact constr
 ownership and endpoint compatibility; the initial-component assumptions of [Mukundan04 §1, 2.2, 4] are not
 supplied by an independently continued approximate contact, and neither the reference observation nor the
 finite-point bound closes that problem.
+
+### Analytic images of affine surface trims
+
+Clearance query copies retain a line or circle for an affine, axis-aligned pcurve on an elementary carrier.
+The spatial curve uses the complete image interval of that pcurve, independently of its inherited edge
+parameter. The UV trim stays unchanged. Other pcurves keep the general surface-curve construction.
+
+The image interval is enclosed by outward-rounded evaluation of its affine endpoints. **Derived here:** an
+iso of an elementary carrier has coefficients `A+B*t` or `A+B*cos(t)+C*sin(t)`. Interval coefficient differences
+bound its discrepancy from the constructed line or circle over the whole image interval; endpoint-enclosure
+width times a speed bound also covers the small extra interval, in both set-distance directions. Trigonometric
+coefficients use interval range reduction and the sine/cosine series through degrees 49/48, with their next
+absolute terms enclosing the alternating tails on `[-4,4]`; `4^50/50!` is below binary64 epsilon squared.
+The series are [NIST DLMF, Olver et al., 2010, section 4.19, equations 1-2](https://dlmf.nist.gov/4.19).
+
+An analytic image is used only when this entire error is no larger than the existing one-tenth-confusion
+trim allowance. The two-trim distance deduction and opening-exclusion margins already cover that allowance
+and are unchanged. This certifies the query representation, not the accuracy of the inherited extremum solver.
+It removes no region or distance query and changes no result geometry.

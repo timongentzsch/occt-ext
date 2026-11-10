@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only WITH OCCT-exception-1.0
 
 #include <BRepOffsetExt_Parts.hxx>
+#include <BRepOffsetExt_Trim.hxx>
 
 #include <BRepSurfaceExt_FaceSeparation.hxx>
 
@@ -102,6 +103,14 @@ TopoDS_Shape surfaceTrims(const TopoDS_Shape& input)
       };
       move(a, first);
       move(b, last);
+      if (const auto image = isoTrimImage(support, on, first, last, 0.1 * Precision::Confusion()))
+      {
+        builder.UpdateEdge(edge, image->curve, Precision::Confusion());
+        builder.SameRange(edge, false);
+        builder.SameParameter(edge, false);
+        builder.Range(edge, image->first, image->last, true);
+        continue;
+      }
       const Handle(Geom2dAdaptor_Curve) curve2d = new Geom2dAdaptor_Curve(on, first, last);
       const Handle(GeomAdaptor_Surface) surface = new GeomAdaptor_Surface(support);
       Adaptor3d_CurveOnSurface          trim(curve2d, surface);

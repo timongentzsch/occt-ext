@@ -18,5 +18,7 @@ set(OCCT_BRepOffsetExt_FILES
   BRepOffsetExt_Solid.cxx
   BRepOffsetExt_Solid.hxx
   BRepOffsetExt_Thicken.cxx
+  BRepOffsetExt_Trim.cxx
+  BRepOffsetExt_Trim.hxx
   BRepOffsetExt_TopologyCleanup.cxx
 )

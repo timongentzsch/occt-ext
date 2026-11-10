@@ -12,6 +12,11 @@
 #include <NCollection_IndexedDataMap.hxx>
 #include <gp_Ax2.hxx>
 #include <BRepOffsetExt_Parts.hxx>
+#include <BRepOffsetExt_Trim.hxx>
+#include <Geom_Plane.hxx>
+#include <Geom_SphericalSurface.hxx>
+#include <Geom2d_Line.hxx>
+#include <GeomAdaptor_Curve.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <Geom_BezierCurve.hxx>
@@ -1312,4 +1317,80 @@ TEST(BRepOffsetExt, ContactShellRetainsUnchangedFaceOrientations)
             checkContactBoundaryLifts(result, bound);
           }
       }
+}
+
+// The image of an affine iso trim depends on its coordinate endpoints, not on
+// the inherited edge parameter. Compare with direct support evaluation, at
+// scales and poses that exercise coefficient rounding as well as both senses.
+TEST(BRepOffsetExt, AnalyticTrimImagesEncloseTheFullAffineParameterImage)
+{
+  for (double scale : {0.01, 1.0, 100.0})
+    for (bool turned : {false, true})
+    {
+      const gp_Ax3                            axes(gp_Pnt(13 * scale, -7 * scale, 19 * scale),
+                                                   turned ? gp_Dir(1, 2, 3) : gp::DZ());
+      const std::vector<Handle(Geom_Surface)> supports{
+        new Geom_Plane(axes),
+        new Geom_CylindricalSurface(axes, 2 * scale),
+        new Geom_ConicalSurface(axes, 0.4, 2 * scale),
+        new Geom_SphericalSurface(axes, 2 * scale),
+        new Geom_ToroidalSurface(axes, 4 * scale, scale)};
+      for (const auto& support : supports)
+        for (bool uIso : {false, true})
+          for (double sense : {-1.0, 1.0})
+          {
+            const Handle(Geom2d_Curve) pcurve =
+              new Geom2d_Line(uIso ? gp_Pnt2d(0.7, -0.2) : gp_Pnt2d(-0.2, 0.7),
+                              uIso ? gp_Dir2d(0, sense) : gp_Dir2d(sense, 0));
+            const double first = -0.5, last = 0.8;
+            const auto   image = BRepExt::isoTrimImage(support, pcurve, first, last, 1e-8);
+            ASSERT_TRUE(image.has_value());
+            EXPECT_TRUE(GeomAdaptor_Curve(image->curve).GetType() == GeomAbs_Line
+                        || GeomAdaptor_Curve(image->curve).GetType() == GeomAbs_Circle);
+            EXPECT_LE(image->error, 1e-8);
+            for (int i = 0; i <= 32; ++i)
+            {
+              const double t  = first + (last - first) * i / 32;
+              const auto   uv = pcurve->Value(t);
+              const double at = uIso ? uv.Y() : uv.X();
+              EXPECT_LE(image->first, at);
+              EXPECT_GE(image->last, at);
+              EXPECT_LE(image->curve->Value(at).Distance(support->Value(uv.X(), uv.Y())),
+                        image->error);
+            }
+          }
+    }
+}
+
+// Every point of the cylindrical patch is below z=2s, and its top arc
+// projects inside the plane z=3s: the distance is exactly s. The spatial
+// edge curves deliberately disagree with that trimmed support.
+TEST(BRepOffsetExt, ClearanceOfAnAnalyticTrimIgnoresItsDisplacedSpatialCurve)
+{
+  for (double scale : {0.1, 1.0, 10.0})
+  {
+    const Handle(Geom_Surface) support =
+      new Geom_CylindricalSurface(gp_Ax3(gp::Origin(), gp::DZ()), 2 * scale);
+    const auto source =
+      BRepBuilderAPI_MakeFace(support, 0.7, 1.4, -0.5 * scale, 2 * scale, Precision::Confusion())
+        .Face();
+    const auto   target = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 3 * scale), gp::DZ()),
+                                                  -3 * scale,
+                                                  3 * scale,
+                                                  -3 * scale,
+                                                  3 * scale)
+                            .Face();
+    BRep_Builder builder;
+    for (TopExp_Explorer e(source, TopAbs_EDGE); e.More(); e.Next())
+    {
+      const auto edge = TopoDS::Edge(e.Current());
+      double     first, last;
+      const auto curve = Handle(Geom_Curve)::DownCast(BRep_Tool::Curve(edge, first, last)->Copy());
+      curve->Translate(gp_Vec(0, 0, 0.25 * scale));
+      builder.UpdateEdge(edge, curve, 0.3 * scale);
+    }
+    const auto measured = BRepExt::clearance({target}, source, {}, 0, 0.9 * scale);
+    EXPECT_TRUE(measured.satisfies(0.9 * scale)) << measured.issue;
+    EXPECT_NEAR(measured.minimum, scale, Precision::Confusion());
+  }
 }
