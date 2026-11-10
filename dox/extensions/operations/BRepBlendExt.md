@@ -1713,6 +1713,11 @@ event, rather than from every root on an incident infinite plane. This preserves
 ordinary four-sided occurrences, face-growth events and encounters with another
 selected rail before completing a carrier for a same-contact end.
 
+At a new split vertex, the original face's parameter port is the projection of
+that shared vertex onto the exact surface. The inherited edge pcurve supplies the
+periodic chart occurrence. Its approximation error is not added to the position
+of the new port; original edge tolerances and geometry remain unchanged.
+
 The internal `completeCarrier` construction retains the solved support chart
 while continuing a regular constant-distance branch to finite support
 restrictions. Each terminal ball solves the offset-equality equations together

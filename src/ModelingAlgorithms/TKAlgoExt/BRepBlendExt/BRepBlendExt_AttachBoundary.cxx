@@ -535,8 +535,17 @@ void Attach::installBoundaries()
             double a, b;
             BRep_Tool::Range(parts[j], a, b);
             to = nodes.size();
-            nodes.push_back({TopExp::LastVertex(parts[j], true),
-                             pc->Value(parts[j].Orientation() == TopAbs_FORWARD ? b : a)});
+            const auto vertex = TopExp::LastVertex(parts[j], true);
+            const auto inherited = pc->Value(parts[j].Orientation() == TopAbs_FORWARD ? b : a);
+            // The new event is an exact surface point. The inherited edge pcurve
+            // supplies its chart period, not its geometric position: that pcurve
+            // may have the larger approximation tolerance of the original edge.
+            GeomAPI_ProjectPointOnSurf projection(BRep_Tool::Pnt(vertex), surface);
+            if (!projection.NbPoints() || projection.LowerDistance() > tolerance)
+              fail(op, no_solution, "a boundary event misses its original surface", {vertex});
+            double u, v;
+            projection.LowerDistanceParameters(u, v);
+            nodes.push_back({vertex, nearPeriod(gp_Pnt2d(u, v), inherited, surface)});
           }
           arcs.push_back({parts[j], at, to, true, !removed});
           at = to;
