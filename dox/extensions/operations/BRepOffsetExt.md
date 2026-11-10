@@ -525,8 +525,8 @@ cross-check of that measurement, no whole-domain existence or global-minimum cer
 
 Exact versus approximated offsets: [PMC09 §11.3.7]. A continuous contact construction still needs branch
 ownership and endpoint compatibility; the initial-component assumptions of [Mukundan04 §1, 2.2, 4] are not
-supplied by an independently continued approximate contact, and neither the reference observation nor the
-finite-point bound closes that problem.
+supplied by an independently continued approximate contact; neither observed contact agreement nor a
+finite-point bound proves branch ownership or endpoint compatibility.
 
 ### Analytic images of affine surface trims
 
