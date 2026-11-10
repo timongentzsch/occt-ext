@@ -35,47 +35,64 @@ void Attach::stopPlaces(int k)
   for (const auto& side : rail.s)
     if (side.cliffCurve || !side.trim.IsNull())
       return;
-  NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> visited;
   for (int end = 0; end < 2; ++end)
   {
     if (piece.joint[end].meets != Meets::Stop)
       continue;
     const auto edge = TopoDS::Edge(rail.edge.Oriented(TopAbs_FORWARD));
-    const auto vertex = end ? TopExp::LastVertex(edge) : TopExp::FirstVertex(edge);
+    auto vertex = end ? TopExp::LastVertex(edge) : TopExp::FirstVertex(edge);
+    if (!piece.stopVertex[end].IsNull())
+      vertex = piece.stopVertex[end];
     if (!edgesOfVertex.Contains(vertex))
       continue;
+    OneStop source;
+    source.from[0] = source.from[1] = vertex;
+    source.middle = piece.uAt(0) / 2 + piece.uAt(1) / 2;
     for (const auto& incident : edgesOfVertex.FindFromKey(vertex))
-      for (const auto& shape : facesOfEdge.FindFromKey(incident))
-      {
-        if (shape.IsSame(rail.s[0].face) || shape.IsSame(rail.s[1].face) || !visited.Add(shape))
-          continue;
-        const auto face = TopoDS::Face(shape);
-        const auto plane = Handle(Geom_Plane)::DownCast(placedFace(face).surface);
-        if (plane.IsNull())
-          continue;
+      if (!ownEdge(piece, incident))
         for (int side = 0; side < 2; ++side)
-        {
-          GeomAPI_IntCS intersection(piece.sheet.contact(side), plane);
-          for (int i = 1; intersection.IsDone() && i <= intersection.NbPoints(); ++i)
-          {
-            double a, b, t;
-            intersection.Parameters(i, a, b, t);
-            const double u = (t - piece.sheet.alpha) / piece.sheet.beta;
-            if (u < 0 || u > 1)
-              continue;
-            const auto trace = tracePlaneEnd(rail, plane->Pln(), boundarySeed(piece, u),
-                                              side, rail.scale / 20);
-            // Incidence is determined by the exact section equations, not by a missing
-            // opposite corner. An ordinary opposite-contact component keeps its curves.
-            if (trace.end == EndBoundaryTrace::End::Contact && trace.points.size() > 1
-                && trace.contactSide == side)
-            {
-              tracedBoundary(k);
-              return;
-            }
-          }
-        }
-      }
+          if (onFace(incident, rail.s[side].face))
+            source.beside[side] = TopoDS::Edge(incident);
+    if (source.beside[0].IsNull() || source.beside[1].IsNull())
+      continue;
+    const auto a = faceAcross(source.beside[0], rail.s[0].face);
+    const auto b = faceAcross(source.beside[1], rail.s[1].face);
+    if (!a.IsNull() && a.IsSame(b))
+    {
+      source.stop = a;
+      // These are the same source events subsequently used to construct the
+      // ordinary end's vertices, curves and ordered graph occurrences.
+      if (simpleStop(k, end, source))
+        continue;
+    }
+    StopEnd plan{k, end, vertex};
+    plan.middle = source.middle;
+    plan.carried[0] = piece.sheet.rail(end == 0 ? 0 : plan.middle);
+    plan.carried[1] = piece.sheet.rail(end == 0 ? plan.middle : 1);
+    for (int side = 0; side < 2; ++side)
+      walkSupport(plan, side);
+    stopWalks.insert_or_assign(std::pair{k, end}, plan);
+    // The source walk owns the finite-face component. An open contact can be
+    // paired with the other contact, or the section can return to that same
+    // contact. Its exact trace distinguishes those incidences before attachment.
+    const int open = plan.walk[0].open.IsNull() ? 1 : 0, side = 1 - open;
+    if (plan.walk[open].open.IsNull() || !plan.walk[side].open.IsNull()
+        || plan.walk[side].crossed.IsNull() || plan.walk[0].continued
+        || plan.walk[1].continued || !plan.walk[side].level.IsNull())
+      continue;
+    const auto face = plan.walk[side].faces.back();
+    const auto plane = Handle(Geom_Plane)::DownCast(placedFace(face).surface);
+    if (plane.IsNull())
+      continue;
+    const auto trace = tracePlaneEnd(rail, plane->Pln(),
+                                      boundarySeed(piece, plan.walk[side].at.first),
+                                      side, rail.scale / 20);
+    if (trace.end == EndBoundaryTrace::End::Contact && trace.points.size() > 1
+        && trace.contactSide == side)
+    {
+      tracedBoundary(k);
+      return;
+    }
   }
 }
 
@@ -84,6 +101,10 @@ void Attach::tracedBoundary(int k)
   const auto completed = completeCarrier(pieces[k]);
   if (!completed)
     fail(op, no_solution, "the retained end component has no complete regular carrier", {pieces[k].rail.edge});
+  contactCrossings.erase(std::remove_if(contactCrossings.begin(), contactCrossings.end(),
+      [k](const auto& event) { return event.piece == k; }), contactCrossings.end());
+  stopWalks.erase({k, 0});
+  stopWalks.erase({k, 1});
   pieces[k] = *completed;
   const Piece& piece = pieces[k];
   const Rail& rail = piece.rail;

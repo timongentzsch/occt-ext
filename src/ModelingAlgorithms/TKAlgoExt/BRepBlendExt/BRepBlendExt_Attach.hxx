@@ -189,6 +189,20 @@ struct Attach
     int           cliff  = -1;
   };
 
+  struct ContactCrossing
+  {
+    int piece, end, side;
+    TopoDS_Edge edge;
+    TopoDS_Face face;
+    std::optional<Meeting> at;
+  };
+  mutable std::vector<ContactCrossing> contactCrossings;
+  //! The retained contact's crossing of an oriented original-face edge, shared by
+  //! incidence planning and the construction of that same boundary vertex.
+  std::optional<Meeting> contactCrossing(int k, int end, int side,
+                                        const TopoDS_Edge& edge,
+                                        const TopoDS_Face& face) const;
+
   //! The steps of stop: the face across both sides, with the slivers it swallows.
   void stopFace(int k, int end, const TopoDS_Vertex& vertex, OneStop& one);
   //! Where a contact leaves its support for the stop face before the end's half of the piece.
@@ -294,6 +308,8 @@ struct Attach
     std::vector<bool>          touched;
     std::vector<TopoDS_Edge>   made;
   };
+
+  std::map<std::pair<int, int>, StopEnd> stopWalks;
 
   //! The face across `edge` from `face`, else null.
   TopoDS_Face faceAcross(const TopoDS_Shape& edge, const TopoDS_Shape& face) const;

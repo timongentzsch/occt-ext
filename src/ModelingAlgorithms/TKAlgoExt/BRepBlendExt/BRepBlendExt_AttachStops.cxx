@@ -511,6 +511,22 @@ std::optional<Meeting> Attach::earlyCrossing(int k, int end, int side, const One
   return found;
 }
 
+std::optional<Meeting> Attach::contactCrossing(int k, int end, int side,
+                                              const TopoDS_Edge& edge,
+                                              const TopoDS_Face& face) const
+{
+  for (const auto& event : contactCrossings)
+    if (event.piece == k && event.end == end && event.side == side
+        && event.edge.IsEqual(edge) && event.face.IsEqual(face))
+      return event.at;
+  const Piece& piece = pieces[k];
+  const double middle = piece.uAt(0) / 2 + piece.uAt(1) / 2;
+  const auto at = crossing(piece.fitted.contact[side], end == 0 ? 0 : middle,
+                           end == 0 ? middle : 1, piece.uAt(end), edge, face);
+  contactCrossings.push_back({k, end, side, edge, face, at});
+  return at;
+}
+
 bool Attach::simpleStop(int k, int end, const OneStop& s) const
 {
   const Piece&         piece  = pieces[k];
@@ -524,12 +540,7 @@ bool Attach::simpleStop(int k, int end, const OneStop& s) const
   bool simple = true;
   for (int side = 0; side < 2 && simple; ++side)
     simple = side == cliff || !rail.s[side].trim.IsNull()
-             || crossing(piece.fitted.contact[side],
-                         end == 0 ? 0 : middle,
-                         end == 0 ? middle : 1,
-                         piece.uAt(end),
-                         beside[side],
-                         rail.s[side].face)
+             || contactCrossing(k, end, side, beside[side], rail.s[side].face)
              || beyond(piece.fitted.contact[side],
                        end == 0 ? 0 : middle,
                        end == 0 ? middle : 1,
@@ -813,12 +824,7 @@ void Attach::stopCorner(int                  k,
     cliffStopCorner(k, end, side, vertex, s, cornerOnStop);
     return;
   }
-  auto found = crossing(piece.fitted.contact[side],
-                        end == 0 ? 0 : middle,
-                        end == 0 ? middle : 1,
-                        piece.uAt(end),
-                        beside[side],
-                        rail.s[side].face);
+  auto found = contactCrossing(k, end, side, beside[side], rail.s[side].face);
   if (!found)
     found = beyond(piece.fitted.contact[side],
                    end == 0 ? 0 : middle,
@@ -1461,12 +1467,7 @@ void Attach::walkSupport(StopEnd& st, int side)
       refuse("the faces at an end of the edge do not stop it");
     if (w.faces.empty())
       w.faces.push_back(beyond);
-    const auto found = crossing(piece.fitted.contact[side],
-                                end == 0 ? 0 : middle,
-                                end == 0 ? middle : 1,
-                                piece.uAt(end),
-                                edge,
-                                own);
+    const auto found = contactCrossing(st.k, end, side, edge, own);
     // A sharp stop surface can meet the contact past this edge's vertex. Searching
     // the whole carried contact is necessary: a stop may consume over half its span.
     if (!found && step == 0 && meets(1 - side, beyond))
@@ -2126,8 +2127,12 @@ void Attach::stops(int k, int end, const TopoDS_Vertex& vertex)
   st.middle     = piece.uAt(0) / 2 + piece.uAt(1) / 2;
   st.carried[0] = piece.sheet.rail(end == 0 ? 0 : st.middle);
   st.carried[1] = piece.sheet.rail(end == 0 ? st.middle : 1);
-  for (int side = 0; side < 2; ++side)
-    walkSupport(st, side);
+  const auto planned = stopWalks.find({k, end});
+  if (planned != stopWalks.end() && planned->second.vertex.IsSame(vertex))
+    st = planned->second;
+  else
+    for (int side = 0; side < 2; ++side)
+      walkSupport(st, side);
   // All the stop faces in order from side 0's crossing to side 1's.
   stopFaces(st);
   if (!st.walk[0].open.IsNull() || !st.walk[1].open.IsNull())
