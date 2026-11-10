@@ -9,6 +9,8 @@ set(OCCT_BRepBlendExt_FILES
   BRepBlendExt_AttachStops.cxx
   BRepBlendExt_Ball.cxx
   BRepBlendExt_Convexity.cxx
+  BRepBlendExt_EndBoundary.cxx
+  BRepBlendExt_EndBoundary.hxx
   BRepBlendExt_Fit.cxx
   BRepBlendExt_Internal.hxx
   BRepBlendExt_Operation.cxx

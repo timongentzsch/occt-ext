@@ -1633,3 +1633,37 @@ Peters, *Patching Catmull-Clark meshes*, SIGGRAPH (2000).
 Moreton and Séquin, *Functional optimization for fair surface design*, SIGGRAPH (1992).
 Dennis and Schnabel, *Numerical Methods for Unconstrained Optimization and Nonlinear Equations*,
 Prentice-Hall (1983).
+
+### Experimental planar boundary curves on exact sections
+
+For constant-radius sections on two regular surfaces, the equality of their offset
+centres gives three equations in four support parameters. A section point in a plane
+gives a fourth equation, with the transverse section parameter as a fifth unknown.
+At rank four the common zero set is locally a curve, by the implicit function theorem.
+Continuation in these five parameters permits an end curve to return to the same
+contact. Contact and finite-carrier restrictions are additional event equations;
+simultaneous events retain all their labels. At a smooth support partition, a new
+support chart can continue the curve from the shared event and its incoming direction.
+These constructions are derived.
+
+`tracePlaneEnd` is an experimental evaluator, not yet called by solid attachment.
+It evaluates the original support surfaces, uses their analytic offset Jacobian,
+and corrects the section/plane residual directly. Centred differences guide the
+section derivative; a predictor-deviation fraction of one eighth controls sampling.
+Those are numerical choices, not existence or approximation certificates. The
+output is corrected points on a seeded component, not a certified spline edge.
+Component discovery, global exposure, common edge/pcurves and a face-boundary graph
+remain open. Variable-radius laws, cliff contacts and section-transition windows
+are outside this prototype.
+
+| Generated boundary checks | Configurations | Result |
+| --- | ---: | --- |
+| Sphere/cylinder, two radii and two plane positions, circular and curvature-continuous laws, three scales and two poses | 48 | Both endpoints on one contact; independent plane/contact equations within 1e-9 of unit size, and the torus equation for circular sections |
+| Same construction over two finite rational circular profiles, circular and curvature-continuous laws, three scales and two poses | 12 | Shared support event and final contact; both carrier/contact labels retained at their common endpoint |
+
+The exposure of a circular sweep is a separate requirement: points lying inside
+any other swept ball must be removed. Adsul, Machchhar and Sohoni, *Local and Global
+Analysis of Parametric Solid Sweeps* (2013), section 3, Definitions 21, 23 and 24,
+distinguish the contact set, its trim set and the exposed envelope
+([paper](https://arxiv.org/html/1305.7351v1)). The numerical boundary tracer supplies
+no global occupancy proof or closed-solid construction.

@@ -10,6 +10,9 @@
 
 #include <BRepBlendExt_Request.hxx>
 #include <BRepBlendExt_Smooth.hxx>
+#include <BRepBlendExt_EndBoundary.hxx>
+#include <Geom_SphericalSurface.hxx>
+#include <Geom_CylindricalSurface.hxx>
 #include <BRepBlendExt_Internal.hxx>
 #include <GeomConvert.hxx>
 #include <Geom_Circle.hxx>
@@ -2399,5 +2402,168 @@ TEST(BRepBlendExt, ContinuedSectionsCarryTheirCompleteSupportBranch)
           for (double weight : mixed.weights)
             EXPECT_GT(weight, 0);
         }
+      }
+}
+
+TEST(BRepBlendExt, PlaneBoundaryReturnsToOneContactAcrossPosesAndScales)
+{
+  using namespace BRepExt::blending::detail;
+  // A sphere and coaxial cylinder have a circular offset intersection. A plane
+  // between the contacts' radial distances cuts an arc with both ends on the
+  // cylinder contact. Its circular section is independently a torus meridian.
+  for (const double scale : {0.001, 1.0, 1000.0})
+    for (const bool moved : {false, true})
+      for (const double radius : {0.2, 0.35})
+        for (const double fraction : {0.25, 0.75})
+          for (const auto law : {BRepExt::blending::Law::Conic, BRepExt::blending::Law::G2})
+          {
+            SCOPED_TRACE(testing::Message() << scale << " " << moved << " " << radius << " "
+                                            << fraction << " " << int(law));
+            const double sphereRadius = 3, cylinderRadius = 2;
+            const double a = cylinderRadius - radius, b = sphereRadius - radius;
+            const double z = std::sqrt(b * b - a * a), inner = a * sphereRadius / b;
+            const double cut   = inner + fraction * (cylinderRadius - inner);
+            const double angle = std::acos(cut / cylinderRadius);
+            gp_Trsf      transform;
+            transform.SetScale(gp_Pnt(), scale);
+            if (moved)
+            {
+              gp_Trsf rotation, translation;
+              rotation.SetRotation(gp_Ax1(gp_Pnt(), gp_Dir(1, 2, 3)), 0.73);
+              translation.SetTranslation(gp_Vec(17 * scale, -23 * scale, 31 * scale));
+              transform = translation * rotation * transform;
+            }
+            Rail rail;
+            rail.law          = law;
+            rail.scale        = radius * scale;
+            rail.magnitude    = 100 * scale;
+            rail.s[0].surface = new Geom_SphericalSurface(gp_Ax3(), sphereRadius);
+            rail.s[1].surface = new Geom_CylindricalSurface(gp_Ax3(), cylinderRadius);
+            for (auto& side : rail.s)
+            {
+              side.surface->Transform(transform);
+              side.distance = radius * scale;
+            }
+            Station seed;
+            seed.uv[0][0]      = angle;
+            seed.uv[0][1]      = std::asin(z / b);
+            seed.uv[1][0]      = angle;
+            seed.uv[1][1]      = z * scale;
+            const gp_Pln plane = gp_Pln(gp_Pnt(cut, 0, 0), gp_Dir(1, 0, 0)).Transformed(transform);
+            const auto   curve = tracePlaneEnd(rail, plane, seed, 1, radius * scale / 10);
+            ASSERT_EQ(curve.end, EndBoundaryTrace::End::Contact);
+            ASSERT_EQ(curve.boundaryCoordinate, 4);
+            ASSERT_GT(curve.points.size(), 2u);
+            EXPECT_NEAR(curve.points.front().parameters[4], 1, 1e-10);
+            EXPECT_NEAR(curve.points.back().parameters[4], 1, 1e-10);
+            const gp_Pnt first =
+              gp_Pnt(cut, cylinderRadius * std::sin(angle), z).Transformed(transform);
+            const gp_Pnt last =
+              gp_Pnt(cut, -cylinderRadius * std::sin(angle), z).Transformed(transform);
+            EXPECT_LE(first.Distance(curve.points.front().point), 1e-8 * scale);
+            EXPECT_LE(last.Distance(curve.points.back().point), 1e-8 * scale);
+            const auto undo = transform.Inverted();
+            for (const auto& point : curve.points)
+            {
+              const auto c = point.centre.Transformed(undo), p = point.point.Transformed(undo);
+              EXPECT_NEAR(c.Z(), z, 1e-9);
+              EXPECT_NEAR(std::hypot(c.X(), c.Y()), a, 1e-9);
+              EXPECT_NEAR(c.Distance(gp_Pnt()), b, 1e-9);
+              EXPECT_NEAR(p.X(), cut, 1e-9);
+              for (int side = 0; side < 2; ++side)
+              {
+                const auto foot = point.contact[side].Transformed(undo);
+                EXPECT_NEAR(foot.Distance(c), radius, 1e-9);
+                if (side == 0)
+                  EXPECT_NEAR(foot.Distance(gp_Pnt()), sphereRadius, 1e-9);
+                else
+                  EXPECT_NEAR(std::hypot(foot.X(), foot.Y()), cylinderRadius, 1e-9);
+              }
+              if (law == BRepExt::blending::Law::Conic)
+                EXPECT_NEAR(std::hypot(std::hypot(p.X(), p.Y()) - a, p.Z() - z), radius, 1e-9);
+              EXPECT_GE(point.parameters[4], -1e-10);
+              EXPECT_LE(point.parameters[4], 1 + 1e-10);
+            }
+          }
+}
+
+TEST(BRepBlendExt, PlaneBoundaryContinuesAcrossASmoothFiniteSupport)
+{
+  using namespace BRepExt::blending::detail;
+  for (const double scale : {0.001, 1.0, 1000.0})
+    for (const bool moved : {false, true})
+      for (const auto law : {BRepExt::blending::Law::Conic, BRepExt::blending::Law::G2})
+      {
+        SCOPED_TRACE(testing::Message() << scale << " " << moved << " " << int(law));
+        const double radius = .25, a = 2 - radius, b = 3 - radius, z = std::sqrt(b * b - a * a);
+        const double cut = (2 + a * 3 / b) / 2, angle = std::acos(cut / 2);
+        gp_Trsf      transform;
+        transform.SetScale(gp_Pnt(), scale);
+        if (moved)
+        {
+          gp_Trsf rotation, translation;
+          rotation.SetRotation(gp_Ax1(gp_Pnt(), gp_Dir(1, 2, 3)), .73);
+          translation.SetTranslation(gp_Vec(17 * scale, -23 * scale, 31 * scale));
+          transform = translation * rotation * transform;
+        }
+        Rail rail;
+        rail.law          = law;
+        rail.scale        = radius * scale;
+        rail.magnitude    = 100 * scale;
+        rail.s[0].surface = new Geom_SphericalSurface(gp_Ax3(), 3);
+        rail.s[0].surface->Transform(transform);
+        for (auto& side : rail.s)
+          side.distance = radius * scale;
+        const auto wall = [&](double start, double finish) {
+          Handle(Geom_Curve) arc =
+            new Geom_TrimmedCurve(new Geom_Circle(gp_Ax2(), 2), start, finish);
+          Handle(Geom_Surface) surface =
+            new Geom_SurfaceOfLinearExtrusion(GeomConvert::CurveToBSplineCurve(arc),
+                                              gp_Dir(0, 0, 1));
+          surface->Transform(transform);
+          return surface;
+        };
+        rail.s[1].surface = wall(0, 2 * angle);
+        Station seed;
+        seed.uv[0][0] = angle;
+        seed.uv[0][1] = std::asin(z / b);
+        const gp_Pnt foot =
+          gp_Pnt(2 * std::cos(angle), 2 * std::sin(angle), z).Transformed(transform);
+        GeomAPI_ProjectPointOnSurf onto(foot, rail.s[1].surface);
+        onto.LowerDistanceParameters(seed.uv[1][0], seed.uv[1][1]);
+        const gp_Pln plane = gp_Pln(gp_Pnt(cut, 0, 0), gp_Dir(1, 0, 0)).Transformed(transform);
+        const auto   first = tracePlaneEnd(rail, plane, seed, 1, radius * scale / 10);
+        ASSERT_EQ(first.end, EndBoundaryTrace::End::SurfaceBoundary);
+        ASSERT_EQ(first.boundaryCoordinate, 2);
+        ASSERT_GT(first.points.size(), 2u);
+        const auto&  joint = first.points.back();
+        const gp_Vec direction(first.points[first.points.size() - 2].point, joint.point);
+        rail.s[1].surface = wall(-angle, 0);
+        for (int side = 0; side < 2; ++side)
+        {
+          GeomAPI_ProjectPointOnSurf project(joint.contact[side], rail.s[side].surface);
+          project.LowerDistanceParameters(seed.uv[side][0], seed.uv[side][1]);
+        }
+        const auto second =
+          tracePlaneEnd(rail, plane, seed, joint.parameters[4], radius * scale / 10, direction);
+        ASSERT_EQ(second.end, EndBoundaryTrace::End::Contact);
+        EXPECT_NE(std::find(second.boundaryCoordinates.begin(), second.boundaryCoordinates.end(), 2),
+                  second.boundaryCoordinates.end());
+        EXPECT_NE(std::find(second.boundaryCoordinates.begin(), second.boundaryCoordinates.end(), 4),
+                  second.boundaryCoordinates.end());
+        ASSERT_GT(second.points.size(), 2u);
+        EXPECT_LE(joint.point.Distance(second.points.front().point), 1e-8 * scale);
+        const gp_Pnt finish = gp_Pnt(cut, -2 * std::sin(angle), z).Transformed(transform);
+        EXPECT_LE(finish.Distance(second.points.back().point), 1e-8 * scale);
+        for (const auto* trace : {&first, &second})
+          for (const auto& p : trace->points)
+          {
+            EXPECT_LE(p.ballResidual, 1e-9 * scale);
+            EXPECT_LE(p.planeResidual, 1e-9 * scale);
+            const auto q = p.point.Transformed(transform.Inverted());
+            EXPECT_NEAR(q.X(), cut, 1e-9);
+            if (law == BRepExt::blending::Law::Conic)
+              EXPECT_NEAR(std::hypot(std::hypot(q.X(), q.Y()) - a, q.Z() - z), radius, 1e-9);
+          }
       }
 }
