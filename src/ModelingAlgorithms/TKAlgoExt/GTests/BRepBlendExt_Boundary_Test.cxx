@@ -13,6 +13,8 @@
 #include <BRepTools.hxx>
 #include <gtest/gtest.h>
 #include <sstream>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepCheck_Analyzer.hxx>
 
 using namespace BRepExt::blending::detail;
 
@@ -147,6 +149,57 @@ TEST(BRepBlendExt, BoundaryCurveFitsSameContactAcrossPosesAndScales)
     }
 }
 
+TEST(BRepBlendExt, SharedSectionEnclosesBothParameterCharts)
+{
+  for (double scale : {.1, 1., 10.})
+    for (bool moved : {false, true})
+    {
+      gp_Trsf pose;
+      pose.SetScale(gp::Origin(), scale);
+      if (moved)
+      {
+        gp_Trsf rotation, translation;
+        rotation.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), .73);
+        translation.SetTranslation(gp_Vec(17 * scale, -23 * scale, 31 * scale));
+        pose = translation * rotation * pose;
+      }
+      auto surface = paraboloid();
+      surface->Transform(pose);
+      auto swapped = Handle(Geom_BSplineSurface)::DownCast(surface->Copy());
+      swapped->ExchangeUV();
+      std::array<Sheet, 2> sheets;
+      sheets[0].surface = surface;
+      sheets[1].surface = swapped;
+      sheets[1].swapped = true;
+      for (auto& sheet : sheets)
+      {
+        sheet.across[0] = 0;
+        sheet.across[1] = 1;
+      }
+      const double u = .37, first = .13, last = .89;
+      const auto   a      = BRepBuilderAPI_MakeVertex(surface->Value(u, first)).Vertex();
+      const auto   b      = BRepBuilderAPI_MakeVertex(surface->Value(u, last)).Vertex();
+      const auto   shared = sharedSectionCurve(sheets, {u, u}, first, last, a, b);
+      ASSERT_TRUE(shared);
+      EXPECT_LE(shared->gaps[0], tol::length);
+      EXPECT_LE(shared->gaps[1], tol::length);
+      double     f, l;
+      const auto curve = BRep_Tool::Curve(shared->edge, f, l);
+      for (int side = 0; side < 2; ++side)
+      {
+        const auto pc = BRep_Tool::CurveOnSurface(shared->edge, sheets[side].surface, {}, f, l);
+        ASSERT_FALSE(pc.IsNull());
+        for (int i = 0; i <= 512; ++i)
+        {
+          const double t  = first + (last - first) * i / 512.;
+          const auto   uv = pc->Value(t);
+          EXPECT_LE(curve->Value(t).Distance(sheets[side].surface->Value(uv.X(), uv.Y())),
+                    side ? shared->gaps[1] : shared->gaps[0]);
+        }
+      }
+    }
+}
+
 TEST(BRepBlendExt, BoundaryGraphPreservesOccurrencesAndSeparateSeamPorts)
 {
   const auto    a       = BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(1, 0, 0)).Edge(),
@@ -272,4 +325,168 @@ TEST(BRepBlendExt, CompleteCarrierRetainsContactChartsAtFiniteRestrictions)
         }
       }
     }
+}
+
+TEST(BRepBlendExt, CarrierContinuationRetainsSharedBallAcrossSupportCharts)
+{
+  for (double scale : {.1, 1., 10.})
+    for (bool moved : {false, true})
+      for (auto law : {BRepExt::blending::Law::Conic, BRepExt::blending::Law::G2})
+      {
+        if (law == BRepExt::blending::Law::G2)
+        {
+          // A build without a supplied section policy has no G2 section to trace.
+          try { (void)BREPBLENDEXT_POLICY::g2Poles(.5); }
+          catch (const BRepExt::Failure&) { continue; }
+        }
+        SCOPED_TRACE(testing::Message() << scale << " " << moved << " " << int(law));
+        gp_Trsf pose;
+        if (moved)
+        {
+          pose.SetRotation(gp_Ax1(gp::Origin(), gp_Dir(1, 2, 3)), .73);
+          pose.SetTranslationPart(gp_Vec(17 * scale, -23 * scale, 31 * scale));
+        }
+        Piece piece;
+        Rail& rail = piece.rail;
+        rail.first = rail.from = -scale;
+        rail.last = rail.to = scale;
+        rail.scale = .2 * scale;
+        rail.magnitude = 100 * scale;
+        rail.law = law;
+        Handle(Geom_Curve) source = new Geom_Line(gp::Origin(), gp::DX());
+        source->Transform(pose);
+        rail.edge = BRepBuilderAPI_MakeEdge(source, -scale, scale);
+        rail.curve.Initialize(rail.edge);
+        const auto wall = [&](double first, double last) {
+          NCollection_Array2<gp_Pnt> poles(1, 2, 1, 2);
+          NCollection_Array1<double> uk(1, 2), vk(1, 2);
+          NCollection_Array1<int> mult(1, 2);
+          uk(1) = first; uk(2) = last;
+          vk(1) = -scale; vk(2) = scale;
+          mult.Init(2);
+          for (int i = 1; i <= 2; ++i)
+            for (int j = 1; j <= 2; ++j)
+              poles(i, j) = gp_Pnt(uk(i), 0, vk(j)).Transformed(pose);
+          return Handle(Geom_Surface)(new Geom_BSplineSurface(poles, uk, vk, mult, mult, 1, 1));
+        };
+        rail.s[0].surface = new Geom_Plane(gp_Pln(gp::Origin(), gp::DZ()).Transformed(pose));
+        rail.s[0].face = BRepBuilderAPI_MakeFace(rail.s[0].surface, -6 * scale, 6 * scale,
+                                               -2 * scale, 2 * scale, tol::length);
+        rail.s[1].surface = wall(-2 * scale, 2 * scale);
+        rail.s[1].face = BRepBuilderAPI_MakeFace(rail.s[1].surface, tol::length);
+        for (int side = 0; side < 2; ++side)
+        {
+          rail.s[side].distance = rail.scale;
+          NCollection_Array1<gp_Pnt2d> feet(1, 2);
+          NCollection_Array1<double> knots(1, 2);
+          NCollection_Array1<int> mult(1, 2);
+          knots(1) = 0; knots(2) = 1;
+          mult.Init(2);
+          feet(1) = gp_Pnt2d(-scale, side == 0 ? rail.scale : -rail.scale);
+          feet(2) = gp_Pnt2d(scale, feet(1).Y());
+          piece.fitted.contact[side] = new Geom2d_BSplineCurve(feet, knots, mult, 1);
+        }
+        const auto completed = completeCarrier(piece);
+        ASSERT_TRUE(completed);
+        for (int end = 0; end < 2; ++end)
+        {
+          const auto next = BRepBuilderAPI_MakeFace(
+            end ? wall(2 * scale, 4 * scale) : wall(-4 * scale, -2 * scale), tol::length).Face();
+          const auto continued = continueCarrier(*completed, end, 1, next);
+          ASSERT_TRUE(continued);
+          EXPECT_NEAR(continued->rail.spineLast, 2 * scale, 1e-8 * scale);
+          // Exact sheets can swap their axes and use an angular section parameter.
+          const auto a = completed->sheet.section(completed->sheet.rail(end));
+          const auto b = continued->sheet.section(continued->sheet.rail(1 - end));
+          for (int i = 0; i <= 32; ++i)
+          {
+            const double w = i / 32.;
+            EXPECT_LE(a->Value((1 - w) * completed->sheet.across[0] + w * completed->sheet.across[1]).Distance(
+              b->Value((1 - w) * continued->sheet.across[0] + w * continued->sheet.across[1])), tol::length);
+          }
+          Station oldEvent, newEvent;
+          for (int side = 0; side < 2; ++side)
+          {
+            auto uv = completed->fitted.contact[side]->Value(end);
+            oldEvent.uv[side][0] = uv.X(); oldEvent.uv[side][1] = uv.Y();
+            uv = continued->fitted.contact[side]->Value(1 - end);
+            newEvent.uv[side][0] = uv.X(); newEvent.uv[side][1] = uv.Y();
+          }
+          ASSERT_TRUE(contactAt(completed->rail, completed->rail.t(end), oldEvent));
+          ASSERT_TRUE(contactAt(continued->rail, continued->rail.t(1 - end), newEvent));
+          EXPECT_LE(oldEvent.centre.Distance(newEvent.centre), tol::length);
+          for (int side = 0; side < 2; ++side)
+            EXPECT_LE(oldEvent.foot[side].Distance(newEvent.foot[side]), tol::length);
+          for (int side = 0; side < 2; ++side)
+            for (int i = 0; i <= 32; ++i)
+            {
+              const auto uv = continued->fitted.contact[side]->Value(i / 32.);
+              EXPECT_LE(continued->sheet.contact(side)->Value(continued->sheet.rail(i / 32.)).Distance(
+                continued->rail.s[side].surface->Value(uv.X(), uv.Y())), tol::length);
+            }
+        }
+      }
+}
+
+// A common straight edge is represented with one or many spline spans. The
+// surfaces have an exact, constant second-form jump along it; knot insertion
+// must not turn a failed continuity claim into an accepted one.
+TEST(BRepBlendExt, CurvatureAcceptanceIsIndependentOfSeamPartition)
+{
+  for (double scale : {.1, 1., 10.})
+    for (double bend : {5e-5, 2.5e-4})
+      for (int spans : {1, 64})
+      {
+        BRepBuilderAPI_Sewing sew;
+        for (int side : {-1, 1})
+        {
+          NCollection_Array2<gp_Pnt> poles(1, 3, 1, 2);
+          for (int i = 1; i <= 3; ++i)
+            for (int j = 1; j <= 2; ++j)
+              poles(i, j) = gp_Pnt(side * (i - 1) * scale / 2, (j - 1) * scale,
+                                   side > 0 && i == 3 ? bend * scale / 2 : 0);
+          NCollection_Array1<double> knots(1, 2);
+          knots(1) = 0; knots(2) = 1;
+          NCollection_Array1<int> um(1, 2), vm(1, 2);
+          um.Init(3); vm.Init(2);
+          Handle(Geom_BSplineSurface) surface =
+            new Geom_BSplineSurface(poles, knots, knots, um, vm, 2, 1);
+          sew.Add(BRepBuilderAPI_MakeFace(surface, 1e-7).Face());
+        }
+        sew.Perform();
+        const auto body = sew.SewedShape();
+        ASSERT_TRUE(BRepCheck_Analyzer(body).IsValid());
+        NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                                   TopTools_ShapeMapHasher> faces;
+        TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, faces);
+        int shared = 0;
+        BRep_Builder builder;
+        for (int i = 1; i <= faces.Extent(); ++i)
+        {
+          const auto& on = faces.FindFromIndex(i);
+          if (on.Extent() != 2) continue;
+          ++shared;
+          const auto edge = TopoDS::Edge(faces.FindKey(i));
+          double first, last;
+          const auto old = BRep_Tool::Curve(edge, first, last);
+          NCollection_Array1<gp_Pnt> points(1, spans + 1);
+          NCollection_Array1<double> knots(1, spans + 1);
+          NCollection_Array1<int> mult(1, spans + 1);
+          for (int k = 1; k <= spans + 1; ++k)
+          {
+            knots(k) = first + (last - first) * (k - 1) / spans;
+            points(k) = old->Value(knots(k));
+            mult(k) = k == 1 || k == spans + 1 ? 2 : 1;
+          }
+          Handle(Geom_BSplineCurve) curve = new Geom_BSplineCurve(points, knots, mult, 1);
+          builder.UpdateEdge(edge, curve, BRep_Tool::Tolerance(edge));
+          builder.Continuity(edge, TopoDS::Face(on.First()), TopoDS::Face(on.Last()), GeomAbs_G2);
+        }
+        ASSERT_EQ(shared, 1);
+        ASSERT_TRUE(BRepCheck_Analyzer(body).IsValid());
+        if (bend <= limit::seamBend)
+          EXPECT_NO_THROW(BRepExt::blending::accepted("blend", body, body, scale));
+        else
+          EXPECT_THROW(BRepExt::blending::accepted("blend", body, body, scale), BRepExt::Failure);
+      }
 }

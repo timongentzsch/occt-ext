@@ -534,6 +534,8 @@ void Attach::plainInterval(int k, int side, ContactInterval& interval,
 
 void Attach::sideContact(int k, int side)
 {
+  if (retainedBoundaries[k])
+    return; // The graph has installed every retained interval, including an empty side.
   if (!contactEdge(k, side).IsNull())
     return; // one edge for parts of a split already made
   if (vanished(k))
@@ -725,7 +727,8 @@ void Attach::blendFaces()
   {
     // One face for the parts of an edge that a split joins, made at the first of them; none
     // for a blend that has no length.
-    if (pieces[k].joint[0].meets == Meets::Split || vanished(k))
+    if ((retainedBoundaries[k] && retainedBoundaries[k]->arcs.empty())
+        || pieces[k].joint[0].meets == Meets::Split || vanished(k))
       continue;
     std::vector<int> group = {k};
     while (pieces[group.back()].joint[1].meets == Meets::Split)
@@ -793,27 +796,26 @@ void Attach::continuity()
   // Across a joint where a support's second form jumps, the ball's path and so the sheet's
   // curvature jump with it: that joint is only G1 (the limit is the one blending::accepted holds
   // the rest to).
-  const auto supportBreaks = [&](int k, int end) {
-    const Piece& a     = pieces[k];
-    const auto&  joint = a.joint[end];
-    const Piece& b     = pieces[joint.piece];
-    for (int side = 0; side < 2; ++side)
-    {
-      const int other = joint.swapped ? 1 - side : side;
-      if (a.rail.s[side].cliffCurve || b.rail.s[other].cliffCurve)
-        continue;
-      const gp_Pnt2d ua = a.fitted.contact[side]->Value(end),
-                     ub = b.fitted.contact[other]->Value(joint.end);
-      Jet ja, jb;
-      if (!jetAt(a.rail.s[side], ua.X(), ua.Y(), ja) || !jetAt(b.rail.s[other], ub.X(), ub.Y(), jb))
-        return true;
-      const SurfaceJet here{op, ja.p, ja.du, ja.dv, ja.duu, ja.dvv, ja.duv, ja.n},
-        there{op, jb.p, jb.du, jb.dv, jb.duu, jb.dvv, jb.duv, jb.n};
-      if (bendDifference(here, there, ja.du.Normalized()).first * a.rail.scale > limit::seamBend)
-        return true;
-    }
-    return false;
-  };
+  const auto supportBreaks =
+    [&](const Piece& a, double end, const Piece& b, double otherEnd, bool swapped) {
+      for (int side = 0; side < 2; ++side)
+      {
+        const int other = swapped ? 1 - side : side;
+        if (a.rail.s[side].cliffCurve || b.rail.s[other].cliffCurve)
+          continue;
+        const gp_Pnt2d ua = a.fitted.contact[side]->Value(end),
+                       ub = b.fitted.contact[other]->Value(otherEnd);
+        Jet            ja, jb;
+        if (!jetAt(a.rail.s[side], ua.X(), ua.Y(), ja)
+            || !jetAt(b.rail.s[other], ub.X(), ub.Y(), jb))
+          return true;
+        const SurfaceJet here{op, ja.p, ja.du, ja.dv, ja.duu, ja.dvv, ja.duv, ja.n},
+          there{op, jb.p, jb.du, jb.dv, jb.duu, jb.dvv, jb.duv, jb.n};
+        if (bendDifference(here, there, ja.du.Normalized()).first * a.rail.scale > limit::seamBend)
+          return true;
+      }
+      return false;
+    };
   const auto record = [&](const TopoDS_Shape& edge, JoinRole role, int order) {
     if (!edge.IsNull())
       joins.push_back({edge, role, order});
@@ -825,6 +827,8 @@ void Attach::continuity()
   };
   for (int k = 0; k < n; ++k)
   {
+    if (retainedBoundaries[k] && retainedBoundaries[k]->arcs.empty())
+      continue;
     const Piece& piece = pieces[k];
     const bool bevel = piece.rail.law == Law::Chamfer;
     const GeomAbs_Shape smooth = piece.rail.law == Law::G2 ? GeomAbs_G2 : GeomAbs_G1;
@@ -868,6 +872,32 @@ void Attach::continuity()
           record(edge, JoinRole::Trim, 0);
       }
     }
+    // Retained chart sections carry the same construction intent as ordinary joints.
+    // Their two pcurves identify the carrier parameters even after a chart's disjoint
+    // retained regions have become separate faces. Support labels survive continuation.
+    if (retainedBoundaries[k])
+      for (const auto& arc : retainedBoundaries[k]->arcs)
+        for (int m = k + 1; m < n; ++m)
+          if (retainedBoundaries[m]
+              && std::any_of(retainedBoundaries[m]->arcs.begin(),
+                             retainedBoundaries[m]->arcs.end(),
+                             [&](const auto& other) { return arc.edge.IsSame(other.edge); }))
+          {
+            const auto parameter = [&](const Piece& p) {
+              double     first, last;
+              const auto pc = BRep_Tool::CurveOnSurface(arc.edge, p.sheet.surface, {}, first, last);
+              const auto uv = pc->Value((first + last) / 2);
+              return ((p.sheet.swapped ? uv.Y() : uv.X()) - p.sheet.alpha) / p.sheet.beta;
+            };
+            const bool breaks =
+              smooth == GeomAbs_G2
+              && supportBreaks(piece, parameter(piece), pieces[m], parameter(pieces[m]), false);
+            mark(arc.edge,
+                 blends[k],
+                 blends[m],
+                 breaks ? JoinRole::SupportBreak : JoinRole::Joint,
+                 breaks ? GeomAbs_G1 : smooth);
+          }
     for (int end = 0; end < 2; ++end)
     {
       const auto& joint = piece.joint[end];
@@ -880,7 +910,9 @@ void Attach::continuity()
         continue; // with the corner's parts, below
       if (joint.meets == Meets::Joint)
       {
-        const bool breaks = smooth == GeomAbs_G2 && supportBreaks(k, end);
+        const bool breaks =
+          smooth == GeomAbs_G2
+          && supportBreaks(piece, end, pieces[joint.piece], joint.end, joint.swapped);
         mark(section[k][end], blends[k], blends[joint.piece],
              breaks ? JoinRole::SupportBreak : JoinRole::Joint, breaks ? GeomAbs_G1 : smooth);
       }

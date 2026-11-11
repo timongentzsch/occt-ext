@@ -79,7 +79,7 @@ std::vector<Polynomial> basis(const Polynomial&          u,
   std::vector<Polynomial> previous(1, Polynomial{I::point(1)});
   for (int d = 1; d <= degree; ++d)
   {
-    std::vector<Polynomial> next(d + 1, Polynomial(3 * d + 1, I::point(0)));
+    std::vector<Polynomial> next(d + 1, Polynomial((u.size() - 1) * d + 1, I::point(0)));
     for (int j = 0; j <= d; ++j)
     {
       const int i = span - d + j;
@@ -175,6 +175,11 @@ double boundaryCurveGap(const Handle(Geom_BSplineSurface)& surface,
     }
     if (lo < bounds[d][0] || hi > bounds[d][1])
       return infinity;
+    // Equal stored Bernstein coefficients represent exactly one constant.
+    // A section's fixed coordinate therefore has degree zero; retaining degree
+    // three would only elevate that constant at every basis multiplication.
+    if (lo == hi)
+      parameters[d].resize(1);
     for (int i = degrees[d]; i + degrees[d] + 1 < int(knots[d].size()); ++i)
       if (knots[d][i] < knots[d][i + 1] && knots[d][i] <= hi && knots[d][i + 1] >= lo)
         cells[d].push_back(i);
@@ -189,7 +194,8 @@ double boundaryCurveGap(const Handle(Geom_BSplineSurface)& surface,
     for (const int v : cells[1])
     {
       const auto                bv    = basis(parameters[1], knots[1], v, degrees[1]);
-      const int                 count = 3 * (degrees[0] + degrees[1]) + 1;
+      const int                 count =
+        int(parameters[0].size() - 1) * degrees[0] + int(parameters[1].size() - 1) * degrees[1] + 1;
       Polynomial                weight(count, I::point(0));
       std::array<Polynomial, 3> numerator;
       for (auto& coordinate : numerator)
@@ -392,6 +398,99 @@ std::optional<BoundaryCurve> planeBoundaryCurve(const Sheet&                 she
                              {{Handle(Geom2d_Curve)(pc), one.basis, one.location},
                               {Handle(Geom2d_Curve)(pp), two.basis, two.location}},
                              tol::length);
+  result.spans = n;
+  return result;
+}
+
+std::optional<SharedBoundaryCurve> sharedSectionCurve(const std::array<Sheet, 2>&  sheets,
+                                                      const std::array<double, 2>& railParameters,
+                                                      double                       from,
+                                                      double                       to,
+                                                      const TopoDS_Vertex&         first,
+                                                      const TopoDS_Vertex&         last)
+{
+  const Handle(Geom_BSplineSurface) surfaces[2] = {
+    Handle(Geom_BSplineSurface)::DownCast(sheets[0].surface),
+    Handle(Geom_BSplineSurface)::DownCast(sheets[1].surface)};
+  if (surfaces[0].IsNull() || surfaces[1].IsNull() || !(from < to))
+    return {};
+  const auto uv = [&](int s, double w) {
+    return sheets[s].uv(railParameters[s], (1 - w) * sheets[s].across[0] + w * sheets[s].across[1]);
+  };
+  const auto point = [&](double w, gp_Pnt& p, gp_Vec& tangent) {
+    const auto at = uv(0, w);
+    gp_Vec     du, dv;
+    surfaces[0]->D1(at.X(), at.Y(), p, du, dv);
+    tangent = (sheets[0].swapped ? du : dv) * (sheets[0].across[1] - sheets[0].across[0]);
+  };
+
+  struct Span
+  {
+    double                                 first, last;
+    std::array<gp_Pnt, 4>                  poles;
+    std::array<std::array<gp_Pnt2d, 4>, 2> pc;
+  };
+
+  std::vector<Span>                         spans;
+  SharedBoundaryCurve                       result;
+  const std::function<bool(double, double)> refine = [&](double a, double b) {
+    Span span;
+    span.first = a;
+    span.last  = b;
+    gp_Vec da, db;
+    point(a, span.poles[0], da);
+    point(b, span.poles[3], db);
+    if (a == from)
+      span.poles[0] = BRep_Tool::Pnt(first);
+    if (b == to)
+      span.poles[3] = BRep_Tool::Pnt(last);
+    span.poles[1] = span.poles[0].Translated(da * ((b - a) / 3));
+    span.poles[2] = span.poles[3].Translated(db * ((a - b) / 3));
+    for (int s = 0; s < 2; ++s)
+      for (int i = 0; i < 4; ++i)
+        span.pc[s][i] = uv(s, a + (b - a) * (i / 3.));
+    const double one = boundaryCurveGap(surfaces[0], span.poles, span.pc[0]),
+                 two = boundaryCurveGap(surfaces[1], span.poles, span.pc[1]);
+    if (one <= tol::length && two <= tol::length)
+    {
+      spans.push_back(span);
+      result.gaps[0] = std::max(result.gaps[0], one);
+      result.gaps[1] = std::max(result.gaps[1], two);
+      return true;
+    }
+    const double m = a / 2 + b / 2;
+    return m != a && m != b && refine(a, m) && refine(m, b);
+  };
+  if (!refine(from, to))
+    return {};
+  const int                    n = int(spans.size());
+  NCollection_Array1<gp_Pnt>   poles(1, 3 * n + 1);
+  NCollection_Array1<gp_Pnt2d> pcs[2] = {NCollection_Array1<gp_Pnt2d>(1, 3 * n + 1),
+                                         NCollection_Array1<gp_Pnt2d>(1, 3 * n + 1)};
+  NCollection_Array1<double>   knots(1, n + 1);
+  NCollection_Array1<int>      multiplicities(1, n + 1);
+  for (int i = 0; i < n; ++i)
+  {
+    knots(i + 1)          = spans[i].first;
+    multiplicities(i + 1) = i == 0 ? 4 : 3;
+    for (int j = 0; j < 4; ++j)
+    {
+      poles(3 * i + j + 1) = spans[i].poles[j];
+      for (int s = 0; s < 2; ++s)
+        pcs[s](3 * i + j + 1) = spans[i].pc[s][j];
+    }
+  }
+  knots(n + 1)                          = to;
+  multiplicities(n + 1)                 = 4;
+  const Handle(Geom_BSplineCurve) curve = new Geom_BSplineCurve(poles, knots, multiplicities, 3);
+  std::vector<OnSurface>          on;
+  for (int s = 0; s < 2; ++s)
+  {
+    const auto placed = placedSheet(sheets[s]);
+    on.push_back(
+      {new Geom2d_BSplineCurve(pcs[s], knots, multiplicities, 3), placed.basis, placed.location});
+  }
+  result.edge  = edgeBetween(curve, first, from, last, to, on, tol::length);
   result.spans = n;
   return result;
 }

@@ -1656,7 +1656,7 @@ independent of rounding in the corrected section parameter. A finite-carrier eve
 coincident with the corrected seed is the initial boundary restriction, not a
 nonzero arc returning to its contact. Event identity uses the existing positional
 metric and equation tolerance in all five parameters.
-Global exposure and support-transition installation remain open. Variable-radius laws, cliff contacts and section-transition windows
+Global exposure remains open. Variable-radius laws, cliff contacts and section-transition windows
 are outside this construction.
 
 | Generated boundary checks | Configurations | Result |
@@ -1733,3 +1733,51 @@ circuits and unresolved terminal events are not completed by this helper. The pl
 | Retained-carrier check | Configurations | Result |
 | --- | ---: | --- |
 | Finite perpendicular spline planes, three scales and two poses | 6 | Both terminal contacts reach their exact restrictions; two disjoint contact intervals retain shared vertices and support pcurves within 1e-7 |
+
+`carrierComponent` continues shared terminal balls onto the body's adjoining
+smooth support charts. It retains the exact contact event on each chart and joins
+an already retained endpoint when the component closes. A face may occur on more
+than one branch. The complete component replaces its connected source chain,
+including previously partitioned pieces; chart labels alone do not identify a
+branch.
+
+Planar boundary traces cross these chart joins at shared section events. A section
+edge is installed only where the two adjacent retained regions require opposite
+occurrences. Its cubic curve and two pcurves use the existing outward-rounded
+spline enclosure, with a 1e-7 length bound on each sheet. These section edges are
+internal partitions, not terminal caps. Original-face edits join contact ports in
+face interiors as well as on inherited wires. Wires are assembled in the forward
+surface frame before restoring the original face orientation.
+
+Nesting of retained cycles in the sheet's parameter domain assigns holes to their
+immediate outer cycles. Disconnected outer cycles become separate faces of the
+same sheet. This can retain more faces than a representation that merges spline
+charts; it does not extend a section beyond its retained boundary.
+
+An exactly constant pcurve coordinate is represented in degree zero during the
+interval basis recurrence. Identical stored Bernstein coefficients equal that
+constant without rounding; the remaining recurrence and residual products still
+round outwards. This removes redundant degree elevation on shared section edges
+without weakening either sheet's discrepancy bound.
+
+| Connected-carrier check | Configurations | Result |
+| --- | ---: | --- |
+| Perpendicular finite charts, circular and curvature-continuous laws, three scales and two poses | 12 | Shared balls and sections agree within 1e-7 |
+| Shared section with exchanged surface parameters, three scales and two poses | 6 | Independent evaluations on both charts lie within the whole-span bounds |
+| Sphere with adjoining spline or extruded wall charts, two section laws, three scales and two poses | 24 | Closed valid solids; sampled edge/pcurve discrepancies below 9.4e-8 |
+
+Shared retained sections carry the same continuity intent as ordinary carrier
+joints. Their pcurves identify the two carrier parameters after disconnected
+retained regions become separate faces. The support second forms determine
+whether a G2 section crosses a curvature break; that decision precedes any
+measurement of the constructed seam.
+
+Curvature acceptance reads seventeen stations over a complete seam as well as
+interior stations in each spline span. Subdividing an edge cannot hide a
+whole-edge curvature defect behind the positional resolution of its short
+spans. A failed whole-edge check reports the measured curvature jump and its
+size-scaled bound.
+
+| Curvature acceptance check | Configurations | Result |
+| --- | ---: | --- |
+| Constant second-form jump, one or 64 seam spans, three scales | 12 | Acceptance is unchanged by seam partitioning |

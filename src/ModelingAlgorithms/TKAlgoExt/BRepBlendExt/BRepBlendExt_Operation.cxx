@@ -22,6 +22,8 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <iomanip>
+#include <sstream>
 
 namespace BRepExt
 {
@@ -149,6 +151,35 @@ void accepted(const char*         op,
     const int                  spans = curve.NbIntervals(GeomAbs_CN);
     NCollection_Array1<double> ends(1, spans + 1);
     curve.Intervals(ends, GeomAbs_CN);
+    // Knot insertion changes neither the seam nor its curvature. A span-local
+    // positional resolution test must not hide a defect extending over the edge.
+    // Read the same seventeen whole-edge stations used for an unpartitioned curve,
+    // in addition to the interior stations that resolve its individual spans.
+    if (spans > 1)
+    {
+      double worst = 0;
+      for (int k = 0; k < 17; ++k)
+      {
+        const double u = ends(1) + (ends(spans + 1) - ends(1)) * (k + 0.5) / 17;
+        gp_Pnt p;
+        gp_Vec t;
+        curve.D1(u, p, t);
+        if (t.Magnitude() > detail::limit::degenerate)
+        {
+          const double bent = bendDifference(ja.at(u), jb.at(u), t.Normalized()).first;
+          if (!detail::unresolved(bent, t.Magnitude() * (ends(spans + 1) - ends(1)), size))
+            worst = std::max(worst, bent);
+        }
+      }
+      if (worst * size > detail::limit::seamBend)
+      {
+        std::ostringstream reason;
+        reason << std::setprecision(9)
+               << "a seam of the G2 blend is not curvature continuous (curvature jump "
+               << worst << ", limit " << detail::limit::seamBend / size << ")";
+        fail(op, no_solution, reason.str(), {edge}, FailureKind::Curvature);
+      }
+    }
     const int samples = spans == 1 ? 17 : 3;
     for (int k = 0; k < spans * samples; ++k)
     {

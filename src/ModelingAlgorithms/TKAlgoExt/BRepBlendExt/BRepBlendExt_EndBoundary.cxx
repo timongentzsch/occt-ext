@@ -344,7 +344,13 @@ EndBoundaryTrace tracePlaneEnd(const Rail&    rail,
     // geometric equations. Both contacts may label the same component's endpoints.
     int        boundary      = -1;
     double     boundaryValue = 0, fraction = 2;
-    const auto crossing = [&](int k, double bound) {
+    const auto crossing = [&](int k, double bound, double inward) {
+      // A continued chart starts at the shared restriction, to the positional
+      // allowance of the solved event. An inward step leaves that event; a tiny
+      // residual on the other side is not a new crossing back to the same event.
+      if (result.points.size() == 1 && std::abs(x[k] - bound) * v.metric[k] <= equations.tolerance
+          && rate[k] * inward > 0 && (next[k] - bound) * inward > 0)
+        return;
       if ((x[k] - bound) * (next[k] - bound) >= 0 || x[k] == bound)
         return;
       const double f = (bound - x[k]) / (next[k] - x[k]);
@@ -355,16 +361,16 @@ EndBoundaryTrace tracePlaneEnd(const Rail&    rail,
         boundaryValue = bound;
       }
     };
-    crossing(4, 0);
-    crossing(4, 1);
+    crossing(4, 0, 1);
+    crossing(4, 1, -1);
     for (int side = 0; side < 2; ++side)
     {
       const auto finite = runsOn(rail.s[side].surface);
       for (int k = 0; k < 2; ++k)
         if (finite[k])
         {
-          crossing(2 * side + k, finite[k]->first);
-          crossing(2 * side + k, finite[k]->second);
+          crossing(2 * side + k, finite[k]->first, 1);
+          crossing(2 * side + k, finite[k]->second, -1);
         }
     }
     if (boundary >= 0)

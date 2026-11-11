@@ -503,35 +503,10 @@ std::shared_ptr<SpineArc> spineCurve(const std::vector<Traced>& balls)
   out->curve = new Geom_BSplineCurve(poles, knots, multiplicities, 3);
   return out;
 }
-} // namespace
-
-std::optional<Piece> completeCarrier(const Piece& original)
+//! Fit one regular chart of the carrier, keeping every solved contact parameter.
+std::optional<Piece> fittedCarrier(const Piece& original, Rail rail,
+                                    const std::vector<Traced>& balls)
 {
-  Rail rail = original.rail;
-  if (!rail.sizes.places.empty() || rail.closed)
-    return {};
-  Station origin;
-  for (int side = 0; side < 2; ++side)
-  {
-    const auto uv = original.fitted.contact[side]->Value(.5);
-    origin.uv[side][0] = uv.X();
-    origin.uv[side][1] = uv.Y();
-  }
-  if (!contactAt(rail, rail.t(.5), origin))
-    return {};
-  SpineTrace trace(rail);
-  const auto start = trace.start(origin);
-  if (!start)
-    return {};
-  std::vector<Traced> left, right;
-  if (trace.boundary(*start, -1, origin, left) != SpineTrace::Stop::Left
-      || trace.boundary(*start, 1, origin, right) != SpineTrace::Stop::Left)
-    return {};
-  std::vector<Traced> balls(left.rbegin(), left.rend());
-  balls.push_back(*start);
-  balls.insert(balls.end(), right.begin(), right.end());
-  if (balls.size() < 3)
-    return {};
   const auto arc = spineCurve(balls);
   rail.spine = arc->curve;
   rail.spineArc = arc;
@@ -561,6 +536,201 @@ std::optional<Piece> completeCarrier(const Piece& original)
   out.sheet = Sheet{out.fitted.blend, false, 0, 1, {0, 1}};
   if (const auto exact = exactSheet(out.rail, stations))
     out.sheet = *exact;
+  return out;
+}
+} // namespace
+
+std::optional<Piece> completeCarrier(const Piece& original)
+{
+  Rail rail = original.rail;
+  if (!rail.sizes.places.empty() || rail.closed)
+    return {};
+  Station origin;
+  for (int side = 0; side < 2; ++side)
+  {
+    const auto uv = original.fitted.contact[side]->Value(.5);
+    origin.uv[side][0] = uv.X();
+    origin.uv[side][1] = uv.Y();
+  }
+  if (!contactAt(rail, rail.t(.5), origin))
+    return {};
+  SpineTrace trace(rail);
+  const auto start = trace.start(origin);
+  if (!start)
+    return {};
+  std::vector<Traced> left, right;
+  if (trace.boundary(*start, -1, origin, left) != SpineTrace::Stop::Left
+      || trace.boundary(*start, 1, origin, right) != SpineTrace::Stop::Left)
+    return {};
+  std::vector<Traced> balls(left.rbegin(), left.rend());
+  balls.push_back(*start);
+  balls.insert(balls.end(), right.begin(), right.end());
+  if (balls.size() < 3)
+    return {};
+  return fittedCarrier(original, rail, balls);
+}
+
+std::optional<Piece> continueCarrier(const Piece& original, int end, int side,
+                                      const TopoDS_Face& next)
+{
+  const Rail& before = original.rail;
+  if (!before.sizes.places.empty() || next.IsNull())
+    return {};
+  Station event;
+  for (int s = 0; s < 2; ++s)
+  {
+    const auto uv = original.fitted.contact[s]->Value(end);
+    event.uv[s][0] = uv.X();
+    event.uv[s][1] = uv.Y();
+  }
+  if (!contactAt(before, before.t(end), event))
+    return {};
+  Rail rail = before;
+  rail.s[side].face = next;
+  rail.s[side].surface = placedFace(next).surface;
+  rail.s[side].outward = next.Orientation() == TopAbs_REVERSED ? -1 : 1;
+  rail.s[side].polynomialSpan = {0, 0};
+  GeomAPI_ProjectPointOnSurf onto(event.foot[side], rail.s[side].surface);
+  if (!onto.NbPoints() || onto.LowerDistance() > before.resolved(limit::solved))
+    return {};
+  onto.LowerDistanceParameters(event.uv[side][0], event.uv[side][1]);
+  Jet after;
+  if (!jetAt(rail.s[side], event.uv[side][0], event.uv[side][1], after)
+      || !SectionPolicy::tangentFor(event.normal[side].Angle(after.n), rail.scale))
+    return {};
+  SpineTrace trace(rail);
+  const auto start = trace.start(event);
+  if (!start)
+    return {};
+  std::vector<Traced> beyond;
+  if (trace.boundary(*start, end ? 1 : -1, event, beyond) != SpineTrace::Stop::Left
+      || beyond.empty())
+    return {};
+  std::vector<Traced> balls;
+  if (end)
+  {
+    balls.push_back(*start);
+    balls.insert(balls.end(), beyond.begin(), beyond.end());
+  }
+  else
+  {
+    balls.assign(beyond.rbegin(), beyond.rend());
+    balls.push_back(*start);
+  }
+  return fittedCarrier(original, rail, balls);
+}
+
+std::optional<CarrierComponent> carrierComponent(const Piece& original, const TopoDS_Shape& body)
+{
+  const auto first = completeCarrier(original);
+  if (!first)
+    return {};
+  CarrierComponent out;
+  const auto append = [&](const Piece& piece) {
+    CarrierComponent::Chart chart;
+    chart.piece = piece;
+    for (int end = 0; end < 2; ++end)
+    {
+      auto& event = chart.ends[end];
+      for (int side = 0; side < 2; ++side)
+      {
+        const auto uv = piece.fitted.contact[side]->Value(end);
+        event.uv[side][0] = uv.X(); event.uv[side][1] = uv.Y();
+      }
+      if (!contactAt(piece.rail, piece.rail.t(end), event))
+        return false;
+    }
+    out.charts.push_back(std::move(chart));
+    return true;
+  };
+  if (!append(*first))
+    return {};
+  NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> faces;
+  TopExp::MapShapesAndUniqueAncestors(body, TopAbs_EDGE, TopAbs_FACE, faces);
+  for (size_t index = 0; index < out.charts.size(); ++index)
+    for (int end = 0; end < 2; ++end)
+    {
+      if (out.charts[index].joins[end] >= 0)
+        continue;
+      // Copies remain valid when the next chart grows the component.
+      const Piece piece = out.charts[index].piece;
+      const Station event = out.charts[index].ends[end];
+      const Rail& rail = piece.rail;
+      TopoDS_Face next;
+      TopoDS_Edge crossed;
+      int changed = -1;
+      for (int side = 0; side < 2; ++side)
+        for (TopExp_Explorer e(rail.s[side].face, TopAbs_EDGE); e.More(); e.Next())
+        {
+          const auto edge = TopoDS::Edge(e.Current());
+          if (BRep_Tool::Degenerated(edge) || !faces.Contains(edge))
+            continue;
+          double f, l;
+          const auto curve = BRep_Tool::Curve(edge, f, l);
+          if (curve.IsNull())
+            continue;
+          const auto at = onCurve(event.foot[side], new Geom_TrimmedCurve(curve, f, l));
+          if (!at || at->distance > tol::length)
+            continue;
+          for (const auto& owner : faces.FindFromKey(edge))
+          {
+            if (owner.IsSame(rail.s[side].face))
+              continue;
+            Side support = rail.s[side];
+            support.face = TopoDS::Face(owner);
+            support.surface = placedFace(support.face).surface;
+            support.outward = support.face.Orientation() == TopAbs_REVERSED ? -1 : 1;
+            support.polynomialSpan = {0, 0};
+            GeomAPI_ProjectPointOnSurf onto(event.foot[side], support.surface);
+            if (!onto.NbPoints() || onto.LowerDistance() > rail.resolved(limit::solved))
+              continue;
+            double u, v;
+            onto.LowerDistanceParameters(u, v);
+            Jet jet;
+            if (!jetAt(support, u, v, jet)
+                || !SectionPolicy::tangentFor(event.normal[side].Angle(jet.n), rail.scale))
+              continue;
+            if (!next.IsNull() && (!next.IsSame(owner) || changed != side))
+              return {}; // A regular two-chart transition has one adjoining support.
+            next = support.face;
+            crossed = edge;
+            changed = side;
+          }
+        }
+      if (next.IsNull())
+        continue;
+      int mate = -1, mateEnd = -1;
+      for (size_t j = 0; j < out.charts.size(); ++j)
+      {
+        const auto& chart = out.charts[j];
+        if (!chart.piece.rail.s[changed].face.IsSame(next)
+            || !chart.piece.rail.s[1 - changed].face.IsSame(rail.s[1 - changed].face))
+          continue;
+        for (int otherEnd = 0; otherEnd < 2; ++otherEnd)
+        {
+          const auto& other = chart.ends[otherEnd];
+          if (event.centre.Distance(other.centre) > rail.resolved(limit::solved)
+              || event.foot[0].Distance(other.foot[0]) > rail.resolved(limit::solved)
+              || event.foot[1].Distance(other.foot[1]) > rail.resolved(limit::solved))
+            continue;
+          if (mate >= 0 || chart.joins[otherEnd] >= 0)
+            return {};
+          mate = int(j); mateEnd = otherEnd;
+        }
+      }
+      if (mate < 0)
+      {
+        const auto continued = continueCarrier(piece, end, changed, next);
+        if (!continued || !append(*continued))
+          return {};
+        mate = int(out.charts.size()) - 1;
+        mateEnd = 1 - end;
+      }
+      const int join = int(out.joins.size());
+      out.joins.push_back({{{{int(index), end}, {mate, mateEnd}}}, changed, crossed});
+      out.charts[index].joins[end] = join;
+      out.charts[mate].joins[mateEnd] = join;
+    }
   return out;
 }
 

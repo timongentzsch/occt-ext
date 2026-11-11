@@ -35,5 +35,22 @@ Standard_EXPORT std::optional<BoundaryCurve> planeBoundaryCurve(const Sheet&    
                                                                 const std::vector<gp_Pnt2d>& guide,
                                                                 const TopoDS_Vertex&         first,
                                                                 const TopoDS_Vertex&         last);
+
+//! A shared section interval of two fitted sheets. The cubic edge and its two
+//! pcurves retain the section parameter; both sheet discrepancies are enclosed.
+struct SharedBoundaryCurve
+{
+  TopoDS_Edge           edge;
+  std::array<double, 2> gaps{};
+  int                   spans = 0;
+};
+
+Standard_EXPORT std::optional<SharedBoundaryCurve> sharedSectionCurve(
+  const std::array<Sheet, 2>&  sheets,
+  const std::array<double, 2>& railParameters,
+  double                       from,
+  double                       to,
+  const TopoDS_Vertex&         first,
+  const TopoDS_Vertex&         last);
 } // namespace BRepExt::blending::detail
 #endif

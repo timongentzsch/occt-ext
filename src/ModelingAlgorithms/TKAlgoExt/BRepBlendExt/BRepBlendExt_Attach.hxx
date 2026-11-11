@@ -579,7 +579,7 @@ struct Attach
   BRep_Builder               builder;
   NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>
                                                            edgesOfVertex, facesOfEdge;
-  const int                                                n;
+  int                                                      n;
   struct ContactEvent
   {
     TopoDS_Vertex vertex;

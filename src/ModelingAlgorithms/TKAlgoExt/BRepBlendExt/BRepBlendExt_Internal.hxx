@@ -1799,6 +1799,36 @@ struct Piece
 //! retaining the original fit's support chart. Empty for unresolved or closed paths.
 Standard_EXPORT std::optional<Piece> completeCarrier(const Piece& original);
 
+//! Continue a completed carrier through a smooth contact event onto the adjoining
+//! support chart, retaining the shared ball and solving to the next restriction.
+Standard_EXPORT std::optional<Piece> continueCarrier(const Piece& original, int end, int side,
+                                                       const TopoDS_Face& next);
+
+
+//! A connected rolling-ball carrier covered by finite support charts. A support
+//! face can occur more than once on distinct branches. Joins own the shared ball;
+//! unjoined ends are finite restrictions, not artificial stopping sections.
+struct CarrierComponent
+{
+  struct Chart
+  {
+    Piece piece;
+    std::array<Station, 2> ends;
+    std::array<int, 2> joins = {-1, -1};
+  };
+  struct Join
+  {
+    std::array<std::pair<int, int>, 2> ends; // chart and end
+    int side;
+    TopoDS_Edge crossed;
+  };
+  std::vector<Chart> charts;
+  std::vector<Join> joins;
+};
+
+Standard_EXPORT std::optional<CarrierComponent> carrierComponent(const Piece& original,
+                                                                 const TopoDS_Shape& body);
+
 //! Whether the seam runs to a pole in the strip the blend replaces, on the edge's side of the
 //! contact: it goes with the strip (Attach::sweepToPole), and the contact, which passes the seam's
 //! place and comes back, stays in one run of the face's parameters.
